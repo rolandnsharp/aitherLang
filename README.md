@@ -93,6 +93,33 @@ binary.
 across hot-reloads. That is the entire state model. No graphs,
 no message passing, no nodes, no wires. Just expressions.
 
+## Compared to
+
+**SuperCollider**: a client/server with a graph of precompiled
+UGens, sequenced from a Smalltalk-derived language. Powerful
+and battle-tested, but the DSP itself lives in C++ you don't
+see. aither is one language with one model (`f(state) →
+sample`), the stdlib is written in the language, and there is
+no graph — patches are just expressions.
+
+**FAUST**: a beautiful functional DSL that compiles a
+block-diagram algebra to fast C++/Rust/LLVM/Wasm. Excellent for
+designing plugins; the model is compile-then-run, and state is
+implicit inside `~` and delay lines. aither is interpreted —
+edits hit the speakers in milliseconds — and state is explicit
+and named (`var x = 0.0`).
+
+**Sonic Pi**: a friendly live-coding layer on top of
+SuperCollider — you sequence pre-built synths and samples. You
+do not define DSP. aither is a level lower: you write the
+oscillator, the filter, the reverb. The sequencer is just a
+function returning a sample.
+
+The trade-off is honest: aither is slower per sample than a
+compiled FAUST patch or a SuperCollider UGen written in C++.
+For most patches that does not matter. For dozens of voices
+running heavy reverb, it does.
+
 ## Read more
 
 - [PHILOSOPHY.md](PHILOSOPHY.md) — the design vision
