@@ -102,12 +102,14 @@ proc loadPatch(filename: string; fadeIn: float64): string =
   acquire(mtx)
   let now = timeSec + timeFrac
   if idx >= 0:
-    # Hot-reload: keep existing voice's vars + callsite state.
-    # start_t persists across hot-swaps so timed sweeps keep their timeline,
-    # but resets when a stopped voice is being re-triggered.
-    slots[idx].voice.program = program
-    slots[idx].voice.callSiteCounter = 0
-    slots[idx].voice.funcs.clear()
+    # Hot-reload: re-compile in place; voice keeps top-level vars (by name)
+    # and call-site state (by slot) across the swap.
+    try:
+      slots[idx].voice.load(program)
+    except CatchableError as e:
+      release(mtx)
+      stderr.writeLine "compile FAIL"
+      return "compile error: " & e.msg
     let retrigger = (not slots[idx].active) or
                     slots[idx].fadeGain <= 0.0 or
                     slots[idx].fadeDelta < 0.0       # interrupting a fade-out
@@ -123,7 +125,13 @@ proc loadPatch(filename: string; fadeIn: float64): string =
     if slotCount >= MaxVoices:
       release(mtx)
       return "voice limit reached (" & $MaxVoices & ")"
-    let voice = newVoice(program, float64(SampleRate))
+    let voice = newVoice(float64(SampleRate))
+    try:
+      voice.load(program)
+    except CatchableError as e:
+      release(mtx)
+      stderr.writeLine "compile FAIL"
+      return "compile error: " & e.msg
     voice.startT = now
     slots[slotCount] = Slot(
       name: baseName, voice: voice, active: true,

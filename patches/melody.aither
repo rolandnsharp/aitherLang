@@ -1,0 +1,4 @@
+let notes = [440, 0, 523, 0, 440, 587, 523, 0]
+let freq = wave(4, notes)
+let env = discharge(impulse(4), 8)
+if freq > 0 then osc(sin, freq) * env * 0.25 |> fbdelay(0.375, 0.5, 0.3) else 0

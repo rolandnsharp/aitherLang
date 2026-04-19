@@ -1,0 +1,9 @@
+# shimmer arp — 16th notes over C major, evolves with slow filter sweep
+let notes = [523, 659, 784, 659, 523, 784, 988, 784, 587, 698, 880, 698, 587, 880, 1047, 880]
+let freq = wave(8.0 / 16, notes)
+let trig = impulse(8)
+let env  = discharge(trig, 14)
+let sweep = (sin(TAU * phasor(0.07)) + 1) * 0.5
+let cut  = 900 + sweep * 4500
+let tone = osc(tri, freq) + osc(sqr, freq) * 0.3
+tone * env |> lpf(cut, 0.4) |> gain(0.09) |> reverb(2.5, 0.4)

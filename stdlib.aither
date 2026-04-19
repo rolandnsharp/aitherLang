@@ -1,218 +1,31 @@
-# aither stdlib — DSP library written in aither itself
+# aither stdlib — small composition layer over native primitives.
 #
-# Hardcoded primitives the evaluator already provides:
-#   math:    sin cos tan exp log log2 abs floor ceil min max
-#            pow sqrt clamp int
-#   stateful: phasor noise
-#   arrays:  array len
-
-# ---------------------------------------------------------------- shapes
-# Pure-math waveshapes, usable as oscillator shapes via osc(shape, freq).
-# Each takes a phase in radians (0..TAU).
-
-def saw(x): (x / TAU) mod 1 * 2 - 1
-def tri(x): abs((x / TAU) mod 1 * 4 - 2) - 1
-def sqr(x): if (x / TAU) mod 1 < 0.5 then 1 else -1
+# Built into the evaluator:
+#   math:      sin cos tan exp log log2 abs floor ceil min max
+#              pow sqrt clamp int
+#   shapes:    saw tri sqr  (also usable as osc shape values)
+#   stateful:  phasor noise
+#   arrays:    array len
+#
+# Native (compiled Nim, called via opCallNative):
+#   filters:   lp1 hp1 lpf hpf bpf notch
+#   delays:    delay fbdelay
+#   reverb:    reverb
+#   physics:   impulse resonator discharge
+#   modulation: tremolo slew
+#   sequence:  wave
+#
+# This file holds only the tiny composition helpers — anything heavy
+# enough to be a hot-loop bottleneck is native.
 
 # ---------------------------------------------------------------- oscillator
 # osc(shape, freq) — run a clock at freq Hz, view it through shape.
+# `shape` is any one-arg function (sin, cos, saw, tri, sqr, or a user def).
 
 def osc(shape, freq): shape(TAU * phasor(freq))
 
 # Pulse with adjustable width (0..1).
 def pulse(freq, width): if phasor(freq) < width then 1 else -1
-
-# Lookup-style oscillator stepping through `values` at freq Hz.
-def wave(freq, values):
-  let p = phasor(freq)
-  let n = len(values)
-  values[int(p * n) mod n]
-
-# ---------------------------------------------------------------- 1-pole filters
-
-def lp1(signal, cutoff):
-  var y = 0.0
-  let a = clamp(cutoff / sr, 0, 1)
-  y = y + a * (signal - y)
-  y
-
-def hp1(signal, cutoff):
-  var y = 0.0
-  let a = clamp(cutoff / sr, 0, 1)
-  y = y + a * (signal - y)
-  signal - y
-
-# ---------------------------------------------------------------- SVF (Cytomic)
-# Trapezoidal state-variable filter. res is 0..1.
-
-def lpf(signal, cutoff, res):
-  var s1 = 0.0
-  var s2 = 0.0
-  let g = tan(PI * min(cutoff, sr * 0.49) / sr)
-  let k = 2 * (1 - res)
-  let a1 = 1 / (1 + g * (g + k))
-  let a2 = g * a1
-  let a3 = g * a2
-  let v3 = signal - s2
-  let v1 = a1 * s1 + a2 * v3
-  let v2 = s2 + a2 * s1 + a3 * v3
-  s1 = 2 * v1 - s1
-  s2 = 2 * v2 - s2
-  v2
-
-def hpf(signal, cutoff, res):
-  var s1 = 0.0
-  var s2 = 0.0
-  let g = tan(PI * min(cutoff, sr * 0.49) / sr)
-  let k = 2 * (1 - res)
-  let a1 = 1 / (1 + g * (g + k))
-  let a2 = g * a1
-  let a3 = g * a2
-  let v3 = signal - s2
-  let v1 = a1 * s1 + a2 * v3
-  let v2 = s2 + a2 * s1 + a3 * v3
-  s1 = 2 * v1 - s1
-  s2 = 2 * v2 - s2
-  signal - k * v1 - v2
-
-def bpf(signal, cutoff, res):
-  var s1 = 0.0
-  var s2 = 0.0
-  let g = tan(PI * min(cutoff, sr * 0.49) / sr)
-  let k = 2 * (1 - res)
-  let a1 = 1 / (1 + g * (g + k))
-  let a2 = g * a1
-  let a3 = g * a2
-  let v3 = signal - s2
-  let v1 = a1 * s1 + a2 * v3
-  let v2 = s2 + a2 * s1 + a3 * v3
-  s1 = 2 * v1 - s1
-  s2 = 2 * v2 - s2
-  v1
-
-def notch(signal, cutoff, res):
-  var s1 = 0.0
-  var s2 = 0.0
-  let g = tan(PI * min(cutoff, sr * 0.49) / sr)
-  let k = 2 * (1 - res)
-  let a1 = 1 / (1 + g * (g + k))
-  let a2 = g * a1
-  let a3 = g * a2
-  let v3 = signal - s2
-  let v1 = a1 * s1 + a2 * v3
-  let v2 = s2 + a2 * s1 + a3 * v3
-  s1 = 2 * v1 - s1
-  s2 = 2 * v2 - s2
-  signal - k * v1
-
-# ---------------------------------------------------------------- delays
-
-def delay(signal, time, max_time):
-  var buf = array(int(max_time * sr), 0.0)
-  var cursor = 0.0
-  let size = len(buf)
-  let rd = int(cursor - time * sr + size) mod size
-  let output = buf[rd]
-  buf[int(cursor)] = signal
-  cursor = (cursor + 1) mod size
-  output
-
-def fbdelay(signal, time, max_time, fb):
-  var buf = array(int(max_time * sr), 0.0)
-  var cursor = 0.0
-  let size = len(buf)
-  let rd = int(cursor - time * sr + size) mod size
-  let output = buf[rd]
-  buf[int(cursor)] = signal + output * fb
-  cursor = (cursor + 1) mod size
-  output
-
-# ---------------------------------------------------------------- reverb
-# Schroeder: 4 parallel comb filters into 2 series allpass.
-# rt60 in seconds, wet 0..1.
-
-def reverb(signal, rt60, wet):
-  var c0 = array(1557, 0.0)
-  var c1 = array(1617, 0.0)
-  var c2 = array(1491, 0.0)
-  var c3 = array(1422, 0.0)
-  var d0 = 0.0
-  var d1 = 0.0
-  var d2 = 0.0
-  var d3 = 0.0
-  var p0 = 0.0
-  var p1 = 0.0
-  var p2 = 0.0
-  var p3 = 0.0
-  var a0 = array(225, 0.0)
-  var a1 = array(556, 0.0)
-  var ap0 = 0.0
-  var ap1 = 0.0
-  let damp = 0.3
-
-  let g0 = pow(10, -3 * 1557 / (rt60 * sr))
-  let o0 = c0[int(p0)]
-  let f0 = o0 * (1 - damp) + d0 * damp
-  d0 = f0
-  c0[int(p0)] = signal + f0 * g0
-  p0 = (p0 + 1) mod 1557
-
-  let g1 = pow(10, -3 * 1617 / (rt60 * sr))
-  let o1 = c1[int(p1)]
-  let f1 = o1 * (1 - damp) + d1 * damp
-  d1 = f1
-  c1[int(p1)] = signal + f1 * g1
-  p1 = (p1 + 1) mod 1617
-
-  let g2 = pow(10, -3 * 1491 / (rt60 * sr))
-  let o2 = c2[int(p2)]
-  let f2 = o2 * (1 - damp) + d2 * damp
-  d2 = f2
-  c2[int(p2)] = signal + f2 * g2
-  p2 = (p2 + 1) mod 1491
-
-  let g3 = pow(10, -3 * 1422 / (rt60 * sr))
-  let o3 = c3[int(p3)]
-  let f3 = o3 * (1 - damp) + d3 * damp
-  d3 = f3
-  c3[int(p3)] = signal + f3 * g3
-  p3 = (p3 + 1) mod 1422
-
-  let combs = (o0 + o1 + o2 + o3) * 0.25
-
-  let b0 = a0[int(ap0)]
-  a0[int(ap0)] = combs + b0 * 0.5
-  let m0 = b0 - combs
-  ap0 = (ap0 + 1) mod 225
-
-  let b1 = a1[int(ap1)]
-  a1[int(ap1)] = m0 + b1 * 0.5
-  let m1 = b1 - m0
-  ap1 = (ap1 + 1) mod 556
-
-  signal * (1 - wet) + m1 * wet
-
-# ---------------------------------------------------------------- physics
-
-def impulse(freq):
-  var prev = 0.0
-  let p = phasor(freq)
-  let hit = if p < prev then 1 else 0
-  prev = p
-  hit
-
-def resonator(signal, freq, decay):
-  var x = 0.0
-  var dx = 0.0
-  let w2 = freq * freq
-  dx = dx + (-decay * dx - w2 * x + signal * w2) * dt
-  x = x + dx * dt
-  x
-
-def discharge(signal, rate):
-  var level = 0.0
-  level = max(signal, level * (1 - rate * dt))
-  level
 
 # ---------------------------------------------------------------- helpers
 
@@ -221,13 +34,3 @@ def gain(signal, amount): signal * amount
 def fold(signal, amount):
   let x = ((signal * amount) mod 4 + 4) mod 4
   if x < 2 then x - 1 else 3 - x
-
-def tremolo(signal, rate, depth):
-  let lfo = (sin(TAU * phasor(rate)) + 1) * 0.5
-  signal * (1 - depth + lfo * depth)
-
-def slew(signal, time):
-  var y = 0.0
-  let a = if time > 0 then min(1, dt / time) else 1
-  y = y + (signal - y) * a
-  y

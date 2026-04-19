@@ -1,0 +1,19 @@
+# dubstep-ish drums — kick on 1, snare on 3 (half-time feel), 8th-note hats
+let beat = phasor(0.5)               # one bar = 2s (4 beats at 120 BPM)
+let pos  = beat * 4                   # 0..4 across the bar
+let on1  = if (pos mod 4) < 0.05 then 1 else 0
+let on3  = if (pos mod 4) >= 2 and (pos mod 4) < 2.05 then 1 else 0
+
+let kenv  = discharge(on1, 10)
+let kpit  = 50 + discharge(on1, 28) * 180
+let kick  = sin(TAU * phasor(kpit)) * kenv
+
+let senv  = discharge(on3, 18)
+let sbody = sin(TAU * phasor(190)) * discharge(on3, 14)
+let scrack = noise() * discharge(on3, 28)
+let snare = (sbody * 0.4 + scrack * 0.6) * senv
+
+let htrig = impulse(8)
+let hat   = noise() * discharge(htrig, 55) |> hpf(9000, 0.3)
+
+kick * 0.55 + snare * 0.45 + hat * 0.18

@@ -1,0 +1,5 @@
+let trig = impulse(2)
+let env = discharge(trig, 20)
+let body = sin(TAU * phasor(180)) * discharge(trig, 15)
+let crack = noise() * discharge(trig, 30)
+(body * 0.4 + crack * 0.6) * env |> gain(0.35)

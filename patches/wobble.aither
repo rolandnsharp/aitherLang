@@ -1,0 +1,9 @@
+# dubstep wobble — C minor-ish sub, LFO-swept filter at 2 Hz to lock with tune
+let notes = [65.4, 65.4, 65.4, 65.4, 87.3, 87.3, 98.0, 65.4]
+let root  = wave(2.0 / 8, notes)
+let lfo   = (sin(TAU * phasor(2)) + 1) * 0.5
+let cut   = 120 + lfo * 1600
+let sub   = osc(sin, root) * 0.35
+let grit  = (osc(saw, root) + osc(saw, root * 1.01)) * 0.5
+let wob = grit |> lpf(cut, 0.9) |> gain(0.35)
+wob + sub
