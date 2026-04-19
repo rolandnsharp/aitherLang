@@ -26,6 +26,7 @@ type
     callSiteState*:  seq[Value]
     callSiteCounter*:int
     t*:              float64
+    startT*:         float64           # wall-clock time when first loaded
     sr*:             float64
     rng*:            uint32
 
@@ -174,11 +175,12 @@ proc eval(voice: Voice; n: Node; scope: Scope): Value =
     f(n.num)
   of nkIdent:
     case n.str
-    of "t":   f(voice.t)
-    of "sr":  f(voice.sr)
-    of "dt":  f(1.0 / voice.sr)
-    of "PI":  f(PI)
-    of "TAU": f(TAU)
+    of "t":       f(voice.t)
+    of "start_t": f(voice.startT)
+    of "sr":      f(voice.sr)
+    of "dt":      f(1.0 / voice.sr)
+    of "PI":      f(PI)
+    of "TAU":     f(TAU)
     else:
       let r = resolve(scope, voice, n.str)
       case r.kind

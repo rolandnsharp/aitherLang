@@ -100,23 +100,31 @@ proc loadPatch(filename: string; fadeIn: float64): string =
 
   let idx = findSlot(baseName)
   acquire(mtx)
+  let now = timeSec + timeFrac
   if idx >= 0:
-    # Hot-reload: keep existing voice's vars + callsite state
+    # Hot-reload: keep existing voice's vars + callsite state.
+    # start_t persists across hot-swaps so timed sweeps keep their timeline,
+    # but resets when a stopped voice is being re-triggered.
     slots[idx].voice.program = program
     slots[idx].voice.callSiteCounter = 0
     slots[idx].voice.funcs.clear()
-    if not slots[idx].active or slots[idx].fadeGain <= 0.0:
+    let retrigger = (not slots[idx].active) or
+                    slots[idx].fadeGain <= 0.0 or
+                    slots[idx].fadeDelta < 0.0       # interrupting a fade-out
+    if retrigger:
+      slots[idx].voice.startT = now
       slots[idx].active = true
       slots[idx].fadeGain = if fadeIn > 0.0: 0.0 else: 1.0
       slots[idx].fadeDelta = if fadeIn > 0.0: fadeDeltaFor(fadeIn) else: 0.0
     elif fadeIn > 0.0:
       slots[idx].fadeDelta = fadeDeltaFor(fadeIn)
-    stderr.writeLine "ok (hot-swap " & baseName & ")"
+    stderr.writeLine "ok (" & (if retrigger: "retrigger " else: "hot-swap ") & baseName & ")"
   else:
     if slotCount >= MaxVoices:
       release(mtx)
       return "voice limit reached (" & $MaxVoices & ")"
     let voice = newVoice(program, float64(SampleRate))
+    voice.startT = now
     slots[slotCount] = Slot(
       name: baseName, voice: voice, active: true,
       fadeGain: (if fadeIn > 0.0: 0.0 else: 1.0),

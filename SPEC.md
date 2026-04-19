@@ -20,13 +20,14 @@ Arrays exist for polyphony (input) and stereo (output).
 
 ## Globals
 
-| Name  | Description          |
-|-------|----------------------|
-| `t`   | time in seconds      |
-| `sr`  | sample rate (48000)  |
-| `dt`  | 1 / sample rate      |
-| `PI`  | 3.14159...           |
-| `TAU` | 6.28318...           |
+| Name      | Description                          |
+|-----------|--------------------------------------|
+| `t`       | time in seconds                      |
+| `sr`      | sample rate (48000)                  |
+| `dt`      | 1 / sample rate                      |
+| `start_t` | time when this voice was first loaded|
+| `PI`      | 3.14159...                           |
+| `TAU`     | 6.28318...                           |
 
 ## State
 

@@ -121,13 +121,14 @@ type
     callSiteState: seq[Value]         # per-call-site state
     callSiteCounter: int              # reset each sample
     funcs: Table[string, FuncDef]     # user-defined functions
+    startT: float64                   # time when voice first loaded
     active: bool
     fadeGain, fadeDelta: float64
 ```
 
 Each sample:
 1. Reset `callSiteCounter` to 0
-2. Set `t` in vars
+2. Set `t` and `start_t` in vars (`start_t` = voice.startT)
 3. Walk AST, return float64
 4. Clamp NaN/Inf to 0
 5. Apply fade gain
