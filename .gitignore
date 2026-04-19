@@ -1,0 +1,4 @@
+aither
+nimcache/
+*.so
+.DS_Store

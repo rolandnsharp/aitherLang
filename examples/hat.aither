@@ -1,0 +1,4 @@
+# closed hi-hat — short noise burst, high-passed
+let trig = impulse(4)
+let env  = discharge(trig, 60)
+noise() * env |> hpf(7000, 0.4) |> gain(0.25)

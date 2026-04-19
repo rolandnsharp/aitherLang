@@ -1,0 +1,4 @@
+var fb = 0.0
+
+fb = sin(TAU * phasor(440 + fb * 500))
+fb * 0.3

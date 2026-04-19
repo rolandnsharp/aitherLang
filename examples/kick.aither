@@ -1,0 +1,5 @@
+# 808-style kick: pitched-down sine, fast amp envelope
+let trig = impulse(2)
+let env  = discharge(trig, 12)
+let pitch = 50 + discharge(trig, 25) * 250
+sin(TAU * phasor(pitch)) * env |> gain(0.7)

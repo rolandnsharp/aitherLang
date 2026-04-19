@@ -1,0 +1,5 @@
+# detuned saw pad — no reverb, just slow filter sweep
+let a = osc(saw, 110)
+let b = osc(saw, 110.4)
+let c = osc(saw, 109.7)
+(a + b + c) / 3 |> lpf(700 + osc(sin, 0.15) * 500, 0.55) |> gain(0.18)

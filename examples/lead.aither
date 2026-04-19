@@ -1,0 +1,4 @@
+# square-wave melodic line — A minor pentatonic-ish
+let note = wave(0.5, [220, 220, 330, 277, 220, 261, 220, 196])
+let env  = discharge(impulse(0.5), 5)
+osc(sqr, note) |> lpf(500 + env * 2500, 0.55) |> gain(0.12)

@@ -1,0 +1,4 @@
+# acid bass — 8-step pattern in A-minor
+let freq = wave(2, [55, 55, 82, 55, 73, 55, 98, 55])
+let env  = discharge(impulse(2), 8)
+osc(saw, freq) |> lpf(200 + env * 3500, 0.82) |> gain(0.35)
