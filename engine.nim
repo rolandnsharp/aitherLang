@@ -52,23 +52,26 @@ proc audioCallback(output: ptr UncheckedArray[cfloat], frameCount: cuint,
       timeFrac -= 1.0
     let t = timeSec + timeFrac
 
-    var mix = 0.0
+    var lMix = 0.0
+    var rMix = 0.0
     for v in 0 ..< sc:
       if not slots[v].active or slots[v].muted: continue
-      var sample = 0.0
+      var l = 0.0
+      var r = 0.0
       try:
-        sample = slots[v].voice.tick(t)
+        let s = slots[v].voice.tick(t)
+        l = s.l; r = s.r
       except CatchableError:
-        sample = 0.0
+        discard
       slots[v].fadeGain = clamp(
         slots[v].fadeGain + slots[v].fadeDelta, 0.0, 1.0)
       if slots[v].fadeGain <= 0.0 and slots[v].fadeDelta < 0.0:
         slots[v].active = false
-      mix += sample * slots[v].fadeGain
+      lMix += l * slots[v].fadeGain
+      rMix += r * slots[v].fadeGain
 
-    let clipped = cfloat(tanh(mix))
-    output[i * 2]     = clipped
-    output[i * 2 + 1] = clipped
+    output[i * 2]     = cfloat(tanh(lMix))
+    output[i * 2 + 1] = cfloat(tanh(rMix))
 
   release(mtx)
 

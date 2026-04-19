@@ -858,7 +858,7 @@ const NativeFnTable: array[NativeCount, NativeFn] = [
   adTremolo, adSlew,
 ]
 
-proc run(vm: var VM): float64 =
+proc run(vm: var VM): Value =
   # Main interpretive loop. We cache the current frame's chunk, pc,
   # stateBase, and localsBase in locals to avoid array-indexing the
   # frame stack every instruction. On call/return we sync back and
@@ -1077,7 +1077,7 @@ proc run(vm: var VM): float64 =
     of opReturn:
       frame.pc = pc                              # not strictly needed
       let r = vm.leaveFrame()
-      if vm.fp == 0: return r.toFloat
+      if vm.fp == 0: return r
       vm.push r
       frame = addr vm.frames[vm.fp - 1]
       chunk = frame.chunk
@@ -1096,19 +1096,27 @@ proc newVoice*(sampleRate: float64 = 48000.0): Voice =
 proc load*(voice: Voice; program: Node) =
   voice.compile(program)
 
-proc tick*(voice: Voice; t: float64): float64 =
+proc sanitize(x: float64): float64 {.inline.} =
+  if x != x or x > 1e6 or x < -1e6: 0.0 else: x
+
+proc tick*(voice: Voice; t: float64): tuple[l, r: float64] =
   voice.t = t
-  if voice.mainChunk == nil: return 0.0
+  if voice.mainChunk == nil: return (0.0, 0.0)
   voice.dspState.idx = 0          # native funcs claim from 0 each tick
   var vm: VM
   vm.voice = voice
   vm.enterFrame(voice.mainChunk, 0)
-  let s =
+  let v =
     try: vm.run()
-    except CatchableError: 0.0
-  if s != s:                # NaN
-    0.0
-  elif s > 1e6 or s < -1e6:
-    0.0
-  else:
-    s
+    except CatchableError: Value(kind: vkFloat, f: 0.0)
+  case v.kind
+  of vkFloat:
+    let s = sanitize(v.f)
+    (s, s)
+  of vkArr:
+    let d = v.buf.data
+    let l = sanitize(if d.len > 0: d[0] else: 0.0)
+    let r = sanitize(if d.len > 1: d[1] else: l)
+    (l, r)
+  of vkFunc:
+    (0.0, 0.0)

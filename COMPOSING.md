@@ -91,6 +91,27 @@ let x = ease((pos - 60) / 8)   # 8s crossfade at 1:00
 A * (1 - x) + B * x
 ```
 
+### Stereo
+
+Return `[L, R]` at the end of the patch. Mono patches can
+still return a single float — the engine mirrors it. Keep
+heavy layers (drones) centred; pan motion layers on a
+period much longer than the breath so stereo reads as a
+slower layer, not a wobble.
+
+```
+let panLfo = sin(TAU * pos / 50)        # 50s cycle
+let ang    = (panLfo + 1) * PI / 4
+let L = centre + motion * cos(ang) * 1.41
+let R = centre + motion * sin(ang) * 1.41
+[L, R]
+```
+
+Equal-power pan (`cos`/`sin` of an angle in `[0, π/2]`)
+keeps loudness constant as the source moves. The `1.41`
+compensates for the single-channel sum; drop it if you
+want the pan to also reduce total energy at the extremes.
+
 ## Common bugs I have hit
 
 - **`wave(freq, notes)` cycles the whole array at `freq` Hz.**
