@@ -2,10 +2,6 @@
 # three sections: ambient intro (pad only) → mid (kick/bass/hat) → full (+ stab/lead).
 # uses the full new stdlib: play blocks, prev, pluck/swell/adsr, pan/haas/width, drive/bitcrush.
 
-def ease(x):
-  let c = clamp(x, 0, 1)
-  c * c * (3 - 2 * c)
-
 let pos = t - start_t
 let fin = ease(pos / 10)
 let bpm = 118.0 / 60.0

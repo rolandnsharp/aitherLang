@@ -31,6 +31,12 @@ def pulse(freq, width): if phasor(freq) < width then 1 else -1
 
 def gain(signal, amount): signal * amount
 
+# Smoothstep ease: 0..1 → 0..1 with C1 continuity. Inputs clamped.
+# The canonical fade / section crossfade curve.
+def ease(x):
+  let c = clamp(x, 0, 1)
+  c * c * (3 - 2 * c)
+
 # Previous-sample memory. `prev(x)` is x delayed by one sample.
 # Each call site gets its own 1-sample buffer via call-site state,
 # so `prev(a) + prev(b)` are independent.

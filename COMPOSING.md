@@ -117,10 +117,12 @@ sections. Quantize only when the genre demands it.
 
 ### Smoothstep (ease 0→1)
 
+`ease(x)` is stdlib — smoothstep with inputs clamped to
+[0, 1]. The canonical fade / section crossfade curve.
+
 ```
-def ease(x):
-  let c = clamp(x, 0, 1)
-  c * c * (3 - 2 * c)
+let fadeIn = ease(pos / 10)             # 10-second fade-in from pos=0
+let cross  = ease((pos - 60) / 8)       # 8-second crossfade centred at 1 min
 ```
 
 Use for fades, section crossfades, any 0→1 transition
@@ -321,7 +323,7 @@ Shapes: `sin`, `cos`, `tan`, `saw`, `tri`, `sqr`.
 Filters: `lp1`, `hp1`, `lpf`, `hpf`, `bpf`, `notch`.
 Delays: `delay`, `fbdelay`. Reverb: `reverb(sig, rt60, wet)`.
 Physics: `impulse`, `resonator`, `discharge`.
-Helpers: `gain`, `fold`, `tremolo`, `slew`, `prev`.
+Helpers: `gain`, `fold`, `tremolo`, `slew`, `prev`, `ease`.
 Envelopes: `discharge`, `pluck`, `swell`, `adsr`.
 Character: `drive`, `wrap`, `bitcrush`, `downsample`, `dropout`.
 Stereo: `pan`, `haas`, `width`, `mono`.

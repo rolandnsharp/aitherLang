@@ -2,10 +2,6 @@
 # every 32s a tension/release cycle. lead notes come from a quantised irrational
 # LFO, sampled-and-held at each beat → pattern never repeats but stays in key.
 
-def ease(x):
-  let c = clamp(x, 0, 1)
-  c * c * (3 - 2 * c)
-
 let pos   = t - start_t
 let fin   = ease(pos / 4)
 let tempo = 140.0 / 60.0

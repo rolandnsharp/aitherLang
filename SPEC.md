@@ -379,6 +379,7 @@ def pulse(freq, width): if phasor(freq) < width then 1 else -1
 ```
 def gain(signal, amount): signal * amount
 def fold(signal, amount): ...             # triangle wrap
+def ease(x): ...                          # smoothstep: canonical fade curve
 def prev(x):                              # one-sample memory
   var last = 0.0
   let out = last

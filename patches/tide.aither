@@ -1,10 +1,6 @@
 # tide — 100 BPM D minor. stereo pad, sidechained bass, sparse chime.
 # demonstrates Phase 3: plays return [L, R] or float, final line IS the mix.
 
-def ease(x):
-  let c = clamp(x, 0, 1)
-  c * c * (3 - 2 * c)
-
 # ---------- shared signals ----------
 let pos   = t - start_t
 let fin   = ease(pos / 6)

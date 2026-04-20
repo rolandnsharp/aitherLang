@@ -2,10 +2,6 @@
 # two non-locking impulse rates give aperiodic "arcs"; carrier only plays
 # during spark envelopes — the classic Tesla coil texture.
 
-def ease(x):
-  let c = clamp(x, 0, 1)
-  c * c * (3 - 2 * c)
-
 let pos    = t - start_t
 let fadeIn = ease(pos / 5)
 

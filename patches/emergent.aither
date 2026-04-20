@@ -2,10 +2,6 @@
 #            → self-firing pulse (energy-dependent). All feedback lives
 #            INSIDE individual plays; cross-play refs are forward-only.
 
-def ease(x):
-  let c = clamp(x, 0, 1)
-  c * c * (3 - 2 * c)
-
 # Karplus-Strong string. freq in Hz, damp ~0.99 (pluck decay), excite is input.
 # One call-site = one buffer = one independent string.
 def ks(freq, damp, excite):

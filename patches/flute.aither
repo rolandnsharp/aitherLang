@@ -1,10 +1,6 @@
 # flute — a slow melodic line above retreat, in D pentatonic.
 # breathy sine + odd harmonics + vibrato; legato slew, long phrases.
 
-def ease(x):
-  let c = clamp(x, 0, 1)
-  c * c * (3 - 2 * c)
-
 let pos = t - start_t
 
 # fade in over 20s so it joins gracefully.

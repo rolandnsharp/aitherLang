@@ -4,10 +4,6 @@
 # ż = xy - βz
 # L = x / 25, R = (z - 25) / 25  → on X-Y scope: the butterfly.
 
-def ease(x):
-  let c = clamp(x, 0, 1)
-  c * c * (3 - 2 * c)
-
 let pos    = t - start_t
 let fadeIn = ease(pos / 6)
 

@@ -1,10 +1,6 @@
 # retreat — 20 minutes, tonal centre on D, four sections.
 # arriving (0-5min) → deepening (5-10) → stillness (10-15) → emerging (15-20)
 
-def ease(x):
-  let c = clamp(x, 0, 1)
-  c * c * (3 - 2 * c)
-
 let pos    = t - start_t
 let breath = (sin(TAU * pos / 30 - PI / 2) + 1) * 0.5   # 30s breath
 
