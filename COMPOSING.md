@@ -272,6 +272,12 @@ want the pan to also reduce total energy at the extremes.
   call order across reloads = state preserved. Reorder
   `osc` calls and phase jumps. Tolerable; just know it.
 
+- **`if/else` chains as scale lookup are a smell.** If you
+  find yourself writing `if i == 0 then a else if i == 1
+  then b else ...`, use an array: `let scale = [a, b, c, d,
+  e]; scale[i]`. Constant literal arrays are compile-time
+  hoisted (zero runtime alloc).
+
 ## Performance
 
 - The engine is a bytecode VM, not tree-walking. Even so,

@@ -1,0 +1,64 @@
+# tide — 100 BPM D minor. stereo pad, sidechained bass, sparse chime.
+# demonstrates Phase 3: plays return [L, R] or float, final line IS the mix.
+
+def ease(x):
+  let c = clamp(x, 0, 1)
+  c * c * (3 - 2 * c)
+
+# ---------- shared signals ----------
+let pos   = t - start_t
+let fin   = ease(pos / 6)
+let tempo = 100.0 / 60.0                          # 1.667 Hz beat
+
+let kTrig = impulse(tempo)
+let kEnv  = discharge(kTrig, 7)
+let sc    = 1 - kEnv * 0.8                        # sidechain duck
+
+# note derivation: D minor root, drifts every ~40s through scale degrees
+let scale = [0, 2, 3, 5, 7]                       # D minor pentatonic (semitones)
+let drift = (sin(TAU * pos * 0.017) + sin(TAU * pos * 0.027) + 2) * 0.5 * 5
+let sStep = scale[int(drift) mod 5]
+let bNote = 36.71 * pow(2, sStep / 12)            # D1-register bass
+let pRoot = 146.83 * pow(2, sStep / 12)           # D3-register pad
+
+# meta cycle: every 16 bars, a "breath" that affects pad brightness
+let meta  = (sin(TAU * pos / 38) + 1) * 0.5       # 38s slow breath
+
+# ---------- parts ----------
+
+play kick:                                        # mono: punchy, centered
+  let p = 45 + discharge(kTrig, 32) * 120
+  sin(TAU * phasor(p)) * kEnv * 0.85 |> lpf(260, 0.4)
+
+play bass:                                        # mono sub, sidechained
+  let raw = osc(sin, bNote) * 0.6 + osc(tri, bNote * 2) * 0.15
+  let s   = raw |> lpf(180, 0.3)
+  s * sc
+
+play pad:                                         # wide stereo, detuned
+  let pL = osc(sin, pRoot) + osc(sin, pRoot * 1.502) * 0.55 + osc(sin, pRoot * 2) * 0.25
+  let pR = osc(sin, pRoot * 0.997) + osc(sin, pRoot * 1.505) * 0.55 + osc(sin, pRoot * 2) * 0.25
+  let cut = 500 + meta * 1200
+  let L = pL |> lpf(cut, 0.3) |> gain(0.08)
+  let R = pR |> lpf(cut, 0.3) |> gain(0.08)
+  [L * sc, R * sc]
+
+play hat:                                         # tight mono, swung
+  let hP = phasor(tempo * 4)
+  let hW = hP + sin(hP * PI) * 0.06
+  let hE = exp(-hW * 30)
+  noise() * hE |> hpf(7500, 0.2) |> gain(0.16)
+
+play chime:                                       # sparse stereo pings
+  let cTrig = impulse(tempo / 16)                  # once every 16 beats (~9.6s)
+  let cEnv  = discharge(cTrig, 1.5)
+  let cPit  = pRoot * 4                            # D5
+  let L = sin(TAU * phasor(cPit))        * cEnv * 0.15
+  let R = sin(TAU * phasor(cPit * 1.003)) * cEnv * 0.15
+  [L, R]
+
+# ---------- mix ----------
+# subgroups visible in the arithmetic: drums vs harmony
+let drums   = kick + hat
+let harmony = bass + pad + chime
+(drums + harmony) * fin |> drive(1.05)

@@ -17,9 +17,9 @@ let kTrig    = impulse(tempo)                    # drives kick + sidechain
 let kEnv     = discharge(kTrig * kickOn, 10)
 let sc       = 1 - kEnv * 0.75                   # sidechain
 
+let scale    = [0, 3, 5, 7, 10]                  # minor pentatonic (semitones)
 let lLfo     = (sin(TAU * pos * 0.083) + sin(TAU * pos * 0.053) + 2) * 0.5 * 5
-let lIdx     = int(lLfo) mod 5
-let lStep    = if lIdx == 0 then 0 else if lIdx == 1 then 3 else if lIdx == 2 then 5 else if lIdx == 3 then 7 else 10
+let lStep    = scale[int(lLfo) mod 5]
 let lRoot    = 220.0 * pow(2, lStep / 12)
 let bRoot    = 55.0 * pow(2, lStep / 12)
 
