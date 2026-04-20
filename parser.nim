@@ -334,7 +334,9 @@ proc parseOr(p: var Parser): Node =
 
 proc parsePipe(p: var Parser): Node =
   var n = p.parseOr()
+  var sawPipe = false
   while p.matchOp("|>"):
+    sawPipe = true
     # RHS must be a function call (or bare ident treated as call)
     let line = p.peek().line
     let id = p.expect(tkIdent, "function name after '|>'")
@@ -343,6 +345,14 @@ proc parsePipe(p: var Parser): Node =
       let extra = p.parseArgList()
       for a in extra: args.add a
     n = Node(kind: nkCall, str: id.str, kids: args, line: line)
+  # If an arithmetic op follows a pipe chain, the user probably expected
+  # `(x |> f()) * y` semantics. aither's pipe is low-precedence like
+  # OCaml/Elixir/F#, so they need explicit parens or a `let` binding.
+  if sawPipe:
+    let t = p.peek()
+    if t.kind == tkOp and t.str in ["+", "-", "*", "/"]:
+      p.fail("pipe result used in arithmetic - wrap the chain in parens " &
+             "(e.g. `(x |> f()) * y`) or bind with `let`")
   n
 
 proc parseExpr(p: var Parser): Node = p.parsePipe()
