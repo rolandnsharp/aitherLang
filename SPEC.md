@@ -2,12 +2,12 @@
 
 A language for real-time audio signal processing.
 
-A program is a single expression that produces one sample,
-evaluated 48,000 times per second. Everything is a number.
+A program is an expression evaluated at audio rate (48,000
+times per second) that produces a single stereo sample. The
+file defines named parts; the final expression is the voice's
+output.
 
 ## Values
-
-Three types:
 
 | Type     | Example                    |
 |----------|----------------------------|
@@ -15,67 +15,74 @@ Three types:
 | function | `sin`, `saw`, `my_shape`   |
 | array    | `[220, 330, 440]`          |
 
-Float is the default. Function values exist for `osc(shape, freq)`.
-Arrays exist for polyphony (input) and stereo (output).
+Float is the default. Function values exist for
+`osc(shape, freq)` (passing a shape function). Arrays exist
+for polyphony (input), stereo output (length-2 arrays), and
+delay/reverb/wavetable buffers.
 
 ## Globals
 
-| Name      | Description                          |
-|-----------|--------------------------------------|
-| `t`       | time in seconds                      |
-| `sr`      | sample rate (48000)                  |
-| `dt`      | 1 / sample rate                      |
-| `start_t` | time when this voice was first loaded|
-| `PI`      | 3.14159...                           |
-| `TAU`     | 6.28318...                           |
+| Name      | Description                            |
+|-----------|----------------------------------------|
+| `t`       | time in seconds since engine start     |
+| `sr`      | sample rate (48000)                    |
+| `dt`      | 1 / sample rate                        |
+| `start_t` | time when this voice was first loaded  |
+| `PI`      | 3.14159...                             |
+| `TAU`     | 6.28318... (2π)                        |
+
+Use `pos = t - start_t` as the composition clock — seconds
+since this voice started, independent of engine uptime.
 
 ## State
 
 `var` declares persistent state. Survives across samples
-and hot-reloads. Auto-initialized on first load only.
+and across hot-reloads. Auto-initialized on first load only.
 
 ```
 var phase = 0.0
-var env = 1.0
+var env   = 1.0
 ```
 
-On hot-reload, existing `var` values are preserved.
+On hot-reload, existing `var` values are preserved by name.
 New `var` declarations initialize to their default.
 
-## Bindings
-
-`let` declares per-sample values. Computed every sample.
+`let` declares per-sample values. Computed fresh each sample.
 
 ```
 let freq = 440 + osc(sin, 0.3) * 50
-let mix = osc(sin, 440) + osc(saw, 220)
+let mix  = osc(sin, 440) + osc(saw, 220)
 ```
 
 ## Operators
 
-### Arithmetic (precedence high to low)
+Arithmetic (precedence high to low):
 
 | Operator       | Description              |
 |----------------|--------------------------|
-| `-x`           | unary negation           |
-| `*`, `/`, `mod`| multiply, divide, modulo |
-| `+`, `-`       | add, subtract            |
+| `-x`, `not x`  | unary                    |
+| `*`, `/`, `mod`| multiplicative           |
+| `+`, `-`       | additive                 |
+| `==`, `<`, `>`, `<=`, `>=`, `!=` | comparison |
+| `and`, `or`    | logical                  |
 | `\|>`          | pipe (lowest)            |
 
-### Comparison
+Arithmetic is polymorphic for length-2 arrays (stereo pairs):
 
-`==`, `!=`, `<`, `>`, `<=`, `>=`
+- `float + float → float`
+- `float + [L, R] → [float+L, float+R]` (broadcast)
+- `[L, R] + [L, R] → [L+L, R+R]` (element-wise)
+- Other array shapes collapse to first element (legacy polyphony)
 
-### Logical
+Same for `-`, `*`, `/`.
 
-`and`, `or`, `not`
-
-True is non-zero. False is zero.
+True is non-zero. False is zero. Conditional results are `1`
+or `0`.
 
 ## Pipe
 
-`|>` inserts the left side as the first argument of
-the right side:
+`|>` inserts the left side as the first argument of the
+function call on the right:
 
 ```
 osc(saw, 55) |> lpf(800, 0.5) |> gain(0.3)
@@ -84,16 +91,29 @@ osc(saw, 55) |> lpf(800, 0.5) |> gain(0.3)
 gain(lpf(osc(saw, 55), 800, 0.5), 0.3)
 ```
 
+Pipe is the *lowest-precedence* operator (matching OCaml /
+Elixir / F#). The RHS must be a function call or ident.
+
+**Gotcha**: `x |> f() * y` does NOT parse as `f(x) * y`.
+Because pipe is low precedence and only accepts a call on
+its RHS, the `*` is orphaned. Wrap in parens or bind first:
+
+```
+(x |> f()) * y                  # parens
+let z = x |> f(); z * y         # bind
+```
+
+The parser emits a clear error in this case.
+
 ## Conditionals
 
-Expression-oriented. Always returns a value.
-No significant whitespace.
+Expression-oriented. Always returns a value. Single-line:
 
 ```
 if t < 4 then osc(sin, 440) else osc(saw, 220)
 ```
 
-Single-line. For multi-branch:
+Multi-branch via chained `else if`:
 
 ```
 if t < 4 then osc(sin, 440)
@@ -103,33 +123,66 @@ else noise()
 
 ## Functions
 
+`def` declares a reusable function:
+
 ```
 def pluck(freq):
   noise() * impulse(3) |> resonator(freq, 0.2)
 
 def chord(root):
   osc(sin, root) + osc(sin, root * 5/4) + osc(sin, root * 3/2)
-
-pluck(330) + chord(220) * 0.2
 ```
 
-The last expression is the return value. Functions can
-use `var` (per-call-site state — each call location gets
-independent state via a counter).
+The last expression in the body is the return value.
+Functions have their own local scope — they cannot see
+file-level `let` bindings. File-level `var`s, other `def`s,
+and globals are visible.
 
 ## First-class functions
 
-Functions are values. They can be passed as arguments:
+Functions are values; pass as arguments:
 
 ```
-def my_shape(x):
-  sin(x) + sin(3 * x) / 3
+def my_shape(x): sin(x) + sin(3 * x) / 3
 
 osc(my_shape, 440)
 ```
 
-This exists for `osc(shape, freq)` — shape and clock are
-separate concepts composed together.
+## Play blocks
+
+`play name:` declares a named, independently-controllable
+part. Its body compiles inline into the main chunk (so it
+sees all file-level lets and vars). Its value is bound to
+a local named after the play, readable from the final
+expression and from later plays.
+
+```
+def ease(x):
+  let c = clamp(x, 0, 1)
+  c * c * (3 - 2 * c)
+
+let tempo = 140.0 / 60.0
+let kEnv  = discharge(impulse(tempo), 10)
+let sc    = 1 - kEnv * 0.75                    # sidechain
+
+play kick:
+  sin(TAU * phasor(50 + discharge(impulse(tempo), 35) * 170)) * kEnv * 0.9
+
+play bass:
+  osc(saw, 55) |> lpf(150 + kEnv * 1500, 0.85) * sc
+
+(kick + bass) |> drive(1.1)                    # final expression = output
+```
+
+Each part has an engine-controlled gain (default 1.0),
+adjustable via CLI. Hot-reloading preserves gains by part
+name.
+
+**Forward references only** — a play can reference any part
+defined *earlier* in the file. For reading a later play's
+value (or its own), use `prev(name)` for a one-sample delay.
+
+See "Program structure" below.
 
 ## Arrays
 
@@ -139,40 +192,43 @@ separate concepts composed together.
 [220, 330, 440]
 ```
 
+Literal arrays of all-constant numbers are compile-time
+hoisted; they allocate once per voice, not per sample.
+
 ### Mutable arrays
 
 ```
-var buf = array(48000, 0.0)   # create array of size n
-buf[i]                         # read element
-buf[i] = x                    # write element
+var buf = array(48000, 0.0)   # size N, initial value
+buf[i]                         # read
+buf[i] = x                     # write
 len(buf)                       # length
 ```
 
-Needed for delay lines, reverb buffers, wavetables.
+Used for delay lines, reverb buffers, wavetables.
 
-### Polyphony (arrays as input)
+### Polyphony (arrays as input to functions)
 
-When a function receives an array where it expects a
-float, it runs once per element with independent state.
-Results are summed.
+When a function receives an array where it expects a float,
+it runs once per element with independent state. Results
+are **summed**:
 
 ```
-osc(sin, [220, 330, 440]) * 0.3
+osc(sin, [220, 330, 440]) * 0.3    # three oscillators → sum → mono
 ```
 
 ### Stereo (arrays as output)
 
-Return an array of two for stereo:
+Return `[L, R]` for stereo. Plays and the final expression
+may return a float (mono, mirrored to both channels) or a
+two-element array (stereo).
 
 ```
-osc(sin, 440) |> pan(0.3)   # returns [L, R]
+osc(sin, 440) |> pan(0.3)    # returns [L, R]
 ```
 
-### Both
-
-```
-osc(sin, [220, 330, 440]) |> pan([-0.5, 0, 0.5])
-```
+Binary ops on length-2 arrays are element-wise (see
+Operators). Mixing a stereo play with a mono play in the
+final expression broadcasts the mono to both channels.
 
 ## Comments
 
@@ -190,28 +246,58 @@ var phase = 0.0; phase += 440 / sr; sin(TAU * phase)
 
 ## Program structure
 
-The last expression is the output sample. The file is
-the instrument.
+A file has four kinds of top-level declaration:
+
+- `def name(args): body` — helper function
+- `let name = expr` — file-level binding, visible in all plays
+- `var name = init` — file-level persistent state
+- `play name: body` — named, controllable part
+
+Followed by exactly one **final expression** — the voice's
+output. The final expression is typically a composition of
+play names and effects:
 
 ```
-var phase = 0.0
-
-phase += 440 / sr
-if phase >= 1.0: phase -= 1.0
-sin(TAU * phase) * 0.3
+(kick + bass + lead) |> drive(1.1)
 ```
 
-No `proc tick*`. No imports. No boilerplate.
-`var` lines are state. Everything else is the body.
+Files **must** end with an expression, not a declaration.
+The engine errors clearly if either rule is violated (no
+play block, no final expression, or an expression in a
+non-final position).
+
+## Scope rules
+
+| Declaration          | Visible                                  | State                              |
+|----------------------|------------------------------------------|------------------------------------|
+| file-level `let`     | everywhere below it                      | computed once per sample           |
+| file-level `var`     | everywhere (by name)                     | persistent, keyed by name          |
+| file-level `def`     | everywhere (hoisted)                     | n/a (callable)                     |
+| `play` body `let`    | inside that `play` only                  | computed once per sample           |
+| `play` body `var`    | file-level by name                       | persistent, shared by name         |
+| `def` body `let`     | inside that `def` only                   | computed once per call             |
+| `def` body `var`     | per-call-site                            | persistent per call location       |
+
+**`def` cannot see file-level lets** — defs are isolated
+functions that take what they need as parameters. **`play`
+can see file-level lets** — plays are inlined blocks that
+share the file's scope.
+
+**`var` inside a play is file-level by name.** If two plays
+both write `var count = 0`, they share the slot. Use
+explicit names (`var kick_count`, `var bass_count`) for
+independence.
+
+**`var` inside a def is per-call-site.** Each location the
+def is called from gets its own state slot. This is what
+makes `osc(sin, 440) + osc(sin, 880)` work — two
+independent phasors without any ceremony.
 
 ---
 
 ## Builtins
 
-Only two categories of builtins are hardcoded in the
-evaluator. Everything else is defined in the stdlib.
-
-### Math (hardcoded — wrappers around C math library)
+### Math (native, C library)
 
 | Function        | Description     |
 |-----------------|-----------------|
@@ -228,142 +314,98 @@ evaluator. Everything else is defined in the stdlib.
 | `max(a, b)`     | maximum         |
 | `pow(a, b)`     | exponentiation  |
 | `sqrt(x)`       | square root     |
-| `clamp(x, l, h)`| clamp to range |
+| `clamp(x, l, h)`| clamp to range  |
 | `int(x)`        | truncate to int |
 
-### Stateful primitives (hardcoded)
+### Shapes (native)
 
-| Function      | Description            |
-|---------------|------------------------|
-| `phasor(freq)`| ramp 0 to 1 at freq Hz |
-| `noise()`     | white noise            |
+| Function | Description                |
+|----------|----------------------------|
+| `saw(x)` | sawtooth: `-1 → 1`         |
+| `tri(x)` | triangle: `-1 → 1 → -1`    |
+| `sqr(x)` | square: `-1 / 1`           |
 
-`phasor` is the only stateful oscillator primitive.
-`noise` is the only stateless random source.
-Everything else — oscillators, filters, effects — is
-built from these in the stdlib.
+`x` is a phase in radians (0..TAU). Also usable as osc
+shapes via `osc(shape, freq)`.
+
+### Stateful primitives (native)
+
+| Function      | Description                     |
+|---------------|---------------------------------|
+| `phasor(freq)`| ramp 0→1 at freq Hz, with state |
+| `noise()`     | white noise, stateless          |
+
+### Native DSP functions
+
+These are compiled Nim (in `dsp.nim`) called from the VM.
+Each call-site gets its own state slot from a per-voice
+float64 pool (4 MB).
+
+**Filters**: `lp1(sig, cut)`, `hp1(sig, cut)`,
+`lpf(sig, cut, res)`, `hpf(sig, cut, res)`,
+`bpf(sig, cut, res)`, `notch(sig, cut, res)`.
+
+**Delays**: `delay(sig, time, max_time)`,
+`fbdelay(sig, time, max_time, fb)`.
+
+**Reverb**: `reverb(sig, rt60, wet)` (Schroeder).
+
+**Physics**: `impulse(freq)`, `resonator(sig, freq, decay)`,
+`discharge(sig, rate)`.
+
+**Modulation**: `tremolo(sig, rate, depth)`,
+`slew(sig, time)`.
+
+**Sequence**: `wave(freq, arr)` — wavetable oscillator;
+with low freq it's a step sequencer, with audio freq it's
+a custom waveform.
 
 ---
 
 ## Stdlib (written in aither)
 
-The stdlib is embedded in the binary as a const string.
-Loaded before every user patch.
+Embedded in the binary as a const string. Loaded before
+every user patch. Source: `stdlib.aither`.
 
-### Shapes (pure math, no state)
-
-```
-def saw(x): x * 2 - 1
-def tri(x): abs(x * 4 - 2) - 1
-def sqr(x): if x < 0.5 then 1 else -1
-```
-
-Usable as oscillator shapes or waveshapers.
-
-### Oscillator
+### Oscillator wrappers
 
 ```
-def osc(shape, freq):
-  shape(TAU * phasor(freq))
-```
-
-The user picks their level:
-
-```
-osc(sin, 440)                 # convenience
-sin(TAU * phasor(440))        # explicit
-let p = phasor(440)           # raw phase, full control
-sin(TAU * p) + sin(3*TAU*p)/3
-```
-
-### Filters
-
-```
-def lp1(signal, cutoff):
-  var y = 0.0
-  let a = clamp(cutoff / sr, 0, 1)
-  y = y + a * (signal - y)
-  y
-
-def lpf(signal, cutoff, res):
-  var s1 = 0.0
-  var s2 = 0.0
-  let g = tan(PI * min(cutoff, sr * 0.49) / sr)
-  let k = 2 * (1 - res)
-  let a1 = 1 / (1 + g * (g + k))
-  let a2 = g * a1
-  let a3 = g * a2
-  let v3 = signal - s2
-  let v1 = a1 * s1 + a2 * v3
-  let v2 = s2 + a2 * s1 + a3 * v3
-  s1 = 2 * v1 - s1
-  s2 = 2 * v2 - s2
-  v2
-```
-
-Similarly: `hpf`, `bpf`, `notch`, `hp1`.
-
-### Effects
-
-```
-def delay(signal, time, max_time):
-  var buf = array(int(max_time * sr), 0.0)
-  var cursor = 0.0
-  let size = len(buf)
-  let rd = int(cursor - time * sr + size) mod size
-  let output = buf[rd]
-  buf[int(cursor)] = signal
-  cursor = (cursor + 1) mod size
-  output
-
-def fbdelay(signal, time, max_time, fb):
-  var buf = array(int(max_time * sr), 0.0)
-  var cursor = 0.0
-  let size = len(buf)
-  let rd = int(cursor - time * sr + size) mod size
-  let output = buf[rd]
-  buf[int(cursor)] = signal + output * fb
-  cursor = (cursor + 1) mod size
-  output
-```
-
-Similarly: `reverb`, `tremolo`, `slew`.
-
-### Physics
-
-```
-def impulse(freq):
-  var prev = 0.0
-  let p = phasor(freq)
-  let hit = if p < prev then 1 else 0
-  prev = p
-  hit
-
-def resonator(signal, freq, decay):
-  var x = 0.0
-  var dx = 0.0
-  let w2 = freq * freq
-  dx = dx + (-decay * dx - w2 * x + signal * w2) * dt
-  x = x + dx * dt
-  x
-
-def discharge(signal, rate):
-  var level = 0.0
-  level = max(signal, level * (1 - rate * dt))
-  level
+def osc(shape, freq):  shape(TAU * phasor(freq))
+def pulse(freq, width): if phasor(freq) < width then 1 else -1
 ```
 
 ### Helpers
 
 ```
 def gain(signal, amount): signal * amount
-def fold(signal, amount):
-  let x = ((signal * amount) mod 4 + 4) mod 4
-  if x < 2 then x - 1 else 3 - x
-def pan(signal, pos):
-  let angle = (pos + 1) * PI / 4
-  [signal * cos(angle), signal * sin(angle)]
+def fold(signal, amount): ...             # triangle wrap
+def prev(x):                              # one-sample memory
+  var last = 0.0
+  let out = last
+  last = x
+  out
 ```
+
+### Character effects
+
+- `drive(sig, amount)` — soft-clip saturation
+- `wrap(sig, amount)` — hard wrap to ±1
+- `bitcrush(sig, bits)` — bit-depth reduction
+- `downsample(sig, rate)` — sample-rate reduction via hold
+- `dropout(sig, rate, duty)` — periodic gate
+
+### Envelopes
+
+- `pluck(trig, decay_sec)` — percussive, fast attack + expo decay
+- `swell(gate, attack, release)` — AR envelope, asymmetric
+- `adsr(gate, a, d, s, r)` — classic ADSR
+
+### Stereo
+
+- `pan(mono_sig, pos)` — equal-power pan, pos in [-1, 1]
+- `haas(mono_sig, ms)` — 1-30 ms delay on one channel for width
+- `width(stereo_sig, amount)` — mid-side width (0 mono, 1 unchanged, >1 exaggerated)
+- `mono(stereo_sig)` — collapse to single channel
 
 ---
 
@@ -371,12 +413,8 @@ def pan(signal, pos):
 
 ### Top-level `var`
 
-Keyed by variable name. Safe to reorder.
-
-```
-var phase = 0.0   # name "phase" → state slot
-var env = 1.0     # name "env" → state slot
-```
+Keyed by variable name. Safe to reorder. Shared by all
+plays and defs that reference the name.
 
 ### `var` inside `def`
 
@@ -385,134 +423,196 @@ independent state.
 
 ```
 osc(sin, 440) + osc(sin, 880)
-# two calls to osc → two separate phasors
-# because each call site has a unique counter position
+# two calls to osc → two independent phasors
 ```
 
 Counter resets to 0 at the start of each sample. Same
 call order = same state slots = phase continuity.
 
-On hot-reload: same call order preserves state. If the
-user changes the call order, state remaps (possible
-phase discontinuity — acceptable).
+On hot-reload: same call order preserves state. Reordering
+calls may cause phase discontinuity (not a crash).
+
+### `var` inside `play`
+
+Currently file-level by name (same slot if two plays share
+a name). For per-play independence, use unique names or
+move state into a local `def` called from the play.
 
 ---
 
-## MIDI (future)
+## CLI
 
-| Name         | Description              |
-|--------------|--------------------------|
-| `midi_freq`  | current note frequency   |
-| `midi_gate`  | 1 while held, 0 released |
-| `midi_vel`   | velocity 0-1             |
-| `cc(n)`      | control change 0-1       |
+The engine runs in a background process (`./aither start`)
+and accepts commands over a UNIX socket.
 
-```
-osc(sin, midi_freq) * midi_vel * discharge(midi_gate, 4)
-```
+### Voice-level
 
-## Composition (future)
+| Command                          | Description                                |
+|----------------------------------|--------------------------------------------|
+| `send <file> [fade]`             | load / hot-swap a patch                    |
+| `stop <voice> [fade]`            | fade out & remove                          |
+| `mute <voice>` / `unmute`        | silence / resume (state keeps running)     |
+| `solo <voice> [fade]`            | fade out all other voices                  |
+| `clear [fade]`                   | stop all voices                            |
+| `list`                           | show active voices                         |
+| `retrigger <voice>`              | reset `start_t` in place                   |
+| `kill`                           | shut down engine                           |
 
-```
-osc(sin, 440) |> lpf(800, 0.5)
-  |> hold(8)
-  osc(saw, 220) |> reverb(1.5, 0.3)
-  |> hold(8)
-  |> fadeout(4)
-```
+### Part-level
 
-## Signal references (future)
+| Command                                                | Description                      |
+|--------------------------------------------------------|----------------------------------|
+| `parts <voice>`                                        | list parts with gain + state     |
+| `part <voice> <part> play [fade]`                      | fade gain to 1                   |
+| `part <voice> <part> stop [fade]`                      | fade gain to 0                   |
+| `part <voice> <part> mute` / `unmute`                  | instant silence / resume         |
+| `part <voice> <part> gain <value> [fade]`              | set gain to arbitrary value      |
 
-```
-# kick (separate file)
-impulse(2) |> resonator(60, 8)
+### Observability
 
-# mix (references kick by name)
-kick + hat * 0.3 |> reverb(1.5, 0.3)
-```
+| Command                          | Description                                         |
+|----------------------------------|-----------------------------------------------------|
+| `scope [voice]`                  | per-voice RMS / peak / clips / envelope sparkline   |
+| `scope master`                   | master-bus stats (pre-tanh mix)                     |
+
+Clips counters clear on read.
 
 ---
 
 ## Implementation
 
-### Parser (Nim, ~250 lines)
+### Parser (`parser.nim`, ~465 lines)
 
-Tokenizer + recursive descent → AST.
-Handles: literals, identifiers, operators, function
-calls, `var`, `let`, `def`, `if/then/else`, `|>`,
-arrays, array indexing, comments.
+Indentation-sensitive tokenizer + recursive-descent parser
+→ AST. Handles: literals, identifiers, operators, function
+calls, `var`, `let`, `def`, `play`, `if/then/else`, `|>`,
+arrays, array indexing, comments. Precedence climbing for
+expressions.
 
-### Evaluator (Nim, ~250 lines)
+### Evaluator (`eval.nim`, ~1150 lines)
 
-Tree-walking interpreter. Calls compiled math builtins.
-Manages per-voice state (var table + call-site counter).
-Returns float, function, or array values.
+Bytecode compiler + stack VM. Each patch compiles to a
+main chunk plus one chunk per `def`. Play blocks compile
+inline into the main chunk with their result stored to a
+named local. Polymorphic binary arithmetic for length-2
+stereo. Per-voice state: float64 pool (4 MB) for native
+DSP, call-site state for def-local `var`, named slots for
+top-level `var`.
 
-### Engine (Nim, ~200 lines)
+### Native DSP (`dsp.nim`, ~200 lines)
 
-Audio callback via miniaudio. Socket CLI. Voice table.
-Loads patches, wraps in tick function, evaluates per
-sample.
+Filters, delays, reverb, resonator, discharge, tremolo,
+slew, wave. Each function claims state slots from the
+per-voice pool. Pool access is bounds-checked — overflow
+degrades to a shared safe slot rather than segfaulting.
 
-### Stdlib (aither, ~200 lines)
+### Engine (`engine.nim`, ~500 lines)
 
-Shapes, osc, filters, effects, physics, helpers.
-Embedded in binary as const string.
+Audio callback via miniaudio. Socket CLI. Voice table with
+per-part gain fades. Per-voice and master-bus rolling stats
+(RMS, peak, clips, 50 ms envelope bins for sparklines).
+Tanh soft-clip on the master.
 
-### Total: ~900 lines Nim + ~200 lines aither
+### Stdlib (`stdlib.aither`, ~100 lines)
 
-One binary. Under 1 MB. No dependencies beyond the
-system audio library.
+Oscillator wrappers, helpers, character effects, envelopes,
+stereo helpers. Pure aither code, baked into the binary as
+a const string.
+
+### Totals
+
+~2300 lines Nim + ~100 lines aither. One binary, ~500 KB.
+No runtime dependencies beyond the system audio library.
 
 ---
 
 ## Complete examples
 
-**Minimal:**
+### Minimal
+
 ```
-osc(sin, 440) * 0.3
+play beep:
+  osc(sin, 440) * 0.2
+
+beep
 ```
 
-**Acid bass:**
+### Acid bass
+
 ```
-let freq = wave(2, [55, 55, 82, 55, 73, 55, 98, 55])
-let env = discharge(impulse(2), 8)
-osc(saw, freq) |> lpf(200 + env * 4000, 0.85) |> gain(0.4)
+let notes = wave(2, [55, 55, 82, 55, 73, 55, 98, 55])
+let env   = discharge(impulse(2), 8)
+
+play acid:
+  let s = osc(saw, notes) |> lpf(200 + env * 4000, 0.85) |> gain(0.4)
+  [s, s]
+
+acid |> drive(1.1)
 ```
 
-**Chaos:**
-```
-var chaos = 0.5
-var tick_count = 0.0
+### FM feedback
 
-tick_count = tick_count + 1
-if tick_count >= 2000 then tick_count = 0; chaos = 3.59 * chaos * (1 - chaos)
-let freq = 200 + chaos * 400
-sin(TAU * phasor(freq)) * 0.3
 ```
+play fm:
+  var fb = 0.0
+  fb = sin(TAU * phasor(440 + fb * 500))
+  fb * 0.3
 
-**FM feedback:**
-```
-var fb = 0.0
-
-fb = sin(TAU * phasor(440 + fb * 500))
-fb * 0.3
+fm
 ```
 
-**Drone:**
+### Kick drum
+
 ```
-let a = osc(saw, 55)
-let b = osc(saw, 55.1)
-let c = osc(saw, 54.9)
-(a + b + c) / 3 |> lpf(400 + osc(sin, 0.1) * 300, 0.4) |> reverb(3, 0.5)
+play kick:
+  discharge(impulse(2), 6) * resonator(impulse(2), 60, 8)
+
+kick
 ```
 
-**Kick drum:**
+### Looper
+
 ```
-discharge(impulse(2), 6) * resonator(impulse(2), 60, 8)
+play loop:
+  osc(saw, 110) |> fbdelay(0.5, 0.5, 0.9)
+
+loop
 ```
 
-**Looper:**
+### Drone with stereo pad
+
 ```
-osc(saw, 110) |> fbdelay(0.5, 0.5, 1.0)
+def ease(x):
+  let c = clamp(x, 0, 1)
+  c * c * (3 - 2 * c)
+
+let pos    = t - start_t
+let breath = (sin(TAU * pos / 20) + 1) * 0.5
+
+play drone:
+  let raw  = osc(saw, 55) + osc(saw, 55.1) + osc(saw, 54.9)
+  let filt = raw / 3 |> lpf(400 + breath * 400, 0.4)
+  filt |> haas(14)
+
+play shimmer:
+  let raw  = osc(sin, 440) + osc(sin, 441.2) * 0.5
+  let wide = [raw, raw * 0.98] |> width(1.5)
+  wide * breath * 0.08
+
+(drone + shimmer) * ease(pos / 8) |> reverb(3, 0.3)
+```
+
+### Forward-feedback composition
+
+```
+let trig = impulse(0.3)
+
+play src:
+  let exc = noise() * discharge(trig, 80) * 0.3
+  osc(sin, 220) * 0.2 + exc
+
+play echo:
+  prev(src) * 0.7             # one-sample-delayed src
+
+(src + echo) |> drive(1.0)
 ```
