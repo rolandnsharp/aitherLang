@@ -595,6 +595,10 @@ proc compileExpr(co: var Compiler; n: Node; wantValue: bool = true) =
         co.compileExpr(s, true)
         if not childWant:
           discard co.chunk.emit(opPop)
+  of nkPlay:
+    # play blocks only make sense at top level; bare occurrence pushes 0.
+    if wantValue:
+      discard co.chunk.emit(opConst, co.chunk.addConst(0.0))
 
 # ============================================================ pre-compile =====
 
@@ -613,6 +617,28 @@ proc updateFuncSlotsOnce(voice: Voice; defs: seq[Node]): bool =
       voice.funcChunks[i].numStateSlots = n
       result = true
 
+proc compileTopLevel(co: var Compiler; body: Node) =
+  # Main chunk: only `play` blocks contribute to the output. Other
+  # statements (def, let, var, bare exprs) run for side effects.
+  if body.kind != nkBlock:
+    raise newException(EvalError, "program must be a block of statements")
+  var playCount = 0
+  for s in body.kids:
+    case s.kind
+    of nkPlay:
+      co.compileExpr(s.kids[0], wantValue = true)
+      if playCount > 0:
+        discard co.chunk.emit(opAdd)
+      inc playCount
+    of nkLet, nkVar, nkAssign, nkDef:
+      co.compileExpr(s, wantValue = false)
+    else:
+      co.compileExpr(s, wantValue = true)
+      discard co.chunk.emit(opPop)
+  if playCount == 0:
+    raise newException(EvalError,
+      "no `play` blocks in file - at least one is required")
+
 proc compileChunk(voice: Voice; chunk: Chunk; body: Node; isFunc: bool;
                   params: seq[string] = @[]) =
   chunk.code.setLen(0)
@@ -629,7 +655,10 @@ proc compileChunk(voice: Voice; chunk: Chunk; body: Node; isFunc: bool;
     isMain: not isFunc)
   for p in params:
     discard co.allocLocal(p)
-  co.compileExpr(body)
+  if isFunc:
+    co.compileExpr(body)
+  else:
+    co.compileTopLevel(body)
   discard chunk.emit(opReturn)
   # Total state slots actually allocated during compile (own slots +
   # all callee-call-site allocations).

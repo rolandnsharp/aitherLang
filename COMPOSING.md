@@ -9,6 +9,33 @@ evaluated 48,000 times a second. There is no score, no
 scheduler, no "when does X happen." Everything —
 melody, rhythm, sections, dynamics — is a signal.
 
+## File structure
+
+Every file has at least one `play` block. Top-level
+statements run once per sample and accumulate; only
+`play` block bodies contribute to the output sum.
+
+```
+def ease(x):                   # helper (def = building block)
+  let c = clamp(x, 0, 1)
+  c * c * (3 - 2 * c)
+
+let tempo = 140.0 / 60.0       # shared across all parts
+let kTrig = impulse(tempo)
+let kEnv  = discharge(kTrig, 10)
+let sc    = 1 - kEnv * 0.75    # sidechain signal, in scope for every play
+
+play kick:                     # named part
+  sin(TAU * phasor(50 + discharge(kTrig, 35) * 170)) * kEnv * 0.9
+
+play bass:
+  osc(saw, 55) |> lpf(150 + kEnv * 1500, 0.85) * sc
+```
+
+`def` is helpers. `play` is instruments. File-level `let`
+and `var` bindings are shared scope across all parts —
+that's where sidechain and shared modulators live.
+
 ## The composition clock
 
 `start_t` is the time the voice was first loaded. Use it:

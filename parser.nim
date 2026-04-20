@@ -17,7 +17,8 @@ type
 
   NodeKind* = enum
     nkNum, nkIdent, nkBinOp, nkUnary, nkCall, nkIf,
-    nkVar, nkLet, nkDef, nkAssign, nkArr, nkIdx, nkIdxAssign, nkBlock
+    nkVar, nkLet, nkDef, nkAssign, nkArr, nkIdx, nkIdxAssign, nkBlock,
+    nkPlay
 
   Node* = ref object
     kind*: NodeKind
@@ -29,7 +30,7 @@ type
 
   ParseError* = object of CatchableError
 
-const Keywords = ["var", "let", "def", "if", "then", "else",
+const Keywords = ["var", "let", "def", "play", "if", "then", "else",
                   "mod", "and", "or", "not"]
 
 # ----------------------------------------------------------------- tokenizer
@@ -377,6 +378,36 @@ proc parseDef(p: var Parser): Node =
              else: Node(kind: nkBlock, kids: stmts, line: line)
   Node(kind: nkDef, str: name, params: params, kids: @[body], line: line)
 
+proc parsePlay(p: var Parser): Node =
+  let line = p.peek().line
+  discard p.expect(tkKeyword)                 # 'play'
+  let name = p.expect(tkIdent, "part name").str
+  # Modifiers (off, fade X, fade-in X, fade-out X) come after name, before ':'.
+  # Parser captures them as a whitespace-joined string in `params[0]`; compiler
+  # doesn't interpret yet. Phase 1 just tolerates them.
+  var mods: seq[string]
+  while p.peek().kind == tkIdent:
+    mods.add p.advance().str
+  discard p.expect(tkColon)
+
+  var stmts: seq[Node]
+  if p.peek().kind == tkNewline:
+    discard p.advance()
+    if p.peek().kind != tkIndent: p.fail("expected indented body after 'play'")
+    discard p.advance()
+    while p.peek().kind notin {tkDedent, tkEof}:
+      stmts.add p.parseStmt()
+    if p.peek().kind == tkDedent: discard p.advance()
+  else:
+    while true:
+      stmts.add p.parseStmt()
+      if p.peek().kind == tkSemi: discard p.advance()
+      else: break
+
+  let body = if stmts.len == 1: stmts[0]
+             else: Node(kind: nkBlock, kids: stmts, line: line)
+  Node(kind: nkPlay, str: name, params: mods, kids: @[body], line: line)
+
 proc parseStmt(p: var Parser): Node =
   let t = p.peek()
   var n: Node
@@ -394,6 +425,8 @@ proc parseStmt(p: var Parser): Node =
     n = Node(kind: nkLet, str: name, kids: @[v], line: t.line)
   elif t.kind == tkKeyword and t.str == "def":
     n = p.parseDef()
+  elif t.kind == tkKeyword and t.str == "play":
+    n = p.parsePlay()
   else:
     let lhs = p.parseExpr()
     let nx = p.peek()
