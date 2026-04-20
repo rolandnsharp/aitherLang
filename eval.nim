@@ -627,19 +627,28 @@ proc updateFuncSlotsOnce(voice: Voice; defs: seq[Node]): bool =
       result = true
 
 proc compileTopLevel(co: var Compiler; body: Node) =
-  # Main chunk: only `play` blocks contribute to the output. Other
-  # statements (def, let, var, bare exprs) run for side effects.
-  # Also: collect the play names into voice.partNames (in source order).
+  # Main chunk structure:
+  #   defs / file-level let/var (run for side effects)
+  #   play blocks (compiled inline, result stored to a local named after the
+  #     play, multiplied by its part gain)
+  #   final expression (the voice output; must be the last top-level node)
   if body.kind != nkBlock:
     raise newException(EvalError, "program must be a block of statements")
+  if body.kids.len == 0:
+    raise newException(EvalError, "empty program")
   co.voice.partNames.setLen(0)
-  for s in body.kids:
+  let lastIdx = body.kids.len - 1
+  var sawFinalExpr = false
+  for i, s in body.kids:
+    let isLast = i == lastIdx
     case s.kind
     of nkPlay:
       let idx = co.voice.partNames.len
       co.voice.partNames.add s.str
-      # Push a play-local scope so `let` inside a play block doesn't leak
-      # across parts. `var` stays file-level (keyed by name).
+      # Play body compiles inline in a local scope so its `let`s don't leak.
+      # Value lands on stack → apply part gain → store to a local named
+      # after the play. Subsequent references (in the final expression) read
+      # the local.
       let parentScope = co.scope
       let savedSlotCount = co.nextLocalSlot
       co.scope = newScope(parentScope, isDef = false)
@@ -647,16 +656,22 @@ proc compileTopLevel(co: var Compiler; body: Node) =
       co.scope = parentScope
       co.nextLocalSlot = savedSlotCount
       discard co.chunk.emit(opPartGain, idx)
-      if idx > 0:
-        discard co.chunk.emit(opAdd)
+      let slot = co.allocLocal(s.str)
+      discard co.chunk.emit(opStoreLocal, slot)
     of nkLet, nkVar, nkAssign, nkDef:
       co.compileExpr(s, wantValue = false)
     else:
+      # An expression. Only the last one is the voice output; others error
+      # (they'd silently produce a value we'd have to discard).
+      if not isLast:
+        raise newException(EvalError,
+          "expression in statement position: only the final top-level node may be an expression")
       co.compileExpr(s, wantValue = true)
-      discard co.chunk.emit(opPop)
-  if co.voice.partNames.len == 0:
+      sawFinalExpr = true
+  if not sawFinalExpr:
     raise newException(EvalError,
-      "no `play` blocks in file - at least one is required")
+      "file must end with an expression: the voice's output " &
+      "(e.g. `(kick + bass) |> drive(1.2)`)")
 
 proc compileChunk(voice: Voice; chunk: Chunk; body: Node; isFunc: bool;
                   params: seq[string] = @[]) =
@@ -769,6 +784,41 @@ template peek(vm: var VM): Value = vm.valStack[vm.sp - 1]
 template peekF(vm: var VM): float64 = vm.valStack[vm.sp - 1].toFloat
 template setTopF(vm: var VM; x: float64) =
   vm.valStack[vm.sp - 1] = Value(kind: vkFloat, f: x)
+
+# Polymorphic binary arithmetic. Fast path is float+float. Length-2 arrays
+# (stereo pairs) are handled element-wise; scalar + stereo broadcasts. Other
+# array shapes collapse to first-element (legacy polyphony behaviour at
+# binary-op sites).
+proc binFloat(op: int; a, b: float64): float64 {.inline.} =
+  case op
+  of 0: a + b
+  of 1: a - b
+  of 2: a * b
+  of 3: (if b == 0.0: 0.0 else: a / b)
+  else: 0.0
+
+proc isStereo(v: Value): bool {.inline.} =
+  v.kind == vkArr and v.buf.data.len == 2
+
+proc mkStereo(l, r: float64): Value {.inline.} =
+  Value(kind: vkArr, buf: Buffer(data: @[l, r]))
+
+proc stereoBinOp(vm: var VM; op: int) =
+  let b = vm.pop()
+  let a = vm.pop()
+  if a.kind == vkFloat and b.kind == vkFloat:
+    vm.pushF(binFloat(op, a.f, b.f))
+  elif isStereo(a) and isStereo(b):
+    vm.push mkStereo(binFloat(op, a.buf.data[0], b.buf.data[0]),
+                     binFloat(op, a.buf.data[1], b.buf.data[1]))
+  elif isStereo(a) and b.kind == vkFloat:
+    vm.push mkStereo(binFloat(op, a.buf.data[0], b.f),
+                     binFloat(op, a.buf.data[1], b.f))
+  elif a.kind == vkFloat and isStereo(b):
+    vm.push mkStereo(binFloat(op, a.f, b.buf.data[0]),
+                     binFloat(op, a.f, b.buf.data[1]))
+  else:
+    vm.pushF(binFloat(op, a.toFloat, b.toFloat))
 
 proc enterFrame(vm: var VM; chunk: Chunk; stateBase: int) {.inline.} =
   let arity = chunk.arity
@@ -969,15 +1019,10 @@ proc run(vm: var VM): Value =
     of opSkipIfStateInited:
       if voice.callSiteInited[stateBase + inst.arg]:
         pc += inst.arg2
-    of opAdd:
-      let b = vm.popF; vm.setTopF(vm.peekF + b)
-    of opSub:
-      let b = vm.popF; vm.setTopF(vm.peekF - b)
-    of opMul:
-      let b = vm.popF; vm.setTopF(vm.peekF * b)
-    of opDiv:
-      let b = vm.popF
-      vm.setTopF(if b == 0.0: 0.0 else: vm.peekF / b)
+    of opAdd: stereoBinOp(vm, 0)
+    of opSub: stereoBinOp(vm, 1)
+    of opMul: stereoBinOp(vm, 2)
+    of opDiv: stereoBinOp(vm, 3)
     of opMod:
       let b = vm.popF
       let a = vm.peekF
@@ -1125,8 +1170,11 @@ proc run(vm: var VM): Value =
     of opPartGain:
       let idx = inst.arg.int
       let g = if idx >= 0 and idx < voice.partGains.len: voice.partGains[idx] else: 1.0
-      let v = vm.popF
-      vm.pushF(v * g)
+      let v = vm.pop()
+      if isStereo(v):
+        vm.push mkStereo(v.buf.data[0] * g, v.buf.data[1] * g)
+      else:
+        vm.pushF(v.toFloat * g)
     of opReturn:
       frame.pc = pc                              # not strictly needed
       let r = vm.leaveFrame()

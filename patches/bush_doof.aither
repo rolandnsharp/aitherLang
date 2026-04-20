@@ -1,5 +1,5 @@
-# bush_doof — gig-ready, composition mode via `play` blocks.
-# shared lets/vars at file level; sidechain via `sc` is free.
+# bush_doof — Phase 3: plays return [L, R]; final expression is the mix.
+# shared signals (sc, kEnv, note derivations) live at file level.
 
 def ease(x):
   let c = clamp(x, 0, 1)
@@ -10,15 +10,13 @@ let pos   = t - start_t
 let fin   = ease(pos / 4)
 let tempo = 140.0 / 60.0
 
-let beat     = phasor(tempo)
 let meta     = phasor(tempo / 64)
 let kickOn   = if meta > 0.9375 then 0 else 1
 
-let kTrig    = impulse(tempo)                   # shared: drives kick + sidechain
+let kTrig    = impulse(tempo)                    # drives kick + sidechain
 let kEnv     = discharge(kTrig * kickOn, 10)
-let sc       = 1 - kEnv * 0.75                  # sidechain signal
+let sc       = 1 - kEnv * 0.75                   # sidechain
 
-# lead/bass note derivation (sample-and-hold pentatonic)
 let lLfo     = (sin(TAU * pos * 0.083) + sin(TAU * pos * 0.053) + 2) * 0.5 * 5
 let lIdx     = int(lLfo) mod 5
 let lStep    = if lIdx == 0 then 0 else if lIdx == 1 then 3 else if lIdx == 2 then 5 else if lIdx == 3 then 7 else 10
@@ -37,37 +35,42 @@ let lLfo2 = (sin(TAU * pos * 0.17) + 1) * 0.5
 let lEnv  = discharge(lT, 6)
 let lCut  = 400 + lLfo2 * 2500 + lEnv * 2500
 
-let burst = ease((meta - 0.9375) / 0.0625)      # last bar of every 16-bar cycle
+let burst = ease((meta - 0.9375) / 0.0625)
 
-# ---------- parts ----------
+# ---------- parts (each returns [L, R]) ----------
 
 play kick:
-  let kPitch = 48 + discharge(kTrig * kickOn, 35) * 170
-  let s = sin(TAU * phasor(kPitch)) * kEnv * 0.9 |> lpf(300, 0.5)
-  s * fin * 0.55
+  let p = 48 + discharge(kTrig * kickOn, 35) * 170
+  let s = sin(TAU * phasor(p)) * kEnv * 0.9 |> lpf(300, 0.5)
+  [s, s]
 
 play bass:
   let s = osc(saw, bNote) |> lpf(150 + bEnv * 1500, 0.85) |> drive(1.2) |> gain(0.42)
-  s * bEnv * sc * fin * 0.55
+  let m = s * bEnv * sc
+  [m, m]
 
 play lead:
-  let s = osc(saw, lNote) |> lpf(lCut, 0.86) |> drive(1.8) |> gain(0.16)
-  s * sc * fin * 0.55
+  let sL = osc(saw, lNote)          |> lpf(lCut, 0.86) |> drive(1.8) |> gain(0.16)
+  let sR = osc(saw, lNote * 1.005)  |> lpf(lCut, 0.86) |> drive(1.8) |> gain(0.16)
+  [sL * sc, sR * sc]
 
 play hats:
   let hP      = phasor(tempo * 4)
   let hWarped = hP + sin(hP * PI) * 0.08
   let hE      = exp(-hWarped * 35)
   let s       = noise() * hE |> hpf(8500, 0.25) |> bitcrush(8) |> gain(0.16)
-  s * fin * 0.55
+  [s, s]
 
 play clap:
-  let cPat    = wave(tempo / 4 * 16, [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0])
-  let cE      = discharge(cPat, 22)
-  let s       = noise() * cE |> bpf(1500, 0.25) |> dropout(tempo * 8, 0.85) |> gain(0.22)
-  s * fin * 0.55
+  let cPat = wave(tempo / 4 * 16, [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0])
+  let cE   = discharge(cPat, 22)
+  let s    = noise() * cE |> bpf(1500, 0.25) |> dropout(tempo * 8, 0.85) |> gain(0.22)
+  [s, s]
 
 play riser:
   let rCut = 200 + burst * 7000
   let s    = noise() |> bpf(rCut, 0.7) |> gain(burst * 0.22)
-  s * fin * 0.55
+  [s, s]
+
+# ---------- mix ----------
+(kick + bass + lead + hats + clap + riser) * fin * 0.55

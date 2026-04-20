@@ -11,30 +11,54 @@ melody, rhythm, sections, dynamics — is a signal.
 
 ## File structure
 
-Every file has at least one `play` block. Top-level
-statements run once per sample and accumulate; only
-`play` block bodies contribute to the output sum.
+Every file has three kinds of thing and exactly one final
+expression. The final expression is the voice's output.
 
 ```
-def ease(x):                   # helper (def = building block)
+# 1. helpers (reusable, isolated; do not see file-level lets)
+def ease(x):
   let c = clamp(x, 0, 1)
   c * c * (3 - 2 * c)
 
-let tempo = 140.0 / 60.0       # shared across all parts
+# 2. shared file-level state (seen by every play)
+let tempo = 140.0 / 60.0
 let kTrig = impulse(tempo)
 let kEnv  = discharge(kTrig, 10)
-let sc    = 1 - kEnv * 0.75    # sidechain signal, in scope for every play
+let sc    = 1 - kEnv * 0.75
 
-play kick:                     # named part
-  sin(TAU * phasor(50 + discharge(kTrig, 35) * 170)) * kEnv * 0.9
+# 3. named parts: each returns [L, R] (or a float for mono)
+play kick:
+  let s = sin(TAU * phasor(50 + discharge(kTrig, 35) * 170)) * kEnv
+  [s, s]
 
 play bass:
-  osc(saw, 55) |> lpf(150 + kEnv * 1500, 0.85) * sc
+  let s = osc(saw, 55) |> lpf(150 + kEnv * 1500, 0.85) * sc
+  [s, s]
+
+# 4. final expression: the voice's output
+(kick + bass) |> drive(1.2)
 ```
 
-`def` is helpers. `play` is instruments. File-level `let`
-and `var` bindings are shared scope across all parts —
-that's where sidechain and shared modulators live.
+`def` is helpers. `play` is instruments — each becomes a
+named value bound to the file's scope. The final
+expression composes those named values into the stereo
+mix. Binary arithmetic is element-wise on stereo pairs
+with scalar broadcast, so `kick + bass` and `lead * 0.5`
+do what you'd expect.
+
+## `def` vs `play`
+
+- **`def name(args):`** — a function. Reusable, parameterised,
+  sees only what it receives. Good for filters, envelopes,
+  math helpers. Calls get per-call-site state.
+- **`play name:`** — a named block inlined into the file's
+  flow. Sees all file-level lets and vars. Has an
+  engine-controllable gain and a name you can `mute` /
+  `solo` / `fade` from the CLI.
+
+The asymmetry is by design: `def` is a *function*, `play`
+is a *piece of the file's body with a name*. Think of it
+as functions vs. top-level blocks in any language.
 
 ## Scope
 
