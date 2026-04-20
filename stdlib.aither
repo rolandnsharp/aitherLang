@@ -71,3 +71,30 @@ def downsample(signal, rate):
 # Periodic dropout / gate. Signal plays for `duty` (0..1) of each cycle.
 def dropout(signal, rate, duty):
   if phasor(rate) < duty then signal else 0
+
+# ---------------------------------------------------------------- stereo
+
+# Equal-power pan. `pos` in [-1, 1]: -1 = hard left, 0 = centre, 1 = hard right.
+# Takes a mono signal, returns [L, R]. Total power constant across the field.
+def pan(signal, pos):
+  let angle = (pos + 1) * PI / 4
+  [signal * cos(angle), signal * sin(angle)]
+
+# Haas effect: delay one channel by a few ms to create psychoacoustic width.
+# `ms` in roughly -30..30. Positive delays right channel, negative delays left.
+# Works because the ear localises by first-arrival time for short delays.
+def haas(signal, ms):
+  let absMs = abs(ms)
+  let d = delay(signal, absMs * 0.001, 0.05)
+  if ms >= 0 then [signal, d] else [d, signal]
+
+# Mid-side width. Takes a stereo [L, R]; `amount` = 0 collapses to mono,
+# 1 is unchanged, >1 widens (diverges L and R). Classic tool for "spread."
+def width(s, amount):
+  let mid  = (s[0] + s[1]) * 0.5
+  let side = (s[0] - s[1]) * 0.5
+  [mid + side * amount, mid - side * amount]
+
+# Collapse stereo to mono. Useful when a play returns [L, R] but you want
+# to feed a single-channel signal into another process (e.g. sidechain).
+def mono(s): (s[0] + s[1]) * 0.5

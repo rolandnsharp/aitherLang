@@ -238,18 +238,30 @@ heavy layers (drones) centred; pan motion layers on a
 period much longer than the breath so stereo reads as a
 slower layer, not a wobble.
 
+Stdlib has four stereo helpers:
+
 ```
-let panLfo = sin(TAU * pos / 50)        # 50s cycle
-let ang    = (panLfo + 1) * PI / 4
-let L = centre + motion * cos(ang) * 1.41
-let R = centre + motion * sin(ang) * 1.41
-[L, R]
+# pan a mono signal left↔right (pos in [-1, 1])
+let panPos = sin(TAU * pos / 50)             # 50s cycle
+osc(saw, 110) * 0.3 |> pan(panPos)
+
+# psychoacoustic width via a 1-30 ms delay on one channel
+osc(sin, 220) * 0.2 |> haas(8)               # right delayed 8 ms
+
+# mid-side width: 0 → mono, 1 → unchanged, >1 → exaggerated stereo
+let stereo = [osc(saw, 440) * 0.2, osc(saw, 441) * 0.2]
+stereo |> width(1.6)
+
+# collapse a stereo signal to mono (e.g. for sidechain)
+let level = mono(bass)
 ```
 
-Equal-power pan (`cos`/`sin` of an angle in `[0, π/2]`)
-keeps loudness constant as the source moves. The `1.41`
-compensates for the single-channel sum; drop it if you
-want the pan to also reduce total energy at the extremes.
+`pan` uses equal-power (`cos`/`sin`) so total loudness
+stays constant across the field. The classic manual form
+`[centre + motion * cos(ang) * 1.41, centre + motion * sin(ang) * 1.41]`
+is still available if you want to compensate for the
+single-channel sum; use `* 1.41` (i.e. `√2`) at the
+extremes.
 
 ## Common bugs I have hit
 
@@ -309,8 +321,9 @@ Shapes: `sin`, `cos`, `tan`, `saw`, `tri`, `sqr`.
 Filters: `lp1`, `hp1`, `lpf`, `hpf`, `bpf`, `notch`.
 Delays: `delay`, `fbdelay`. Reverb: `reverb(sig, rt60, wet)`.
 Physics: `impulse`, `resonator`, `discharge`.
-Helpers: `gain`, `fold`, `tremolo`, `slew`, `pan`, `prev`.
+Helpers: `gain`, `fold`, `tremolo`, `slew`, `prev`.
 Character: `drive`, `wrap`, `bitcrush`, `downsample`, `dropout`.
+Stereo: `pan`, `haas`, `width`, `mono`.
 
 `prev(x)` returns the previous sample's value of any expression.
 Useful for forward cross-play feedback:
