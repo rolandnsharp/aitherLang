@@ -139,17 +139,26 @@ proc fadeDeltaFor(seconds: float64): float64 =
 proc loadPatch(filename: string; fadeIn: float64): string =
   if not fileExists(filename): return "file not found: " & filename
   let userSrc = readFile(filename)
-  let combined = Stdlib & "\n" & userSrc
   let baseName = splitFile(filename).name
 
   stderr.write "loading " & extractFilename(filename) & " ... "
 
-  var program: parser.Node
+  # Parse stdlib and user source separately so error line numbers
+  # reference the user's file directly (not the combined source).
+  var stdlibAst: parser.Node
+  var userAst: parser.Node
   try:
-    program = parseProgram(combined)
+    stdlibAst = parseProgram(Stdlib)
+    userAst = parseProgram(userSrc)
   except ParseError as e:
     stderr.writeLine "parse FAIL"
     return "parse error: " & e.msg
+
+  # Merge: stdlib's top-level statements come first, then the user's.
+  let program = parser.Node(
+    kind: parser.nkBlock,
+    kids: stdlibAst.kids & userAst.kids,
+    line: 1)
 
   let idx = findSlot(baseName)
   acquire(mtx)
