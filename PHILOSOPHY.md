@@ -242,6 +242,41 @@ process, evolving, stateful. You can't compute sample
 Aither lets you use both simultaneously. The first is
 purer. The second has memory. Together they make music.
 
+## Why the language stays small
+
+Every primitive in aither had to earn its place against the
+alternatives. The default is no.
+
+When a feature is proposed — a master compressor, a bus,
+a spectral transform, a pattern DSL, a feedback primitive,
+a harmonic bank — the question is not "would this be
+useful?" (everything is useful to someone). The question
+is: *can the existing primitives already express this?*
+
+If yes, adding the feature obscures the composition it was
+meant to support. The user writes the feature's name
+instead of writing the composition that produces the same
+result. A layer of abstraction inserts itself between the
+musician and the math.
+
+A feedback loop does not need `prev()` — `var` already
+holds one sample of memory. A sidechain does not need a
+bus — file-level `let` bindings are already shared scope.
+A time-stretched hold does not need `hold()` — a `pos`-keyed
+ease is already a timeline. A scale lookup does not need
+a `case` — an array with an integer index is already a
+dispatch table.
+
+Each primitive that survives is load-bearing. Each one
+that's refused keeps the language small enough to hold in
+the head.
+
+This discipline is not minimalism for its own sake. It is
+the discovery, each time, that the small set of things
+aither already has is more expressive than it first
+appears. Resisting features is how that expressiveness
+stays visible.
+
 ## The goal
 
 A scientific instrument for signal processing, synthesis,
