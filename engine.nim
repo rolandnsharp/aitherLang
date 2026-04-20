@@ -13,7 +13,21 @@ const
 
 const Stdlib = staticRead("stdlib.aither")
 
+const EnvBins = 20          # sparkline slots
+const EnvBinSamples = 2400  # 50ms per bin at 48 kHz
+const PeakDecay = 0.99993   # ~300ms exponential decay
+const RmsAlpha  = 1.04e-4   # ~200ms smoothing
+
 type
+  Stats = object
+    peakL, peakR:     float64
+    rmsSqL, rmsSqR:   float64
+    clips:            int
+    envRing:          array[EnvBins, float32]
+    envBinIdx:        int
+    envBinMax:        float32
+    envCount:         int
+
   Slot = object
     name:       string
     voice:      eval.Voice
@@ -21,10 +35,29 @@ type
     muted:      bool
     fadeGain:   float64
     fadeDelta:  float64
+    stats:      Stats
+
+proc update(s: var Stats; gl, gr: float64) {.inline.} =
+  let al = abs(gl)
+  let ar = abs(gr)
+  s.peakL = max(s.peakL * PeakDecay, al)
+  s.peakR = max(s.peakR * PeakDecay, ar)
+  s.rmsSqL = s.rmsSqL * (1.0 - RmsAlpha) + al * al * RmsAlpha
+  s.rmsSqR = s.rmsSqR * (1.0 - RmsAlpha) + ar * ar * RmsAlpha
+  if al > 1.0 or ar > 1.0: inc s.clips
+  let mAbs = max(al, ar).float32
+  if mAbs > s.envBinMax: s.envBinMax = mAbs
+  inc s.envCount
+  if s.envCount >= EnvBinSamples:
+    s.envRing[s.envBinIdx] = s.envBinMax
+    s.envBinIdx = (s.envBinIdx + 1) mod EnvBins
+    s.envBinMax = 0
+    s.envCount = 0
 
 var
   slots: array[MaxVoices, Slot]
   slotCount: int
+  master: Stats
   running: bool
   timeSec: float64
   timeFrac: float64
@@ -67,9 +100,13 @@ proc audioCallback(output: ptr UncheckedArray[cfloat], frameCount: cuint,
         slots[v].fadeGain + slots[v].fadeDelta, 0.0, 1.0)
       if slots[v].fadeGain <= 0.0 and slots[v].fadeDelta < 0.0:
         slots[v].active = false
-      lMix += l * slots[v].fadeGain
-      rMix += r * slots[v].fadeGain
+      let gl = l * slots[v].fadeGain
+      let gr = r * slots[v].fadeGain
+      update(slots[v].stats, gl, gr)
+      lMix += gl
+      rMix += gr
 
+    update(master, lMix, rMix)
     output[i * 2]     = cfloat(tanh(lMix))
     output[i * 2 + 1] = cfloat(tanh(rMix))
 
@@ -145,6 +182,14 @@ proc loadPatch(filename: string; fadeIn: float64): string =
   release(mtx)
   ""
 
+proc retriggerVoice(name: string): string =
+  let idx = findSlot(name)
+  if idx < 0: return "not found: " & name
+  acquire(mtx)
+  slots[idx].voice.startT = timeSec + timeFrac
+  release(mtx)
+  ""
+
 proc stopVoice(name: string; fade: float64): string =
   let idx = findSlot(name)
   if idx < 0: return "not found: " & name
@@ -185,6 +230,65 @@ proc soloVoice(name: string; fade: float64): string =
       slots[i].fadeDelta = -fadeDeltaFor(if fade > 0.0: fade else: DefaultFadeMs / 1000.0)
   release(mtx)
   ""
+
+const SparkBlocks = [" ", "\u2581", "\u2582", "\u2583", "\u2584", "\u2585", "\u2586", "\u2587", "\u2588"]
+
+proc dBOf(v: float64): float64 {.inline.} =
+  if v < 1e-9: -180.0 else: 20.0 * log10(v)
+
+proc envBar(v: float32): string =
+  let f = v.float64
+  if f < 1e-5: return SparkBlocks[0]
+  let db = dBOf(f)
+  let idx = clamp(int((db + 60.0) / 60.0 * 8.0 + 0.5), 0, 8)
+  SparkBlocks[idx]
+
+proc fmtDb(v: float64): string =
+  if v < 1e-9: return "  -inf"
+  let db = dBOf(v)
+  formatFloat(db, ffDecimal, 1)
+
+proc statsReport(header: string; s: Stats): string =
+  var spark = ""
+  for k in 0 ..< EnvBins:
+    spark &= envBar(s.envRing[(s.envBinIdx + k) mod EnvBins])
+  let rmsL = sqrt(s.rmsSqL)
+  let rmsR = sqrt(s.rmsSqR)
+  header & "\n" &
+  "  RMS   L " & fmtDb(rmsL) & " dB   R " & fmtDb(rmsR) & " dB\n" &
+  "  peak  L " & fmtDb(s.peakL) & " dB   R " & fmtDb(s.peakR) &
+       " dB   clips=" & $s.clips & "\n" &
+  "  env   " & spark
+
+proc voiceReport(i: int): string =
+  let state =
+    if not slots[i].active:        "stopped"
+    elif slots[i].muted:           "muted"
+    elif slots[i].fadeDelta < 0.0: "fading-out"
+    elif slots[i].fadeDelta > 0.0: "fading-in"
+    else:                          "playing"
+  let header = slots[i].name & "  " & state & "  gain=" &
+               formatFloat(slots[i].fadeGain, ffDecimal, 2)
+  let rep = statsReport(header, slots[i].stats)
+  slots[i].stats.clips = 0          # clear-on-read
+  rep
+
+proc masterReport(): string =
+  let rep = statsReport("master", master)
+  master.clips = 0                  # clear-on-read
+  rep
+
+proc scopeReport(name: string): string =
+  if name == "master":
+    return masterReport()
+  if name.len == 0 or name == "*":
+    var parts: seq[string] = @[masterReport()]
+    for i in 0 ..< slotCount:
+      parts.add voiceReport(i)
+    return parts.join("\n\n")
+  let idx = findSlot(name)
+  if idx < 0: return "not found: " & name
+  voiceReport(idx)
 
 proc listVoices(): string =
   var lines: seq[string]
@@ -239,6 +343,13 @@ proc handleCmd(line: string): string =
     if err.len > 0: "ERR " & err else: "OK"
   of "list":
     "OK\n" & listVoices()
+  of "scope":
+    let target = if parts.len >= 2: parts[1] else: ""
+    "OK\n" & scopeReport(target)
+  of "retrigger":
+    if parts.len < 2: return "ERR usage: retrigger <name>"
+    let err = retriggerVoice(parts[1])
+    if err.len > 0: "ERR " & err else: "OK"
   of "kill":
     running = false
     "OK bye"
@@ -308,6 +419,8 @@ when isMainModule:
     echo "  solo <name> [fade]          fade out everything else"
     echo "  clear [fade]                stop all voices"
     echo "  list                        show active voices"
+    echo "  scope [name]                per-voice RMS/peak/clips/envelope (all if no name; 'master' for mix bus)"
+    echo "  retrigger <name>            reset start_t so the composition plays from the top"
     echo "  kill                        shut down engine"
     quit 0
 
@@ -337,6 +450,12 @@ when isMainModule:
     sendCmd("clear" & extra)
   of "list":
     sendCmd("list")
+  of "scope":
+    let extra = if args.len >= 2: " " & args[1] else: ""
+    sendCmd("scope" & extra)
+  of "retrigger":
+    if args.len < 2: quit "usage: aither retrigger <name>"
+    sendCmd("retrigger " & args[1])
   of "kill":
     sendCmd("kill")
   else:

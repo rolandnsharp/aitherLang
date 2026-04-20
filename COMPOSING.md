@@ -37,6 +37,9 @@ signals instead:
 | "play section B at 1:00"           | crossfade A→B centered on `pos = 60`    |
 | "sequence of events"               | `wave`, LFO, or `freq(t)` directly      |
 | "quantized grid"                   | only quantize if the *music* wants it   |
+| "bar counter variable"             | a slow phasor *is* the bar position     |
+| "shift note offsets for swing"     | warp the phase: `p + sin(p*π) * swing`  |
+| "velocity table lookup"            | velocity is an amplitude oscillator     |
 
 Continuous pitch, continuous amplitude, continuous
 sections. Quantize only when the genre demands it.
@@ -82,6 +85,73 @@ let freq  = 261.6 * pow(2, step / 12)
 Use `wave` + `impulse` when you want *discrete events*
 (bells, plucks). Use the quantized-LFO trick when you
 want a melody that *breathes*.
+
+### Rhythm is oscillation (see docs/guides/RHYTHM_PHILOSOPHY.md)
+
+The phasor *is* the clock. Every rhythmic concept derives
+from it by math — no scheduler, no event list. A gate is
+a phasor crossing a threshold. An envelope is a function
+of the phasor. A velocity pattern is an amplitude
+wavetable.
+
+```
+let beat    = phasor(tempo)                   # 0..1 across each beat
+let eighths = phasor(tempo * 2)               # eighth-note phasor
+let bar     = phasor(tempo / 16)              # 16-beat bar cycle
+let vel     = wave(tempo * 4, [1, .6, .8, .5, 1, .4, .9, .7])
+```
+
+No special "sequencer," no "bar counter" variable.
+
+### Swing / groove via phase warping
+
+Humanisation is not event-shifting; it is *phase warping*.
+The beats still fall at the same phases; the *shape* of
+time between them curves.
+
+```
+let phase  = phasor(tempo * 2)                # 8th-note phasor
+let warped = phase + sin(phase * PI) * 0.08   # ~8% swing
+let env    = exp(-warped * 40)                # envelope on warped time
+```
+
+Because time was warped continuously, the swing is alive
+at every sample, not quantised to a 16th grid.
+
+### Structural variation via slow phasor
+
+To drop the kick every 16 bars, or swap bass patterns
+every 32 bars — don't count bars. Build a slow phasor
+that *is* the position in the long-form cycle, and gate
+layers with it.
+
+```
+let barPhase = phasor(tempo / 16)         # 16-beat bar cycle
+let kickGate = if barPhase > 0.94 then 0 else 1   # last beat dropped
+
+let longPhase = phasor(tempo / 128)       # 32-bar cycle
+let patternXfade = ease(longPhase * 2 - 0.5)      # A↔B every 32 bars
+```
+
+Slow phasors are bar positions. Fast phasors are beats.
+Audio-rate phasors are pitches. Same primitive, different
+timescale.
+
+### Sidechain / pump (duck one layer with another's envelope)
+
+Dance-music glue: the kick's envelope ducks the rest of
+the mix momentarily so the kick has space to breathe.
+Signal-native — just invert an envelope and multiply.
+
+```
+let kEnv     = discharge(impulse(tempo), 10)  # kick envelope
+let sidechain = 1 - kEnv * 0.7                # ducks to 0.3 when kick hits
+let bassDuck  = bass * sidechain
+let leadDuck  = lead * sidechain
+```
+
+No new primitive. The thing that makes pro dance mixes
+sound professional is literally one multiplication.
 
 ### Sections
 
