@@ -235,6 +235,7 @@ Filters: `lp1`, `hp1`, `lpf`, `hpf`, `bpf`, `notch`.
 Delays: `delay`, `fbdelay`. Reverb: `reverb(sig, rt60, wet)`.
 Physics: `impulse`, `resonator`, `discharge`.
 Helpers: `gain`, `fold`, `tremolo`, `slew`, `pan`.
+Character: `drive`, `wrap`, `bitcrush`, `downsample`, `dropout`.
 
 Always read `stdlib.aither` before inventing a function —
 it is short and probably already has what you need.

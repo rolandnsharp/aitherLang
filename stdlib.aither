@@ -34,3 +34,31 @@ def gain(signal, amount): signal * amount
 def fold(signal, amount):
   let x = ((signal * amount) mod 4 + 4) mod 4
   if x < 2 then x - 1 else 3 - x
+
+# ---------------------------------------------------------------- character
+
+# Algebraic soft-clip. `amount` > 1 adds harmonics; output stays in ±1.
+def drive(signal, amount):
+  let x = signal * amount
+  x / (1 + abs(x))
+
+# Hard wrap to ±1. Harsh; pairs well with drive. `amount` scales before wrap.
+def wrap(signal, amount):
+  let y = signal * amount + 1
+  ((y mod 2) + 2) mod 2 - 1
+
+# Bit-depth reduction. `bits` can be fractional. Classic lo-fi crunch.
+def bitcrush(signal, bits):
+  let steps = pow(2, bits)
+  floor(signal * steps + 0.5) / steps
+
+# Sample-rate reduction via hold. `rate` is Hz of the sampling clock.
+# Try rate=2000 for crunchy 8-bit-era grit, rate=100 for pitched aliasing.
+def downsample(signal, rate):
+  var held = 0.0
+  held = if impulse(rate) > 0.5 then signal else held
+  held
+
+# Periodic dropout / gate. Signal plays for `duty` (0..1) of each cycle.
+def dropout(signal, rate, duty):
+  if phasor(rate) < duty then signal else 0
