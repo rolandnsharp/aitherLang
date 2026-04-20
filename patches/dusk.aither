@@ -1,0 +1,86 @@
+# dusk — 118 BPM D minor deep techno.
+# three sections: ambient intro (pad only) → mid (kick/bass/hat) → full (+ stab/lead).
+# uses the full new stdlib: play blocks, prev, pluck/swell/adsr, pan/haas/width, drive/bitcrush.
+
+def ease(x):
+  let c = clamp(x, 0, 1)
+  c * c * (3 - 2 * c)
+
+let pos = t - start_t
+let fin = ease(pos / 10)
+let bpm = 118.0 / 60.0
+
+# drifting scale degree — pitches never quite repeat
+let scale = [0, 2, 3, 5, 7, 10]
+let drift = (sin(TAU * pos * 0.021) + sin(TAU * pos * 0.033) + 2) * 0.5 * 6
+let sStep = scale[int(drift) mod 6]
+
+# shared: kick envelope + sidechain
+let kTrig = impulse(bpm)
+let kEnv  = pluck(kTrig, 0.35)
+let sc    = 1 - kEnv * 0.85
+
+# slow breathing amp for the pad
+let breath = (sin(TAU * pos * 0.07) + 1) * 0.5
+
+play pad:
+  let fund = 146.83 * pow(2, sStep / 12)        # D3-ish
+  let m    = osc(sin, fund) + osc(sin, fund * 1.005) * 0.5 + osc(sin, fund * 1.2) + osc(sin, fund * 1.5) * 0.5
+  let filt = m * 0.08 |> lpf(500 + breath * 700, 0.3)
+  let wide = filt |> haas(14)
+  wide * sc
+
+play kick:
+  let p  = 45 + discharge(kTrig, 28) * 160
+  let s  = sin(TAU * phasor(p)) * kEnv * 0.9
+  let fs = s |> lpf(300, 0.4)
+  [fs, fs]
+
+play bass:
+  let fund = 36.71 * pow(2, sStep / 12)         # D1-ish
+  var b = 36.71
+  let bt  = impulse(bpm / 4)                     # changes every 4 beats
+  b = if bt > 0.5 then fund else b
+  let env = swell(bt, 0.02, 0.9)
+  let raw = osc(saw, b) |> lpf(200 + env * 400, 0.7) |> drive(1.3)
+  let s   = raw * env * 0.35
+  [s, s] * sc
+
+play stab:
+  let trig = impulse(bpm / 8)                    # every 8 beats
+  let gate = discharge(trig, 20)
+  let env  = adsr(gate, 0.01, 0.3, 0.2, 1.2)
+  let root = 293.66 * pow(2, sStep / 12)         # D4
+  let note = (osc(saw, root) + osc(saw, root * 1.2) + osc(saw, root * 1.5)) * 0.13
+  let filt = note |> lpf(800 + env * 2000, 0.5)
+  let wide = (filt * env) |> haas(12)
+  wide * sc
+
+play hat:
+  let htrig  = impulse(bpm * 4)                   # 16ths
+  let env    = pluck(htrig, 0.05)
+  let raw    = noise() * env |> hpf(7500, 0.25) |> bitcrush(9) |> gain(0.12)
+  let panPos = sin(TAU * pos * 0.23) * 0.35
+  raw |> pan(panPos)
+
+play lead:
+  let lt    = impulse(bpm / 2)                    # every half beat
+  let gate  = discharge(lt, 15)
+  let env   = adsr(gate, 0.08, 0.5, 0.25, 0.9)
+  let lRoot = 587.33 * pow(2, sStep / 12)         # D5
+  let tone  = osc(saw, lRoot) * 0.45
+  let fb    = prev(bass[0]) * 0.3                  # forward feedback from bass
+  let raw   = (tone + fb) |> lpf(800 + env * 3000, 0.6)
+  let s     = raw * env * 0.08
+  s |> haas(6)
+
+# three-section arrangement: crossfades via overlapping eases
+let intro_w = 1 - ease((pos - 60) / 30)
+let mid_w   = ease((pos - 60) / 30) * (1 - ease((pos - 150) / 30))
+let full_w  = ease((pos - 150) / 30)
+
+let intro_mix = pad
+let mid_mix   = pad + kick + bass + hat
+let full_mix  = pad + kick + bass + hat + stab + lead
+
+(intro_mix * intro_w + mid_mix * mid_w + full_mix * full_w) * fin |> drive(1.05)
