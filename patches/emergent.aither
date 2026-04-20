@@ -1,0 +1,80 @@
+# emergent — Karplus-Strong chain → Lorenz (modulated by string energy)
+#            → self-firing pulse (energy-dependent). All feedback lives
+#            INSIDE individual plays; cross-play refs are forward-only.
+
+def ease(x):
+  let c = clamp(x, 0, 1)
+  c * c * (3 - 2 * c)
+
+# Karplus-Strong string. freq in Hz, damp ~0.99 (pluck decay), excite is input.
+# One call-site = one buffer = one independent string.
+def ks(freq, damp, excite):
+  var buf    = array(4800, 0.0)
+  var cursor = 0.0
+  let size   = len(buf)
+  let period = sr / freq
+  let rd1    = int(cursor - period + size) mod size
+  let rd2    = (rd1 - 1 + size) mod size
+  let out    = (buf[rd1] + buf[rd2]) * 0.5 * damp
+  buf[int(cursor)] = out + excite
+  cursor = (cursor + 1) mod size
+  out
+
+let pos = t - start_t
+let fin = ease(pos / 8)
+
+# Non-locking pluck triggers - strings never repeat in phase
+let trigA = impulse(0.31)
+let trigB = impulse(0.43)
+let trigC = impulse(0.59)
+
+play str_a:
+  let exc = noise() * discharge(trigA, 100) * 0.4
+  let s   = ks(220, 0.993, exc)
+  [s, s] * 0.28
+
+play str_b:
+  # coupling: str_a's output (L channel) excites str_b lightly
+  let exc = noise() * discharge(trigB, 100) * 0.4 + str_a[0] * 0.06
+  let s   = ks(165, 0.993, exc)
+  [s, s] * 0.28
+
+play str_c:
+  let exc = noise() * discharge(trigC, 100) * 0.4 + (str_a[0] + str_b[0]) * 0.04
+  let s   = ks(110, 0.995, exc)
+  [s, s] * 0.28
+
+# shared string-energy signal — drives chaos and pulse
+let stringE = abs(str_a[0]) + abs(str_b[0]) + abs(str_c[0])
+
+play chaos:
+  # Lorenz; rho modulated by string energy → emergent cross-coupling
+  var x = 0.1
+  var y = 0.0
+  var z = 0.0
+  let ddt = dt * 45
+  let rho = 28.0 + stringE * 8.0
+  let dx = 10.0 * (y - x)
+  let dy = x * (rho - z) - y
+  let dz = x * y - (8.0 / 3.0) * z
+  x = x + dx * ddt
+  y = y + dy * ddt
+  z = z + dz * ddt
+  let L = x / 25
+  let R = (z - 25) / 20
+  [L * 0.06, R * 0.06]
+
+play pulse:
+  # integrate-and-fire: pressure builds from string energy, fires, resets.
+  # creates an emergent rhythm whose rate depends on string activity.
+  var accum = 0.0
+  let rise = 0.0005 + stringE * 0.003
+  accum = accum + rise
+  let fire  = if accum > 0.7 then 1 else 0
+  accum = if accum > 0.7 then 0 else accum
+  let env   = discharge(fire, 12)
+  let pit   = 70 + stringE * 150
+  let s     = sin(TAU * phasor(pit)) * env * 0.3
+  [s, s]
+
+(str_a + str_b + str_c + chaos + pulse) * fin |> drive(1.08)

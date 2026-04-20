@@ -31,6 +31,15 @@ def pulse(freq, width): if phasor(freq) < width then 1 else -1
 
 def gain(signal, amount): signal * amount
 
+# Previous-sample memory. `prev(x)` is x delayed by one sample.
+# Each call site gets its own 1-sample buffer via call-site state,
+# so `prev(a) + prev(b)` are independent.
+def prev(x):
+  var last = 0.0
+  let out = last
+  last = x
+  out
+
 def fold(signal, amount):
   let x = ((signal * amount) mod 4 + 4) mod 4
   if x < 2 then x - 1 else 3 - x

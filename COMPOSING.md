@@ -309,8 +309,21 @@ Shapes: `sin`, `cos`, `tan`, `saw`, `tri`, `sqr`.
 Filters: `lp1`, `hp1`, `lpf`, `hpf`, `bpf`, `notch`.
 Delays: `delay`, `fbdelay`. Reverb: `reverb(sig, rt60, wet)`.
 Physics: `impulse`, `resonator`, `discharge`.
-Helpers: `gain`, `fold`, `tremolo`, `slew`, `pan`.
+Helpers: `gain`, `fold`, `tremolo`, `slew`, `pan`, `prev`.
 Character: `drive`, `wrap`, `bitcrush`, `downsample`, `dropout`.
+
+`prev(x)` returns the previous sample's value of any expression.
+Useful for forward cross-play feedback:
+
+```
+play a: osc(sin, 440) * 0.2
+play b:
+  let echo = prev(a[0]) * 0.7     # one-sample-delayed a
+  ...
+```
+
+Self-feedback is more naturally written inline with `var`:
+`var last = 0.0; last = <new signal using last>; last`.
 
 Always read `stdlib.aither` before inventing a function —
 it is short and probably already has what you need.
