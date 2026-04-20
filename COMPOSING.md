@@ -36,6 +36,24 @@ play bass:
 and `var` bindings are shared scope across all parts —
 that's where sidechain and shared modulators live.
 
+## Scope
+
+| Declaration          | Visible                                     | State model                       |
+|----------------------|---------------------------------------------|-----------------------------------|
+| file-level `let`     | everywhere below                            | computed once per sample          |
+| file-level `var`     | everywhere                                  | persistent, keyed by name         |
+| file-level `def`     | everywhere (hoisted)                        | n/a (callable)                    |
+| `play` body `let`    | inside that `play` only                     | computed once per sample          |
+| `play` body `var`    | file-level by name (not play-local)         | persistent, shared by name        |
+| `def` body `let`     | inside that `def` only                      | computed once per call            |
+| `def` body `var`     | per-call-site (each call gets own state)    | persistent per call location      |
+
+A few consequences worth knowing:
+
+- `let` inside two different `play` blocks can share a name without collision — they're independently scoped.
+- `var` inside a `play` is file-level by name. Write `var kick_count = 0` and `var bass_count = 0` (not `var count` twice) if you want them independent.
+- A `def` called from multiple places gets independent state per call site. That's why `osc(sin, 440) + osc(sin, 880)` gives two independent phasors without any ceremony.
+
 ## The composition clock
 
 `start_t` is the time the voice was first loaded. Use it:

@@ -638,7 +638,14 @@ proc compileTopLevel(co: var Compiler; body: Node) =
     of nkPlay:
       let idx = co.voice.partNames.len
       co.voice.partNames.add s.str
+      # Push a play-local scope so `let` inside a play block doesn't leak
+      # across parts. `var` stays file-level (keyed by name).
+      let parentScope = co.scope
+      let savedSlotCount = co.nextLocalSlot
+      co.scope = newScope(parentScope, isDef = false)
       co.compileExpr(s.kids[0], wantValue = true)
+      co.scope = parentScope
+      co.nextLocalSlot = savedSlotCount
       discard co.chunk.emit(opPartGain, idx)
       if idx > 0:
         discard co.chunk.emit(opAdd)
