@@ -5,7 +5,7 @@ FLAGS := --mm:arc --threads:on --opt:speed -d:danger \
 
 all: aither
 
-aither: engine.nim eval.nim parser.nim stdlib.aither miniaudio.nim miniaudio_wrapper.c miniaudio.h
+aither: engine.nim eval.nim parser.nim dsp.nim stdlib.aither miniaudio.nim miniaudio_wrapper.c miniaudio.h
 	$(NIM) c $(FLAGS) --out:aither engine.nim
 
 clean:

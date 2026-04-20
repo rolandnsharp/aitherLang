@@ -9,18 +9,26 @@
 
 import std/math
 
-const DspPoolSize* = 65536      # 512 KB per voice; covers many reverbs
+const DspPoolSize* = 524288     # 4 MB per voice; covers seconds of fbdelay
+const OverflowSlot = DspPoolSize - 128   # shared fallback region at pool tail
 
 type
   DspState* = object
-    pool*: array[DspPoolSize, float64]
-    idx*:  int
-    sr*:   float64
+    pool*:     array[DspPoolSize, float64]
+    idx*:      int
+    overflow*: bool          # set when claim had to clamp; callback may log
+    sr*:       float64
 
 template claim(s: var DspState; n: int = 1): int =
-  let r = s.idx
-  s.idx += n
-  r
+  # Bounds-check so a patch requesting more state than the pool holds
+  # degrades to shared garbage-state rather than segfaulting the engine.
+  if s.idx + n > OverflowSlot:
+    s.overflow = true
+    OverflowSlot
+  else:
+    let r = s.idx
+    s.idx += n
+    r
 
 # ---------------------------------------------------------------- shapes
 # (saw, tri, sqr are builtin opcodes; here only as helpers if needed)
