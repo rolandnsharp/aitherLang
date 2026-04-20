@@ -322,6 +322,7 @@ Filters: `lp1`, `hp1`, `lpf`, `hpf`, `bpf`, `notch`.
 Delays: `delay`, `fbdelay`. Reverb: `reverb(sig, rt60, wet)`.
 Physics: `impulse`, `resonator`, `discharge`.
 Helpers: `gain`, `fold`, `tremolo`, `slew`, `prev`.
+Envelopes: `discharge`, `pluck`, `swell`, `adsr`.
 Character: `drive`, `wrap`, `bitcrush`, `downsample`, `dropout`.
 Stereo: `pan`, `haas`, `width`, `mono`.
 

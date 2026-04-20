@@ -72,6 +72,37 @@ def downsample(signal, rate):
 def dropout(signal, rate, duty):
   if phasor(rate) < duty then signal else 0
 
+# ---------------------------------------------------------------- envelopes
+
+# Percussive envelope. On a trigger (impulse or gate rising edge), jumps to
+# 1 and decays exponentially to near-zero over `decay` seconds.
+# Wraps `discharge`; uses ~7 time-constants for -60 dB ("audibly silent").
+def pluck(trig, decay):
+  discharge(trig, 7 / decay)
+
+# Gate-driven AR envelope. While `gate > 0.5`, rises toward 1 over `attack`
+# seconds; when `gate` drops, falls toward 0 over `release` seconds.
+# Exponential (1-pole) approach.
+def swell(gate, attack, release):
+  var level = 0.0
+  let time = if gate > level then attack else release
+  let rate = if time > 0 then dt / time else 1
+  level = level + (gate - level) * rate
+  level
+
+# Full ADSR. `gate > 0.5` triggers attack; falling gate triggers release.
+# a/d/r in seconds, s in 0..1 (sustain level). Exponential approach
+# through four phases; decays to near-silence during release.
+def adsr(gate, a, d, s, r):
+  var level  = 0.0
+  var peaked = 0.0
+  let target = if gate > 0.5 then (if peaked > 0.5 then s else 1.0) else 0.0
+  let time   = if gate > 0.5 then (if peaked > 0.5 then d else a) else r
+  let rate   = if time > 0 then dt / time else 1
+  level = level + (target - level) * rate
+  peaked = if gate < 0.5 then 0.0 else (if level > 0.98 then 1.0 else peaked)
+  level
+
 # ---------------------------------------------------------------- stereo
 
 # Equal-power pan. `pos` in [-1, 1]: -1 = hard left, 0 = centre, 1 = hard right.
