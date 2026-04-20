@@ -1,0 +1,34 @@
+# squelch worm — classic psytrance scream.
+# FM self-feedback (one sample of memory) = endless harmonics from almost no code.
+# pitch wanders via summed irrational LFOs; mod depth breathes; pan drifts.
+
+def ease(x):
+  let c = clamp(x, 0, 1)
+  c * c * (3 - 2 * c)
+
+let pos    = t - start_t
+let fadeIn = ease(pos / 5)
+
+# pitch wander: two non-locking LFOs, swept between ~80 and ~460 Hz.
+let wP = 220 + (sin(TAU * pos * 0.023) + sin(TAU * pos * 0.041)) * 130
+
+# feedback depth — breathes so timbre evolves
+let wD = 260 + sin(TAU * pos * 0.083) * 220
+
+# self-modulating sine — the worm.
+var fb = 0.0
+fb = sin(TAU * (phasor(wP + fb * wD)))
+
+# gentle amplitude shaping so it's not flat — sparse peaks via a slow envelope.
+let gEnv = discharge(impulse(0.18), 0.35) * 0.8 + 0.2
+
+# limit and shape
+let worm = fb * gEnv |> lpf(3800, 0.35)
+
+# slow stereo pan, 14s cycle — scope will show the worm dancing.
+let panL = sin(TAU * pos / 14)
+let ang  = (panL + 1) * PI / 4
+let L    = worm * cos(ang) * 1.41
+let R    = worm * sin(ang) * 1.41
+
+[L * fadeIn * 0.18, R * fadeIn * 0.18]

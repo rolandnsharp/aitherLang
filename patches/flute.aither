@@ -1,0 +1,42 @@
+# flute — a slow melodic line above retreat, in D pentatonic.
+# breathy sine + odd harmonics + vibrato; legato slew, long phrases.
+
+def ease(x):
+  let c = clamp(x, 0, 1)
+  c * c * (3 - 2 * c)
+
+let pos = t - start_t
+
+# fade in over 20s so it joins gracefully.
+let fadeIn = ease(pos / 20)
+
+# D major pentatonic above D4: D E F# A B D
+let wander = (sin(TAU * pos * 0.043) + sin(TAU * pos * 0.027) + 2) * 0.5 * 6
+let idx    = int(wander) mod 6
+let step   = if idx == 0 then 0 else if idx == 1 then 2 else if idx == 2 then 4 else if idx == 3 then 7 else if idx == 4 then 9 else 12
+let target = 293.66 * pow(2, step / 12)
+let freq   = slew(target, 0.08)
+
+# vibrato: ~5 Hz, ±0.8% pitch.
+let vib     = sin(TAU * phasor(5.2)) * 0.008
+let vFreq   = freq * (1 + vib)
+
+# flute tone: strong fundamental, small odd harmonics, a breath of noise at pitch.
+let breath  = noise() |> bpf(vFreq * 2, 0.6) |> hpf(vFreq, 0.2)
+let tone    = osc(sin, vFreq) * 0.7 + osc(sin, vFreq * 3) * 0.09 + osc(sin, vFreq * 5) * 0.03 + breath * 0.04
+
+# phrasing: slow amplitude curve over 18s, so it breathes in long notes.
+let phrase  = (sin(TAU * pos / 18 - PI / 2) + 1) * 0.5
+let phrG    = 0.35 + phrase * 0.5
+
+let voice   = tone * phrG |> lpf(vFreq * 3.5, 0.25)
+let wet     = voice |> reverb(3.0, 0.45)
+let mix     = voice * 0.5 + wet * 0.6
+
+# gentle slow pan on a 75s cycle — independent of retreat's 90s pan.
+let pan     = sin(TAU * pos / 75)
+let ang     = (pan + 1) * PI / 4
+let l       = mix * cos(ang) * 1.41
+let r       = mix * sin(ang) * 1.41
+
+[l * fadeIn * 0.18, r * fadeIn * 0.18]

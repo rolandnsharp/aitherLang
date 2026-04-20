@@ -1,0 +1,72 @@
+# doof — evolving 140 BPM psytrance.
+# every 32s a tension/release cycle. lead notes come from a quantised irrational
+# LFO, sampled-and-held at each beat → pattern never repeats but stays in key.
+
+def ease(x):
+  let c = clamp(x, 0, 1)
+  c * c * (3 - 2 * c)
+
+let pos   = t - start_t
+let fin   = ease(pos / 4)
+let tempo = 140.0 / 60.0
+
+# --- 32-second tension-release cycles ---
+let cycle = pos - int(pos / 32) * 32
+let tens  = ease(cycle / 28)              # rises 0→1 over 28s of each cycle
+let burst = ease((cycle - 28) / 2)        # peaks in final 2s → snap back to 0
+
+# --- long-form arc: overall fullness breathes over 90s ---
+let fullness = 0.85 + sin(TAU * pos / 90) * 0.15
+
+# --- kick: fixed 140 BPM, pitch-sweep depth modulated by tens ---
+let kTrig  = impulse(tempo)
+let kEnv   = discharge(kTrig, 10)
+let kPitch = 50 + discharge(kTrig, 32 - burst * 20) * (150 + tens * 100)
+let kick   = sin(TAU * phasor(kPitch)) * kEnv |> lpf(320, 0.5)
+
+# --- bass: 8th-note groove, filter cutoff breathes with tension ---
+let bTrig  = impulse(tempo * 2)
+let bEnv   = discharge(bTrig, 18)
+let bSeq   = wave(tempo * 2 / 8, [55, 55, 65.4, 55, 61.7, 55, 73.4, 55])
+let bCut   = 120 + bEnv * (1100 + tens * 900)
+let bass   = osc(saw, bSeq) |> lpf(bCut, 0.82) |> gain(0.38)
+let bassG  = bass * bEnv
+
+# --- lead: sample-and-hold a quantised pentatonic LFO on every beat ---
+let lLfo   = (sin(TAU * pos * 0.083) + sin(TAU * pos * 0.053) + 2) * 0.5 * 5
+let lIdx   = int(lLfo) mod 5
+let lStep  = if lIdx == 0 then 0 else if lIdx == 1 then 3 else if lIdx == 2 then 5 else if lIdx == 3 then 7 else 10
+let lRoot  = 220.0 * pow(2, lStep / 12)
+
+var lNote = 220.0
+let lTrig = impulse(tempo)
+lNote = if lTrig > 0.5 then lRoot else lNote
+
+let lModRate = 0.11 + tens * 0.25
+let lModLfo  = (sin(TAU * pos * lModRate) + 1) * 0.5
+let lEnv     = discharge(lTrig, 6)
+let lCut     = 400 + lModLfo * (2000 + tens * 2500) + lEnv * 2200
+let lead     = osc(saw, lNote) |> lpf(lCut, 0.86) |> gain(0.18)
+
+# --- squelch: only blooms during the burst at end of each cycle ---
+let sTrig    = impulse(tempo * 2)
+let sEnv     = discharge(sTrig, 40)
+let sCut     = 800 + sEnv * 3200
+let squelch  = osc(saw, lNote * 2) |> lpf(sCut, 0.9) |> gain(burst * 0.16)
+let squelchG = squelch * sEnv
+
+# --- riser: noise sweep during burst, then silence ---
+let rCut     = 200 + burst * 7000
+let riser    = noise() |> bpf(rCut, 0.7) |> gain(burst * 0.18)
+
+# --- hats: 16th-note grid, tight envelope, high-pass for shimmer ---
+let hTrig    = impulse(tempo * 4)
+let hEnv     = discharge(hTrig, 55)
+let hat      = noise() * hEnv |> hpf(8000, 0.2) |> gain(0.18)
+
+# --- clap: wave-pattern pulses on beats 2 and 4 (16-step grid, 1s on 5 & 13) ---
+let cPat     = wave(tempo / 4 * 16, [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0])
+let cEnv     = discharge(cPat, 22)
+let clap     = noise() * cEnv |> bpf(1500, 0.25) |> gain(0.22)
+
+(kick + bassG + lead + squelchG + riser + hat + clap) * fullness * fin * 0.52

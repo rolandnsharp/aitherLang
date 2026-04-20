@@ -3,3 +3,7 @@ aither_dbg
 nimcache/
 *.so
 .DS_Store
+
+# recording captures
+*.mp4
+*.wav

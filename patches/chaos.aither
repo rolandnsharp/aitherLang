@@ -1,0 +1,41 @@
+# chaos — Lorenz attractor. strange attractor = classical-physics fractal.
+# ẋ = σ(y - x)
+# ẏ = x(ρ - z) - y
+# ż = xy - βz
+# L = x / 25, R = (z - 25) / 25  → on X-Y scope: the butterfly.
+
+def ease(x):
+  let c = clamp(x, 0, 1)
+  c * c * (3 - 2 * c)
+
+let pos    = t - start_t
+let fadeIn = ease(pos / 6)
+
+# time scaling: Lorenz natural time ≈ 1s. we want audio-rate chaos but still
+# recognisable shape on the scope — compromise at ~50 orbits/sec.
+let ddt    = dt * 55
+
+let sigma  = 10.0
+let rho    = 28.0 + sin(TAU * pos * 0.031) * 2.5         # ρ breathes → attractor morphs
+let beta   = 8.0 / 3.0
+
+var lx = 0.1
+var ly = 0.0
+var lz = 0.0
+
+let dx = sigma * (ly - lx)
+let dy = lx * (rho - lz) - ly
+let dz = lx * ly - beta * lz
+lx = lx + dx * ddt
+ly = ly + dy * ddt
+lz = lz + dz * ddt
+
+# map to audio. x in ±20 → L, z centred around 25 ± 15 → R.
+let xNorm = lx / 22.0
+let zNorm = (lz - 25.0) / 18.0
+
+# tame with a low-pass so it sits warm in the mix (else chaos = harsh noise).
+let L = xNorm |> lpf(2500, 0.3)
+let R = zNorm |> lpf(2500, 0.3)
+
+[L * fadeIn * 0.16, R * fadeIn * 0.16]

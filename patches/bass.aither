@@ -1,0 +1,32 @@
+# bass — a pair of deep drones on D and A (root + fifth), slowly beating.
+# mono; strictly below 150 Hz; 15-second fade-in so it enters unnoticed.
+
+def ease(x):
+  let c = clamp(x, 0, 1)
+  c * c * (3 - 2 * c)
+
+let pos    = t - start_t
+let fadeIn = ease(pos / 15)
+let breath = (sin(TAU * pos / 45 - PI / 2) + 1) * 0.5    # 45s cycle, out of step with retreat's 30s
+
+# deep layer — D1/A1. felt on real monitors, inaudible on laptop speakers.
+let d1a = osc(sin, 36.71)
+let d1b = osc(sin, 36.71 * 1.004)
+let a1a = osc(sin, 55.00)
+let a1b = osc(sin, 55.00 * 0.996)
+let deep = ((d1a + d1b) * 0.5 + (a1a + a1b) * 0.25) |> lpf(130, 0.2)
+
+# mid-bass layer — D2/A2 as saws, so harmonics up to ~1 kHz carry on
+# laptop speakers even when fundamentals don't. LPF kept gentle.
+let d2a = osc(saw, 73.42)
+let d2b = osc(saw, 73.42 * 1.003)
+let a2a = osc(saw, 110.00)
+let a2b = osc(saw, 110.00 * 0.997)
+let mid = ((d2a + d2b) * 0.4 + (a2a + a2b) * 0.25) |> lpf(550, 0.3)
+
+let low = deep + mid * 1.2
+
+# breathe slowly in amplitude
+let gain = (0.45 + breath * 0.15) * fadeIn
+
+low * gain

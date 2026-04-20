@@ -1,0 +1,57 @@
+# retreat — 20 minutes, tonal centre on D, four sections.
+# arriving (0-5min) → deepening (5-10) → stillness (10-15) → emerging (15-20)
+
+def ease(x):
+  let c = clamp(x, 0, 1)
+  c * c * (3 - 2 * c)
+
+let pos    = t - start_t
+let breath = (sin(TAU * pos / 30 - PI / 2) + 1) * 0.5   # 30s breath
+
+# --- section gates (ease-in / ease-out envelopes, non-overlapping middle) ---
+let g_arr = ease(pos / 60)           * (1 - ease((pos - 280) / 40))
+let g_dpn = ease((pos - 280) / 40)   * (1 - ease((pos - 580) / 40))
+let g_stl = ease((pos - 580) / 40)   * (1 - ease((pos - 880) / 40))
+let g_emg = ease((pos - 880) / 40)   * (1 - ease((pos - 1200) / 60))
+
+# --- palette: pure D, no harmonic motion ---
+let d1 = 36.71
+let d2 = 73.42
+let d3 = 146.83
+
+# low drone D2 — present in arriving, deepening, emerging; absent in stillness
+let drone   = osc(sin, d2) + osc(sin, d2 * 1.007) * 0.55 + osc(sin, d3) * 0.25
+let droneFL = drone |> lpf(240 + 60 * breath, 0.3)
+let droneFR = drone |> lpf(260 + 60 * sin(TAU * pos * 0.019), 0.3)
+let droneG  = g_arr * 0.28 + g_dpn * 0.32 + g_emg * 0.22
+
+# sub D1 — deepening peak, tapers into emerging
+let sub    = (osc(sin, d1) + osc(sin, d2) * 0.25) |> lpf(110, 0.2)
+let subG   = g_dpn * 0.32 + g_emg * 0.12
+
+# breath noise — always present, swells on inhale
+let air    = noise()
+let airL   = air |> bpf(380 + 260 * breath, 0.5) |> hpf(220, 0.2)
+let airR   = air |> bpf(480 + 240 * breath, 0.5) |> hpf(220, 0.2)
+let airG   = breath * breath * 0.2 * (0.7 + 0.3 * (g_arr + g_stl + g_emg))
+
+# heartbeat — stillness only, one very soft D2 pulse every 20s
+let hTrig  = impulse(0.05)
+let hEnv   = discharge(hTrig, 1.8)
+let heart  = osc(sin, d2) * hEnv * 0.5 |> lpf(180, 0.25)
+let heartG = g_stl * 0.5
+
+# upper bloom — emerging only, D3 + fifth above, lightly panning
+let upHi   = osc(sin, d3) * 0.35 + osc(sin, d3 * 1.5) * 0.12
+let upRvb  = upHi * g_emg * 0.18 |> reverb(5.0, 0.55)
+let panUp  = sin(TAU * pos / 90)
+let upAng  = (panUp + 1) * PI / 4
+let upL    = upRvb * cos(upAng) * 1.41
+let upR    = upRvb * sin(upAng) * 1.41
+
+# --- mix ---
+let overallBreath = 0.85 + breath * 0.15
+let L = (droneFL * droneG + sub * subG + heart * heartG + airL * airG + upL) * overallBreath
+let R = (droneFR * droneG + sub * subG + heart * heartG + airR * airG + upR) * overallBreath
+
+[L, R]

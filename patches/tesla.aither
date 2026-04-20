@@ -1,0 +1,32 @@
+# tesla — high-frequency carrier modulated by irregular spark transients.
+# two non-locking impulse rates give aperiodic "arcs"; carrier only plays
+# during spark envelopes — the classic Tesla coil texture.
+
+def ease(x):
+  let c = clamp(x, 0, 1)
+  c * c * (3 - 2 * c)
+
+let pos    = t - start_t
+let fadeIn = ease(pos / 5)
+
+# carrier wanders in high register
+let cFreq  = 2400 + sin(TAU * pos * 0.043) * 600 + sin(TAU * pos * 0.071) * 300
+let carrier = osc(sin, cFreq) + osc(sqr, cFreq * 1.5) * 0.2
+
+# spark triggers at two non-locking rates → always irregular
+let sTrig1 = impulse(2.8 + sin(TAU * pos * 0.09) * 0.6)
+let sTrig2 = impulse(3.7 + sin(TAU * pos * 0.11) * 0.5)
+let sTrig  = sTrig1 + sTrig2
+let sEnv   = discharge(sTrig, 26)
+
+# arc = carrier gated by spark envelope; plus noise burst riding on the arc
+let arc    = carrier * sEnv + noise() * sEnv * 0.6
+let tesla  = arc |> lpf(6500, 0.3)
+
+# slow stereo pan so the sparks feel spatial
+let pan    = sin(TAU * pos / 11)
+let ang    = (pan + 1) * PI / 4
+let L      = tesla * cos(ang) * 1.41
+let R      = tesla * sin(ang) * 1.41
+
+[L * fadeIn * 0.09, R * fadeIn * 0.09]
