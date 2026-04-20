@@ -100,6 +100,19 @@ proc audioCallback(output: ptr UncheckedArray[cfloat], frameCount: cuint,
         slots[v].fadeGain + slots[v].fadeDelta, 0.0, 1.0)
       if slots[v].fadeGain <= 0.0 and slots[v].fadeDelta < 0.0:
         slots[v].active = false
+      # Advance per-part gains toward their targets (clamped 0..1). When
+      # a fade reaches its target, snap to it and clear the delta.
+      let voice = slots[v].voice
+      for p in 0 ..< voice.partGains.len:
+        let d = voice.partFadeDeltas[p]
+        if d != 0.0:
+          let target = voice.partFadeTargets[p]
+          let newG = voice.partGains[p] + d
+          if (d > 0.0 and newG >= target) or (d < 0.0 and newG <= target):
+            voice.partGains[p] = target
+            voice.partFadeDeltas[p] = 0.0
+          else:
+            voice.partGains[p] = clamp(newG, 0.0, 1.0)
       let gl = l * slots[v].fadeGain
       let gr = r * slots[v].fadeGain
       update(slots[v].stats, gl, gr)
@@ -290,6 +303,77 @@ proc scopeReport(name: string): string =
   if idx < 0: return "not found: " & name
   voiceReport(idx)
 
+proc parseFloatArg(s: string; fallback: float64 = 0.0): float64 =
+  if s.len == 0: return fallback
+  try: return parseFloat(s)
+  except ValueError: return fallback
+
+proc findPart(voice: eval.Voice; name: string): int =
+  for i, n in voice.partNames:
+    if n == name: return i
+  -1
+
+proc partStateWord(g, d: float64): string =
+  if d > 0.0: "fading-in"
+  elif d < 0.0: "fading-out"
+  elif g <= 0.0: "silent"
+  else: "playing"
+
+proc partsReport(voiceName: string): string =
+  let idx = findSlot(voiceName)
+  if idx < 0: return "not found: " & voiceName
+  let v = slots[idx].voice
+  if v.partNames.len == 0: return "(no parts)"
+  var lines: seq[string] = @[]
+  for i, name in v.partNames:
+    let state = partStateWord(v.partGains[i], v.partFadeDeltas[i])
+    lines.add "  " & name & "  [" & state & "]  gain=" &
+              formatFloat(v.partGains[i], ffDecimal, 2)
+  voiceName & "\n" & lines.join("\n")
+
+proc setPartGainTarget(voice: eval.Voice; part: int;
+                       target, fade: float64) =
+  let clamped = clamp(target, 0.0, 1.0)
+  voice.partFadeTargets[part] = clamped
+  if fade <= 0.0:
+    voice.partGains[part] = clamped
+    voice.partFadeDeltas[part] = 0.0
+  else:
+    let cur = voice.partGains[part]
+    let steps = max(1.0, fade * float64(SampleRate))
+    voice.partFadeDeltas[part] = (clamped - cur) / steps
+
+proc partCmd(voiceName, partName, action: string;
+             args: seq[string]): string =
+  let vIdx = findSlot(voiceName)
+  if vIdx < 0: return "voice not found: " & voiceName
+  let voice = slots[vIdx].voice
+  let pIdx = findPart(voice, partName)
+  if pIdx < 0: return "part not found: " & partName
+  case action.toLowerAscii()
+  of "play":
+    let fade = if args.len >= 1: parseFloatArg(args[0]) else: 0.02
+    acquire(mtx); setPartGainTarget(voice, pIdx, 1.0, fade); release(mtx)
+    ""
+  of "stop":
+    let fade = if args.len >= 1: parseFloatArg(args[0]) else: 0.02
+    acquire(mtx); setPartGainTarget(voice, pIdx, 0.0, fade); release(mtx)
+    ""
+  of "mute":
+    acquire(mtx); setPartGainTarget(voice, pIdx, 0.0, 0.01); release(mtx)
+    ""
+  of "unmute":
+    acquire(mtx); setPartGainTarget(voice, pIdx, 1.0, 0.01); release(mtx)
+    ""
+  of "gain":
+    if args.len < 1: return "usage: part <voice> <name> gain <value> [fade]"
+    let target = parseFloatArg(args[0])
+    let fade = if args.len >= 2: parseFloatArg(args[1]) else: 0.02
+    acquire(mtx); setPartGainTarget(voice, pIdx, target, fade); release(mtx)
+    ""
+  else:
+    "unknown part action: " & action
+
 proc listVoices(): string =
   var lines: seq[string]
   for i in 0 ..< slotCount:
@@ -304,11 +388,6 @@ proc listVoices(): string =
   if lines.len == 0: "(no voices)" else: lines.join("\n")
 
 # ------------------------------------------------------------- command parsing
-
-proc parseFloatArg(s: string; fallback: float64 = 0.0): float64 =
-  if s.len == 0: return fallback
-  try: return parseFloat(s)
-  except ValueError: return fallback
 
 proc handleCmd(line: string): string =
   let parts = line.strip().splitWhitespace()
@@ -349,6 +428,15 @@ proc handleCmd(line: string): string =
   of "retrigger":
     if parts.len < 2: return "ERR usage: retrigger <name>"
     let err = retriggerVoice(parts[1])
+    if err.len > 0: "ERR " & err else: "OK"
+  of "parts":
+    if parts.len < 2: return "ERR usage: parts <voice>"
+    "OK\n" & partsReport(parts[1])
+  of "part":
+    if parts.len < 4:
+      return "ERR usage: part <voice> <name> <play|stop|mute|unmute|gain> [args]"
+    let extra = if parts.len >= 5: parts[4 .. ^1] else: @[]
+    let err = partCmd(parts[1], parts[2], parts[3], extra)
     if err.len > 0: "ERR " & err else: "OK"
   of "kill":
     running = false
@@ -421,6 +509,8 @@ when isMainModule:
     echo "  list                        show active voices"
     echo "  scope [name]                per-voice RMS/peak/clips/envelope (all if no name; 'master' for mix bus)"
     echo "  retrigger <name>            reset start_t so the composition plays from the top"
+    echo "  parts <voice>               list named parts (play blocks) with gain + state"
+    echo "  part <voice> <name> <action> [args]   play/stop/mute/unmute/gain a part"
     echo "  kill                        shut down engine"
     quit 0
 
@@ -456,6 +546,13 @@ when isMainModule:
   of "retrigger":
     if args.len < 2: quit "usage: aither retrigger <name>"
     sendCmd("retrigger " & args[1])
+  of "parts":
+    if args.len < 2: quit "usage: aither parts <voice>"
+    sendCmd("parts " & args[1])
+  of "part":
+    if args.len < 4:
+      quit "usage: aither part <voice> <name> <play|stop|mute|unmute|gain> [args]"
+    sendCmd("part " & args[1 .. ^1].join(" "))
   of "kill":
     sendCmd("kill")
   else:

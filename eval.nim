@@ -150,6 +150,7 @@ type
     opJmp, opJmpFalse, opJmpTrue,
     opCallUser, opLoadFunc, opCallFuncVal, opCallNative,
     opMakeArray, opArrayLit, opArrayGet, opArraySet, opArrayLen,
+    opPartGain,              # pop sample, multiply by voice.partGains[arg], push
     opReturn
 
   Instruction = object
@@ -201,6 +202,14 @@ type
     # functions in execution order each tick. Persists across samples
     # (state lives between ticks), reset only on voice retrigger.
     dspState*: DspState
+
+    # Per-part state (see `play` blocks). Names are set by the compiler in
+    # top-level source order; gains, fade deltas and targets are maintained
+    # by the engine. All four seqs are always the same length.
+    partNames*:       seq[string]
+    partGains*:       seq[float64]
+    partFadeDeltas*:  seq[float64]
+    partFadeTargets*: seq[float64]
 
   EvalError* = object of CatchableError
 
@@ -620,22 +629,25 @@ proc updateFuncSlotsOnce(voice: Voice; defs: seq[Node]): bool =
 proc compileTopLevel(co: var Compiler; body: Node) =
   # Main chunk: only `play` blocks contribute to the output. Other
   # statements (def, let, var, bare exprs) run for side effects.
+  # Also: collect the play names into voice.partNames (in source order).
   if body.kind != nkBlock:
     raise newException(EvalError, "program must be a block of statements")
-  var playCount = 0
+  co.voice.partNames.setLen(0)
   for s in body.kids:
     case s.kind
     of nkPlay:
+      let idx = co.voice.partNames.len
+      co.voice.partNames.add s.str
       co.compileExpr(s.kids[0], wantValue = true)
-      if playCount > 0:
+      discard co.chunk.emit(opPartGain, idx)
+      if idx > 0:
         discard co.chunk.emit(opAdd)
-      inc playCount
     of nkLet, nkVar, nkAssign, nkDef:
       co.compileExpr(s, wantValue = false)
     else:
       co.compileExpr(s, wantValue = true)
       discard co.chunk.emit(opPop)
-  if playCount == 0:
+  if co.voice.partNames.len == 0:
     raise newException(EvalError,
       "no `play` blocks in file - at least one is required")
 
@@ -1103,6 +1115,11 @@ proc run(vm: var VM): Value =
     of opArrayLen:
       let arr = vm.pop()
       vm.pushF(if arr.kind == vkArr: float64(arr.buf.data.len) else: 0.0)
+    of opPartGain:
+      let idx = inst.arg.int
+      let g = if idx >= 0 and idx < voice.partGains.len: voice.partGains[idx] else: 1.0
+      let v = vm.popF
+      vm.pushF(v * g)
     of opReturn:
       frame.pc = pc                              # not strictly needed
       let r = vm.leaveFrame()
@@ -1123,7 +1140,21 @@ proc newVoice*(sampleRate: float64 = 48000.0): Voice =
   result.dspState.sr = sampleRate
 
 proc load*(voice: Voice; program: Node) =
+  # Hot-reload diff: preserve gains/fade deltas for parts whose names survive.
+  # New parts default to gain 1.0 (playing). Removed parts simply disappear.
+  var oldGains = initTable[string, float64]()
+  var oldDeltas = initTable[string, float64]()
+  for i, name in voice.partNames:
+    oldGains[name] = voice.partGains[i]
+    oldDeltas[name] = voice.partFadeDeltas[i]
   voice.compile(program)
+  voice.partGains.setLen(voice.partNames.len)
+  voice.partFadeDeltas.setLen(voice.partNames.len)
+  voice.partFadeTargets.setLen(voice.partNames.len)
+  for i, name in voice.partNames:
+    voice.partGains[i] = oldGains.getOrDefault(name, 1.0)
+    voice.partFadeDeltas[i] = oldDeltas.getOrDefault(name, 0.0)
+    voice.partFadeTargets[i] = voice.partGains[i]
 
 proc sanitize(x: float64): float64 {.inline.} =
   if x != x or x > 1e6 or x < -1e6: 0.0 else: x
