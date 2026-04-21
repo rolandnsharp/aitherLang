@@ -11,7 +11,7 @@ import parser, dsp
 # ============================================================ value type ======
 
 type
-  ValueKind* = enum vkFloat, vkArr, vkFunc
+  ValueKind* = enum vkFloat, vkArr, vkFunc, vkStereo
 
   Buffer* = ref object
     data*: seq[float64]
@@ -21,13 +21,17 @@ type
     of vkFloat: f*: float64
     of vkArr:   buf*: Buffer
     of vkFunc:  fid*: int
+    of vkStereo: l*, r*: float64     # inline stereo pair, no allocation
 
 proc f(x: float64): Value {.inline.} = Value(kind: vkFloat, f: x)
+proc stereoVal(l, r: float64): Value {.inline.} =
+  Value(kind: vkStereo, l: l, r: r)
 proc toFloat(v: Value): float64 {.inline.} =
   case v.kind
-  of vkFloat: v.f
-  of vkArr:   (if v.buf.data.len > 0: v.buf.data[0] else: 0.0)
-  of vkFunc:  0.0
+  of vkFloat:  v.f
+  of vkArr:    (if v.buf.data.len > 0: v.buf.data[0] else: 0.0)
+  of vkFunc:   0.0
+  of vkStereo: v.l
 
 # ============================================================ builtins ========
 
@@ -150,6 +154,7 @@ type
     opJmp, opJmpFalse, opJmpTrue,
     opCallUser, opLoadFunc, opCallFuncVal, opCallNative,
     opMakeArray, opArrayLit, opArrayGet, opArraySet, opArrayLen,
+    opStereoLit,             # pop r, pop l, push vkStereo(l, r) - no allocation
     opPartGain,              # pop sample, multiply by voice.partGains[arg], push
     opReturn
 
@@ -499,6 +504,11 @@ proc compileExpr(co: var Compiler; n: Node; wantValue: bool = true) =
       for i, k in n.kids: data[i] = k.num
       let idx = co.chunk.addConstArr(Buffer(data: data))
       discard co.chunk.emit(opConstArr, idx)
+    elif n.kids.len == 2:
+      # [L, R] stereo literal: emit dedicated no-alloc opcode
+      co.compileExpr(n.kids[0])
+      co.compileExpr(n.kids[1])
+      discard co.chunk.emit(opStereoLit)
     else:
       for k in n.kids: co.compileExpr(k)
       discard co.chunk.emit(opArrayLit, n.kids.len)
@@ -798,10 +808,19 @@ proc binFloat(op: int; a, b: float64): float64 {.inline.} =
   else: 0.0
 
 proc isStereo(v: Value): bool {.inline.} =
-  v.kind == vkArr and v.buf.data.len == 2
+  v.kind == vkStereo or (v.kind == vkArr and v.buf.data.len == 2)
 
-proc mkStereo(l, r: float64): Value {.inline.} =
-  Value(kind: vkArr, buf: Buffer(data: @[l, r]))
+proc stereoL(v: Value): float64 {.inline.} =
+  case v.kind
+  of vkStereo: v.l
+  of vkArr:    v.buf.data[0]
+  else:        0.0
+
+proc stereoR(v: Value): float64 {.inline.} =
+  case v.kind
+  of vkStereo: v.r
+  of vkArr:    v.buf.data[1]
+  else:        0.0
 
 proc stereoBinOp(vm: var VM; op: int) =
   let b = vm.pop()
@@ -809,14 +828,14 @@ proc stereoBinOp(vm: var VM; op: int) =
   if a.kind == vkFloat and b.kind == vkFloat:
     vm.pushF(binFloat(op, a.f, b.f))
   elif isStereo(a) and isStereo(b):
-    vm.push mkStereo(binFloat(op, a.buf.data[0], b.buf.data[0]),
-                     binFloat(op, a.buf.data[1], b.buf.data[1]))
+    vm.push stereoVal(binFloat(op, stereoL(a), stereoL(b)),
+                      binFloat(op, stereoR(a), stereoR(b)))
   elif isStereo(a) and b.kind == vkFloat:
-    vm.push mkStereo(binFloat(op, a.buf.data[0], b.f),
-                     binFloat(op, a.buf.data[1], b.f))
+    vm.push stereoVal(binFloat(op, stereoL(a), b.f),
+                      binFloat(op, stereoR(a), b.f))
   elif a.kind == vkFloat and isStereo(b):
-    vm.push mkStereo(binFloat(op, a.f, b.buf.data[0]),
-                     binFloat(op, a.f, b.buf.data[1]))
+    vm.push stereoVal(binFloat(op, a.f, stereoL(b)),
+                      binFloat(op, a.f, stereoR(b)))
   else:
     vm.pushF(binFloat(op, a.toFloat, b.toFloat))
 
@@ -1146,15 +1165,24 @@ proc run(vm: var VM): Value =
       for i in 0 ..< n:
         data[n - 1 - i] = vm.popF
       vm.push Value(kind: vkArr, buf: Buffer(data: data))
+    of opStereoLit:
+      let r = vm.popF
+      let l = vm.popF
+      vm.push stereoVal(l, r)
     of opArrayGet:
       let idx = int(vm.popF)
       let arr = vm.pop()
-      if arr.kind != vkArr:
-        vm.pushF(0.0)
-      else:
+      case arr.kind
+      of vkStereo:
+        if idx == 0: vm.pushF(arr.l)
+        elif idx == 1: vm.pushF(arr.r)
+        else: vm.pushF(0.0)
+      of vkArr:
         let dat = arr.buf.data
         if idx < 0 or idx >= dat.len: vm.pushF(0.0)
         else: vm.pushF(dat[idx])
+      else:
+        vm.pushF(0.0)
     of opArraySet:
       let val = vm.popF
       let idx = int(vm.popF)
@@ -1166,13 +1194,16 @@ proc run(vm: var VM): Value =
       vm.pushF(val)
     of opArrayLen:
       let arr = vm.pop()
-      vm.pushF(if arr.kind == vkArr: float64(arr.buf.data.len) else: 0.0)
+      case arr.kind
+      of vkArr:    vm.pushF(float64(arr.buf.data.len))
+      of vkStereo: vm.pushF(2.0)
+      else:        vm.pushF(0.0)
     of opPartGain:
       let idx = inst.arg.int
       let g = if idx >= 0 and idx < voice.partGains.len: voice.partGains[idx] else: 1.0
       let v = vm.pop()
       if isStereo(v):
-        vm.push mkStereo(v.buf.data[0] * g, v.buf.data[1] * g)
+        vm.push stereoVal(stereoL(v) * g, stereoR(v) * g)
       else:
         vm.pushF(v.toFloat * g)
     of opReturn:
@@ -1228,6 +1259,8 @@ proc tick*(voice: Voice; t: float64): tuple[l, r: float64] =
   of vkFloat:
     let s = sanitize(v.f)
     (s, s)
+  of vkStereo:
+    (sanitize(v.l), sanitize(v.r))
   of vkArr:
     let d = v.buf.data
     let l = sanitize(if d.len > 0: d[0] else: 0.0)
