@@ -47,7 +47,6 @@ type
     stereoNames: Table[string, tuple[l, r: string]]
 
   Ctx = ref object
-    buf: string           # accumulating output
     userDefs: Table[string, Node]
     topVarNames*: seq[string]   # top-level vars in definition order
     topVarSet: HashSet[string]
@@ -87,23 +86,21 @@ const Libm1 = ["sin", "cos", "tan", "exp", "log", "log2",
 # ---- small helpers -----------------------------------------------------
 
 proc newCtx*(program: Node): Ctx =
-  result = Ctx(userDefs: initTable[string, Node](),
-               topVarSet: initHashSet[string](),
-               topLets: initHashSet[string](),
-               topArrays: initTable[string, (string, int)](),
-               playSet: initHashSet[string](),
-               stereoLets: initHashSet[string](),
-               sr: 48000.0,
-               typeCounter: initTable[string, int](),
-               typeCumSize: initTable[string, int]())
+  result = Ctx(sr: 48000.0)
   # Gather user defs so call sites can inline them.
   for n in program.kids:
     if n.kind == nkDef:
       result.userDefs[n.str] = n
 
+# Fixed-width placeholder token so simple `replace` back-patching stays
+# unambiguous regardless of id length (avoids "__OFF_1__" matching a
+# prefix of "__OFF_10__").
+proc offsetPlaceholder(rid: int): string =
+  "__OFF_" & align($rid, 6, '0') & "__"
+
 # Register one stateful call site. Returns a placeholder token to embed
-# in the C source — substituted with the absolute pool offset at the
-# end of emission, once region bases are known.
+# in the emitted C — substituted with the absolute pool offset after
+# the walk, once per-type bases are known.
 proc registerRegion(c: Ctx; typeName: string; size: int): string =
   if typeName notin c.typeCounter:
     c.typeCounter[typeName] = 0
@@ -114,10 +111,11 @@ proc registerRegion(c: Ctx; typeName: string; size: int): string =
   c.typeCounter[typeName] = perTypeIdx + 1
   c.typeCumSize[typeName] = intraOffset + size
   let rid = c.regions.len
-  # offset is back-patched once per-type bases are assigned.
+  # `offset` holds the intra-region offset here; `finaliseLayout` rewrites
+  # it to an absolute pool slot once region bases are assigned.
   c.regions.add Region(typeName: typeName, perTypeIdx: perTypeIdx,
                        offset: intraOffset, size: size)
-  "__OFF_" & $rid & "__"
+  offsetPlaceholder(rid)
 
 proc fresh(c: Ctx; prefix: string): string =
   inc c.tmpCounter
@@ -151,6 +149,23 @@ proc lookup(sc: Scope; name: string): string =
     if name in s.names: return s.names[name]
     s = s.parent
   ""
+
+# Builtins callable by name from user code that aren't keywords or ops:
+# libm1, shape primitives, stateful inlined builtins, math helpers.
+const BuiltinFns = ["saw", "tri", "sqr", "phasor", "noise", "abs", "pow"]
+
+# True when `name` is a function-valued identifier (for function-valued
+# args to user defs, and for spotting function-idents during stereo
+# emission). Unifies what used to be three near-identical predicates.
+proc isFnName(c: Ctx; sc: Scope; name: string): bool =
+  name in Libm1 or name in BuiltinFns or
+  name in c.userDefs or NativeArities.hasKey(name) or
+  sc.lookupFn(name).len > 0
+
+# Reference to one channel of a play block or stereo let, as a C lvalue.
+proc stereoRef(c: Ctx; name, chan: string): string =
+  let prefix = if name in c.playSet: "p_" else: "l_"
+  prefix & name & "_" & chan
 
 proc numLit(v: float64): string =
   # Emit with enough digits that round-trip is exact; append dot if
@@ -228,12 +243,7 @@ proc emitDefInline(c: Ctx; sc: Scope; def: Node; args: seq[Node]): string =
     let a = args[i]
     # Function-valued arg: a bare ident naming a known builtin/def. Bind
     # in inner.fns so calls to `p(...)` resolve to the concrete function.
-    if a.kind == nkIdent and
-       (a.str in Libm1 or a.str in ["saw", "tri", "sqr", "sin", "cos",
-                                     "phasor", "noise", "pow"] or
-        a.str in c.userDefs or
-        NativeArities.hasKey(a.str) or
-        sc.lookupFn(a.str).len > 0):
+    if a.kind == nkIdent and isFnName(c, sc, a.str):
       let resolved = if sc.lookupFn(a.str).len > 0: sc.lookupFn(a.str)
                      else: a.str
       inner.fns[p] = resolved
@@ -316,24 +326,18 @@ proc emitNoise(c: Ctx): string =
 # Size (in float64 slots) claimed by one call to a given native. For
 # delay/fbdelay this depends on the `max_time` argument, which must be
 # a numeric literal so the region size is compile-time known.
+proc delayBufSlots(c: Ctx; name: string; maxTimeArg: Node): int =
+  if maxTimeArg.kind != nkNum:
+    raise newException(ValueError,
+      name & " max_time must be a numeric literal (line " &
+      $maxTimeArg.line & ")")
+  1 + max(1, int(maxTimeArg.num * c.sr))
+
 proc nativeSlotSize(c: Ctx; name: string; kids: seq[Node]): int =
   case name
-  of "lp1", "hp1", "impulse", "discharge", "tremolo", "slew", "wave":
-    1
-  of "lpf", "hpf", "bpf", "notch", "resonator":
-    2
-  of "delay":
-    let mt = kids[2]
-    if mt.kind != nkNum:
-      raise newException(ValueError,
-        "delay max_time must be a numeric literal (line " & $mt.line & ")")
-    1 + max(1, int(mt.num * c.sr))
-  of "fbdelay":
-    let mt = kids[2]
-    if mt.kind != nkNum:
-      raise newException(ValueError,
-        "fbdelay max_time must be a numeric literal (line " & $mt.line & ")")
-    1 + max(1, int(mt.num * c.sr))
+  of "lp1", "hp1", "impulse", "discharge", "tremolo", "slew", "wave": 1
+  of "lpf", "hpf", "bpf", "notch", "resonator":                       2
+  of "delay", "fbdelay":          delayBufSlots(c, name, kids[2])
   of "reverb":
     # Matches dsp.nim nReverb's total = sum(2+L for combLens) + sum(1+L for apLens).
     (2+1557) + (2+1617) + (2+1491) + (2+1422) + (1+225) + (1+556)
@@ -502,9 +506,7 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
       if stereo.ok:
         return (if int(i.num) == 0: stereo.l else: stereo.r)
       if a.str in c.playSet or a.str in c.stereoLets:
-        let chan = if int(i.num) == 0: "_l" else: "_r"
-        let prefix = if a.str in c.playSet: "p_" else: "l_"
-        return prefix & a.str & chan
+        return stereoRef(c, a.str, if int(i.num) == 0: "l" else: "r")
     # Inline constant array literal with constant index.
     if a.kind == nkArr and i.kind == nkNum:
       let k = int(i.num)
@@ -523,16 +525,12 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
     let scoped = sc.lookupStereo(n.str)
     if scoped.ok:
       return (scoped.l, scoped.r, true)
-    if n.str in c.playSet:
-      return ("p_" & n.str & "_l", "p_" & n.str & "_r", true)
-    if n.str in c.stereoLets:
-      return ("l_" & n.str & "_l", "l_" & n.str & "_r", true)
+    if n.str in c.playSet or n.str in c.stereoLets:
+      return (stereoRef(c, n.str, "l"), stereoRef(c, n.str, "r"), true)
     # Function-value idents (passed as args) aren't variables; let
     # emitExpr handle them via its call site. Report as scalar with a
     # placeholder so the caller falls through to scalar emission.
-    if n.str in Libm1 or n.str in ["sin", "cos", "saw", "tri", "sqr",
-                                    "phasor", "noise", "abs", "pow"] or
-       n.str in c.userDefs or NativeArities.hasKey(n.str):
+    if isFnName(c, sc, n.str):
       return (n.str, n.str, false)
     let s = c.emitExpr(sc, n)
     return (s, s, false)
@@ -554,9 +552,7 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
         let pick = if int(idx.num) == 0: stereo.l else: stereo.r
         return (pick, pick, false)
       if base.str in c.playSet or base.str in c.stereoLets:
-        let chan = if int(idx.num) == 0: "_l" else: "_r"
-        let prefix = if base.str in c.playSet: "p_" else: "l_"
-        let pick = prefix & base.str & chan
+        let pick = stereoRef(c, base.str, if int(idx.num) == 0: "l" else: "r")
         return (pick, pick, false)
     let s = c.emitExpr(sc, n)
     return (s, s, false)
@@ -611,12 +607,7 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
       blk.add "  {\n"
       for i, p in def.params:
         let a = n.kids[i]
-        if a.kind == nkIdent and
-           (a.str in Libm1 or
-            a.str in ["sin","cos","saw","tri","sqr","phasor","noise",
-                      "abs","pow"] or
-            a.str in c.userDefs or NativeArities.hasKey(a.str) or
-            sc.lookupFn(a.str).len > 0):
+        if a.kind == nkIdent and isFnName(c, sc, a.str):
           let resolved =
             if sc.lookupFn(a.str).len > 0: sc.lookupFn(a.str) else: a.str
           inner.fns[p] = resolved
@@ -958,6 +949,24 @@ proc emit*(c: Ctx; program: Node): string =
 
   pre & c.arrayDecls & body
 
+# Assign per-type base offsets (in first-seen order), rewrite each
+# region's intra-offset into an absolute pool slot, and back-patch the
+# placeholders left in the emitted C. Also enforces the pool budget.
+proc finaliseLayout(c: Ctx; src: var string) =
+  var base = 0
+  var bases = initTable[string, int]()
+  for t in c.typeOrder:
+    bases[t] = base
+    base += c.typeCumSize[t]
+  if base > PoolSize:
+    raise newException(ValueError,
+      "patch needs " & $base & " pool slots, pool is " & $PoolSize &
+      " — reduce delays / reverbs or raise DspPoolSize")
+  for r in c.regions.mitems:
+    r.offset = bases[r.typeName] + r.offset
+  for rid, r in c.regions:
+    src = src.replace(offsetPlaceholder(rid), $r.offset)
+
 proc generate*(program: Node; patchPath: string = "";
                sr: float64 = 48000.0):
     tuple[csrc: string; varNames, partNames: seq[string];
@@ -966,20 +975,5 @@ proc generate*(program: Node; patchPath: string = "";
   c.patchPath = patchPath
   c.sr = sr
   var src = c.emit(program)
-  # Finalise per-type region bases in first-seen order.
-  var bases = initTable[string, int]()
-  var total = 0
-  for t in c.typeOrder:
-    bases[t] = total
-    total += c.typeCumSize[t]
-  if total > PoolSize:
-    raise newException(ValueError,
-      "patch needs " & $total & " pool slots, pool is " & $PoolSize &
-      " — reduce delays / reverbs or raise DspPoolSize")
-  for r in c.regions.mitems:
-    r.offset = bases[r.typeName] + r.offset     # intra-offset -> absolute
-  # Substitute placeholder tokens with absolute slot offsets. Iterate
-  # in reverse so "__OFF_10__" isn't accidentally matched by "__OFF_1__".
-  for i in countdown(c.regions.len - 1, 0):
-    src = src.replace("__OFF_" & $i & "__", $c.regions[i].offset)
+  finaliseLayout(c, src)
   (src, c.topVarNames, c.playNames, c.regions)
