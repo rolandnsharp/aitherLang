@@ -12,3 +12,6 @@ tests/codegen_kick
 tests/tcc_dsp
 tests/tcc_hello
 tests/tcc_tick
+tests/migration
+tests/linemap
+tests/playblocks

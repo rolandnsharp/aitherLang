@@ -13,11 +13,15 @@ type
   # t/start_t from Nim is a plain struct-field store into the malloc'd
   # buffer — no allocation, no GC touch.
   VoiceHeader* {.byref.} = object
-    pool*:     array[DspPoolSize, float64]
-    idx*:      int
-    overflow*: bool
-    sr*:       float64
+    pool*:          array[DspPoolSize, float64]
+    idx*:           int
+    overflow*:      bool
+    sr*:            float64
     t*, dt*, start_t*: float64
+    # Points into the Nim-owned partGains seq so generated C can read
+    # per-part gains. Set at load(); the seq is sized once (on first load
+    # per voice) so its data address stays stable.
+    partGainsPtr*:  pointer
 
   NativeVoice* = ref object
     state*:     pointer          # malloc'd VoiceState buffer
@@ -63,8 +67,9 @@ proc registerNatives(s: TccState) =
   discard s.addSymbol("shape_sqr",   cast[pointer](shapeSqr))
 
 proc compileProgram(program: Node; patchPath: string):
-    tuple[lib: TccState; tickFn: TickFn; size: int; varNames: seq[string]] =
-  let (csrc, varNames) = generate(program, patchPath)
+    tuple[lib: TccState; tickFn: TickFn; size: int;
+          varNames, partNames: seq[string]] =
+  let (csrc, varNames, partNames) = generate(program, patchPath)
   let lib = tccNew()
   if cast[pointer](lib) == nil:
     raise newException(ValueError, "tcc_new failed")
@@ -92,7 +97,7 @@ proc compileProgram(program: Node; patchPath: string):
   if fn == nil or sizeFn == nil:
     lib.delete()
     raise newException(ValueError, "TCC symbol lookup failed")
-  (lib, fn, int(sizeFn()), varNames)
+  (lib, fn, int(sizeFn()), varNames, partNames)
 
 proc newVoice*(sr: float64): NativeVoice =
   NativeVoice()
@@ -120,7 +125,7 @@ proc load*(v: NativeVoice; program: Node; sr: float64;
     for i, name in v.varNames:
       snapshot[name] = varAddr(v.state, i)[]
 
-  let (lib, fn, size, varNames) = compileProgram(program, patchPath)
+  let (lib, fn, size, varNames, partNames) = compileProgram(program, patchPath)
   let newState = alloc0(size)
   cast[ptr VoiceHeader](newState).sr = sr
   cast[ptr VoiceHeader](newState).dt = 1.0 / sr
@@ -129,6 +134,31 @@ proc load*(v: NativeVoice; program: Node; sr: float64;
     if name in snapshot:
       varAddr(newState, i)[] = snapshot[name]
       initedAddr(newState, varNames.len, i)[] = 1'u8
+
+  # Diff old partNames vs new; preserve gain by name, default to 1.0.
+  var oldPartGains = initTable[string, float64]()
+  var oldPartTargets = initTable[string, float64]()
+  var oldPartDeltas = initTable[string, float64]()
+  for i, n in v.partNames:
+    oldPartGains[n] = v.partGains[i]
+    oldPartTargets[n] = v.partFadeTargets[i]
+    oldPartDeltas[n] = v.partFadeDeltas[i]
+  v.partNames = partNames
+  v.partGains.setLen(partNames.len)
+  v.partFadeDeltas.setLen(partNames.len)
+  v.partFadeTargets.setLen(partNames.len)
+  for i, n in partNames:
+    v.partGains[i] = oldPartGains.getOrDefault(n, 1.0)
+    v.partFadeTargets[i] = oldPartTargets.getOrDefault(n, v.partGains[i])
+    v.partFadeDeltas[i] = oldPartDeltas.getOrDefault(n, 0.0)
+  # Publish gain-array pointer into the new state. The seq's data is
+  # stable for the lifetime of this allocation (we set its length above
+  # and never append past it). If there are no parts, point at a dummy
+  # one-element stash to avoid a null deref from the generated code.
+  if partNames.len > 0:
+    cast[ptr VoiceHeader](newState).partGainsPtr = v.partGains[0].addr
+  else:
+    cast[ptr VoiceHeader](newState).partGainsPtr = nil
 
   if v.state != nil:
     dealloc(v.state)

@@ -11,7 +11,7 @@ sin(TAU * phasor(50)) * env
 """
 
 let prog = parseProgram(Src)
-let (csrc, _) = generate(prog, "patches/fake.aither")
+let (csrc, _, _) = generate(prog, "patches/fake.aither")
 
 # Expected directives at the three source lines (1, 2, 3).
 for n in [1, 2, 3]:
