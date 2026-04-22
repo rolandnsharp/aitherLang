@@ -15,7 +15,7 @@ let stdAst = parseProgram(Stdlib)
 let userAst = parseProgram(userSrc)
 let program = Node(kind: nkBlock, kids: stdAst.kids & userAst.kids, line: 1)
 
-let (csrc, varNames, partNames) = generate(program)
+let (csrc, varNames, partNames, _) = generate(program)
 echo "---- generated C ----"
 echo csrc
 echo "---- vars: ", varNames

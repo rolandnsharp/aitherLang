@@ -37,6 +37,10 @@ type
     partGains*:       seq[float64]
     partFadeDeltas*:  seq[float64]
     partFadeTargets*: seq[float64]
+    # Per-helper-type layout of this voice's pool (see codegen.Region).
+    # Used at hot-reload time to copy matching (type, perTypeIdx) regions
+    # from the old state into the new one.
+    regions*:         seq[Region]
 
 # TCC invokes this synchronously during compile/relocate; we stash the
 # most recent message so compileProgram can report it on failure.
@@ -66,10 +70,10 @@ proc registerNatives(s: TccState) =
   discard s.addSymbol("shape_tri",   cast[pointer](shapeTri))
   discard s.addSymbol("shape_sqr",   cast[pointer](shapeSqr))
 
-proc compileProgram(program: Node; patchPath: string):
+proc compileProgram(program: Node; patchPath: string; sr: float64):
     tuple[lib: TccState; tickFn: TickFn; size: int;
-          varNames, partNames: seq[string]] =
-  let (csrc, varNames, partNames) = generate(program, patchPath)
+          varNames, partNames: seq[string]; regions: seq[Region]] =
+  let (csrc, varNames, partNames, regions) = generate(program, patchPath, sr)
   let lib = tccNew()
   if cast[pointer](lib) == nil:
     raise newException(ValueError, "tcc_new failed")
@@ -97,7 +101,7 @@ proc compileProgram(program: Node; patchPath: string):
   if fn == nil or sizeFn == nil:
     lib.delete()
     raise newException(ValueError, "TCC symbol lookup failed")
-  (lib, fn, int(sizeFn()), varNames, partNames)
+  (lib, fn, int(sizeFn()), varNames, partNames, regions)
 
 proc newVoice*(sr: float64): NativeVoice =
   NativeVoice()
@@ -125,17 +129,19 @@ type
     state*: pointer
     stateSize*: int
     varNames*, partNames*: seq[string]
+    regions*: seq[Region]
 
 proc prepare*(program: Node; sr: float64; patchPath: string = ""): Prepared =
   ## Compile + allocate the new state buffer. Slow (TCC compile is 5-20 ms
   ## on big patches, state zero-init is another ms for 4 MB). Caller must
   ## hand the result to `commit` to actually swap it in.
-  let (lib, fn, size, varNames, partNames) = compileProgram(program, patchPath)
+  let (lib, fn, size, varNames, partNames, regions) =
+    compileProgram(program, patchPath, sr)
   let newState = alloc0(size)
   cast[ptr VoiceHeader](newState).sr = sr
   cast[ptr VoiceHeader](newState).dt = 1.0 / sr
   Prepared(lib: lib, tickFn: fn, state: newState, stateSize: size,
-           varNames: varNames, partNames: partNames)
+           varNames: varNames, partNames: partNames, regions: regions)
 
 proc commit*(v: NativeVoice; p: Prepared) =
   ## Apply a prepared compile. Must be called under the audio mutex:
@@ -150,6 +156,24 @@ proc commit*(v: NativeVoice; p: Prepared) =
         if nName == name:
           varAddr(p.state, j)[] = old
           initedAddr(p.state, p.varNames.len, j)[] = 1'u8
+          break
+
+    # Per-helper-type region migration. For each region in the new
+    # layout, find the old region with the same (typeName, perTypeIdx)
+    # and a matching size, then copy those pool slots across. Mismatched
+    # sizes (e.g. delay with a changed max_time) and unmatched regions
+    # leave the new region zeroed — we just lose that one helper's
+    # history rather than shifting everything else.
+    let oldPool = cast[ptr UncheckedArray[float64]](v.state)
+    let newPool = cast[ptr UncheckedArray[float64]](p.state)
+    for newR in p.regions:
+      for oldR in v.regions:
+        if oldR.typeName == newR.typeName and
+           oldR.perTypeIdx == newR.perTypeIdx and
+           oldR.size == newR.size:
+          copyMem(addr newPool[newR.offset],
+                  addr oldPool[oldR.offset],
+                  newR.size * sizeof(float64))
           break
 
   # Diff old partNames vs new; preserve gain/fade state by name.
@@ -183,6 +207,7 @@ proc commit*(v: NativeVoice; p: Prepared) =
   v.tickFn = p.tickFn
   v.tccLib = p.lib
   v.varNames = p.varNames
+  v.regions = p.regions
 
 proc load*(v: NativeVoice; program: Node; sr: float64;
            patchPath: string = "") =

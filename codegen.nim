@@ -21,7 +21,21 @@
 import std/[strutils, tables, sets, strformat, sequtils]
 import parser
 
+const PoolSize* = 524288
+
 type
+  # A per-helper-type state region. Each stateful call site owns one
+  # region, keyed by (typeName, perTypeIdx). Across a hot reload, a new
+  # region with a matching (typeName, perTypeIdx, size) inherits the old
+  # region's slots via copyMem — so inserting a new helper type in a
+  # patch doesn't shift existing state (filters, delays, reverb tails
+  # survive structural edits).
+  Region* = object
+    typeName*: string
+    perTypeIdx*: int
+    offset*: int            # absolute start offset into pool (in slots)
+    size*: int              # number of float64 slots
+
   Scope = ref object
     parent: Scope
     # name -> C expression text (for params, inlined let bindings)
@@ -47,6 +61,14 @@ type
     arrayDecls: string          # accumulates `static const double arr_N[...]`
     tmpCounter: int
     patchPath: string           # source path used in `#line` directives
+    # Per-helper-type state layout. `regions` is filled during emission;
+    # offsets are finalised after the walk by assigning per-type base
+    # offsets in first-seen order.
+    sr*: float64
+    regions*: seq[Region]
+    typeCounter: Table[string, int]     # name -> next perTypeIdx
+    typeCumSize: Table[string, int]     # name -> cumulative size so far
+    typeOrder: seq[string]              # types in first-seen order
 
 # Native dsp.nim primitives callable from generated C.
 # Name -> arity (not counting the state pointer).
@@ -70,11 +92,32 @@ proc newCtx*(program: Node): Ctx =
                topLets: initHashSet[string](),
                topArrays: initTable[string, (string, int)](),
                playSet: initHashSet[string](),
-               stereoLets: initHashSet[string]())
+               stereoLets: initHashSet[string](),
+               sr: 48000.0,
+               typeCounter: initTable[string, int](),
+               typeCumSize: initTable[string, int]())
   # Gather user defs so call sites can inline them.
   for n in program.kids:
     if n.kind == nkDef:
       result.userDefs[n.str] = n
+
+# Register one stateful call site. Returns a placeholder token to embed
+# in the C source — substituted with the absolute pool offset at the
+# end of emission, once region bases are known.
+proc registerRegion(c: Ctx; typeName: string; size: int): string =
+  if typeName notin c.typeCounter:
+    c.typeCounter[typeName] = 0
+    c.typeCumSize[typeName] = 0
+    c.typeOrder.add typeName
+  let perTypeIdx = c.typeCounter[typeName]
+  let intraOffset = c.typeCumSize[typeName]
+  c.typeCounter[typeName] = perTypeIdx + 1
+  c.typeCumSize[typeName] = intraOffset + size
+  let rid = c.regions.len
+  # offset is back-patched once per-type bases are assigned.
+  c.regions.add Region(typeName: typeName, perTypeIdx: perTypeIdx,
+                       offset: intraOffset, size: size)
+  "__OFF_" & $rid & "__"
 
 proc fresh(c: Ctx; prefix: string): string =
   inc c.tmpCounter
@@ -223,17 +266,15 @@ proc emitBlockExpr(c: Ctx; sc: Scope; blk: Node): string =
       pre.add &"double {tmp} = ({v}); "
       sc.names[s.str] = tmp
     of nkVar:
-      # var inside def body -> claim one pool slot, init with given value
-      # on first run via a pool-slot guard. Simpler approach: just claim,
-      # and the init value is written once via an "inited" companion? That
-      # needs extra state. Simplest here: claim a slot, write the init
-      # expression on every sample *only if* we've never run — but tracking
-      # that per-call-site needs a separate "inited" bit. For now, seed
-      # the slot to the init value on the first sample by using a second
-      # pool slot as an inited flag.
+      # `var` inside a def body -> claim two pool slots keyed under a
+      # "var" helper-type region: one "inited" flag, one value. On the
+      # first evaluation the init expression runs; thereafter the stored
+      # value persists across samples (and across hot reloads, because
+      # the (type, perTypeIdx) pair survives a state migration).
       let flagSlot = c.fresh("vf")
       let valSlot = c.fresh("vs")
-      pre.add &"long {flagSlot} = s->idx++; long {valSlot} = s->idx++; "
+      let off = c.registerRegion("var", 2)
+      pre.add &"long {flagSlot} = {off}; long {valSlot} = ({off}) + 1; "
       pre.add &"if (s->pool[{flagSlot}] == 0.0) {{ " &
               &"s->pool[{valSlot}] = ({c.emitExpr(sc, s.kids[0])}); " &
               &"s->pool[{flagSlot}] = 1.0; }} "
@@ -250,11 +291,12 @@ proc emitBlockExpr(c: Ctx; sc: Scope; blk: Node): string =
       pre.add &"(void)({v}); "
   "0.0"   # empty block
 
-# phasor(freq) inlined: claim one pool slot, advance, return wrapped value.
+# phasor(freq) inlined: one pool slot, advance, return wrapped value.
 proc emitPhasor(c: Ctx; sc: Scope; freqNode: Node): string =
   let freq = c.emitExpr(sc, freqNode)
   let slot = c.fresh("ph")
-  "(({ long " & slot & " = s->idx++; " &
+  let off = c.registerRegion("phasor", 1)
+  "(({ long " & slot & " = " & off & "; " &
     "s->pool[" & slot & "] = fmod(s->pool[" & slot & "] + (" & freq &
     ") / s->sr, 1.0); " &
     "if (s->pool[" & slot & "] < 0.0) s->pool[" & slot & "] += 1.0; " &
@@ -263,12 +305,40 @@ proc emitPhasor(c: Ctx; sc: Scope; freqNode: Node): string =
 # noise() inlined: xorshift32 on a pool slot interpreted as uint32.
 proc emitNoise(c: Ctx): string =
   let slot = c.fresh("nz")
-  "(({ long " & slot & " = s->idx++; " &
+  let off = c.registerRegion("noise", 1)
+  "(({ long " & slot & " = " & off & "; " &
     "unsigned int r = (unsigned int)s->pool[" & slot & "]; " &
     "if (r == 0) r = 2463534242u; " &
     "r ^= r << 13; r ^= r >> 17; r ^= r << 5; " &
     "s->pool[" & slot & "] = (double)r; " &
     "((double)r / 4294967295.0) * 2.0 - 1.0; }))"
+
+# Size (in float64 slots) claimed by one call to a given native. For
+# delay/fbdelay this depends on the `max_time` argument, which must be
+# a numeric literal so the region size is compile-time known.
+proc nativeSlotSize(c: Ctx; name: string; kids: seq[Node]): int =
+  case name
+  of "lp1", "hp1", "impulse", "discharge", "tremolo", "slew", "wave":
+    1
+  of "lpf", "hpf", "bpf", "notch", "resonator":
+    2
+  of "delay":
+    let mt = kids[2]
+    if mt.kind != nkNum:
+      raise newException(ValueError,
+        "delay max_time must be a numeric literal (line " & $mt.line & ")")
+    1 + max(1, int(mt.num * c.sr))
+  of "fbdelay":
+    let mt = kids[2]
+    if mt.kind != nkNum:
+      raise newException(ValueError,
+        "fbdelay max_time must be a numeric literal (line " & $mt.line & ")")
+    1 + max(1, int(mt.num * c.sr))
+  of "reverb":
+    # Matches dsp.nim nReverb's total = sum(2+L for combLens) + sum(1+L for apLens).
+    (2+1557) + (2+1617) + (2+1491) + (2+1422) + (1+225) + (1+556)
+  else:
+    raise newException(ValueError, "no slot size for native '" & name & "'")
 
 proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
   case n.kind
@@ -386,8 +456,13 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
       else:
         raise newException(ValueError,
           "wave: second arg must be an array literal or top-level array let")
-      return &"n_wave((DspState*)s, {freq}, (double*){sym}, {length})"
-    # Native dsp calls
+      let size = c.nativeSlotSize("wave", n.kids)
+      let off = c.registerRegion("wave", size)
+      return &"(s->idx = {off}, n_wave((DspState*)s, {freq}, (double*){sym}, {length}))"
+    # Native dsp calls. Before each call we set s->idx to the call
+    # site's baked region offset so the native's internal claim()
+    # writes into its dedicated region, regardless of surrounding
+    # call structure. The comma expression forces left-to-right eval.
     if name in NativeArities:
       let arity = NativeArities[name]
       if arity == -1:
@@ -396,7 +471,10 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
       if n.kids.len != arity:
         raise newException(ValueError,
           name & " takes " & $arity & " args, got " & $n.kids.len)
-      return "n_" & name & "((DspState*)s, " & c.callArgs(sc, n.kids) & ")"
+      let size = c.nativeSlotSize(name, n.kids)
+      let off = c.registerRegion(name, size)
+      return "(s->idx = " & off & ", n_" & name & "((DspState*)s, " &
+             c.callArgs(sc, n.kids) & "))"
     # User def inline
     if name in c.userDefs:
       return c.emitDefInline(sc, c.userDefs[name], n.kids)
@@ -581,8 +659,9 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
             # call-site state, matching emitBlockExpr's approach.
             let flagSlot = c.fresh("vf")
             let valSlot = c.fresh("vs")
-            blk.add &"    long {flagSlot} = s->idx++;\n"
-            blk.add &"    long {valSlot} = s->idx++;\n"
+            let off = c.registerRegion("var", 2)
+            blk.add &"    long {flagSlot} = {off};\n"
+            blk.add &"    long {valSlot} = ({off}) + 1;\n"
             let initC = c.emitExpr(inner, st.kids[0])
             blk.add &"    if (s->pool[{flagSlot}] == 0.0) {{\n"
             blk.add &"      s->pool[{valSlot}] = ({initC});\n"
@@ -879,9 +958,28 @@ proc emit*(c: Ctx; program: Node): string =
 
   pre & c.arrayDecls & body
 
-proc generate*(program: Node; patchPath: string = ""):
-    tuple[csrc: string; varNames, partNames: seq[string]] =
+proc generate*(program: Node; patchPath: string = "";
+               sr: float64 = 48000.0):
+    tuple[csrc: string; varNames, partNames: seq[string];
+          regions: seq[Region]] =
   let c = newCtx(program)
   c.patchPath = patchPath
-  let src = c.emit(program)
-  (src, c.topVarNames, c.playNames)
+  c.sr = sr
+  var src = c.emit(program)
+  # Finalise per-type region bases in first-seen order.
+  var bases = initTable[string, int]()
+  var total = 0
+  for t in c.typeOrder:
+    bases[t] = total
+    total += c.typeCumSize[t]
+  if total > PoolSize:
+    raise newException(ValueError,
+      "patch needs " & $total & " pool slots, pool is " & $PoolSize &
+      " — reduce delays / reverbs or raise DspPoolSize")
+  for r in c.regions.mitems:
+    r.offset = bases[r.typeName] + r.offset     # intra-offset -> absolute
+  # Substitute placeholder tokens with absolute slot offsets. Iterate
+  # in reverse so "__OFF_10__" isn't accidentally matched by "__OFF_1__".
+  for i in countdown(c.regions.len - 1, 0):
+    src = src.replace("__OFF_" & $i & "__", $c.regions[i].offset)
+  (src, c.topVarNames, c.playNames, c.regions)
