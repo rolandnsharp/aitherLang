@@ -402,6 +402,11 @@ proc emit*(c: Ctx; program: Node): string =
   pre.add "extern double shape_sqr(double);\n"
   # VoiceState — DspState prefix is *exactly* the Nim layout; new fields
   # go after.
+  # NOTE: voice.nim depends on this exact layout for state migration:
+  #   [DspState prefix (sizeof DspState = 4194328 bytes)]
+  #   [double t, dt, start_t]  (3*8 = 24 bytes, header ends at 4194352)
+  #   [double v_<name0>, v_<name1>, ...]  (one slot per top-level var)
+  #   [unsigned char inited[N]]  (one byte per top-level var)
   pre.add "typedef struct {\n"
   pre.add "  double pool[524288];\n"
   pre.add "  long   idx;\n"

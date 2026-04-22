@@ -2,7 +2,7 @@
 ## the old bytecode VM. Each voice owns a TCC state (kept alive while
 ## its compiled tick() can run) and a malloc'd VoiceState buffer.
 
-import std/[strutils]
+import std/[strutils, tables]
 import parser, tcc, dsp, codegen
 
 type
@@ -90,13 +90,38 @@ proc compileProgram(program: Node):
 proc newVoice*(sr: float64): NativeVoice =
   NativeVoice()
 
+# Layout constants mirror the codegen's emitted struct — see the NOTE in
+# codegen.nim near the VoiceState emission. Migration here writes directly
+# into the buffer by computed offsets; stay in lockstep with codegen.
+const HeaderSize  = sizeof(VoiceHeader)   # bytes up to and including start_t
+const VarSlotSize = sizeof(float64)
+
+proc varAddr(state: pointer; i: int): ptr float64 {.inline.} =
+  cast[ptr float64](cast[uint](state) + uint(HeaderSize) +
+                    uint(i) * uint(VarSlotSize))
+
+proc initedAddr(state: pointer; nVars, i: int): ptr uint8 {.inline.} =
+  cast[ptr uint8](cast[uint](state) + uint(HeaderSize) +
+                  uint(nVars) * uint(VarSlotSize) + uint(i))
+
 proc load*(v: NativeVoice; program: Node; sr: float64) =
+  # Snapshot the previous compilation's var values by name. Anything that
+  # migrates gets its inited bit set so the lazy-init guard skips it.
+  var snapshot = initTable[string, float64]()
+  if v.state != nil:
+    for i, name in v.varNames:
+      snapshot[name] = varAddr(v.state, i)[]
+
   let (lib, fn, size, varNames) = compileProgram(program)
-  # Fresh state buffer. (State migration by-name is a later step; for now
-  # hot reload retriggers the voice fresh.)
   let newState = alloc0(size)
   cast[ptr VoiceHeader](newState).sr = sr
   cast[ptr VoiceHeader](newState).dt = 1.0 / sr
+
+  for i, name in varNames:
+    if name in snapshot:
+      varAddr(newState, i)[] = snapshot[name]
+      initedAddr(newState, varNames.len, i)[] = 1'u8
+
   if v.state != nil:
     dealloc(v.state)
     # Hold onto the old lib until the next swap — audio callback may have
