@@ -41,6 +41,7 @@ type
     topArrays: Table[string, (string, int)]
     arrayDecls: string          # accumulates `static const double arr_N[...]`
     tmpCounter: int
+    patchPath: string           # source path used in `#line` directives
 
 # Native dsp.nim primitives callable from generated C.
 # Name -> arity (not counting the state pointer).
@@ -442,6 +443,11 @@ proc emit*(c: Ctx; program: Node): string =
       finalIdx = i; break
 
   for i, s in program.kids:
+    # Map generated-C line back to aither source. Best-effort: puts the
+    # directive at a statement boundary; errors inside inlined expressions
+    # still report under their enclosing top-level line. TCC honors these.
+    if c.patchPath.len > 0 and s.line > 0:
+      body.add &"#line {s.line} \"{c.patchPath}\"\n"
     case s.kind
     of nkDef, nkVar: discard       # def inlined; var already lazy-inited
     of nkLet:
@@ -482,7 +488,9 @@ proc emit*(c: Ctx; program: Node): string =
 
   pre & c.arrayDecls & body
 
-proc generate*(program: Node): tuple[csrc: string, varNames: seq[string]] =
+proc generate*(program: Node; patchPath: string = ""):
+    tuple[csrc: string, varNames: seq[string]] =
   let c = newCtx(program)
+  c.patchPath = patchPath
   let src = c.emit(program)
   (src, c.topVarNames)

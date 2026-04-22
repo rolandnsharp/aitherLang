@@ -34,7 +34,12 @@ type
     partFadeDeltas*:  seq[float64]
     partFadeTargets*: seq[float64]
 
+# TCC invokes this synchronously during compile/relocate; we stash the
+# most recent message so compileProgram can report it on failure.
+var lastTccError {.threadvar.}: string
+
 proc errHandler(opaque: pointer; msg: cstring) {.cdecl.} =
+  lastTccError = $msg
   stderr.writeLine "TCC: ", $msg
 
 proc registerNatives(s: TccState) =
@@ -57,9 +62,9 @@ proc registerNatives(s: TccState) =
   discard s.addSymbol("shape_tri",   cast[pointer](shapeTri))
   discard s.addSymbol("shape_sqr",   cast[pointer](shapeSqr))
 
-proc compileProgram(program: Node):
+proc compileProgram(program: Node; patchPath: string):
     tuple[lib: TccState; tickFn: TickFn; size: int; varNames: seq[string]] =
-  let (csrc, varNames) = generate(program)
+  let (csrc, varNames) = generate(program, patchPath)
   let lib = tccNew()
   if cast[pointer](lib) == nil:
     raise newException(ValueError, "tcc_new failed")
@@ -70,13 +75,15 @@ proc compileProgram(program: Node):
   if lib.addLibrary("m") != 0:
     lib.delete()
     raise newException(ValueError, "tcc_add_library m failed")
+  lastTccError = ""
   registerNatives(lib)
   # Append a size-reporting helper so the engine allocates exactly
   # sizeof(VoiceState) — which varies by patch (extra fields per top-level var).
   let withSize = csrc & "\nint voice_state_size(void) { return sizeof(VoiceState); }\n"
   if lib.compileString(withSize) < 0:
     lib.delete()
-    raise newException(ValueError, "TCC compile failed")
+    raise newException(ValueError,
+      if lastTccError.len > 0: lastTccError else: "TCC compile failed")
   if lib.relocate() < 0:
     lib.delete()
     raise newException(ValueError, "TCC relocate failed")
@@ -104,7 +111,8 @@ proc initedAddr(state: pointer; nVars, i: int): ptr uint8 {.inline.} =
   cast[ptr uint8](cast[uint](state) + uint(HeaderSize) +
                   uint(nVars) * uint(VarSlotSize) + uint(i))
 
-proc load*(v: NativeVoice; program: Node; sr: float64) =
+proc load*(v: NativeVoice; program: Node; sr: float64;
+           patchPath: string = "") =
   # Snapshot the previous compilation's var values by name. Anything that
   # migrates gets its inited bit set so the lazy-init guard skips it.
   var snapshot = initTable[string, float64]()
@@ -112,7 +120,7 @@ proc load*(v: NativeVoice; program: Node; sr: float64) =
     for i, name in v.varNames:
       snapshot[name] = varAddr(v.state, i)[]
 
-  let (lib, fn, size, varNames) = compileProgram(program)
+  let (lib, fn, size, varNames) = compileProgram(program, patchPath)
   let newState = alloc0(size)
   cast[ptr VoiceHeader](newState).sr = sr
   cast[ptr VoiceHeader](newState).dt = 1.0 / sr

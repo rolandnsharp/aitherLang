@@ -164,7 +164,7 @@ proc loadPatch(filename: string; fadeIn: float64): string =
     # Hot-reload: re-compile in place; voice keeps top-level vars (by name)
     # and call-site state (by slot) across the swap.
     try:
-      slots[idx].voice.load(program, float64(SampleRate))
+      slots[idx].voice.load(program, float64(SampleRate), filename)
     except CatchableError as e:
       release(mtx)
       stderr.writeLine "compile FAIL"
@@ -186,7 +186,7 @@ proc loadPatch(filename: string; fadeIn: float64): string =
       return "voice limit reached (" & $MaxVoices & ")"
     let voice = newVoice(float64(SampleRate))
     try:
-      voice.load(program, float64(SampleRate))
+      voice.load(program, float64(SampleRate), filename)
     except CatchableError as e:
       release(mtx)
       stderr.writeLine "compile FAIL"
