@@ -72,10 +72,15 @@ proc nHp1*(s: var DspState; signal, cutoff: float64): float64 {.cdecl, exportc: 
 
 type FilterMode* = enum fmLow, fmHigh, fmBand, fmNotch
 
-proc svf(s: var DspState; signal, cutoff, res: float64;
+proc svf(s: var DspState; signal, cutoffArg, res: float64;
          mode: FilterMode): float64 {.inline.} =
+  # Clamp cutoff to (1 Hz, just under Nyquist). A negative or zero cutoff
+  # would push tan() into the wrong quadrant and produce NaN/Inf that the
+  # filter would then accumulate into its pool slots forever; clamping
+  # here turns "WOOP and silence" into a quiet/audible degradation.
+  let cutoff = clamp(cutoffArg, 1.0, s.sr * 0.499)
   let i = s.claim(2)
-  let g = tan(PI * min(cutoff, s.sr * 0.49) / s.sr)
+  let g = tan(PI * cutoff / s.sr)
   let k = 2.0 * (1.0 - res)
   let a1 = 1.0 / (1.0 + g * (g + k))
   let a2 = g * a1
