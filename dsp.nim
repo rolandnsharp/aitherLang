@@ -33,35 +33,36 @@ template claim(s: var DspState; n: int = 1): int =
 # ---------------------------------------------------------------- shapes
 # (saw, tri, sqr are builtin opcodes; here only as helpers if needed)
 
-proc shapeSaw*(x: float64): float64 {.inline.} =
+proc shapeSaw*(x: float64): float64 {.cdecl, exportc: "shape_saw".} =
   (x / TAU) mod 1.0 * 2.0 - 1.0
 
-proc shapeTri*(x: float64): float64 {.inline.} =
+proc shapeTri*(x: float64): float64 {.cdecl, exportc: "shape_tri".} =
   abs((x / TAU) mod 1.0 * 4.0 - 2.0) - 1.0
 
-proc shapeSqr*(x: float64): float64 {.inline.} =
+proc shapeSqr*(x: float64): float64 {.cdecl, exportc: "shape_sqr".} =
   if (x / TAU) mod 1.0 < 0.5: 1.0 else: -1.0
 
 # ---------------------------------------------------------------- oscillators
 
-proc nWave*(s: var DspState; freq: float64; values: openArray[float64]): float64 =
-  if values.len == 0: return 0.0
+proc nWave*(s: var DspState; freq: float64;
+            values: ptr UncheckedArray[float64]; n: cint): float64
+           {.cdecl, exportc: "n_wave".} =
+  if n <= 0: return 0.0
   let i = s.claim()
   s.pool[i] = (s.pool[i] + freq / s.sr) mod 1.0
   if s.pool[i] < 0.0: s.pool[i] += 1.0
-  let n = values.len
-  let idx = int(s.pool[i] * float64(n)) mod n
+  let idx = int(s.pool[i] * float64(n)) mod int(n)
   values[idx]
 
 # ---------------------------------------------------------------- 1-pole filters
 
-proc nLp1*(s: var DspState; signal, cutoff: float64): float64 =
+proc nLp1*(s: var DspState; signal, cutoff: float64): float64 {.cdecl, exportc: "n_lp1".} =
   let i = s.claim()
   let a = clamp(cutoff / s.sr, 0.0, 1.0)
   s.pool[i] += a * (signal - s.pool[i])
   s.pool[i]
 
-proc nHp1*(s: var DspState; signal, cutoff: float64): float64 =
+proc nHp1*(s: var DspState; signal, cutoff: float64): float64 {.cdecl, exportc: "n_hp1".} =
   let i = s.claim()
   let a = clamp(cutoff / s.sr, 0.0, 1.0)
   s.pool[i] += a * (signal - s.pool[i])
@@ -90,19 +91,19 @@ proc svf(s: var DspState; signal, cutoff, res: float64;
   of fmBand:  v1
   of fmNotch: signal - k * v1
 
-proc nLpf*(s: var DspState; signal, cutoff, res: float64): float64 =
+proc nLpf*(s: var DspState; signal, cutoff, res: float64): float64 {.cdecl, exportc: "n_lpf".} =
   svf(s, signal, cutoff, res, fmLow)
-proc nHpf*(s: var DspState; signal, cutoff, res: float64): float64 =
+proc nHpf*(s: var DspState; signal, cutoff, res: float64): float64 {.cdecl, exportc: "n_hpf".} =
   svf(s, signal, cutoff, res, fmHigh)
-proc nBpf*(s: var DspState; signal, cutoff, res: float64): float64 =
+proc nBpf*(s: var DspState; signal, cutoff, res: float64): float64 {.cdecl, exportc: "n_bpf".} =
   svf(s, signal, cutoff, res, fmBand)
-proc nNotch*(s: var DspState; signal, cutoff, res: float64): float64 =
+proc nNotch*(s: var DspState; signal, cutoff, res: float64): float64 {.cdecl, exportc: "n_notch".} =
   svf(s, signal, cutoff, res, fmNotch)
 
 # ------------------------------------------------------------------- delays
 # Buffer lives inline in the pool. Layout: [cursor, sample0, sample1, ...].
 
-proc nDelay*(s: var DspState; signal, time, maxTime: float64): float64 =
+proc nDelay*(s: var DspState; signal, time, maxTime: float64): float64 {.cdecl, exportc: "n_delay".} =
   let bufLen = max(1, int(maxTime * s.sr))
   let base = s.claim(1 + bufLen)
   let cursor = int(s.pool[base]) mod bufLen
@@ -111,7 +112,7 @@ proc nDelay*(s: var DspState; signal, time, maxTime: float64): float64 =
   s.pool[base + 1 + cursor] = signal
   s.pool[base] = float64((cursor + 1) mod bufLen)
 
-proc nFbdelay*(s: var DspState; signal, time, maxTime, fb: float64): float64 =
+proc nFbdelay*(s: var DspState; signal, time, maxTime, fb: float64): float64 {.cdecl, exportc: "n_fbdelay".} =
   let bufLen = max(1, int(maxTime * s.sr))
   let base = s.claim(1 + bufLen)
   let cursor = int(s.pool[base]) mod bufLen
@@ -123,7 +124,7 @@ proc nFbdelay*(s: var DspState; signal, time, maxTime, fb: float64): float64 =
 # ------------------------------------------------------------------ reverb
 # Schroeder: 4 parallel comb filters into 2 series allpass.
 
-proc nReverb*(s: var DspState; signal, rt60, wet: float64): float64 =
+proc nReverb*(s: var DspState; signal, rt60, wet: float64): float64 {.cdecl, exportc: "n_reverb".} =
   const
     combLens = [1557, 1617, 1491, 1422]
     apLens   = [225, 556]
@@ -164,14 +165,14 @@ proc nReverb*(s: var DspState; signal, rt60, wet: float64): float64 =
 
 # ---------------------------------------------------------------- physics
 
-proc nImpulse*(s: var DspState; freq: float64): float64 =
+proc nImpulse*(s: var DspState; freq: float64): float64 {.cdecl, exportc: "n_impulse".} =
   let i = s.claim()
   let prev = s.pool[i]
   s.pool[i] = (s.pool[i] + freq / s.sr) mod 1.0
   if s.pool[i] < 0.0: s.pool[i] += 1.0
   if s.pool[i] < prev: 1.0 else: 0.0
 
-proc nResonator*(s: var DspState; input, freq, decay: float64): float64 =
+proc nResonator*(s: var DspState; input, freq, decay: float64): float64 {.cdecl, exportc: "n_resonator".} =
   let i = s.claim(2)
   let omega2 = freq * freq
   let invSr = 1.0 / s.sr
@@ -179,21 +180,21 @@ proc nResonator*(s: var DspState; input, freq, decay: float64): float64 =
   s.pool[i]   += s.pool[i+1] * invSr
   s.pool[i]
 
-proc nDischarge*(s: var DspState; input, rate: float64): float64 =
+proc nDischarge*(s: var DspState; input, rate: float64): float64 {.cdecl, exportc: "n_discharge".} =
   let i = s.claim()
   s.pool[i] = max(input, s.pool[i] * (1.0 - rate / s.sr))
   s.pool[i]
 
 # -------------------------------------------------------- modulation/effects
 
-proc nTremolo*(s: var DspState; signal, rate, depth: float64): float64 =
+proc nTremolo*(s: var DspState; signal, rate, depth: float64): float64 {.cdecl, exportc: "n_tremolo".} =
   let i = s.claim()
   s.pool[i] = (s.pool[i] + rate / s.sr) mod 1.0
   if s.pool[i] < 0.0: s.pool[i] += 1.0
   let lfo = (sin(TAU * s.pool[i]) + 1.0) * 0.5
   signal * (1.0 - depth + lfo * depth)
 
-proc nSlew*(s: var DspState; signal, time: float64): float64 =
+proc nSlew*(s: var DspState; signal, time: float64): float64 {.cdecl, exportc: "n_slew".} =
   let i = s.claim()
   let a = if time > 0.0: min(1.0, (1.0 / s.sr) / time) else: 1.0
   s.pool[i] += (signal - s.pool[i]) * a

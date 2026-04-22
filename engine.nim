@@ -1,7 +1,7 @@
 ## aither engine — audio callback + socket CLI for live coding
 
 import std/[os, net, strutils, math, locks, tables]
-import parser, eval, miniaudio
+import parser, voice, miniaudio
 
 const
   SampleRate    = 48000'u32
@@ -30,7 +30,7 @@ type
 
   Slot = object
     name:       string
-    voice:      eval.Voice
+    voice:      NativeVoice
     active:     bool
     muted:      bool
     fadeGain:   float64
@@ -91,11 +91,8 @@ proc audioCallback(output: ptr UncheckedArray[cfloat], frameCount: cuint,
       if not slots[v].active or slots[v].muted: continue
       var l = 0.0
       var r = 0.0
-      try:
-        let s = slots[v].voice.tick(t)
-        l = s.l; r = s.r
-      except CatchableError:
-        discard
+      let s = slots[v].voice.tick(t)
+      l = s.l; r = s.r
       slots[v].fadeGain = clamp(
         slots[v].fadeGain + slots[v].fadeDelta, 0.0, 1.0)
       if slots[v].fadeGain <= 0.0 and slots[v].fadeDelta < 0.0:
@@ -167,7 +164,7 @@ proc loadPatch(filename: string; fadeIn: float64): string =
     # Hot-reload: re-compile in place; voice keeps top-level vars (by name)
     # and call-site state (by slot) across the swap.
     try:
-      slots[idx].voice.load(program)
+      slots[idx].voice.load(program, float64(SampleRate))
     except CatchableError as e:
       release(mtx)
       stderr.writeLine "compile FAIL"
@@ -189,7 +186,7 @@ proc loadPatch(filename: string; fadeIn: float64): string =
       return "voice limit reached (" & $MaxVoices & ")"
     let voice = newVoice(float64(SampleRate))
     try:
-      voice.load(program)
+      voice.load(program, float64(SampleRate))
     except CatchableError as e:
       release(mtx)
       stderr.writeLine "compile FAIL"
@@ -317,7 +314,7 @@ proc parseFloatArg(s: string; fallback: float64 = 0.0): float64 =
   try: return parseFloat(s)
   except ValueError: return fallback
 
-proc findPart(voice: eval.Voice; name: string): int =
+proc findPart(voice: NativeVoice; name: string): int =
   for i, n in voice.partNames:
     if n == name: return i
   -1
@@ -340,7 +337,7 @@ proc partsReport(voiceName: string): string =
               formatFloat(v.partGains[i], ffDecimal, 2)
   voiceName & "\n" & lines.join("\n")
 
-proc setPartGainTarget(voice: eval.Voice; part: int;
+proc setPartGainTarget(voice: NativeVoice; part: int;
                        target, fade: float64) =
   let clamped = clamp(target, 0.0, 1.0)
   voice.partFadeTargets[part] = clamped
