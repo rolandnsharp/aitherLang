@@ -143,6 +143,25 @@ proc prepare*(program: Node; sr: float64; patchPath: string = ""): Prepared =
   Prepared(lib: lib, tickFn: fn, state: newState, stateSize: size,
            varNames: varNames, partNames: partNames, regions: regions)
 
+# Defense 1: a region is "poisoned" if any of its slots is NaN, ±Inf,
+# or absurdly large (a near-blow-up that hasn't tipped to Inf yet).
+# Carrying poison forward across hot reload would mean fixing the patch
+# doesn't help — the migrated state stays sick.
+proc isPoisonedRegion(pool: ptr UncheckedArray[float64];
+                      offset, size: int): bool {.inline.} =
+  for k in 0 ..< size:
+    let v = pool[offset + k]
+    if v != v or v > 1e6 or v < -1e6: return true
+  false
+
+# Defense 2: zero the entire DSP pool. Called from the audio callback
+# when a tick produces NaN/Inf. The next tick reads from a clean state.
+# Top-level `var` fields aren't part of the pool, so user-visible state
+# (counters, accumulators bound by name) survives the reset.
+proc resetPool*(v: NativeVoice) =
+  if v.state == nil: return
+  zeroMem(v.state, DspPoolSize * sizeof(float64))
+
 proc commit*(v: NativeVoice; p: Prepared) =
   ## Apply a prepared compile. Must be called under the audio mutex:
   ## touches v.state / v.tickFn which the audio thread reads each sample.
@@ -171,9 +190,12 @@ proc commit*(v: NativeVoice; p: Prepared) =
         if oldR.typeName == newR.typeName and
            oldR.perTypeIdx == newR.perTypeIdx and
            oldR.size == newR.size:
-          copyMem(addr newPool[newR.offset],
-                  addr oldPool[oldR.offset],
-                  newR.size * sizeof(float64))
+          if not isPoisonedRegion(oldPool, oldR.offset, oldR.size):
+            copyMem(addr newPool[newR.offset],
+                    addr oldPool[oldR.offset],
+                    newR.size * sizeof(float64))
+          # else: leave the new region zeroed; the patch gets a clean
+          # slate for that helper while everything else still migrates.
           break
 
   # Diff old partNames vs new; preserve gain/fade state by name.

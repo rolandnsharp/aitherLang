@@ -36,6 +36,7 @@ type
     fadeGain:   float64
     fadeDelta:  float64
     stats:      Stats
+    nanLogged:  bool        # one log line per voice per session, then quiet
 
 proc update(s: var Stats; gl, gr: float64) {.inline.} =
   let al = abs(gl)
@@ -93,6 +94,18 @@ proc audioCallback(output: ptr UncheckedArray[cfloat], frameCount: cuint,
       var r = 0.0
       let s = slots[v].voice.tick(t)
       l = s.l; r = s.r
+      # NaN/Inf defense: a single bad sample (unstable filter, runaway
+      # resonator, sqrt of a negative, etc.) would otherwise propagate
+      # forever through the voice's pool state. Reset the pool, drop
+      # this sample's contribution, and log once per voice so the user
+      # learns about the issue without spamming 48000 lines/sec.
+      if l != l or r != r or l > 1e6 or r > 1e6 or l < -1e6 or r < -1e6:
+        slots[v].voice.resetPool()
+        if not slots[v].nanLogged:
+          stderr.writeLine "[aither] voice " & slots[v].name &
+                           " produced NaN/Inf — pool reset"
+          slots[v].nanLogged = true
+        continue
       slots[v].fadeGain = clamp(
         slots[v].fadeGain + slots[v].fadeDelta, 0.0, 1.0)
       if slots[v].fadeGain <= 0.0 and slots[v].fadeDelta < 0.0:
@@ -173,6 +186,7 @@ proc loadPatch(filename: string; fadeIn: float64): string =
   let now = timeSec + timeFrac
   if idx >= 0:
     slots[idx].voice.commit(prepared)
+    slots[idx].nanLogged = false           # fresh diagnostics for the new code
     let retrigger = (not slots[idx].active) or
                     slots[idx].fadeGain <= 0.0 or
                     slots[idx].fadeDelta < 0.0       # interrupting a fade-out
