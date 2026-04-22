@@ -281,6 +281,19 @@ proc fmtDb(v: float64): string =
   let db = dBOf(v)
   formatFloat(db, ffDecimal, 1)
 
+# One-line meter summary suitable for tacking onto a command response.
+# Same conventions as scopeReport (fmtDb, env sparkline) but compact
+# and parseable: `<name>  rms=<dB> peak=<dB> clips=<n> env=<bars>`.
+proc meterLine(name: string; s: Stats): string =
+  var spark = ""
+  for k in 0 ..< EnvBins:
+    let v = s.envRing[(s.envBinIdx + k) mod EnvBins]
+    spark &= (if v.float64 < 1e-5: "·" else: envBar(v))
+  let rms = sqrt(max(s.rmsSqL, s.rmsSqR))
+  let peak = max(s.peakL, s.peakR)
+  name & "  rms=" & fmtDb(rms).strip() & "dB peak=" & fmtDb(peak).strip() &
+    "dB clips=" & $s.clips & " env=" & spark
+
 proc statsReport(header: string; s: Stats): string =
   var spark = ""
   for k in 0 ..< EnvBins:
@@ -417,7 +430,15 @@ proc handleCmd(line: string): string =
     if parts.len < 2: return "ERR usage: send <file> [fade-seconds]"
     let fade = if parts.len >= 3: parseFloatArg(parts[2]) else: 0.0
     let err = loadPatch(parts[1], fade)
-    if err.len > 0: "ERR " & err else: "OK"
+    if err.len > 0: "ERR " & err
+    else:
+      # Tack on a one-line meter snapshot so the operator gets feedback
+      # without a separate `scope` round-trip. For a fresh load the
+      # numbers may be -inf / 0 until the first audio buffer runs.
+      let baseName = splitFile(parts[1]).name
+      let idx = findSlot(baseName)
+      if idx >= 0: "OK " & meterLine(baseName, slots[idx].stats)
+      else: "OK"
   of "stop":
     if parts.len < 2: return "ERR usage: stop <name> [fade-seconds]"
     let fade = if parts.len >= 3: parseFloatArg(parts[2]) else: 0.0
