@@ -198,10 +198,10 @@ are just expressions.
 block-diagram algebra to fast C++/Rust/LLVM/Wasm. Excellent
 for designing plugins; the model is compile-then-run, and
 state is implicit inside `~` and delay lines. aither also
-compiles — each patch is transpiled to C and JIT'd via TCC
-on load, so edits are running native code within a few
-milliseconds. State is explicit and named (`var x = 0.0`),
-and hot reload preserves it.
+compiles — each patch is transpiled to C and compiled
+in-process by TCC on load, so edits are running native code
+within a few milliseconds. State is explicit and named
+(`var x = 0.0`), and hot reload preserves it.
 
 **Sonic Pi / Tidal / Strudel**: friendly live-coding layers
 on top of synths and samples — you sequence pre-built
@@ -238,10 +238,11 @@ stdlib.aither   ~140 lines   composition layer (osc, drive, adsr, pan, prev…)
 ```
 
 About 2500 lines total. A patch is parsed to an AST,
-transpiled to C, handed to TCC for JIT compilation, and the
-resulting `tick(state)` function pointer is called once per
-sample from the audio callback. Hot reload compiles the new
-code off the audio thread, then swaps pointers under a brief
-mutex while copying matching state regions across.
+transpiled to C, handed to TCC which compiles it to machine
+code in memory, and the resulting `tick(state)` function
+pointer is called once per sample from the audio callback.
+Hot reload compiles the new code off the audio thread, then
+swaps pointers under a brief mutex while copying matching
+state regions across.
 Dependencies: Nim's stdlib, libtcc, and the system audio
 library.
