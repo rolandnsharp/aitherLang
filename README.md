@@ -170,6 +170,13 @@ composition layer on top is written in aither itself.
 across hot-reloads. That is the entire state model. No
 graphs, no message passing, no nodes, no wires.
 
+Hot-reload preserves more than top-level `var`s. Every
+stateful helper call site — each filter, delay buffer,
+reverb tail, phasor phase — is keyed by helper type and
+per-type index, so inserting a new oscillator or effect
+doesn't shift the storage of everything after it. Existing
+voices keep ringing while the edit takes effect.
+
 `play` blocks make named parts controllable live. CLI
 commands mute / solo / fade / retrigger individual parts
 without touching the file. Composition mode (one file with
@@ -190,10 +197,11 @@ are just expressions.
 **FAUST**: a beautiful functional DSL that compiles a
 block-diagram algebra to fast C++/Rust/LLVM/Wasm. Excellent
 for designing plugins; the model is compile-then-run, and
-state is implicit inside `~` and delay lines. aither is
-interpreted (via a bytecode VM) — edits hit the speakers in
-milliseconds — and state is explicit and named
-(`var x = 0.0`).
+state is implicit inside `~` and delay lines. aither also
+compiles — each patch is transpiled to C and JIT'd via TCC
+on load, so edits are running native code within a few
+milliseconds. State is explicit and named (`var x = 0.0`),
+and hot reload preserves it.
 
 **Sonic Pi / Tidal / Strudel**: friendly live-coding layers
 on top of synths and samples — you sequence pre-built
@@ -221,12 +229,19 @@ simultaneously, use a DAW.
 ## Architecture
 
 ```
-parser.nim      ~465 lines   tokenizer + recursive descent → AST
-eval.nim       ~1150 lines   bytecode compiler + stack VM
+parser.nim      ~485 lines   tokenizer + recursive descent → AST
+codegen.nim     ~975 lines   AST → C source + per-helper-type state layout
+voice.nim       ~225 lines   TCC compile → dlopen'd tick(); hot-reload migration
 dsp.nim         ~200 lines   native DSP primitives (filters, delay, reverb...)
-engine.nim      ~500 lines   audio callback + UNIX socket CLI + stats
-stdlib.aither   ~100 lines   composition layer (osc, drive, adsr, pan, prev…)
+engine.nim      ~565 lines   audio callback + UNIX socket CLI + stats
+stdlib.aither   ~140 lines   composition layer (osc, drive, adsr, pan, prev…)
 ```
 
-About 2400 lines total. No dependencies beyond Nim's
-standard library and the system audio library.
+About 2500 lines total. A patch is parsed to an AST,
+transpiled to C, handed to TCC for JIT compilation, and the
+resulting `tick(state)` function pointer is called once per
+sample from the audio callback. Hot reload compiles the new
+code off the audio thread, then swaps pointers under a brief
+mutex while copying matching state regions across.
+Dependencies: Nim's stdlib, libtcc, and the system audio
+library.
