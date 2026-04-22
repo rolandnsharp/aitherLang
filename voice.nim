@@ -154,13 +154,20 @@ proc isPoisonedRegion(pool: ptr UncheckedArray[float64];
     if v != v or v > 1e6 or v < -1e6: return true
   false
 
-# Defense 2: zero the entire DSP pool. Called from the audio callback
-# when a tick produces NaN/Inf. The next tick reads from a clean state.
-# Top-level `var` fields aren't part of the pool, so user-visible state
-# (counters, accumulators bound by name) survives the reset.
+# Defense 2: zero the stateful-primitive regions of the DSP pool.
+# Called from the audio callback when a tick produces NaN/Inf — the
+# next tick reads from clean filter / delay / reverb state. Regions
+# whose typeName is "var" are skipped: those hold user-named state
+# (counters, fade-in start times, etc.) that performance patches rely
+# on, and resetting them would re-trigger user-authored fades on every
+# NaN event. Top-level vars sit after the pool in the struct and
+# aren't touched either.
 proc resetPool*(v: NativeVoice) =
   if v.state == nil: return
-  zeroMem(v.state, DspPoolSize * sizeof(float64))
+  let pool = cast[ptr UncheckedArray[float64]](v.state)
+  for r in v.regions:
+    if r.typeName == "var": continue
+    zeroMem(addr pool[r.offset], r.size * sizeof(float64))
 
 proc commit*(v: NativeVoice; p: Prepared) =
   ## Apply a prepared compile. Must be called under the audio mutex:
