@@ -157,18 +157,22 @@ proc loadPatch(filename: string; fadeIn: float64): string =
     kids: stdlibAst.kids & userAst.kids,
     line: 1)
 
+  # Heavy phase — compile + alloc — runs OUTSIDE the audio mutex. Taking
+  # the mutex here was causing buffer drops when TCC compile took >10 ms
+  # on big patches. Now the audio callback only blocks briefly (~µs) on
+  # the swap below.
+  var prepared: Prepared
+  try:
+    prepared = prepare(program, float64(SampleRate), filename)
+  except CatchableError as e:
+    stderr.writeLine "compile FAIL"
+    return "compile error: " & e.msg
+
   let idx = findSlot(baseName)
   acquire(mtx)
   let now = timeSec + timeFrac
   if idx >= 0:
-    # Hot-reload: re-compile in place; voice keeps top-level vars (by name)
-    # and call-site state (by slot) across the swap.
-    try:
-      slots[idx].voice.load(program, float64(SampleRate), filename)
-    except CatchableError as e:
-      release(mtx)
-      stderr.writeLine "compile FAIL"
-      return "compile error: " & e.msg
+    slots[idx].voice.commit(prepared)
     let retrigger = (not slots[idx].active) or
                     slots[idx].fadeGain <= 0.0 or
                     slots[idx].fadeDelta < 0.0       # interrupting a fade-out
@@ -179,26 +183,22 @@ proc loadPatch(filename: string; fadeIn: float64): string =
       slots[idx].fadeDelta = if fadeIn > 0.0: fadeDeltaFor(fadeIn) else: 0.0
     elif fadeIn > 0.0:
       slots[idx].fadeDelta = fadeDeltaFor(fadeIn)
+    release(mtx)
     stderr.writeLine "ok (" & (if retrigger: "retrigger " else: "hot-swap ") & baseName & ")"
   else:
     if slotCount >= MaxVoices:
       release(mtx)
       return "voice limit reached (" & $MaxVoices & ")"
     let voice = newVoice(float64(SampleRate))
-    try:
-      voice.load(program, float64(SampleRate), filename)
-    except CatchableError as e:
-      release(mtx)
-      stderr.writeLine "compile FAIL"
-      return "compile error: " & e.msg
+    voice.commit(prepared)
     voice.startT = now
     slots[slotCount] = Slot(
       name: baseName, voice: voice, active: true,
       fadeGain: (if fadeIn > 0.0: 0.0 else: 1.0),
       fadeDelta: (if fadeIn > 0.0: fadeDeltaFor(fadeIn) else: 0.0))
     inc slotCount
+    release(mtx)
     stderr.writeLine "ok (new " & baseName & ")"
-  release(mtx)
   ""
 
 proc retriggerVoice(name: string): string =

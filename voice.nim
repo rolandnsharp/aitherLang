@@ -116,60 +116,80 @@ proc initedAddr(state: pointer; nVars, i: int): ptr uint8 {.inline.} =
   cast[ptr uint8](cast[uint](state) + uint(HeaderSize) +
                   uint(nVars) * uint(VarSlotSize) + uint(i))
 
-proc load*(v: NativeVoice; program: Node; sr: float64;
-           patchPath: string = "") =
-  # Snapshot the previous compilation's var values by name. Anything that
-  # migrates gets its inited bit set so the lazy-init guard skips it.
-  var snapshot = initTable[string, float64]()
-  if v.state != nil:
-    for i, name in v.varNames:
-      snapshot[name] = varAddr(v.state, i)[]
+type
+  # The output of the heavy phase (compile + alloc). Doesn't touch the
+  # live voice, so it can run outside the audio mutex.
+  Prepared* = ref object
+    lib*: TccState
+    tickFn*: TickFn
+    state*: pointer
+    stateSize*: int
+    varNames*, partNames*: seq[string]
 
+proc prepare*(program: Node; sr: float64; patchPath: string = ""): Prepared =
+  ## Compile + allocate the new state buffer. Slow (TCC compile is 5-20 ms
+  ## on big patches, state zero-init is another ms for 4 MB). Caller must
+  ## hand the result to `commit` to actually swap it in.
   let (lib, fn, size, varNames, partNames) = compileProgram(program, patchPath)
   let newState = alloc0(size)
   cast[ptr VoiceHeader](newState).sr = sr
   cast[ptr VoiceHeader](newState).dt = 1.0 / sr
+  Prepared(lib: lib, tickFn: fn, state: newState, stateSize: size,
+           varNames: varNames, partNames: partNames)
 
-  for i, name in varNames:
-    if name in snapshot:
-      varAddr(newState, i)[] = snapshot[name]
-      initedAddr(newState, varNames.len, i)[] = 1'u8
+proc commit*(v: NativeVoice; p: Prepared) =
+  ## Apply a prepared compile. Must be called under the audio mutex:
+  ## touches v.state / v.tickFn which the audio thread reads each sample.
+  ## This is the fast phase — just a handful of memcpys and pointer
+  ## stores, a few microseconds, not milliseconds.
+  if v.state != nil:
+    for i, name in v.varNames:
+      let old = varAddr(v.state, i)[]
+      # copy into the new struct at the new field's offset
+      for j, nName in p.varNames:
+        if nName == name:
+          varAddr(p.state, j)[] = old
+          initedAddr(p.state, p.varNames.len, j)[] = 1'u8
+          break
 
-  # Diff old partNames vs new; preserve gain by name, default to 1.0.
-  var oldPartGains = initTable[string, float64]()
-  var oldPartTargets = initTable[string, float64]()
-  var oldPartDeltas = initTable[string, float64]()
+  # Diff old partNames vs new; preserve gain/fade state by name.
+  var oldGains = initTable[string, float64]()
+  var oldTargets = initTable[string, float64]()
+  var oldDeltas = initTable[string, float64]()
   for i, n in v.partNames:
-    oldPartGains[n] = v.partGains[i]
-    oldPartTargets[n] = v.partFadeTargets[i]
-    oldPartDeltas[n] = v.partFadeDeltas[i]
-  v.partNames = partNames
-  v.partGains.setLen(partNames.len)
-  v.partFadeDeltas.setLen(partNames.len)
-  v.partFadeTargets.setLen(partNames.len)
-  for i, n in partNames:
-    v.partGains[i] = oldPartGains.getOrDefault(n, 1.0)
-    v.partFadeTargets[i] = oldPartTargets.getOrDefault(n, v.partGains[i])
-    v.partFadeDeltas[i] = oldPartDeltas.getOrDefault(n, 0.0)
-  # Publish gain-array pointer into the new state. The seq's data is
-  # stable for the lifetime of this allocation (we set its length above
-  # and never append past it). If there are no parts, point at a dummy
-  # one-element stash to avoid a null deref from the generated code.
-  if partNames.len > 0:
-    cast[ptr VoiceHeader](newState).partGainsPtr = v.partGains[0].addr
+    oldGains[n] = v.partGains[i]
+    oldTargets[n] = v.partFadeTargets[i]
+    oldDeltas[n] = v.partFadeDeltas[i]
+  v.partNames = p.partNames
+  v.partGains.setLen(p.partNames.len)
+  v.partFadeDeltas.setLen(p.partNames.len)
+  v.partFadeTargets.setLen(p.partNames.len)
+  for i, n in p.partNames:
+    v.partGains[i] = oldGains.getOrDefault(n, 1.0)
+    v.partFadeTargets[i] = oldTargets.getOrDefault(n, v.partGains[i])
+    v.partFadeDeltas[i] = oldDeltas.getOrDefault(n, 0.0)
+  if p.partNames.len > 0:
+    cast[ptr VoiceHeader](p.state).partGainsPtr = v.partGains[0].addr
   else:
-    cast[ptr VoiceHeader](newState).partGainsPtr = nil
+    cast[ptr VoiceHeader](p.state).partGainsPtr = nil
 
+  # Swap. The audio callback is guaranteed to see a consistent pair
+  # (tickFn + matching state) because we hold the mutex.
   if v.state != nil:
     dealloc(v.state)
-    # Hold onto the old lib until the next swap — audio callback may have
-    # been mid-call. This leaks one TCC state (~10 KB) per swap.
-    v.oldLibs.add v.tccLib
-  v.state = newState
-  v.stateSize = size
-  v.tickFn = fn
-  v.tccLib = lib
-  v.varNames = varNames
+    v.oldLibs.add v.tccLib   # keep old code alive — small leak per reload
+  v.state = p.state
+  v.stateSize = p.stateSize
+  v.tickFn = p.tickFn
+  v.tccLib = p.lib
+  v.varNames = p.varNames
+
+proc load*(v: NativeVoice; program: Node; sr: float64;
+           patchPath: string = "") =
+  ## Convenience wrapper: prepare + commit. Call this only when NOT on
+  ## the audio critical path (e.g. from tests). Engine.nim uses the
+  ## split form so the heavy compile happens outside the mutex.
+  v.commit(prepare(program, sr, patchPath))
 
 proc tick*(v: NativeVoice; t: float64): tuple[l, r: float64] {.inline.} =
   let hdr = cast[ptr VoiceHeader](v.state)
