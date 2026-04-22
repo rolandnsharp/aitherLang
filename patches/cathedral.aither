@@ -1,0 +1,271 @@
+# cathedral — slow-evolving ambient piece in D minor. nine plays,
+# multiple simultaneous reverbs, detuned unisons, layered stereo
+# delay networks. arrangement unfolds over ~4 minutes without
+# anything repeating. shows off the native per-sample throughput —
+# everything the bytecode VM couldn't afford.
+
+# ------------------------------------------------------- shared clocks
+let pos   = t - start_t
+let fin   = ease(pos / 12)                          # overall fade-in
+let tempo = 70.0 / 60.0                             # 70 BPM, half-time
+
+# --- doof layer: time-since-this-var-appeared (reload persistence) ---
+# Fresh `var`s init to 0 on first compile; migration preserves them
+# across subsequent reloads. Perfect "seconds since the drop started".
+var dpos = 0
+dpos = dpos + dt
+let dTempo = 145.0 / 60.0
+let d_build = ease(dpos / 10)                       # 10 s tension build
+let d_drop  = ease((dpos - 10) / 0.25)               # sharp drop at 10 s
+let d_cut   = 1 - ease((dpos - 9.5) / 0.5)           # riser cuts on drop
+
+let dkTrig = impulse(dTempo)
+let dkEnv  = pluck(dkTrig, 0.22)
+let dBseq  = wave(dTempo / 2, [55, 55, 55, 110, 55, 82.5, 55, 55])
+let dbTrig = impulse(dTempo * 4)
+let dbEnv  = pluck(dbTrig, 0.11)
+
+# --- second build-drop cycle: fresh counter for this edit ---
+var drop2pos = 0
+drop2pos = drop2pos + dt
+let d2_build = ease(drop2pos / 8)                    # 8 s swell
+let d2_drop  = ease((drop2pos - 8) / 0.25)           # sharp re-drop
+let d2_cutRiser = 1 - ease((drop2pos - 7.7) / 0.4)   # reverse cymbal cuts
+
+# mid-section "empty the room" ducking: fade the doof kick+bass for
+# the last 2 seconds of the build so the drop hits against silence
+let d2_room = 1 - ease((drop2pos - 6) / 1.5) * (1 - ease((drop2pos - 8) / 0.2))
+
+# hoover lead sequence — stepping through a 4-note pentatonic over 2 beats
+let hoovSeq = wave(dTempo / 2, [220, 330, 247, 294])
+
+# user helper: super-saw (7-voice detuned saw unison, spread)
+def supersaw(freq, spread):
+  osc(saw, freq) + osc(saw, freq * (1 + spread)) * 0.8 + osc(saw, freq * (1 - spread)) * 0.8 + osc(saw, freq * (1 + spread * 2)) * 0.55 + osc(saw, freq * (1 - spread * 2)) * 0.55 + osc(saw, freq * 0.5) * 0.3 + osc(saw, freq * 2.0) * 0.25
+
+# very slow multi-period shape signals: breath, cinematic arc, drift.
+let breath = (sin(TAU * pos / 18) + 1) * 0.5
+let arc    = (sin(TAU * pos / 73) + sin(TAU * pos / 113) + 2) * 0.25
+let drift  = (sin(TAU * pos * 0.023) + sin(TAU * pos * 0.029) + 2) * 0.5 * 6
+
+# D-minor hexatonic; step drifts every ~40 s
+let scale = [0, 2, 3, 5, 7, 10]
+let step  = scale[int(drift) mod 6]
+
+# kick envelope + sidechain, sent into harmony layers
+let kTrig = impulse(tempo)
+let kEnv  = pluck(kTrig, 0.5)
+let sc    = 1 - kEnv * 0.6
+
+# section gates keyed on pos (all 0..1, overlap for smooth crossfades)
+let s_bells  = ease((pos - 20) / 15) * (1 - ease((pos - 220) / 30))
+let s_rhythm = ease((pos - 80) / 18) * (1 - ease((pos - 240) / 30))
+let s_bass   = ease((pos - 105) / 25) * (1 - ease((pos - 240) / 30))
+let s_lead   = ease((pos - 135) / 25)
+let s_wash   = ease((pos - 55) / 25)
+let s_echoes = ease((pos - 95) / 28) * (1 - ease((pos - 260) / 40))
+
+# ----------------------------------------------------------- voices
+
+play drone:
+  # 10-voice detuned-saw unison (5 per channel) at D1 and octaves.
+  # different detunings left vs right → naturally wide, no haas needed.
+  let f = 36.71
+  let sL = osc(saw, f) + osc(saw, f * 1.0047) * 0.7 + osc(saw, f * 0.9958) * 0.7 + osc(saw, f * 0.503) * 0.8 + osc(saw, f * 2.006) * 0.35
+  let sR = osc(saw, f * 1.0013) + osc(saw, f * 1.0062) * 0.7 + osc(saw, f * 0.9938) * 0.7 + osc(saw, f * 0.497) * 0.8 + osc(saw, f * 1.998) * 0.35
+  let cut = 180 + breath * 260 + arc * 150
+  let fL = sL * 0.055 |> lpf(cut, 0.25)
+  let fR = sR * 0.055 |> lpf(cut, 0.25)
+  [fL, fR]
+
+play pad:
+  # 4-voice sine chord (root, minor third, fifth, octave) transposed by
+  # drift; slow BPF opens with `arc`; its own reverb for cathedral air.
+  let f   = 146.83 * pow(2, step / 12)
+  let thd = f * pow(2, 3 / 12)
+  let fth = f * pow(2, 7 / 12)
+  let oct = f * 2
+  let mL = osc(sin, f) + osc(sin, thd * 1.003) * 0.6 + osc(sin, fth * 0.998) * 0.45 + osc(sin, oct) * 0.3
+  let mR = osc(sin, f * 1.005) + osc(sin, thd * 0.997) * 0.6 + osc(sin, fth * 1.003) * 0.45 + osc(sin, oct * 1.002) * 0.3
+  let brt = 300 + breath * 800 + arc * 400
+  let bL = mL * 0.045 |> bpf(brt, 0.4)
+  let bR = mR * 0.045 |> bpf(brt, 0.4)
+  let wL = reverb(bL, 6, 0.55)
+  let wR = reverb(bR, 6, 0.55)
+  [(bL + wL * 0.6) * sc, (bR + wR * 0.6) * sc]
+
+play bells:
+  # one chime every 4 beats, pitch follows drift; resonator tail +
+  # its own reverb. two slightly-detuned pings per event.
+  let bTrig = impulse(tempo / 4)
+  let bEnv  = discharge(bTrig, 1.2)
+  let bPit  = 587.33 * pow(2, step / 12)
+  let L0 = sin(TAU * phasor(bPit)) * bEnv * 0.16
+  let R0 = sin(TAU * phasor(bPit * 1.004)) * bEnv * 0.16
+  let rL = resonator(L0, bPit, 1.8) * 0.35
+  let rR = resonator(R0, bPit * 1.004, 1.8) * 0.35
+  let wL = reverb(L0 + rL, 4, 0.4)
+  let wR = reverb(R0 + rR, 4, 0.4)
+  [(L0 + rL + wL * 0.45) * s_bells, (R0 + rR + wR * 0.45) * s_bells]
+
+play kick:
+  let p  = 45 + discharge(kTrig, 32) * 140
+  let s1 = sin(TAU * phasor(p)) * kEnv * 0.85
+  let f1 = s1 |> lpf(280, 0.4)
+  [f1 * s_rhythm, f1 * s_rhythm]
+
+play bass:
+  # sub-heavy D1 with harmonic mix; sidechained, filter opens with arc.
+  let bNote = 36.71 * pow(2, step / 12)
+  let sub = osc(sin, bNote) * 0.55 + osc(sin, bNote * 2) * 0.12 + osc(tri, bNote * 4) * 0.04
+  let cut = 140 + arc * 260
+  let filt = sub |> lpf(cut, 0.3)
+  let s = filt * sc * s_bass
+  [s, s]
+
+play lead:
+  # emerges at ~2:15. 8th-note arpeggio through the hexatonic scale,
+  # pitch transposed by the current drift step too. heavy LPF+reverb,
+  # widened with haas for a distant ring.
+  let arpR   = tempo * 2
+  let arpP   = int(phasor(arpR) * 8) mod 6
+  let arpStep = scale[int(arpP) mod 6]
+  let f   = 293.66 * pow(2, arpStep / 12) * pow(2, step / 12)
+  let lTrig = impulse(arpR)
+  let lEnv  = pluck(lTrig, 0.22)
+  let tone  = osc(saw, f) * 0.22 + osc(tri, f * 0.998) * 0.1
+  let filt  = tone * lEnv |> lpf(700 + lEnv * 2400, 0.55)
+  let wet   = reverb(filt, 5, 0.55)
+  let mix   = filt * 0.35 + wet * 0.5
+  let wide  = mix |> haas(11)
+  wide * s_lead * sc
+
+play wash:
+  # noise through a slowly-sweeping narrow BPF into its own long
+  # reverb. L and R use independent reverb tails for width.
+  let sweep = 400 + (sin(TAU * pos / 37) + 1) * 600
+  let n = noise() * 0.4 |> bpf(sweep, 0.85)
+  let wL = reverb(n, 8, 0.9) * 0.18
+  let wR = reverb(n * 0.97, 8, 0.9) * 0.18
+  [wL * s_wash, wR * s_wash]
+
+play rain:
+  # sparse micro-noise bursts; slow stereo panning motion.
+  let rtick = impulse(11)
+  let rgate = discharge(rtick, 300) * 0.22
+  let raw   = noise() * rgate |> hpf(5500, 0.3) |> bitcrush(10)
+  let pp    = sin(TAU * pos * 0.17) * 0.75
+  let sig   = raw * 0.6 * s_rhythm
+  sig |> pan(pp)
+
+play echoes:
+  # distant saw plucked every 6 beats, fed into nested fbdelays with
+  # different times per channel — the delay network IS the music here.
+  let eTrig = impulse(tempo / 6)
+  let eEnv  = pluck(eTrig, 0.3)
+  let eF    = 220 * pow(2, step / 12)
+  let eT    = osc(saw, eF) * eEnv * 0.16
+  let eF2   = eT |> lpf(1200, 0.5)
+  let eDl   = fbdelay(eF2, 0.45, 0.9, 0.55)
+  let sig   = eF2 + eDl * 0.55
+  let L     = fbdelay(sig, 0.27, 0.4, 0.4) * 0.55
+  let R     = fbdelay(sig, 0.33, 0.4, 0.4) * 0.55
+  [L * s_echoes, R * s_echoes]
+
+play drise:
+  # noise through a BPF opening 300 → 7500 Hz over 10s. cuts on drop.
+  let n    = noise() * 0.55
+  let cut  = 300 + d_build * 7200
+  let filt = n |> bpf(cut, 0.72)
+  let sig  = filt * d_build * 0.5 * d_cut
+  [sig, sig]
+
+play dkick:
+  # four-on-floor 145 BPM, short pitch sweep + click transient
+  let p     = 45 + discharge(dkTrig, 28) * 160
+  let body2 = sin(TAU * phasor(p)) * dkEnv
+  let click = noise() * pluck(dkTrig, 0.007) * 0.35
+  let mix2  = (body2 + click) * 0.9 |> lpf(320, 0.3)
+  [mix2 * d_drop, mix2 * d_drop]
+
+play dbass:
+  # 303-style acid: saw through resonant LPF tracking pluck env;
+  # mild sidechain on the doof kick for groove
+  let cut   = 220 + dbEnv * 3800
+  let raw   = osc(saw, dBseq) * 0.42
+  let filt  = raw |> lpf(cut, 0.9) |> drive(1.35)
+  let sig   = filt * (1 - dkEnv * 0.55) * d_drop
+  [sig, sig]
+
+play dhats:
+  # 16th closed hats + 8th open accent, slow pan motion
+  let ctick  = impulse(dTempo * 4)
+  let cEnv2  = pluck(ctick, 0.025)
+  let otick  = impulse(dTempo * 2)
+  let oEnv2  = discharge(otick, 14)
+  let closedH = noise() * cEnv2 |> hpf(8200, 0.25) |> gain(0.17)
+  let openH   = noise() * oEnv2 |> hpf(6400, 0.3) |> gain(0.08)
+  let sigH    = (closedH + openH) * d_drop
+  let pp      = sin(TAU * dpos * 0.3) * 0.4
+  sigH |> pan(pp)
+
+play dtoms:
+  # cross-rhythmic 3-against-4 tribal tom pulses
+  let tTrig = impulse(dTempo / 3)
+  let tEnv2 = pluck(tTrig, 0.3)
+  let tPit  = 95 + discharge(tTrig, 18) * 80
+  let raw2  = sin(TAU * phasor(tPit)) * tEnv2 |> lpf(700, 0.3)
+  let sigT  = raw2 * 0.32 * d_drop
+  let ppT   = sin(TAU * dpos * 0.19) * 0.55
+  sigT |> pan(ppT)
+
+play ddidge:
+  # low buzzy drone — detuned saws, amp-modulated at ~3 Hz
+  let buzz = sin(TAU * dpos * 3.1) * 0.3 + 0.6
+  let src  = osc(saw, 55) * 0.6 + osc(saw, 55.4) * 0.45
+  let raw3 = src * buzz
+  let filt3 = raw3 |> bpf(360, 0.88) |> drive(1.15)
+  let sigD = filt3 * 0.14 * d_drop
+  [sigD, sigD]
+
+play reverse:
+  # reverse-cymbal swell: noise through a HPF that closes from 500 Hz
+  # down to 20 Hz while amplitude ramps up, then cuts on the drop.
+  let n = noise() * 0.7
+  let cutoff = 500 - d2_build * 480     # closes over the build
+  let filt = n |> hpf(cutoff, 0.3)
+  let sig = filt * d2_build * d2_build * 0.35 * d2_cutRiser
+  [sig, sig]
+
+play hoover:
+  # classic psy hoover: 7-voice super-saw through wah filter, short
+  # pluck env per 16th. drops in sync with d2_drop.
+  let hTrig = impulse(dTempo * 2)
+  let hEnv  = pluck(hTrig, 0.14)
+  let wah   = 400 + hEnv * 2600 + (sin(TAU * drop2pos * 0.7) + 1) * 800
+  let raw   = supersaw(hoovSeq, 0.007) * 0.08
+  let filt  = raw |> lpf(wah, 0.82) |> drive(1.2)
+  let wet   = reverb(filt, 3, 0.35)
+  let mixH  = filt * 0.6 + wet * 0.45
+  let wide  = mixH |> haas(8)
+  wide * d2_drop * (1 - dkEnv * 0.3)
+
+play formant:
+  # vowel-like additive sine stack (approx an "aah" formant structure)
+  # tuned to D3 with vibrato; swells in with d2_build, stays during drop.
+  let f    = 146.83 * pow(2, step / 12)
+  let vib  = sin(TAU * drop2pos * 4.5) * 0.008
+  let fb   = f * (1 + vib)
+  let f1   = osc(sin, fb * 2.67) * 0.4        # formant 1 ~730 Hz
+  let f2   = osc(sin, fb * 4.25) * 0.32       # formant 2 ~1090 Hz
+  let f3   = osc(sin, fb * 9.13) * 0.16       # formant 3 ~2440 Hz
+  let body = osc(sin, fb) + osc(sin, fb * 2) * 0.3 + f1 + f2 + f3
+  let filt = body * 0.04 |> lpf(1800, 0.2)
+  [filt * d2_build, filt * d2_build * 1.02]   # slight detune L vs R
+
+# ------------------------------------------------------------- mix
+# one final expression; stereo sum → gentle drive → tanh master.
+let dk_room = dkick * d2_room
+let db_room = dbass * d2_room
+let mix = (drone + pad + bells + kick + bass + rain + lead + echoes + wash + drise + dk_room + db_room + dhats + dtoms + ddidge + reverse + hoover + formant) * fin
+mix |> drive(1.1)
