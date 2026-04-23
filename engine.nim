@@ -264,6 +264,10 @@ proc soloVoice(name: string; fade: float64): string =
   release(mtx)
   ""
 
+proc isNumeric(s: string): bool {.inline.} =
+  try: discard parseFloat(s); true
+  except ValueError: false
+
 const SparkBlocks = [" ", "\u2581", "\u2582", "\u2583", "\u2584", "\u2585", "\u2586", "\u2587", "\u2588"]
 
 proc dBOf(v: float64): float64 {.inline.} =
@@ -376,6 +380,34 @@ proc setPartGainTarget(voice: NativeVoice; part: int;
     let steps = max(1.0, fade * float64(SampleRate))
     voice.partFadeDeltas[part] = (clamped - cur) / steps
 
+proc setPartMute(voiceName, partName: string;
+                 muted: bool; fade: float64): string =
+  let vIdx = findSlot(voiceName)
+  if vIdx < 0: return "voice not found: " & voiceName
+  let voice = slots[vIdx].voice
+  let pIdx = findPart(voice, partName)
+  if pIdx < 0:
+    return "no play named " & partName & " in voice " & voiceName
+  let target = if muted: 0.0 else: 1.0
+  let f = if fade > 0.0: fade else: DefaultFadeMs / 1000.0
+  acquire(mtx); setPartGainTarget(voice, pIdx, target, f); release(mtx)
+  ""
+
+proc soloPart(voiceName, partName: string; fade: float64): string =
+  let vIdx = findSlot(voiceName)
+  if vIdx < 0: return "voice not found: " & voiceName
+  let voice = slots[vIdx].voice
+  let pIdx = findPart(voice, partName)
+  if pIdx < 0:
+    return "no play named " & partName & " in voice " & voiceName
+  let f = if fade > 0.0: fade else: DefaultFadeMs / 1000.0
+  acquire(mtx)
+  for i in 0 ..< voice.partNames.len:
+    let target = if i == pIdx: 1.0 else: 0.0
+    setPartGainTarget(voice, i, target, f)
+  release(mtx)
+  ""
+
 proc partCmd(voiceName, partName, action: string;
              args: seq[string]): string =
   let vIdx = findSlot(voiceName)
@@ -418,6 +450,15 @@ proc listVoices(): string =
       else:                             "playing"
     lines.add slots[i].name & " [" & state & "] gain=" &
               formatFloat(slots[i].fadeGain, ffDecimal, 2)
+    # Per-play gains so the operator can see what's currently muted
+    # without a separate `parts` round-trip. Voices with no plays keep
+    # the single-line format so existing scripts don't break.
+    let v = slots[i].voice
+    for k, pname in v.partNames:
+      let g = v.partGains[k]
+      let suffix = if g <= 0.0: " (muted)" else: ""
+      lines.add "  " & alignLeft(pname, 8) & " gain=" &
+                formatFloat(g, ffDecimal, 2) & suffix
   if lines.len == 0: "(no voices)" else: lines.join("\n")
 
 # ------------------------------------------------------------- command parsing
@@ -445,18 +486,33 @@ proc handleCmd(line: string): string =
     let err = stopVoice(parts[1], fade)
     if err.len > 0: "ERR " & err else: "OK"
   of "mute":
-    if parts.len < 2: return "ERR usage: mute <name>"
-    let err = setMute(parts[1], true)
-    if err.len > 0: "ERR " & err else: "OK"
+    if parts.len < 2: return "ERR usage: mute <voice> [play] [fade-seconds]"
+    if parts.len >= 3 and not isNumeric(parts[2]):
+      let fade = if parts.len >= 4: parseFloatArg(parts[3]) else: 0.0
+      let err = setPartMute(parts[1], parts[2], true, fade)
+      if err.len > 0: "ERR " & err else: "OK"
+    else:
+      let err = setMute(parts[1], true)
+      if err.len > 0: "ERR " & err else: "OK"
   of "unmute":
-    if parts.len < 2: return "ERR usage: unmute <name>"
-    let err = setMute(parts[1], false)
-    if err.len > 0: "ERR " & err else: "OK"
+    if parts.len < 2: return "ERR usage: unmute <voice> [play] [fade-seconds]"
+    if parts.len >= 3 and not isNumeric(parts[2]):
+      let fade = if parts.len >= 4: parseFloatArg(parts[3]) else: 0.0
+      let err = setPartMute(parts[1], parts[2], false, fade)
+      if err.len > 0: "ERR " & err else: "OK"
+    else:
+      let err = setMute(parts[1], false)
+      if err.len > 0: "ERR " & err else: "OK"
   of "solo":
-    if parts.len < 2: return "ERR usage: solo <name> [fade-seconds]"
-    let fade = if parts.len >= 3: parseFloatArg(parts[2]) else: 0.0
-    let err = soloVoice(parts[1], fade)
-    if err.len > 0: "ERR " & err else: "OK"
+    if parts.len < 2: return "ERR usage: solo <voice> [play] [fade-seconds]"
+    if parts.len >= 3 and not isNumeric(parts[2]):
+      let fade = if parts.len >= 4: parseFloatArg(parts[3]) else: 0.0
+      let err = soloPart(parts[1], parts[2], fade)
+      if err.len > 0: "ERR " & err else: "OK"
+    else:
+      let fade = if parts.len >= 3: parseFloatArg(parts[2]) else: 0.0
+      let err = soloVoice(parts[1], fade)
+      if err.len > 0: "ERR " & err else: "OK"
   of "clear":
     let fade = if parts.len >= 2: parseFloatArg(parts[1]) else: 0.0
     let err = clearAll(fade)
@@ -543,9 +599,9 @@ when isMainModule:
     echo "  start                       launch engine"
     echo "  send <file> [fade]          load patch (instant or fade-in seconds)"
     echo "  stop <name> [fade]          fade out & remove voice"
-    echo "  mute <name>                 silence (state keeps running)"
-    echo "  unmute <name>               resume"
-    echo "  solo <name> [fade]          fade out everything else"
+    echo "  mute <voice> [play] [fade]  silence whole voice or one play block"
+    echo "  unmute <voice> [play] [fade] resume voice or play block"
+    echo "  solo <voice> [play] [fade]  fade out other voices, or other plays in this voice"
     echo "  clear [fade]                stop all voices"
     echo "  list                        show active voices"
     echo "  scope [name]                per-voice RMS/peak/clips/envelope (all if no name; 'master' for mix bus)"
@@ -567,14 +623,16 @@ when isMainModule:
     let extra = if args.len >= 3: " " & args[2] else: ""
     sendCmd("stop " & args[1] & extra)
   of "mute":
-    if args.len < 2: quit "usage: aither mute <name>"
-    sendCmd("mute " & args[1])
+    if args.len < 2: quit "usage: aither mute <voice> [play] [fade]"
+    let extra = if args.len >= 3: " " & args[2 .. ^1].join(" ") else: ""
+    sendCmd("mute " & args[1] & extra)
   of "unmute":
-    if args.len < 2: quit "usage: aither unmute <name>"
-    sendCmd("unmute " & args[1])
+    if args.len < 2: quit "usage: aither unmute <voice> [play] [fade]"
+    let extra = if args.len >= 3: " " & args[2 .. ^1].join(" ") else: ""
+    sendCmd("unmute " & args[1] & extra)
   of "solo":
-    if args.len < 2: quit "usage: aither solo <name> [fade]"
-    let extra = if args.len >= 3: " " & args[2] else: ""
+    if args.len < 2: quit "usage: aither solo <voice> [play] [fade]"
+    let extra = if args.len >= 3: " " & args[2 .. ^1].join(" ") else: ""
     sendCmd("solo " & args[1] & extra)
   of "clear":
     let extra = if args.len >= 2: " " & args[1] else: ""
