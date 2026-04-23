@@ -154,10 +154,27 @@ proc lookup(sc: Scope; name: string): string =
 # libm1, shape primitives, stateful inlined builtins, math helpers.
 const BuiltinFns = ["saw", "tri", "sqr", "phasor", "noise", "abs", "pow"]
 
+# True when `name` resolves to a value (scalar local, stereo local, top
+# lets/vars/arrays, play block, stereo let). Values shadow function
+# names, so this short-circuits isFnName below.
+proc isValueName(c: Ctx; sc: Scope; name: string): bool =
+  if sc.lookup(name).len > 0: return true
+  if sc.lookupStereo(name).ok: return true
+  if name in c.topLets: return true
+  if name in c.topVarSet: return true
+  if name in c.topArrays: return true
+  if name in c.playSet: return true
+  if name in c.stereoLets: return true
+  false
+
 # True when `name` is a function-valued identifier (for function-valued
 # args to user defs, and for spotting function-idents during stereo
 # emission). Unifies what used to be three near-identical predicates.
+# Shadowing: a local/top value with the same name wins, so isFnName
+# returns false if `name` already resolves to a value — `let swell =
+# 0.5` must not be mistaken for a ref to stdlib's `def swell`.
 proc isFnName(c: Ctx; sc: Scope; name: string): bool =
+  if isValueName(c, sc, name): return false
   name in Libm1 or name in BuiltinFns or
   name in c.userDefs or NativeArities.hasKey(name) or
   sc.lookupFn(name).len > 0
@@ -253,6 +270,9 @@ proc emitDefInline(c: Ctx; sc: Scope; def: Node; call: Node): string =
     let a = args[i]
     # Function-valued arg: a bare ident naming a known builtin/def. Bind
     # in inner.fns so calls to `p(...)` resolve to the concrete function.
+    # isFnName respects shadowing — a local `let saw = ...` (or any other
+    # value binding) wins over a same-named stdlib def, so this branch
+    # won't steal a scalar arg from the caller.
     if a.kind == nkIdent and isFnName(c, sc, a.str):
       let resolved = if sc.lookupFn(a.str).len > 0: sc.lookupFn(a.str)
                      else: a.str
