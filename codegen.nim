@@ -167,6 +167,15 @@ proc stereoRef(c: Ctx; name, chan: string): string =
   let prefix = if name in c.playSet: "p_" else: "l_"
   prefix & name & "_" & chan
 
+proc errLoc(n: Node): string =
+  # Format the node's source location for an error message. Prefers
+  # "<source>:<line>" when the source tag is set (stdlib / patch path),
+  # falling back to "line <n>" for nodes that pre-date the source-tagging
+  # plumbing or were synthesised without a file origin.
+  if n.source.len > 0 and n.line > 0: "(" & n.source & ":" & $n.line & ")"
+  elif n.line > 0:                    "(line " & $n.line & ")"
+  else:                               ""
+
 proc numLit(v: float64): string =
   # Emit with enough digits that round-trip is exact; append dot if
   # integer-valued so the literal type is double.
@@ -232,11 +241,12 @@ proc callArgs(c: Ctx; sc: Scope; kids: openArray[Node]): string =
 # Inline a user def call. Substitute param names with the evaluated C
 # expressions (bound to fresh locals to avoid re-evaluating side effects),
 # emit let/var handling inside a statement expression.
-proc emitDefInline(c: Ctx; sc: Scope; def: Node; args: seq[Node]): string =
+proc emitDefInline(c: Ctx; sc: Scope; def: Node; call: Node): string =
+  let args = call.kids
   if args.len != def.params.len:
     raise newException(ValueError,
       "wrong arg count for " & def.str & ": expected " &
-      $def.params.len & " got " & $args.len)
+      $def.params.len & " got " & $args.len & " " & errLoc(call))
   let inner = push(sc)
   var preface = ""
   for i, p in def.params:
@@ -292,7 +302,8 @@ proc emitBlockExpr(c: Ctx; sc: Scope; blk: Node): string =
     of nkAssign:
       let target = sc.lookup(s.str)
       if target.len == 0:
-        raise newException(ValueError, "unknown assignment target: " & s.str)
+        raise newException(ValueError,
+          "unknown assignment target: " & s.str & " " & errLoc(s))
       let rhs = c.emitExpr(sc, s.kids[0])
       pre.add &"{target} = ({rhs}); "
     else:
@@ -329,8 +340,7 @@ proc emitNoise(c: Ctx): string =
 proc delayBufSlots(c: Ctx; name: string; maxTimeArg: Node): int =
   if maxTimeArg.kind != nkNum:
     raise newException(ValueError,
-      name & " max_time must be a numeric literal (line " &
-      $maxTimeArg.line & ")")
+      name & " max_time must be a numeric literal " & errLoc(maxTimeArg))
   1 + max(1, int(maxTimeArg.num * c.sr))
 
 proc nativeSlotSize(c: Ctx; name: string; kids: seq[Node]): int =
@@ -362,14 +372,15 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
       elif n.str in c.topLets: "l_" & n.str
       elif n.str in c.topVarSet: "s->v_" & n.str
       else:
-        raise newException(ValueError, "unknown identifier: " & n.str &
-                            " (line " & $n.line & ")")
+        raise newException(ValueError,
+          "unknown identifier: " & n.str & " " & errLoc(n))
   of nkUnary:
     let v = c.emitExpr(sc, n.kids[0])
     case n.str
     of "-":   "(-(" & v & "))"
     of "not": "((" & v & ") == 0.0 ? 1.0 : 0.0)"
-    else:     raise newException(ValueError, "bad unary: " & n.str)
+    else:     raise newException(ValueError,
+                "bad unary: " & n.str & " " & errLoc(n))
   of nkBinOp:
     let a = c.emitExpr(sc, n.kids[0])
     let b = c.emitExpr(sc, n.kids[1])
@@ -389,7 +400,8 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
     of ">=": &"((({a}) >= ({b})) ? 1.0 : 0.0)"
     of "and": &"(((({a}) != 0.0) && (({b}) != 0.0)) ? 1.0 : 0.0)"
     of "or":  &"(((({a}) != 0.0) || (({b}) != 0.0)) ? 1.0 : 0.0)"
-    else: raise newException(ValueError, "bad binop: " & n.str)
+    else: raise newException(ValueError,
+            "bad binop: " & n.str & " " & errLoc(n))
   of nkIf:
     let cond = c.emitExpr(sc, n.kids[0])
     let thn  = c.emitExpr(sc, n.kids[1])
@@ -402,7 +414,7 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
     # Stateful builtins inlined
     if name == "phasor":
       if n.kids.len != 1:
-        raise newException(ValueError, "phasor takes 1 arg")
+        raise newException(ValueError, "phasor takes 1 arg " & errLoc(n))
       return c.emitPhasor(sc, n.kids[0])
     if name == "noise":
       return c.emitNoise()
@@ -439,7 +451,7 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
     # wave(freq, array) — array must resolve to a compile-time constant.
     if name == "wave":
       if n.kids.len != 2:
-        raise newException(ValueError, "wave takes 2 args")
+        raise newException(ValueError, "wave takes 2 args " & errLoc(n))
       let freq = c.emitExpr(sc, n.kids[0])
       let arr = n.kids[1]
       var sym = ""
@@ -453,13 +465,14 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
         for k in arr.kids:
           if k.kind != nkNum:
             raise newException(ValueError,
-              "wave array must be numeric literals only")
+              "wave array must be numeric literals only " & errLoc(k))
           items.add numLit(k.num)
         c.arrayDecls.add &"static const double {sym}[{length}] = {{" &
           items.join(", ") & "};\n"
       else:
         raise newException(ValueError,
-          "wave: second arg must be an array literal or top-level array let")
+          "wave: second arg must be an array literal or top-level " &
+          "array let " & errLoc(arr))
       let size = c.nativeSlotSize("wave", n.kids)
       let off = c.registerRegion("wave", size)
       return &"(s->idx = {off}, n_wave((DspState*)s, {freq}, (double*){sym}, {length}))"
@@ -471,26 +484,27 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
       let arity = NativeArities[name]
       if arity == -1:
         raise newException(ValueError,
-          name & " (array arg) not yet supported in codegen")
+          name & " (array arg) not yet supported in codegen " & errLoc(n))
       if n.kids.len != arity:
         raise newException(ValueError,
-          name & " takes " & $arity & " args, got " & $n.kids.len)
+          name & " takes " & $arity & " args, got " & $n.kids.len &
+          " " & errLoc(n))
       let size = c.nativeSlotSize(name, n.kids)
       let off = c.registerRegion(name, size)
       return "(s->idx = " & off & ", n_" & name & "((DspState*)s, " &
              c.callArgs(sc, n.kids) & "))"
     # User def inline
     if name in c.userDefs:
-      return c.emitDefInline(sc, c.userDefs[name], n.kids)
+      return c.emitDefInline(sc, c.userDefs[name], n)
     raise newException(ValueError,
-      "unknown function: " & name & " (line " & $n.line & ")")
+      "unknown function: " & name & " " & errLoc(n))
   of nkArr:
     # Only inline stereo pair arrays are supported as values. Emit as
     # two scalar expressions — the caller context (a final expression or
     # an index) has to unpack.
     raise newException(ValueError,
-      "array value can't appear here (line " & $n.line &
-      ") — only numeric literals for wave() or top-level stereo return")
+      "array value can't appear here " & errLoc(n) &
+      " — only numeric literals for wave() or top-level stereo return")
   of nkIdx:
     let a = n.kids[0]
     let i = n.kids[1]
@@ -511,13 +525,14 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
     if a.kind == nkArr and i.kind == nkNum:
       let k = int(i.num)
       if k < 0 or k >= a.kids.len:
-        raise newException(ValueError, "array index out of range")
+        raise newException(ValueError,
+          "array index out of range " & errLoc(n))
       return c.emitExpr(sc, a.kids[k])
     raise newException(ValueError,
-      "indexing non-constant arrays not supported (line " & $n.line & ")")
+      "indexing non-constant arrays not supported " & errLoc(n))
   else:
     raise newException(ValueError,
-      "cannot emit expression node: " & $n.kind)
+      "cannot emit expression node: " & $n.kind & " " & errLoc(n))
 
 proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
   case n.kind
@@ -541,7 +556,7 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
       return (l, r, true)
     raise newException(ValueError,
       "array literal with " & $n.kids.len &
-      " elements in stereo context (only [L,R] supported)")
+      " elements in stereo context (only [L,R] supported) " & errLoc(n))
   of nkIdx:
     let base = n.kids[0]
     let idx = n.kids[1]
@@ -562,6 +577,7 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
     if not a.stereo and not b.stereo:
       let s = c.emitExpr(sc, n)
       return (s, s, false)
+    let loc = errLoc(n)
     proc combine(op, x, y: string): string =
       case op
       of "+":  &"(({x}) + ({y}))"
@@ -569,7 +585,7 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
       of "*":  &"(({x}) * ({y}))"
       of "/":  &"(({y}) == 0.0 ? 0.0 : ({x}) / ({y}))"
       else: raise newException(ValueError,
-              "binop '" & op & "' not allowed on stereo values")
+              "binop '" & op & "' not allowed on stereo values " & loc)
     return (combine(n.str, a.l, b.l), combine(n.str, a.r, b.r), true)
   of nkUnary:
     let a = c.emitStereo(sc, n.kids[0], pre)
@@ -578,7 +594,8 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
       return (s, s, false)
     if n.str == "-":
       return ("(-(" & a.l & "))", "(-(" & a.r & "))", true)
-    raise newException(ValueError, "unary '" & n.str & "' not allowed on stereo")
+    raise newException(ValueError,
+      "unary '" & n.str & "' not allowed on stereo " & errLoc(n))
   of nkIf:
     let cond = c.emitExpr(sc, n.kids[0])
     let thn = c.emitStereo(sc, n.kids[1], pre)
@@ -598,7 +615,7 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
       if n.kids.len != def.params.len:
         raise newException(ValueError,
           "wrong arg count for " & n.str & ": expected " &
-          $def.params.len & " got " & $n.kids.len)
+          $def.params.len & " got " & $n.kids.len & " " & errLoc(n))
       let inner = push(sc)
       let tmpL = c.fresh("st_" & n.str & "_l")
       let tmpR = c.fresh("st_" & n.str & "_r")
@@ -662,7 +679,8 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
           of nkAssign:
             let target = inner.lookup(st.str)
             if target.len == 0:
-              raise newException(ValueError, "unknown assign: " & st.str)
+              raise newException(ValueError,
+                "unknown assign: " & st.str & " " & errLoc(st))
             let rhs = c.emitExpr(inner, st.kids[0])
             blk.add &"    {target} = ({rhs});\n"
           else:
@@ -691,21 +709,27 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
     if not canSplit:
       raise newException(ValueError,
         "stateful call '" & name & "' receives a stereo value " &
-        "(line " & $n.line & ") — split L/R first via bass[0]/bass[1]")
+        errLoc(n) & " — split L/R first via bass[0]/bass[1]")
     # Substitute per-channel stereo args via fresh scope-bound names,
-    # then emit two scalar calls via emitExpr.
+    # then emit two scalar calls via emitExpr. Synthesised nodes inherit
+    # n's line/source so any error raised during the split emission still
+    # points at the user's code, not a line-0 ghost.
     let innerL = push(sc)
     let innerR = push(sc)
-    var callL = Node(kind: nkCall, str: n.str, line: n.line, kids: @[])
-    var callR = Node(kind: nkCall, str: n.str, line: n.line, kids: @[])
+    var callL = Node(kind: nkCall, str: n.str,
+                     line: n.line, source: n.source, kids: @[])
+    var callR = Node(kind: nkCall, str: n.str,
+                     line: n.line, source: n.source, kids: @[])
     for i, k in n.kids:
       if argVals[i].stereo:
         let tmpL = c.fresh("stl")
         let tmpR = c.fresh("str")
         innerL.names[tmpL] = argVals[i].l
         innerR.names[tmpR] = argVals[i].r
-        callL.kids.add Node(kind: nkIdent, str: tmpL, line: n.line)
-        callR.kids.add Node(kind: nkIdent, str: tmpR, line: n.line)
+        callL.kids.add Node(kind: nkIdent, str: tmpL,
+                            line: n.line, source: n.source)
+        callR.kids.add Node(kind: nkIdent, str: tmpR,
+                            line: n.line, source: n.source)
       else:
         callL.kids.add k
         callR.kids.add k
@@ -849,8 +873,12 @@ proc emit*(c: Ctx; program: Node): string =
     # Map generated-C line back to aither source. Best-effort: puts the
     # directive at a statement boundary; errors inside inlined expressions
     # still report under their enclosing top-level line. TCC honors these.
-    if c.patchPath.len > 0 and s.line > 0:
-      body.add &"#line {s.line} \"{c.patchPath}\"\n"
+    # Prefer the per-node source tag so a stdlib-originating statement
+    # reports as stdlib in TCC errors, not as the user's patch path.
+    let srcFile =
+      if s.source.len > 0: s.source else: c.patchPath
+    if srcFile.len > 0 and s.line > 0:
+      body.add &"#line {s.line} \"{srcFile}\"\n"
     case s.kind
     of nkDef, nkVar: discard       # def inlined; var already lazy-inited
     of nkLet:
@@ -878,7 +906,8 @@ proc emit*(c: Ctx; program: Node): string =
       let target =
         if s.str in c.topVarSet: "s->v_" & s.str
         elif s.str in c.topLets: "l_" & s.str
-        else: raise newException(ValueError, "unknown assign: " & s.str)
+        else: raise newException(ValueError,
+                "unknown assign: " & s.str & " " & errLoc(s))
       let rhs = c.emitExpr(topSc, s.kids[0])
       body.add &"  {target} = ({rhs});\n"
     of nkPlay:
@@ -929,8 +958,7 @@ proc emit*(c: Ctx; program: Node): string =
               if st.str in c.topVarSet: "s->v_" & st.str
               elif inner.lookup(st.str).len > 0: inner.lookup(st.str)
               else: raise newException(ValueError,
-                "unknown assignment target '" & st.str &
-                "' (line " & $st.line & ")")
+                "unknown assignment target '" & st.str & "' " & errLoc(st))
             let rhs = c.emitExpr(inner, st.kids[0])
             body.add &"    {target} = ({rhs});\n"
           else:

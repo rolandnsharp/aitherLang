@@ -146,6 +146,44 @@ proc fadeDeltaFor(seconds: float64): float64 =
   let s = if seconds <= 0.0: DefaultFadeMs / 1000.0 else: seconds
   1.0 / (s * float64(SampleRate))
 
+# Scan a codegen error message for `(source:line)` locations and append
+# the text of the referenced source line, so the user sees the offending
+# code in the response instead of having to open the file and count.
+# Stdlib is baked in at compile-time; only the user's patch text is
+# passed in. Other sources are ignored. The first match is enough — if
+# codegen raised on a nested construct, later locations usually repeat
+# the same anchor.
+proc annotateErr(msg, userSrc, userPath: string): string =
+  # Look for a "(name:line)" token where name ends at ':' and line is an
+  # int. A bare `(line N)` (untagged source) passes through unchanged.
+  var i = 0
+  while i < msg.len:
+    let lp = msg.find('(', i)
+    if lp < 0: break
+    let rp = msg.find(')', lp + 1)
+    if rp < 0: break
+    let inner = msg[lp+1 ..< rp]
+    let colon = inner.find(':')
+    if colon > 0:
+      let src = inner[0 ..< colon]
+      let lineStr = inner[colon+1 .. ^1]
+      var lineNum = 0
+      try: lineNum = parseInt(lineStr)
+      except ValueError: lineNum = 0
+      if lineNum > 0:
+        let body =
+          if src == "stdlib": Stdlib
+          elif src == userPath: userSrc
+          else: ""
+        if body.len > 0:
+          let lines = body.split('\n')
+          if lineNum <= lines.len:
+            return msg & "\n  " & src & ":" & $lineNum & "  " &
+                   lines[lineNum - 1].strip()
+        return msg
+    i = rp + 1
+  msg
+
 proc loadPatch(filename: string; fadeIn: float64): string =
   if not fileExists(filename): return "file not found: " & filename
   let userSrc = readFile(filename)
@@ -164,6 +202,14 @@ proc loadPatch(filename: string; fadeIn: float64): string =
     stderr.writeLine "parse FAIL"
     return "parse error: " & e.msg
 
+  # Tag every node with its source origin so codegen errors (and the
+  # `#line` directives feeding TCC) can point at the right file. Without
+  # this, a stdlib-sourced error reports under the user's patch path and
+  # sends the user hunting through their own code for a fault that's in
+  # stdlib (or in their invocation of a stdlib def).
+  setSource(stdlibAst, "stdlib")
+  setSource(userAst, filename)
+
   # Merge: stdlib's top-level statements come first, then the user's.
   let program = parser.Node(
     kind: parser.nkBlock,
@@ -179,7 +225,7 @@ proc loadPatch(filename: string; fadeIn: float64): string =
     prepared = prepare(program, float64(SampleRate), filename)
   except CatchableError as e:
     stderr.writeLine "compile FAIL"
-    return "compile error: " & e.msg
+    return "compile error: " & annotateErr(e.msg, userSrc, filename)
 
   let idx = findSlot(baseName)
   acquire(mtx)

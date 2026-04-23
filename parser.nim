@@ -27,6 +27,7 @@ type
     params*: seq[string]        # def parameters
     kids*: seq[Node]            # children (interpretation per kind)
     line*: int
+    source*: string             # origin (e.g. "stdlib" or "patches/foo.aither")
 
   ParseError* = object of CatchableError
 
@@ -481,3 +482,12 @@ proc parseProgram*(source: string): Node =
     stmts.add p.parseStmt()
     p.skipNewlines()
   Node(kind: nkBlock, kids: stmts, line: 1)
+
+proc setSource*(n: Node; source: string) =
+  ## Stamp every node in `n`'s subtree with the given source origin,
+  ## used by error messages so the reader can tell which file produced a
+  ## given (line N). Called by the engine after parsing stdlib and the
+  ## user patch separately.
+  if n == nil: return
+  n.source = source
+  for k in n.kids: setSource(k, source)
