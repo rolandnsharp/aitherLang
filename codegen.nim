@@ -170,8 +170,10 @@ proc lookup(sc: Scope; name: string): string =
   ""
 
 # Builtins callable by name from user code that aren't keywords or ops:
-# libm1, shape primitives, stateful inlined builtins, math helpers.
-const BuiltinFns = ["saw", "tri", "sqr", "phasor", "noise", "abs", "pow"]
+# libm1, shape primitives, stateful inlined builtins, math helpers, MIDI.
+const BuiltinFns = ["saw", "tri", "sqr", "phasor", "noise", "abs", "pow",
+                    "midi_cc", "midi_note", "midi_freq", "midi_gate",
+                    "midi_trig"]
 
 # True when `name` resolves to a value (scalar local, stereo local, top
 # lets/vars/arrays, play block, stereo let). Values shadow function
@@ -260,7 +262,7 @@ proc isPureForStereo(c: Ctx; n: Node): bool =
   case n.kind
   of nkVar: return false
   of nkCall:
-    if n.str in ["phasor", "noise"]: return false
+    if n.str in ["phasor", "noise", "midi_trig"]: return false
     if NativeArities.hasKey(n.str): return false
     if n.str in c.userDefs:
       if not isPureForStereo(c, c.userDefs[n.str].kids[0]): return false
@@ -487,6 +489,25 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
       return &"fmin(fmax({v}, {lo}), {hi})"
     if name == "int" and n.kids.len == 1:
       return "((double)(long)(" & c.emitExpr(sc, n.kids[0]) & "))"
+    # MIDI input primitives — read engine-owned global state.
+    # midi_cc/note/trig take a note-or-CC number; midi_freq/gate are 0-arg.
+    # midi_trig is stateful (per-voice pool slot for edge detection), so
+    # it goes through the region path; the other four are pure reads.
+    if name == "midi_cc" and n.kids.len == 1:
+      return "n_midi_cc((int)(" & c.emitExpr(sc, n.kids[0]) & "))"
+    if name == "midi_note" and n.kids.len == 1:
+      return "n_midi_note((int)(" & c.emitExpr(sc, n.kids[0]) & "))"
+    if name == "midi_freq" and n.kids.len == 0:
+      return "n_midi_freq()"
+    if name == "midi_gate" and n.kids.len == 0:
+      return "n_midi_gate()"
+    if name == "midi_trig" and n.kids.len == 1:
+      let off = c.registerRegion("midi_trig", 1)
+      return "(s->idx = " & off & ", n_midi_trig((DspState*)s, (int)(" &
+             c.emitExpr(sc, n.kids[0]) & ")))"
+    if name in ["midi_cc", "midi_note", "midi_trig", "midi_freq", "midi_gate"]:
+      raise newException(ValueError,
+        name & ": wrong arg count " & errLoc(n))
     # wave(freq, array) — array must resolve to a compile-time constant.
     if name == "wave":
       if n.kids.len != 2:
@@ -891,6 +912,11 @@ proc emit*(c: Ctx; program: Node): string =
   pre.add "extern double shape_saw(double);\n"
   pre.add "extern double shape_tri(double);\n"
   pre.add "extern double shape_sqr(double);\n"
+  pre.add "extern double n_midi_cc(int);\n"
+  pre.add "extern double n_midi_note(int);\n"
+  pre.add "extern double n_midi_freq(void);\n"
+  pre.add "extern double n_midi_gate(void);\n"
+  pre.add "extern double n_midi_trig(DspState*,int);\n"
   # VoiceState — DspState prefix is *exactly* the Nim layout; new fields
   # go after.
   # NOTE: voice.nim depends on this exact layout for state migration:
