@@ -408,37 +408,6 @@ proc soloPart(voiceName, partName: string; fade: float64): string =
   release(mtx)
   ""
 
-proc partCmd(voiceName, partName, action: string;
-             args: seq[string]): string =
-  let vIdx = findSlot(voiceName)
-  if vIdx < 0: return "voice not found: " & voiceName
-  let voice = slots[vIdx].voice
-  let pIdx = findPart(voice, partName)
-  if pIdx < 0: return "part not found: " & partName
-  case action.toLowerAscii()
-  of "play":
-    let fade = if args.len >= 1: parseFloatArg(args[0]) else: 0.02
-    acquire(mtx); setPartGainTarget(voice, pIdx, 1.0, fade); release(mtx)
-    ""
-  of "stop":
-    let fade = if args.len >= 1: parseFloatArg(args[0]) else: 0.02
-    acquire(mtx); setPartGainTarget(voice, pIdx, 0.0, fade); release(mtx)
-    ""
-  of "mute":
-    acquire(mtx); setPartGainTarget(voice, pIdx, 0.0, 0.01); release(mtx)
-    ""
-  of "unmute":
-    acquire(mtx); setPartGainTarget(voice, pIdx, 1.0, 0.01); release(mtx)
-    ""
-  of "gain":
-    if args.len < 1: return "usage: part <voice> <name> gain <value> [fade]"
-    let target = parseFloatArg(args[0])
-    let fade = if args.len >= 2: parseFloatArg(args[1]) else: 0.02
-    acquire(mtx); setPartGainTarget(voice, pIdx, target, fade); release(mtx)
-    ""
-  else:
-    "unknown part action: " & action
-
 proc listVoices(): string =
   var lines: seq[string]
   for i in 0 ..< slotCount:
@@ -529,12 +498,6 @@ proc handleCmd(line: string): string =
   of "parts":
     if parts.len < 2: return "ERR usage: parts <voice>"
     "OK\n" & partsReport(parts[1])
-  of "part":
-    if parts.len < 4:
-      return "ERR usage: part <voice> <name> <play|stop|mute|unmute|gain> [args]"
-    let extra = if parts.len >= 5: parts[4 .. ^1] else: @[]
-    let err = partCmd(parts[1], parts[2], parts[3], extra)
-    if err.len > 0: "ERR " & err else: "OK"
   of "kill":
     running = false
     "OK bye"
@@ -607,7 +570,6 @@ when isMainModule:
     echo "  scope [name]                per-voice RMS/peak/clips/envelope (all if no name; 'master' for mix bus)"
     echo "  retrigger <name>            reset start_t so the composition plays from the top"
     echo "  parts <voice>               list named parts (play blocks) with gain + state"
-    echo "  part <voice> <name> <action> [args]   play/stop/mute/unmute/gain a part"
     echo "  kill                        shut down engine"
     quit 0
 
@@ -648,10 +610,6 @@ when isMainModule:
   of "parts":
     if args.len < 2: quit "usage: aither parts <voice>"
     sendCmd("parts " & args[1])
-  of "part":
-    if args.len < 4:
-      quit "usage: aither part <voice> <name> <play|stop|mute|unmute|gain> [args]"
-    sendCmd("part " & args[1 .. ^1].join(" "))
   of "kill":
     sendCmd("kill")
   else:

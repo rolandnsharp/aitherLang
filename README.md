@@ -37,22 +37,29 @@ One binary, ~500 KB. Linux-only for now (system audio via miniaudio).
 ## Use
 
 ```
-aither start                   launch engine
-aither send bass.aither        load & play
-aither send bass.aither 2      ...with 2-second fade in
-aither stop bass 1             fade out over 1 second
-aither list                    show active voices
-aither parts bass              show individual parts (play blocks)
-aither part bass kick mute     silence one part; state keeps running
-aither part bass kick play 2   fade a muted part back in over 2 s
-aither scope master            master-bus RMS / peak / clips / envelope
-aither retrigger bass          reset start_t so the piece plays from top
-aither kill                    shut down
+aither start                          launch engine
+aither send bass.aither               load & play
+aither send bass.aither 2             ...with 2-second fade in
+aither stop bass 1                    fade out over 1 second
+aither mute bass                      silence whole voice (state keeps running)
+aither mute bass kick                 silence one play within bass
+aither mute bass kick 2               ...with 2-second fade
+aither unmute bass kick               restore
+aither solo bass kick                 fade other plays in bass to 0
+aither list                           show active voices + per-play gains
+aither parts bass                     focused per-play view for one voice
+aither scope master                   master-bus RMS / peak / clips / envelope
+aither retrigger bass                 reset start_t so the piece plays from top
+aither clear 2                        fade everything out
+aither kill                           shut down
 ```
 
 Each file is a voice. The filename is the name. Edit the
 file, resend it, and the voice hot-swaps without dropping
-state. Edit individual parts live with `aither part …`.
+state. Edit individual parts live with `aither mute /
+unmute / solo …`. To rebalance the mix, edit the patch's
+`gain()` calls and resend — mixing decisions live in the
+score, not in the CLI.
 
 ```
 aither start &
