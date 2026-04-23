@@ -42,6 +42,10 @@ proc tokenize*(source: string): seq[Token] =
   var col = 1
   var i = 0
   var atLineStart = true
+  # bracketDepth > 0 means we're inside a `[ ... ]` literal. Newlines and
+  # indent changes are treated as whitespace in that window so long array
+  # literals can be split across lines Python-style.
+  var bracketDepth = 0
   let n = source.len
 
   template emit(k: TokKind; s: string = ""; v: float64 = 0.0) =
@@ -49,31 +53,51 @@ proc tokenize*(source: string): seq[Token] =
 
   while i < n:
     if atLineStart:
-      var indent = 0
-      while i < n and source[i] == ' ':
-        indent += 1; i += 1; col += 1
-      # Skip blank or comment-only lines without changing indent stack
-      if i >= n or source[i] == '\n' or source[i] == '#':
+      if bracketDepth > 0:
+        # Inside a bracketed literal: skip leading whitespace, skip
+        # comment-only lines, but emit no indent/dedent and no newline.
+        while i < n and source[i] == ' ':
+          i += 1; col += 1
         if i < n and source[i] == '#':
           while i < n and source[i] != '\n': i += 1
         if i < n and source[i] == '\n':
           i += 1; line += 1; col = 1
-        continue
-      # Indent change
-      if indent > indents[^1]:
-        indents.add indent
-        emit(tkIndent)
+          continue
+        atLineStart = false
       else:
-        while indents.len > 1 and indent < indents[^1]:
-          discard indents.pop()
-          emit(tkDedent)
-      atLineStart = false
+        var indent = 0
+        while i < n and source[i] == ' ':
+          indent += 1; i += 1; col += 1
+        # Skip blank or comment-only lines without changing indent stack
+        if i >= n or source[i] == '\n' or source[i] == '#':
+          if i < n and source[i] == '#':
+            while i < n and source[i] != '\n': i += 1
+          if i < n and source[i] == '\n':
+            i += 1; line += 1; col = 1
+          continue
+        # Indent change
+        if indent > indents[^1]:
+          indents.add indent
+          emit(tkIndent)
+        else:
+          while indents.len > 1 and indent < indents[^1]:
+            discard indents.pop()
+            emit(tkDedent)
+        atLineStart = false
 
     let c = source[i]
     case c
     of '\n':
-      emit(tkNewline)
-      i += 1; line += 1; col = 1; atLineStart = true
+      if bracketDepth == 0:
+        emit(tkNewline)
+        atLineStart = true
+      else:
+        # Inside brackets, newlines are whitespace. We still need
+        # atLineStart logic for the *next* line so leading whitespace
+        # gets eaten, so flip it here too — but the branch above won't
+        # emit indent/dedent while bracketDepth > 0.
+        atLineStart = true
+      i += 1; line += 1; col = 1
     of ' ', '\t', '\r':
       i += 1; col += 1
     of '#':
@@ -98,8 +122,10 @@ proc tokenize*(source: string): seq[Token] =
       if s in Keywords: emit(tkKeyword, s) else: emit(tkIdent, s)
     of '(':  emit(tkLParen); i += 1; col += 1
     of ')':  emit(tkRParen); i += 1; col += 1
-    of '[':  emit(tkLBracket); i += 1; col += 1
-    of ']':  emit(tkRBracket); i += 1; col += 1
+    of '[':  emit(tkLBracket); i += 1; col += 1; bracketDepth += 1
+    of ']':
+      emit(tkRBracket); i += 1; col += 1
+      if bracketDepth > 0: bracketDepth -= 1
     of ',':  emit(tkComma); i += 1; col += 1
     of ':':  emit(tkColon); i += 1; col += 1
     of ';':  emit(tkSemi); i += 1; col += 1
@@ -212,6 +238,9 @@ proc parseArrayLit(p: var Parser): Node =
     while true:
       items.add p.parseExpr()
       if not p.match(tkComma): break
+      # Trailing comma before the closing bracket is allowed so that
+      # multi-line literals don't need to special-case the last entry.
+      if p.peek().kind == tkRBracket: break
   discard p.expect(tkRBracket)
   Node(kind: nkArr, kids: items, line: line)
 

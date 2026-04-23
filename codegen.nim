@@ -45,6 +45,11 @@ type
     fns: Table[string, string]
     # name -> (lExpr, rExpr). Stereo-valued bindings (params, lets).
     stereoNames: Table[string, tuple[l, r: string]]
+    # name -> (C symbol, length). Play-local numeric-literal arrays that
+    # were auto-hoisted to static const data; lookup walks the chain
+    # (parent scopes inherit top-level arrays via the topArrays fallback
+    # used only if we bottom out here).
+    arrays: Table[string, tuple[sym: string; length: int]]
 
   Ctx = ref object
     userDefs: Table[string, Node]
@@ -125,7 +130,21 @@ proc push(parent: Scope): Scope =
   Scope(parent: parent,
         names: initTable[string, string](),
         fns: initTable[string, string](),
-        stereoNames: initTable[string, tuple[l, r: string]]())
+        stereoNames: initTable[string, tuple[l, r: string]](),
+        arrays: initTable[string, tuple[sym: string; length: int]]())
+
+proc lookupArray(c: Ctx; sc: Scope; name: string):
+    tuple[sym: string; length: int; ok: bool] =
+  var s = sc
+  while s != nil:
+    if name in s.arrays:
+      let a = s.arrays[name]
+      return (a.sym, a.length, true)
+    s = s.parent
+  if name in c.topArrays:
+    let (sym, length) = c.topArrays[name]
+    return (sym, length, true)
+  ("", 0, false)
 
 proc lookupStereo(sc: Scope; name: string): tuple[l, r: string, ok: bool] =
   var s = sc
@@ -160,9 +179,9 @@ const BuiltinFns = ["saw", "tri", "sqr", "phasor", "noise", "abs", "pow"]
 proc isValueName(c: Ctx; sc: Scope; name: string): bool =
   if sc.lookup(name).len > 0: return true
   if sc.lookupStereo(name).ok: return true
+  if c.lookupArray(sc, name).ok: return true
   if name in c.topLets: return true
   if name in c.topVarSet: return true
-  if name in c.topArrays: return true
   if name in c.playSet: return true
   if name in c.stereoLets: return true
   false
@@ -476,8 +495,13 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
       let arr = n.kids[1]
       var sym = ""
       var length = 0
-      if arr.kind == nkIdent and arr.str in c.topArrays:
-        (sym, length) = c.topArrays[arr.str]
+      if arr.kind == nkIdent:
+        let found = c.lookupArray(sc, arr.str)
+        if not found.ok:
+          raise newException(ValueError,
+            "wave: " & arr.str & " is not a numeric-literal array " &
+            errLoc(arr))
+        (sym, length) = (found.sym, found.length)
       elif arr.kind == nkArr:
         sym = c.fresh("arr")
         length = arr.kids.len
@@ -491,8 +515,8 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
           items.join(", ") & "};\n"
       else:
         raise newException(ValueError,
-          "wave: second arg must be an array literal or top-level " &
-          "array let " & errLoc(arr))
+          "wave: second arg must be an array literal or a let binding " &
+          "to one " & errLoc(arr))
       let size = c.nativeSlotSize("wave", n.kids)
       let off = c.registerRegion("wave", size)
       return &"(s->idx = {off}, n_wave((DspState*)s, {freq}, (double*){sym}, {length}))"
@@ -528,11 +552,12 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
   of nkIdx:
     let a = n.kids[0]
     let i = n.kids[1]
-    # Top-level numeric array (e.g. `let notes = [...]`).
-    if a.kind == nkIdent and a.str in c.topArrays:
-      let (sym, length) = c.topArrays[a.str]
-      let ix = c.emitExpr(sc, i)
-      return &"({sym}[(int)({ix}) % {length}])"
+    # Numeric array: top-level, or auto-hoisted play-local.
+    if a.kind == nkIdent:
+      let found = c.lookupArray(sc, a.str)
+      if found.ok:
+        let ix = c.emitExpr(sc, i)
+        return &"({found.sym}[(int)({ix}) % {found.length}])"
     # Play-name / stereo-let / scope-bound stereo indexed with a
     # constant 0 or 1 → L or R channel scalar.
     if a.kind == nkIdent and i.kind == nkNum and int(i.num) in {0, 1}:
@@ -796,10 +821,21 @@ proc emit*(c: Ctx; program: Node): string =
   # First pass: collect top-level vars (including ones nested in play
   # bodies — `var` is name-keyed, play-scope doesn't change that) and
   # top-level lets (play-local lets stay local).
+  # Pass 1a: collect every play name up-front. Shadow checks in
+  # subsequent passes rely on c.playSet being complete regardless of
+  # the play's source position.
+  for s in program.kids:
+    if s.kind == nkPlay:
+      c.playSet.incl s.str
+
   proc scanVars(c: Ctx; n: Node) =
     if n == nil: return
     case n.kind
     of nkVar:
+      if n.str in c.playSet:
+        raise newException(ValueError,
+          "'" & n.str & "' is the name of a play block — " &
+          "choose a different variable name " & errLoc(n))
       if n.str notin c.topVarSet:
         c.topVarSet.incl n.str
         c.topVarNames.add n.str
@@ -812,10 +848,18 @@ proc emit*(c: Ctx; program: Node): string =
   for s in program.kids:
     case s.kind
     of nkVar:
+      if s.str in c.playSet:
+        raise newException(ValueError,
+          "'" & s.str & "' is the name of a play block — " &
+          "choose a different variable name " & errLoc(s))
       if s.str notin c.topVarSet:
         c.topVarSet.incl s.str
         c.topVarNames.add s.str
     of nkLet:
+      if s.str in c.playSet:
+        raise newException(ValueError,
+          "'" & s.str & "' is the name of a play block — " &
+          "choose a different variable name " & errLoc(s))
       c.topLets.incl s.str
     of nkPlay:
       let body = s.kids[0]
@@ -956,10 +1000,42 @@ proc emit*(c: Ctx; program: Node): string =
         else:
           case st.kind
           of nkLet:
+            # Shadow guard: a play-local let that reuses a play name is
+            # almost always a typo. Without this, `let bass = ...` inside
+            # another play captures a scalar while later references to
+            # `bass` go through the stereo play-name path, producing a
+            # misleading type error deep in the expression walker.
+            if st.str in c.playSet:
+              raise newException(ValueError,
+                "'" & st.str & "' is the name of a play block — " &
+                "choose a different local variable name " & errLoc(st))
+            # Numeric-literal array of length != 2: auto-hoist so wave()
+            # (and indexing) can treat it like a top-level array. Pre-fix
+            # the user had to move the array above the play block; now it
+            # can live next to the play that uses it. Length 2 keeps its
+            # stereo-pair semantics (see `[L, R]` lets).
+            let rhs = st.kids[0]
+            if rhs.kind == nkArr and rhs.kids.len != 2 and
+               rhs.kids.len > 0 and rhs.kids.allIt(it.kind == nkNum):
+              let sym = c.fresh("arr_" & s.str & "_" & st.str)
+              var items: seq[string] = @[]
+              for k in rhs.kids: items.add numLit(k.num)
+              c.arrayDecls.add &"static const double {sym}[{rhs.kids.len}] = {{" &
+                items.join(", ") & "};\n"
+              inner.arrays[st.str] = (sym, rhs.kids.len)
+            # A non-numeric array with length != 2 has no legal interpretation
+            # (not a wave() data arg, not a stereo pair). Catch it here with a
+            # message that points the user at the numeric-literal requirement
+            # rather than letting emitExpr raise the stale "array value can't
+            # appear here" from the bottom of the expression walker.
+            elif rhs.kind == nkArr and rhs.kids.len != 2:
+              raise newException(ValueError,
+                "array let '" & st.str & "' must be numeric literals only " &
+                "(for wave) or a length-2 stereo pair " & errLoc(st))
             # Stereo-producing RHS (haas, pan, arr literal, or references
             # to a prior stereo local): emit two locals, register name
             # as a stereo let for downstream emission.
-            if c.refsStereo(st.kids[0]):
+            elif c.refsStereo(st.kids[0]):
               var sub = ""
               let v = c.emitStereo(inner, st.kids[0], sub)
               body.add sub
