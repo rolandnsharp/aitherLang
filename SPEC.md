@@ -360,6 +360,33 @@ float64 pool (4 MB).
 with low freq it's a step sequencer, with audio freq it's
 a custom waveform.
 
+### MIDI input
+
+I/O primitives are prefixed by their source (`midi_`) so a
+reader can tell "this number comes from a knob you turned"
+apart from a derived DSP signal. State is engine-owned —
+hot-reloading a patch preserves held notes and knob values.
+
+| Function        | Description                                      |
+|-----------------|--------------------------------------------------|
+| `midi_cc(n)`    | CC `n` value, `0..1`. `n` in `0..127`.           |
+| `midi_note(n)`  | Velocity `0..1` while note `n` is held; 0 else. |
+| `midi_freq()`   | Hz of the most recent note-on (mono).            |
+| `midi_gate()`   | Velocity `0..1` of the most recent note-on; 0 after note-off. |
+| `midi_trig(n)`  | 1.0 for a single sample on each note-on for `n`; 0 otherwise. Per-voice edge detect. |
+
+If no MIDI device is connected, all five return 0 and the
+patch still runs. There is no binding step — the patch IS
+the routing. Example:
+
+```
+play bass: osc(saw, midi_freq()) * midi_gate() * 0.3
+play kick: discharge(midi_trig(36), 30) * sin(TAU * phasor(60))
+(bass + kick) * midi_cc(80)
+```
+
+See "CLI" below for `aither midi list / connect / disconnect`.
+
 ---
 
 ## Stdlib (written in aither)

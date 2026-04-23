@@ -1,7 +1,7 @@
 ## aither engine — audio callback + socket CLI for live coding
 
 import std/[os, net, strutils, math, locks, tables]
-import parser, voice, miniaudio
+import parser, voice, miniaudio, midi
 
 const
   SampleRate    = 48000'u32
@@ -544,6 +544,30 @@ proc handleCmd(line: string): string =
   of "parts":
     if parts.len < 2: return "ERR usage: parts <voice>"
     "OK\n" & partsReport(parts[1])
+  of "midi":
+    if parts.len < 2:
+      return "ERR usage: midi list|connect <spec>|disconnect"
+    case parts[1].toLowerAscii()
+    of "list":
+      let body = midiListPorts()
+      if body.len == 0: "OK (no MIDI ports)"
+      else: "OK\n" & body.strip(leading = false)
+    of "connect":
+      if parts.len < 3: return "ERR usage: midi connect <client:port>"
+      if midiConnect(parts[2]): "OK connected " & parts[2]
+      else: "ERR midi connect failed: " & parts[2]
+    of "disconnect":
+      # v1: we don't track individual subscriptions, so the only thing we
+      # can offer is closing + reopening the sequencer. That also drops
+      # the thread — call it a deliberate limitation for now.
+      midiShutdown()
+      if midiOpen():
+        midiStartThread()
+        "OK midi reset"
+      else:
+        "ERR midi reopen failed"
+    else:
+      "ERR usage: midi list|connect <spec>|disconnect"
   of "kill":
     running = false
     "OK bye"
@@ -560,6 +584,19 @@ proc startEngine() =
     quit "audio start failed", 1
 
   echo "aither \xC2\xB7 ", SampleRate, " Hz \xC2\xB7 ", SocketPath
+
+  # Bring up MIDI input. If no sequencer is available (unusual on Linux
+  # but possible in containers / chroots) we just log and carry on —
+  # midi_* primitives read zero, patches still run.
+  if midiOpen():
+    let who = midiAutoConnect()
+    if who.len > 0:
+      stderr.writeLine "[aither] connected to MIDI: ", who
+    else:
+      stderr.writeLine "[aither] MIDI ready, no input port auto-connected"
+    midiStartThread()
+  else:
+    stderr.writeLine "[aither] MIDI unavailable (ALSA seq open failed)"
 
   if fileExists(SocketPath): removeFile(SocketPath)
   var server = newSocket(AF_UNIX, SOCK_STREAM, IPPROTO_IP)
@@ -578,6 +615,7 @@ proc startEngine() =
     except CatchableError:
       if running: discard
 
+  midiShutdown()
   discard aither_audio_stop()
   aither_audio_uninit()
   server.close()
@@ -616,6 +654,9 @@ when isMainModule:
     echo "  scope [name]                per-voice RMS/peak/clips/envelope (all if no name; 'master' for mix bus)"
     echo "  retrigger <name>            reset start_t so the composition plays from the top"
     echo "  parts <voice>               list named parts (play blocks) with gain + state"
+    echo "  midi list                   show ALSA seq ports"
+    echo "  midi connect <spec>         subscribe to a specific port (e.g. '28:0')"
+    echo "  midi disconnect             drop MIDI and re-open the sequencer"
     echo "  kill                        shut down engine"
     quit 0
 
@@ -656,6 +697,10 @@ when isMainModule:
   of "parts":
     if args.len < 2: quit "usage: aither parts <voice>"
     sendCmd("parts " & args[1])
+  of "midi":
+    if args.len < 2: quit "usage: aither midi list|connect <spec>|disconnect"
+    let rest = args[1 .. ^1].join(" ")
+    sendCmd("midi " & rest)
   of "kill":
     sendCmd("kill")
   else:

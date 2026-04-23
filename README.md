@@ -50,9 +50,35 @@ aither list                           show active voices + per-play gains
 aither parts bass                     focused per-play view for one voice
 aither scope master                   master-bus RMS / peak / clips / envelope
 aither retrigger bass                 reset start_t so the piece plays from top
+aither midi list                      ALSA seq input ports
+aither midi connect 28:0              subscribe to a specific port
 aither clear 2                        fade everything out
 aither kill                           shut down
 ```
+
+### MIDI input
+
+On `aither start` the engine auto-connects to the first
+ALSA seq input port it finds. Primitives exposed to patches:
+
+```
+midi_cc(n)        # knob/slider n — value 0..1
+midi_note(n)      # velocity 0..1 while note n is held
+midi_freq()       # Hz of the most recent note-on (mono)
+midi_gate()       # velocity 0..1 of that note; 0 after release
+midi_trig(n)      # 1.0 for one sample on each note-on for n
+```
+
+There is no binding step — the patch IS the routing:
+
+```
+play lead: osc(saw, midi_freq()) * midi_gate() * 0.3
+play kick: discharge(midi_trig(36), 30) * sin(TAU * phasor(60))
+(lead + kick) * midi_cc(80)
+```
+
+If no device is present all five return 0 — the patch still
+runs. Hot-reload preserves held notes and knob positions.
 
 Each file is a voice. The filename is the name. Edit the
 file, resend it, and the voice hot-swaps without dropping

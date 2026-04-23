@@ -11,8 +11,11 @@
 ##   * `midi_trig(n)` is the only primitive with per-voice pool state
 ##     (one slot tracks the last-seen global trig counter for note n).
 
-import std/[atomics, math]
+import std/[atomics, math, os]
 import dsp
+
+{.compile: "alsa_midi.c".}
+{.passL: "-lasound".}
 
 const OverflowSlotMidi = DspPoolSize - 128
 
@@ -91,3 +94,82 @@ proc nMidiTrig*(s: var DspState; n: cint): cdouble
   let prev = s.pool[i]
   s.pool[i] = cur
   if cur > prev: 1.0 else: 0.0
+
+# ---- ALSA seq backend ---------------------------------------------------
+# The C wrapper in alsa_midi.c isolates us from libasound's unions and
+# bitfields. Our side runs a single thread that blocks in snd_seq_event_input
+# and dispatches to the writer API above.
+
+type
+  NoteOnFn*  = proc (note, vel: cint) {.cdecl.}
+  NoteOffFn* = proc (note: cint) {.cdecl.}
+  CcFn*      = proc (cc, value: cint) {.cdecl.}
+
+proc aither_alsa_open(name: cstring): cint {.importc, cdecl.}
+proc aither_alsa_connect_from(client, port: cint): cint {.importc, cdecl.}
+proc aither_alsa_list_ports(buf: cstring; size: cint): cint {.importc, cdecl.}
+proc aither_alsa_auto_connect(buf: cstring; size: cint): cint {.importc, cdecl.}
+proc aither_alsa_parse_address(spec: cstring; client, port: ptr cint): cint
+  {.importc, cdecl.}
+proc aither_alsa_run(onOn: NoteOnFn; onOff: NoteOffFn; onCc: CcFn)
+  {.importc, cdecl.}
+proc aither_alsa_close() {.importc, cdecl.}
+
+# Callbacks that the C thread invokes directly. They must be {.cdecl,
+# gcsafe.} — they touch only atomic globals so the GC is never reached.
+proc cbNoteOn(note, vel: cint) {.cdecl.} = midiNoteOn(int(note), int(vel))
+proc cbNoteOff(note: cint) {.cdecl.} = midiNoteOff(int(note))
+proc cbCc(cc, value: cint) {.cdecl.} = midiCc(int(cc), int(value))
+
+var midiThread: Thread[void]
+var midiThreadStarted: bool
+
+proc midiRunLoop() {.thread, nimcall.} =
+  aither_alsa_run(cbNoteOn, cbNoteOff, cbCc)
+
+# Public API --------------------------------------------------------------
+
+proc midiOpen*(clientName = "aither"): bool =
+  ## Open the ALSA seq client and create an input port. No subscription
+  ## yet — the caller picks a source via midiAutoConnect or midiConnect.
+  ## Returns false if libasound isn't available / seq can't be opened.
+  aither_alsa_open(cstring(clientName)) == 0
+
+proc midiListPorts*(): string =
+  ## Render all readable ALSA seq ports as "client:port\tname" lines.
+  ## Returns an empty string if nothing is available.
+  var buf = newString(4096)
+  let n = aither_alsa_list_ports(cstring(buf), cint(buf.len))
+  if n <= 0: return ""
+  buf.setLen(buf.cstring.len)
+  buf
+
+proc midiAutoConnect*(): string =
+  ## Subscribe to the first connectable input port; return a human-readable
+  ## identifier ("Device - Port (client:port)"), or "" if nothing found.
+  var buf = newString(256)
+  if aither_alsa_auto_connect(cstring(buf), cint(buf.len)) == 0:
+    buf.setLen(buf.cstring.len)
+    return buf
+  ""
+
+proc midiConnect*(spec: string): bool =
+  ## Subscribe to a specific port; spec is ALSA's "client:port" form,
+  ## either numeric ("28:0") or client-name ("Minilab3:0").
+  var client, port: cint
+  if aither_alsa_parse_address(cstring(spec), addr client, addr port) != 0:
+    return false
+  aither_alsa_connect_from(client, port) == 0
+
+proc midiStartThread*() =
+  ## Spawn the blocking input thread. Idempotent.
+  if midiThreadStarted: return
+  createThread(midiThread, midiRunLoop)
+  midiThreadStarted = true
+
+proc midiShutdown*() =
+  ## Close the sequencer (which unblocks the input thread) and join.
+  if not midiThreadStarted: return
+  aither_alsa_close()
+  joinThread(midiThread)
+  midiThreadStarted = false
