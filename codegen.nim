@@ -239,6 +239,7 @@ proc numLit(v: float64): string =
 
 proc emitExpr(c: Ctx; sc: Scope; n: Node): string
 proc emitBlockExpr(c: Ctx; sc: Scope; blk: Node): string
+proc refsStereo(c: Ctx; sc: Scope; n: Node): bool
 
 # Stereo-aware emission. Returns (l, r, stereo) where stereo=false means
 # l == r (the caller may collapse to a single emit). `pre` accumulates
@@ -704,6 +705,39 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
       "cannot emit expression node: " & $n.kind & " " & errLoc(n))
 
 proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
+  # Scalar fast path. If the subtree contains no stereo refs, it has
+  # exactly one value — emit it once via emitExpr, bind to a temp via
+  # `pre` when the expression may have side effects, and return the
+  # temp as both .l and .r. Without the bind, compound scalar results
+  # (anything containing phasor/delay/native DSP/etc.) would be inlined
+  # textually into both *outL and *outR by the caller and run their
+  # state-advancing side effects twice per sample (doubling phasor
+  # frequency, delay write-rate, etc.). Literals and bare idents are
+  # side-effect-free so we skip the bind.
+  if not c.refsStereo(sc, n):
+    case n.kind
+    of nkNum:
+      let s = numLit(n.num)
+      return (s, s, false)
+    of nkIdent:
+      # Same fn-ident fallback as the old nkIdent case — a function
+      # identifier has no C value, but we return (name, name) so the
+      # caller (a stereo-def inlining pass that captures fn-valued
+      # params) can read it.
+      if isFnName(c, sc, n.str):
+        return (n.str, n.str, false)
+      let s = c.emitExpr(sc, n)
+      return (s, s, false)
+    else:
+      let s = c.emitExpr(sc, n)
+      let tmp = c.fresh("sst")
+      pre.add &"  double {tmp} = ({s});\n"
+      return (tmp, tmp, false)
+
+  # refsStereo is true: at least one descendant is stereo. Dispatch by
+  # node kind to build a channel-split result. The "both operands
+  # scalar" branches that used to live here are unreachable now — if
+  # they ever applied, the early-out above caught the whole subtree.
   case n.kind
   of nkIdent:
     let scoped = sc.lookupStereo(n.str)
@@ -711,15 +745,14 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
       return (scoped.l, scoped.r, true)
     if n.str in c.playSet or n.str in c.stereoLets:
       return (stereoRef(c, n.str, "l"), stereoRef(c, n.str, "r"), true)
-    # Function-value idents (passed as args) aren't variables; let
-    # emitExpr handle them via its call site. Report as scalar with a
-    # placeholder so the caller falls through to scalar emission.
-    if isFnName(c, sc, n.str):
-      return (n.str, n.str, false)
-    let s = c.emitExpr(sc, n)
-    return (s, s, false)
+    raise newException(ValueError,
+      "internal: nkIdent '" & n.str & "' flagged as stereo by refsStereo " &
+      "but no stereo binding found " & errLoc(n))
   of nkArr:
     if n.kids.len == 2:
+      # Each channel gets its own emission — the two expressions are
+      # separate subtrees, so any side effect they share (unlikely but
+      # possible) is intended to happen per channel.
       let l = c.emitExpr(sc, n.kids[0])
       let r = c.emitExpr(sc, n.kids[1])
       return (l, r, true)
@@ -738,14 +771,11 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
       if base.str in c.playSet or base.str in c.stereoLets:
         let pick = stereoRef(c, base.str, if int(idx.num) == 0: "l" else: "r")
         return (pick, pick, false)
-    let s = c.emitExpr(sc, n)
-    return (s, s, false)
+    raise newException(ValueError,
+      "stereo-indexed expression must be base[0] or base[1] " & errLoc(n))
   of nkBinOp:
     let a = c.emitStereo(sc, n.kids[0], pre)
     let b = c.emitStereo(sc, n.kids[1], pre)
-    if not a.stereo and not b.stereo:
-      let s = c.emitExpr(sc, n)
-      return (s, s, false)
     let loc = errLoc(n)
     proc combine(op, x, y: string): string =
       case op
@@ -755,35 +785,30 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
       of "/":  &"(({y}) == 0.0 ? 0.0 : ({x}) / ({y}))"
       else: raise newException(ValueError,
               "binop '" & op & "' not allowed on stereo values " & loc)
+    # a.l / a.r / b.l / b.r are all either bare temps (from the scalar
+    # fast path) or true stereo refs — safe to duplicate textually.
     return (combine(n.str, a.l, b.l), combine(n.str, a.r, b.r), true)
   of nkUnary:
     let a = c.emitStereo(sc, n.kids[0], pre)
-    if not a.stereo:
-      let s = c.emitExpr(sc, n)
-      return (s, s, false)
     if n.str == "-":
       return ("(-(" & a.l & "))", "(-(" & a.r & "))", true)
     raise newException(ValueError,
       "unary '" & n.str & "' not allowed on stereo " & errLoc(n))
   of nkIf:
-    let cond = c.emitExpr(sc, n.kids[0])
+    # cond is always scalar (no stereo conditional in aither). Bind it
+    # so the ternary body textually referencing condTmp in both L and R
+    # doesn't evaluate the condition twice per sample if it contains
+    # side-effecting subexpressions.
+    let condExpr = c.emitExpr(sc, n.kids[0])
+    let condTmp = c.fresh("ifc")
+    pre.add &"  double {condTmp} = ({condExpr});\n"
     let thn = c.emitStereo(sc, n.kids[1], pre)
     let els =
       if n.kids[2] != nil: c.emitStereo(sc, n.kids[2], pre)
       else: ("0.0", "0.0", false)
-    if not thn.stereo and not els.stereo:
-      let s = c.emitExpr(sc, n)
-      return (s, s, false)
-    return (&"(({cond}) != 0.0 ? ({thn.l}) : ({els.l}))",
-            &"(({cond}) != 0.0 ? ({thn.r}) : ({els.r}))", true)
+    return (&"(({condTmp}) != 0.0 ? ({thn.l}) : ({els.l}))",
+            &"(({condTmp}) != 0.0 ? ({thn.r}) : ({els.r}))", true)
   of nkCall:
-    # sum() is a compile-time unroll with a lambda arg; its second child
-    # is nkLambda, which is not a legal standalone value. Route the
-    # whole call through scalar emission so we never recurse into the
-    # lambda via emitStereo's arg walk. sum() itself is scalar in v1.
-    if n.str == "sum":
-      let s = c.emitExpr(sc, n)
-      return (s, s, false)
     # Stereo-returning user def (e.g. haas, pan): inline once, capture
     # the two output channels into fresh temps via the `pre` preamble.
     if n.str in c.userDefs and isStereoDef(c, c.userDefs[n.str]):
@@ -876,7 +901,8 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
       blk.add "  }\n"
       pre.add blk
       return (tmpL, tmpR, true)
-    # Otherwise: evaluate args stereo-aware to see if any is stereo.
+    # Otherwise: walk args stereo-aware. At least one arg is stereo
+    # (else refsStereo would have caught the whole call at the top).
     var argVals: seq[StereoVal] = @[]
     var anyStereo = false
     for k in n.kids:
@@ -884,8 +910,9 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
       if v.stereo: anyStereo = true
       argVals.add v
     if not anyStereo:
-      let s = c.emitExpr(sc, n)
-      return (s, s, false)
+      raise newException(ValueError,
+        "internal: nkCall '" & n.str & "' flagged as stereo by refsStereo " &
+        "but no arg resolved to stereo " & errLoc(n))
     # One or more stereo args: try to split per channel. Safe only for
     # pure callees (libm / arithmetic builtins / pure user defs).
     let name = n.str
@@ -924,17 +951,32 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
     let rExpr = c.emitExpr(innerR, callR)
     return (lExpr, rExpr, true)
   else:
+    # Any other node kind (e.g. nkLambda reaching emitStereo as a value)
+    # is invalid in stereo context — the scalar fast path at the top
+    # handles legitimate shapes. Fall through to emitExpr so its own
+    # diagnostic (e.g. the nkLambda misuse error) surfaces.
     let s = c.emitExpr(sc, n)
     return (s, s, false)
 
-# Detect whether a subtree references any play name or stereo let, or
-# calls a stereo-returning user def — used to decide whether a top-level
-# `let` after plays is stereo.
-proc refsStereo(c: Ctx; n: Node): bool =
+# Detect whether a subtree references any play name, stereo let, or
+# scope-bound stereo name, or calls a stereo-returning user def. Used to
+# (1) decide whether a top-level `let` after plays is stereo and (2)
+# gate emitStereo's scalar fast path — a refsStereo=false subtree is
+# safe to emit once through emitExpr and bound to a temp.
+#
+# NOTE: takes the Scope so stereo params of an in-progress stereo-def
+# inline are visible (their bindings live in sc.stereoNames, not in
+# playSet/stereoLets). Without the scope walk, a lambda / inner expr
+# inside a stereo-def body that references such a param would look
+# scalar, short-circuit through emitExpr, and then raise "unknown
+# identifier" because emitExpr can't resolve a scope-bound stereo.
+proc refsStereo(c: Ctx; sc: Scope; n: Node): bool =
   if n == nil: return false
   case n.kind
   of nkIdent:
-    return n.str in c.playSet or n.str in c.stereoLets
+    if n.str in c.playSet or n.str in c.stereoLets: return true
+    if sc != nil and sc.lookupStereo(n.str).ok: return true
+    return false
   of nkArr:
     return n.kids.len == 2
   of nkLambda:
@@ -942,23 +984,24 @@ proc refsStereo(c: Ctx; n: Node): bool =
     # when deciding whether the enclosing expression is stereo-typed.
     return false
   of nkIdx:
-    # Indexing a stereo (play / stereo-let) with a constant 0 or 1
-    # collapses to scalar; only propagate stereo if the index isn't a
-    # constant pick.
+    # Indexing a stereo (play / stereo-let / scoped) with a constant 0
+    # or 1 collapses to scalar; only propagate stereo if the index
+    # isn't a constant pick.
     let a = n.kids[0]; let i = n.kids[1]
-    if a.kind == nkIdent and i.kind == nkNum and int(i.num) in {0, 1} and
-       (a.str in c.playSet or a.str in c.stereoLets):
-      return false
-    return c.refsStereo(i)   # ignore base; its stereo-ness is consumed
+    if a.kind == nkIdent and i.kind == nkNum and int(i.num) in {0, 1}:
+      let isStereoBase = a.str in c.playSet or a.str in c.stereoLets or
+                         (sc != nil and sc.lookupStereo(a.str).ok)
+      if isStereoBase: return false
+    return c.refsStereo(sc, i)   # ignore base; its stereo-ness is consumed
   of nkCall:
     if n.str in c.userDefs and isStereoDef(c, c.userDefs[n.str]):
       return true
     for k in n.kids:
-      if k != nil and c.refsStereo(k): return true
+      if k != nil and c.refsStereo(sc, k): return true
     return false
   else:
     for k in n.kids:
-      if k != nil and c.refsStereo(k): return true
+      if k != nil and c.refsStereo(sc, k): return true
     return false
 
 # ---- top-level emission ------------------------------------------------
@@ -1107,7 +1150,7 @@ proc emit*(c: Ctx; program: Node): string =
         c.arrayDecls.add &"static const double {sym}[{arrKids.len}] = {{" &
           items.join(", ") & "};\n"
         c.topArrays[s.str] = (sym, arrKids.len)
-      elif c.refsStereo(s.kids[0]):
+      elif c.refsStereo(topSc, s.kids[0]):
         var pre = ""
         let v = c.emitStereo(topSc, s.kids[0], pre)
         body.add pre
@@ -1194,7 +1237,7 @@ proc emit*(c: Ctx; program: Node): string =
             # Stereo-producing RHS (haas, pan, arr literal, or references
             # to a prior stereo local): emit two locals, register name
             # as a stereo let for downstream emission.
-            elif c.refsStereo(st.kids[0]):
+            elif c.refsStereo(inner, st.kids[0]):
               var sub = ""
               let v = c.emitStereo(inner, st.kids[0], sub)
               body.add sub
