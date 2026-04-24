@@ -1,0 +1,43 @@
+# Phase 5 verification — cello via inharmonic() + cello_shape + stiff_cello.
+#
+# ------------------------------------------------------------- background
+# Originally planned to wire CC 74 to max_n so partials sweep live. But
+# `sum(N, ...)` requires N to be a compile-time constant, and a knob
+# value is runtime — `int(8 + midi_cc(74)*24)` is not a literal, so
+# `inharmonic(f, ..., max_n_knob)` would fail at codegen with "first
+# arg must be a compile-time-constant integer". That failure is itself
+# the diagnostic: literal-propagation does not (and should not) reach
+# through runtime MIDI state.
+#
+# Fallback. The knob blends two fixed-N spectra so there IS something
+# audibly changing in real time. CC 74 mixes cello_shape (inharmonic,
+# body resonance) against warm_shape (harmonic, dark 1/n² roll-off).
+# max_n is pinned at 24 for both.
+#
+# ---------------------------------------------------------- listen for
+#   * BOW ATTACK — press a key: envelope swells in over ~0.25 s, release
+#     tail over ~0.6 s. Should feel gestural, not a step transition.
+#   * NO ALIASING — play chromatic above C5. Higher notes should stay
+#     clean; the 24-partial stack auto-band-limits above 24 kHz. Any
+#     crunch / buzz on top notes is a bug.
+#   * BODY RESONANCE — low A2..C3 should have a sense of body, not a
+#     "filtered saw" neutrality. The cello_shape peaks at 200/400/1500
+#     give the wood-box coloration.
+#   * KNOB SWEEP — turn CC 74 full range while holding a note. Timbre
+#     should move audibly: bright inharmonic cello at 0, dark warm
+#     hollow tone at 1. If it doesn't move at all, CC 74 isn't
+#     connected or the Minilab is on a different channel.
+#   * REVERB BLEND — tail should extend the bow gesture, not sit on
+#     top as a separate effect. Wet at 0.2 is conservative.
+# ---------------------------------------------------------------------
+
+let f     = midi_freq()
+let gate  = midi_gate()
+let env   = swell(gate, 0.25, 0.6)
+let blend = midi_cc(74)
+
+let bright = inharmonic(f, stiff_cello, cello_shape, 24)
+let warm   = additive(f, warm_shape, 24)
+let tone   = bright * (1 - blend) + warm * blend
+
+tone * env * 0.2 |> reverb(2.5, 0.2)

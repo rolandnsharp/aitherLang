@@ -1,0 +1,33 @@
+# Phase 5 verification — bell via inharmonic() + bar_partials + bell_decay.
+#
+# Any key-on fires the strike envelope (rising edge on midi_gate, via
+# the stdlib `prev` one-sample memory). Pitch is the held note; partial
+# spacing is fixed by bar_partials (1, 2.756, 5.404, 8.933, 13.345).
+#
+# ---------------------------------------------------------- listen for
+#   * CLEAN STRIKE — each new key-on is one sharp transient, not a
+#     whoosh or swell. The rising-edge detector should fire exactly
+#     once per note-on.
+#   * LONG DECAY — ~2 s tail. All five partials decay together (1/n
+#     amplitude per bell_decay), but the high ones are quieter and
+#     mask sooner. Result: tail shifts from metallic → glassy as it
+#     fades — that perceptual shift is the point.
+#   * NOT A PITCHED NOTE — the non-integer partials should clearly
+#     NOT resolve to a tonal interval. If it sounds like a chord, the
+#     ratios didn't take effect. Should read as "bell" or "bar", not
+#     "note".
+#   * PITCH TRACKS — bell at C4 is higher than bell at C3 (the
+#     fundamental moves), but the RATIOS between partials are
+#     identical — that invariance is what makes this "bell-shaped"
+#     regardless of fundamental.
+#   * REVERB — longer RT60 (3.0) than the cello because bells need
+#     space to breathe. Wet at 0.4 is heavier but should still blend,
+#     not drown, the inharmonic tail.
+# ---------------------------------------------------------------------
+
+let g      = midi_gate()
+let strike = if g > 0.5 and prev(g) < 0.5 then 1.0 else 0.0
+let env    = pluck(strike, 2.0)
+let f      = midi_freq()
+
+inharmonic(f, bar_partials, bell_decay, 5) * env * 0.3 |> reverb(3.0, 0.4)
