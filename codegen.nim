@@ -50,6 +50,13 @@ type
     # (parent scopes inherit top-level arrays via the topArrays fallback
     # used only if we bottom out here).
     arrays: Table[string, tuple[sym: string; length: int]]
+    # name -> compile-time numeric literal value. Populated alongside the
+    # usual `names` binding whenever a def-param or let is initialised
+    # from an nkNum. Consumed by builtins that need compile-time-constant
+    # integer args (currently `sum(N, fn)`). Keeping this parallel to
+    # `names` preserves the normal scalar-double binding for every other
+    # use site — the literal is an *additional* fact, not a replacement.
+    numLits: Table[string, float64]
 
   Ctx = ref object
     userDefs: Table[string, Node]
@@ -131,7 +138,15 @@ proc push(parent: Scope): Scope =
         names: initTable[string, string](),
         fns: initTable[string, string](),
         stereoNames: initTable[string, tuple[l, r: string]](),
-        arrays: initTable[string, tuple[sym: string; length: int]]())
+        arrays: initTable[string, tuple[sym: string; length: int]](),
+        numLits: initTable[string, float64]())
+
+proc lookupNumLit(sc: Scope; name: string): tuple[val: float64; ok: bool] =
+  var s = sc
+  while s != nil:
+    if name in s.numLits: return (s.numLits[name], true)
+    s = s.parent
+  (0.0, false)
 
 proc lookupArray(c: Ctx; sc: Scope; name: string):
     tuple[sym: string; length: int; ok: bool] =
@@ -252,6 +267,7 @@ proc isStereoReturn(c: Ctx; n: Node): bool =
       (n.kids[2] != nil and isStereoReturn(c, n.kids[2]))
   of nkCall:
     n.str in c.userDefs and isStereoDef(c, c.userDefs[n.str])
+  of nkLambda: false      # lambdas are scalar-valued in v1
   else: false
 
 # Walk a user def body to decide whether it can be safely inlined twice
@@ -262,10 +278,16 @@ proc isPureForStereo(c: Ctx; n: Node): bool =
   case n.kind
   of nkVar: return false
   of nkCall:
+    # sum() unrolls at codegen into N textual call sites; if the lambda
+    # body contains stateful primitives, duplicating the whole sum() for
+    # both channels would claim twice the pool slots and desync L/R
+    # state. Treat sum() as stateful for stereo-inlining purposes.
+    if n.str == "sum": return false
     if n.str in ["phasor", "noise", "midi_trig"]: return false
     if NativeArities.hasKey(n.str): return false
     if n.str in c.userDefs:
       if not isPureForStereo(c, c.userDefs[n.str].kids[0]): return false
+  of nkLambda: return false      # conservative: lambda bodies may be stateful
   else: discard
   for k in n.kids:
     if k != nil and not isPureForStereo(c, k): return false
@@ -304,6 +326,18 @@ proc emitDefInline(c: Ctx; sc: Scope; def: Node; call: Node): string =
     let tmp = c.fresh("p_" & p)
     preface.add &"double {tmp} = ({argC}); "
     inner.names[p] = tmp
+    # Literal propagation: if the arg is a numeric literal (either an
+    # nkNum directly, or an ident that already resolves to a numLit in
+    # the caller's scope), remember the numeric value alongside the
+    # scalar-double binding so builtins that require compile-time
+    # constants (e.g. sum(N, fn)) can see through one or more def-param
+    # hops. The scalar-double binding above remains authoritative for
+    # every other use.
+    if a.kind == nkNum:
+      inner.numLits[p] = a.num
+    elif a.kind == nkIdent:
+      let v = sc.lookupNumLit(a.str)
+      if v.ok: inner.numLits[p] = v.val
   # def.kids[0] is the body (single expression or nkBlock of stmts).
   let body = def.kids[0]
   let bodyC =
@@ -326,6 +360,12 @@ proc emitBlockExpr(c: Ctx; sc: Scope; blk: Node): string =
       let v = c.emitExpr(sc, s.kids[0])
       pre.add &"double {tmp} = ({v}); "
       sc.names[s.str] = tmp
+      # Literal propagation: see the matching comment in emitDefInline.
+      if s.kids[0].kind == nkNum:
+        sc.numLits[s.str] = s.kids[0].num
+      elif s.kids[0].kind == nkIdent:
+        let nv = sc.lookupNumLit(s.kids[0].str)
+        if nv.ok: sc.numLits[s.str] = nv.val
     of nkVar:
       # `var` inside a def body -> claim two pool slots keyed under a
       # "var" helper-type region: one "inited" flag, one value. On the
@@ -452,6 +492,61 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
     # If the call target is a fn-valued param, resolve to the concrete name.
     let resolved = sc.lookupFn(n.str)
     let name = if resolved.len > 0: resolved else: n.str
+    # sum(N, fn) — compile-time fold. Special-cased before the native
+    # table because it's pure codegen (no n_sum runtime symbol). N must
+    # resolve to a numeric literal at codegen time; the literal may
+    # travel through def params or lets via `numLits` propagation.
+    if name == "sum":
+      if n.kids.len != 2:
+        raise newException(ValueError,
+          "sum takes 2 args: sum(N, fn) " & errLoc(n))
+      let nArg = n.kids[0]
+      let lamArg = n.kids[1]
+      var nVal: float64
+      if nArg.kind == nkNum:
+        nVal = nArg.num
+      elif nArg.kind == nkIdent:
+        let v = sc.lookupNumLit(nArg.str)
+        if not v.ok:
+          raise newException(ValueError,
+            "sum: first arg must be a compile-time-constant integer; " &
+            "'" & nArg.str & "' is not a numeric literal " & errLoc(nArg))
+        nVal = v.val
+      else:
+        raise newException(ValueError,
+          "sum: first arg must be a compile-time-constant integer " &
+          errLoc(nArg))
+      let N = int(nVal)
+      if float64(N) != nVal:
+        raise newException(ValueError,
+          "sum: first arg must be an integer, got " & $nVal & " " &
+          errLoc(nArg))
+      if N < 0:
+        raise newException(ValueError,
+          "sum: first arg must be non-negative, got " & $N & " " &
+          errLoc(nArg))
+      if lamArg.kind != nkLambda:
+        raise newException(ValueError,
+          "sum: second arg must be a lambda like `n => expr`, got " &
+          $lamArg.kind & " " & errLoc(lamArg))
+      if lamArg.params.len != 1:
+        raise newException(ValueError,
+          "sum: lambda must take exactly one parameter " & errLoc(lamArg))
+      if N == 0: return "0.0"
+      let paramName = lamArg.params[0]
+      let body = lamArg.kids[0]
+      var terms: seq[string] = @[]
+      for k in 1..N:
+        # Each iteration gets its own child scope — so the param binding
+        # doesn't leak across iterations, and per-iteration stateful
+        # primitives (phasor, delay, etc.) each hit registerRegion anew
+        # and claim their own pool slot.
+        let iter = push(sc)
+        let litText = numLit(float64(k))
+        iter.names[paramName] = litText
+        iter.numLits[paramName] = float64(k)
+        terms.add c.emitExpr(iter, body)
+      return "(" & terms.join(" + ") & ")"
     # Stateful builtins inlined
     if name == "phasor":
       if n.kids.len != 1:
@@ -570,6 +665,14 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
     raise newException(ValueError,
       "array value can't appear here " & errLoc(n) &
       " — only numeric literals for wave() or top-level stereo return")
+  of nkLambda:
+    # v1: lambdas are not first-class values. They may only appear as
+    # the second arg to sum(N, fn); reaching emitExpr here means the
+    # user stored/returned/used one as a value somewhere else.
+    raise newException(ValueError,
+      "lambda `" & (if n.params.len > 0: n.params[0] else: "_") &
+      " => ...` can only appear as a builtin argument (e.g. " &
+      "sum(N, n => expr)), not as a standalone value " & errLoc(n))
   of nkIdx:
     let a = n.kids[0]
     let i = n.kids[1]
@@ -674,6 +777,13 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
     return (&"(({cond}) != 0.0 ? ({thn.l}) : ({els.l}))",
             &"(({cond}) != 0.0 ? ({thn.r}) : ({els.r}))", true)
   of nkCall:
+    # sum() is a compile-time unroll with a lambda arg; its second child
+    # is nkLambda, which is not a legal standalone value. Route the
+    # whole call through scalar emission so we never recurse into the
+    # lambda via emitStereo's arg walk. sum() itself is scalar in v1.
+    if n.str == "sum":
+      let s = c.emitExpr(sc, n)
+      return (s, s, false)
     # Stereo-returning user def (e.g. haas, pan): inline once, capture
     # the two output channels into fresh temps via the `pre` preamble.
     if n.str in c.userDefs and isStereoDef(c, c.userDefs[n.str]):
@@ -709,6 +819,12 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
           let tmp = c.fresh("p_" & p)
           blk.add &"    double {tmp} = ({sv.l});\n"
           inner.names[p] = tmp
+          # Literal propagation — same reasoning as emitDefInline.
+          if a.kind == nkNum:
+            inner.numLits[p] = a.num
+          elif a.kind == nkIdent:
+            let nv = sc.lookupNumLit(a.str)
+            if nv.ok: inner.numLits[p] = nv.val
       # Emit body as a block, storing the stereo final value into tmpL/tmpR.
       let bodyNode = def.kids[0]
       let stmts: seq[Node] =
@@ -728,6 +844,11 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
             let tmp = c.fresh("l_" & st.str)
             blk.add &"    double {tmp} = ({v});\n"
             inner.names[st.str] = tmp
+            if st.kids[0].kind == nkNum:
+              inner.numLits[st.str] = st.kids[0].num
+            elif st.kids[0].kind == nkIdent:
+              let nv = inner.lookupNumLit(st.kids[0].str)
+              if nv.ok: inner.numLits[st.str] = nv.val
           of nkVar:
             # `var` inside a stereo-def inline: treat as pool-backed
             # call-site state, matching emitBlockExpr's approach.
@@ -816,6 +937,10 @@ proc refsStereo(c: Ctx; n: Node): bool =
     return n.str in c.playSet or n.str in c.stereoLets
   of nkArr:
     return n.kids.len == 2
+  of nkLambda:
+    # Lambda bodies are a scalar scope (v1). Don't peek inside them
+    # when deciding whether the enclosing expression is stereo-typed.
+    return false
   of nkIdx:
     # Indexing a stereo (play / stereo-let) with a constant 0 or 1
     # collapses to scalar; only propagate stereo if the index isn't a
@@ -992,6 +1117,14 @@ proc emit*(c: Ctx; program: Node): string =
       else:
         let v = c.emitExpr(topSc, s.kids[0])
         body.add &"  double l_{s.str} = ({v});\n"
+        # Literal propagation (top-level lets): enables `let H = 16`
+        # followed by `sum(H, ...)` — H flows through to sum as a
+        # compile-time constant.
+        if s.kids[0].kind == nkNum:
+          topSc.numLits[s.str] = s.kids[0].num
+        elif s.kids[0].kind == nkIdent:
+          let nv = topSc.lookupNumLit(s.kids[0].str)
+          if nv.ok: topSc.numLits[s.str] = nv.val
     of nkAssign:
       let target =
         if s.str in c.topVarSet: "s->v_" & s.str
@@ -1073,6 +1206,12 @@ proc emit*(c: Ctx; program: Node): string =
               let tmp = "l_" & st.str
               body.add &"    double {tmp} = ({v});\n"
               inner.names[st.str] = tmp
+              # Literal propagation (play-local lets).
+              if st.kids[0].kind == nkNum:
+                inner.numLits[st.str] = st.kids[0].num
+              elif st.kids[0].kind == nkIdent:
+                let nv = inner.lookupNumLit(st.kids[0].str)
+                if nv.ok: inner.numLits[st.str] = nv.val
           of nkVar:
             discard              # top-level-var init already ran
           of nkAssign:

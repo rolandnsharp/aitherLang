@@ -18,7 +18,7 @@ type
   NodeKind* = enum
     nkNum, nkIdent, nkBinOp, nkUnary, nkCall, nkIf,
     nkVar, nkLet, nkDef, nkAssign, nkArr, nkIdx, nkIdxAssign, nkBlock,
-    nkPlay
+    nkPlay, nkLambda
 
   Node* = ref object
     kind*: NodeKind
@@ -135,7 +135,11 @@ proc tokenize*(source: string): seq[Token] =
       else:
         raise newException(ParseError, "unexpected '|' at " & $line & ":" & $col)
     of '=':
-      if i + 1 < n and source[i+1] == '=':
+      if i + 1 < n and source[i+1] == '>':
+        # `=>` introduces a lambda body: `n => expr`. Checked ahead of
+        # `==` so the longer operator wins when both could match.
+        emit(tkOp, "=>"); i += 2; col += 2
+      elif i + 1 < n and source[i+1] == '=':
         emit(tkOp, "=="); i += 2; col += 2
       else:
         emit(tkAssign); i += 1; col += 1
@@ -284,6 +288,13 @@ proc parsePrimary(p: var Parser): Node =
     if p.peek().kind == tkLParen:
       let args = p.parseArgList()
       return Node(kind: nkCall, str: t.str, kids: args, line: t.line)
+    # Single-arg lambda: `n => body`. v1 only supports one param and
+    # only in builtin-arg position (codegen rejects lambdas elsewhere).
+    if p.peek().kind == tkOp and p.peek().str == "=>":
+      discard p.advance()
+      let body = p.parseExpr()
+      return Node(kind: nkLambda, params: @[t.str],
+                  kids: @[body], line: t.line)
     return Node(kind: nkIdent, str: t.str, line: t.line)
   of tkOp:
     if t.str == "-":
