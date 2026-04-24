@@ -42,10 +42,12 @@ proc tokenize*(source: string): seq[Token] =
   var col = 1
   var i = 0
   var atLineStart = true
-  # bracketDepth > 0 means we're inside a `[ ... ]` literal. Newlines and
-  # indent changes are treated as whitespace in that window so long array
-  # literals can be split across lines Python-style.
-  var bracketDepth = 0
+  # groupDepth > 0 means we're inside a `(...)` call / grouping or a
+  # `[...]` literal. Newlines and indent changes are treated as
+  # whitespace in that window so long expressions can split across
+  # lines Python-style — matters for multi-line lambda bodies like
+  # `sum(max_n, n => \n let pf = ... \n shape(n,pf) * ...)`.
+  var groupDepth = 0
   let n = source.len
 
   template emit(k: TokKind; s: string = ""; v: float64 = 0.0) =
@@ -53,8 +55,8 @@ proc tokenize*(source: string): seq[Token] =
 
   while i < n:
     if atLineStart:
-      if bracketDepth > 0:
-        # Inside a bracketed literal: skip leading whitespace, skip
+      if groupDepth > 0:
+        # Inside a paren/bracket group: skip leading whitespace, skip
         # comment-only lines, but emit no indent/dedent and no newline.
         while i < n and source[i] == ' ':
           i += 1; col += 1
@@ -88,14 +90,14 @@ proc tokenize*(source: string): seq[Token] =
     let c = source[i]
     case c
     of '\n':
-      if bracketDepth == 0:
+      if groupDepth == 0:
         emit(tkNewline)
         atLineStart = true
       else:
-        # Inside brackets, newlines are whitespace. We still need
+        # Inside a group, newlines are whitespace. We still need
         # atLineStart logic for the *next* line so leading whitespace
         # gets eaten, so flip it here too — but the branch above won't
-        # emit indent/dedent while bracketDepth > 0.
+        # emit indent/dedent while groupDepth > 0.
         atLineStart = true
       i += 1; line += 1; col = 1
     of ' ', '\t', '\r':
@@ -120,12 +122,14 @@ proc tokenize*(source: string): seq[Token] =
       while i < n and (source[i].isAlphaAscii() or source[i].isDigit() or source[i] == '_'):
         s.add source[i]; i += 1; col += 1
       if s in Keywords: emit(tkKeyword, s) else: emit(tkIdent, s)
-    of '(':  emit(tkLParen); i += 1; col += 1
-    of ')':  emit(tkRParen); i += 1; col += 1
-    of '[':  emit(tkLBracket); i += 1; col += 1; bracketDepth += 1
+    of '(':  emit(tkLParen); i += 1; col += 1; groupDepth += 1
+    of ')':
+      emit(tkRParen); i += 1; col += 1
+      if groupDepth > 0: groupDepth -= 1
+    of '[':  emit(tkLBracket); i += 1; col += 1; groupDepth += 1
     of ']':
       emit(tkRBracket); i += 1; col += 1
-      if bracketDepth > 0: bracketDepth -= 1
+      if groupDepth > 0: groupDepth -= 1
     of ',':  emit(tkComma); i += 1; col += 1
     of ':':  emit(tkColon); i += 1; col += 1
     of ';':  emit(tkSemi); i += 1; col += 1
@@ -290,9 +294,30 @@ proc parsePrimary(p: var Parser): Node =
       return Node(kind: nkCall, str: t.str, kids: args, line: t.line)
     # Single-arg lambda: `n => body`. v1 only supports one param and
     # only in builtin-arg position (codegen rejects lambdas elsewhere).
+    # The body may be a plain expression or a let-prefixed sequence:
+    #   n => let pf = n*freq; <expr using pf>
+    # Since lambdas typically appear inside parens (a sum() arg), the
+    # tokenizer has already dropped newlines between the `let` lines.
+    # Stmts are separated by the expression boundaries that `parseExpr`
+    # already respects (a `let` or the start of the final expr ends
+    # the previous rhs), plus optional semicolons.
     if p.peek().kind == tkOp and p.peek().str == "=>":
       discard p.advance()
-      let body = p.parseExpr()
+      var stmts: seq[Node] = @[]
+      while p.isKw("let"):
+        let letLine = p.peek().line
+        discard p.advance()
+        let name = p.expect(tkIdent, "binding name").str
+        discard p.expect(tkAssign)
+        let rhs = p.parseExpr()
+        stmts.add Node(kind: nkLet, str: name, kids: @[rhs], line: letLine)
+        while p.peek().kind == tkSemi: discard p.advance()
+      let finalExpr = p.parseExpr()
+      let body =
+        if stmts.len == 0: finalExpr
+        else:
+          stmts.add finalExpr
+          Node(kind: nkBlock, kids: stmts, line: t.line)
       return Node(kind: nkLambda, params: @[t.str],
                   kids: @[body], line: t.line)
     return Node(kind: nkIdent, str: t.str, line: t.line)

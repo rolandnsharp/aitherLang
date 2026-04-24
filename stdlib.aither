@@ -135,3 +135,92 @@ def width(s, amount):
 # Collapse stereo to mono. Useful when a play returns [L, R] but you want
 # to feed a single-channel signal into another process (e.g. sidechain).
 def mono(s): (s[0] + s[1]) * 0.5
+
+# ---------------------------------------------------------------- spectrum
+# Timbre construction via sum-of-sines. Every physical resonant system
+# vibrates as a sum of sines (Fourier); additive synthesis writes that
+# fact directly. `sum(max_n, fn)` is the engine-level primitive; these
+# are thin composition helpers over it. Because `max_n` propagates
+# through def params as a compile-time literal, the wrappers work even
+# though the loop bound looks dynamic.
+
+# Harmonic synthesis — partials at integer multiples of `freq`.
+# `shape(n, pf)` returns the amplitude of the nth partial at its
+# frequency `pf`. Partials above Nyquist contribute 0 so the user's
+# math is the band-limiter.
+def additive(freq, shape, max_n):
+  sum(max_n, n =>
+    let pf = n * freq
+    if pf >= 24000 then 0
+    else shape(n, pf) * sin(TAU * phasor(pf)))
+
+# Inharmonic synthesis — partials at user-chosen frequency ratios.
+# `ratio(n)` returns the frequency multiplier for the nth partial,
+# `amp(n, pf)` its amplitude. Drives bells, plates, stiff strings.
+def inharmonic(freq, ratio, amp, max_n):
+  sum(max_n, n =>
+    let pf = freq * ratio(n)
+    if pf >= 24000 then 0
+    else amp(n, pf) * sin(TAU * phasor(pf)))
+
+# -------- harmonic shape functions (for additive) --------
+# Each returns the amplitude of the nth partial. `pf` is the partial's
+# frequency in Hz — unused by the pure-harmonic shapes but exposed so
+# formant shapes (vowel_ah etc.) can peak amplitude near target Hz.
+def saw_shape(n, pf):       1.0 / n
+def sqr_shape(n, pf):       if n mod 2 == 1 then 1.0 / n else 0.0
+def tri_shape(n, pf):       if n mod 2 == 1 then 1.0 / (n * n) else 0.0
+def warm_shape(n, pf):      1.0 / (n * n)
+def bright_shape(n, pf):    1.0 / pow(n, 0.5)
+def bowed_shape(n, pf):     1.0 / (n + 0.5)
+
+# -------- formant shapes (amplitude peaks near target Hz) --------
+# Each base partial (1/n) is boosted wherever its frequency sits inside
+# a formant region. Gaussian peaks centred at the characteristic
+# resonances of the corresponding vowel or instrument body.
+def vowel_ah(n, pf):
+  let basis = 1.0 / n
+  let f1 = exp(-pow((pf - 700) / 150, 2)) * 4.0
+  let f2 = exp(-pow((pf - 1200) / 150, 2)) * 3.0
+  basis * (1.0 + f1 + f2)
+
+def vowel_ee(n, pf):
+  let basis = 1.0 / n
+  let f1 = exp(-pow((pf - 270) / 100, 2)) * 4.0
+  let f2 = exp(-pow((pf - 2300) / 200, 2)) * 3.5
+  basis * (1.0 + f1 + f2)
+
+def cello_shape(n, pf):
+  let basis = 1.0 / n
+  let A0     = exp(-pow((pf - 200) / 80, 2)) * 2.0
+  let T1     = exp(-pow((pf - 400) / 100, 2)) * 1.5
+  let bright = exp(-pow((pf - 1500) / 300, 2)) * 1.0
+  let taper  = if n > 12 then exp(-(n - 12.0) * 0.3) else 1.0
+  basis * (1.0 + A0 + T1 + bright) * taper
+
+# -------- inharmonic ratio functions (for inharmonic) --------
+# Return the frequency ratio (partial_freq / fundamental) for the nth
+# partial. Stiff strings are near-harmonic with a sqrt(1+Bn²) spread;
+# bars and plates have well-known physical mode ratios.
+def stiff_string(n):  n * sqrt(1.0 + n * n * 0.0003)
+def stiff_cello(n):   n * sqrt(1.0 + n * n * 0.00008)
+def bar_partials(n):
+  if n == 1 then 1.0
+  else (if n == 2 then 2.756
+        else (if n == 3 then 5.404
+              else (if n == 4 then 8.933
+                    else 13.345)))
+def plate_partials(n):
+  if n == 1 then 1.0
+  else (if n == 2 then 2.295
+        else (if n == 3 then 3.873
+              else (if n == 4 then 5.612
+                    else 7.682)))
+def phi_partials(n):  pow(1.618, n - 1)
+
+# -------- amp functions (for inharmonic) --------
+# Soft decay (1/√n) is gentler than the pure saw's 1/n — good default
+# for bell/piano partials. bell_decay matches the classic 1/n roll-off.
+def soft_decay(n, pf):    1.0 / pow(n, 0.5)
+def bell_decay(n, pf):    1.0 / n
+def bright_decay(n, pf):  1.0 / pow(n, 0.3)

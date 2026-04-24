@@ -546,7 +546,14 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
         let litText = numLit(float64(k))
         iter.names[paramName] = litText
         iter.numLits[paramName] = float64(k)
-        terms.add c.emitExpr(iter, body)
+        # A lambda body may be either a single expression or an nkBlock
+        # of `let` bindings terminated by a final expression. Route the
+        # latter through emitBlockExpr so its `let` cases bind locals
+        # in the iteration scope.
+        let bodyC =
+          if body.kind == nkBlock: c.emitBlockExpr(iter, body)
+          else: c.emitExpr(iter, body)
+        terms.add bodyC
       return "(" & terms.join(" + ") & ")"
     # Stateful builtins inlined
     if name == "phasor":
