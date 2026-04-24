@@ -136,7 +136,31 @@ sequence).
 
 Stdlib (pure aither, in `stdlib.aither`): `osc pulse gain
 fold prev drive wrap bitcrush downsample dropout pluck
-swell adsr pan haas width mono`.
+swell adsr pan haas width mono`, plus the spectral synthesis
+layer: `additive` / `inharmonic` wrapping `sum(N, fn)` over
+`saw_shape`, `warm_shape`, `vowel_ee`, `cello_shape`,
+`stiff_string`, `bar_partials`, `phi_partials`, and others.
+
+### Additive synthesis
+
+`sum(N, fn)` evaluates `fn(1) + fn(2) + ... + fn(N)` at
+codegen; lambdas `n => expr` make the fold notation match
+the math. Build timbres as sums of sines — the stdlib's
+`additive` / `inharmonic` defs are ~3-line wrappers over
+`sum`:
+
+```
+play cello:
+  let gate = if (t mod 4) < 2 then 1 else 0
+  let env  = swell(gate, 0.25, 0.6)
+  inharmonic(110, stiff_cello, cello_shape, 24) * env * 0.2
+
+cello |> reverb(2.5, 0.2)
+```
+
+24 partials at cello-physics spacing, body-resonance amp
+curve, gated bow envelope, plate reverb. No filter needed —
+the amplitude spectrum IS the filter.
 
 ## A taste
 

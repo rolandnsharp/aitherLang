@@ -148,6 +148,64 @@ def my_shape(x): sin(x) + sin(3 * x) / 3
 osc(my_shape, 440)
 ```
 
+## Lambdas
+
+Single-argument anonymous function with the syntax
+`name => expr`:
+
+```
+sum(16, n => sin(TAU * phasor(n * 440)) / n)
+#   ^^^^^^^  the lambda binds `n` for the body
+```
+
+The body may be a plain expression, or a `let`-prefixed
+sequence terminated by a final expression:
+
+```
+sum(16, n =>
+  let pf = n * 440
+  sin(TAU * phasor(pf)) / n)
+```
+
+Each `let` line introduces a binding visible to the final
+expression (and to later `let`s). Semicolons between lets
+are accepted but optional — newlines inside the enclosing
+`(...)` are whitespace (see "Group-depth tokenization").
+
+**Restrictions (v1)**:
+- Single parameter only: `n => ...`, not `(a, b) => ...`.
+- Only legal as an argument to a builtin — currently `sum`.
+  A lambda stored in a `let` or returned from a `def` is a
+  compile error with a message pointing at the right shape.
+
+Lambdas capture any variable in their enclosing lexical
+scope — enclosing `let`s, `def` parameters, and globals all
+work. Captures are free: the lambda body inlines into each
+call site and resolves identifiers through the normal scope
+walk.
+
+## Compile-time evaluation
+
+Numeric literals *propagate* through `def` parameters and
+`let` bindings. If you call `fixed_count(5)`, the body sees
+`amount = 5` not only as a runtime C double but also as a
+compile-time integer constant — so `sum(amount, n => ...)`
+resolves `amount` to the literal `5` at codegen and unrolls
+accordingly.
+
+```
+def additive(freq, shape, max_n):
+  sum(max_n, n => ...)         # max_n is a literal at call time
+
+additive(440, saw_shape, 16)   # sum unrolls to 16 iterations
+```
+
+Propagation is transitive across multiple def hops and
+through `let` bindings whose RHS is a numeric literal. For
+runtime-valued `N`, `sum` errors with a clear message —
+keep the loop bound a literal, or let it flow through a
+def/let from a literal.
+
 ## Play blocks
 
 `play name:` declares a named, independently-controllable
@@ -244,6 +302,29 @@ Separated by newlines or semicolons:
 var phase = 0.0; phase += 440 / sr; sin(TAU * phase)
 ```
 
+## Group-depth tokenization
+
+Newlines inside `(...)` calls / grouping, and `[...]`
+array literals, are whitespace. Expressions may span as
+many lines as you like inside any bracket pair:
+
+```
+let notes = [
+  110.0,
+  146.83,
+  164.81,
+  220.0,
+]
+
+sum(16, n =>
+  let pf = n * 440
+  sin(TAU * phasor(pf)) / n)
+```
+
+Outside brackets, newlines terminate statements as usual.
+There is no backslash continuation yet; wrap a multi-line
+expression in parens if you need to split it.
+
 ## Program structure
 
 A file has four kinds of top-level declaration:
@@ -335,6 +416,35 @@ shapes via `osc(shape, freq)`.
 | `phasor(freq)`| ramp 0→1 at freq Hz, with state |
 | `noise()`     | white noise, stateless          |
 
+### Compile-time fold
+
+```
+sum(N, fn)
+```
+
+Evaluate `fn(1) + fn(2) + ... + fn(N)` at codegen time
+and emit the unrolled sum as one scalar expression. `N`
+must be a compile-time integer literal (directly, or via
+a def-param / let that carries a literal through literal
+propagation — see above). `fn` must be a single-argument
+lambda.
+
+```
+sum(8, n => 1.0 / n)                        # harmonic series up to 8
+sum(16, n => sin(TAU * phasor(n*f)) / n)    # 16-harmonic saw
+```
+
+Because each iteration is a distinct textual emission
+site, stateful primitives inside the lambda each claim
+their own state region. `sum(16, n => phasor(n*f))` yields
+16 independent phasor states — exactly what additive
+synthesis needs.
+
+**Cost**: linear in `N`. Each iteration compiles to its
+own C expression; 32 harmonics means 32 phasor slots and
+32 sine computations per sample. Default to `N = 8..16`
+unless you have a reason to push higher.
+
 ### Native DSP functions
 
 These are compiled Nim (in `dsp.nim`) called from the VM.
@@ -400,6 +510,41 @@ every user patch. Source: `stdlib.aither`.
 def osc(shape, freq):  shape(TAU * phasor(freq))
 def pulse(freq, width): if phasor(freq) < width then 1 else -1
 ```
+
+### Spectral synthesis (built on `sum`)
+
+```
+def additive(freq, shape, max_n):
+  sum(max_n, n =>
+    let pf = n * freq
+    if pf >= 24000 then 0
+    else shape(n, pf) * sin(TAU * phasor(pf)))
+
+def inharmonic(freq, ratio, amp, max_n):
+  sum(max_n, n =>
+    let pf = freq * ratio(n)
+    if pf >= 24000 then 0
+    else amp(n, pf) * sin(TAU * phasor(pf)))
+```
+
+`additive` builds timbres from partials at integer
+multiples of `freq`. `inharmonic` uses user-supplied
+frequency ratios for bell, piano, plate, stiff-string
+textures.
+
+Shape functions `(n, pf) → amplitude` for `additive`:
+`saw_shape`, `sqr_shape`, `tri_shape`, `warm_shape`,
+`bright_shape`, `bowed_shape`, `vowel_ah`, `vowel_ee`,
+`cello_shape`.
+
+Ratio functions `n → multiplier` for `inharmonic`:
+`stiff_string`, `stiff_cello`, `bar_partials`,
+`plate_partials`, `phi_partials`.
+
+Amp functions `(n, pf) → amplitude` for `inharmonic`:
+`soft_decay`, `bell_decay`, `bright_decay`.
+
+See GUIDE.md "Spectral synthesis" for worked examples.
 
 ### Helpers
 

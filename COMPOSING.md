@@ -333,6 +333,78 @@ is still available if you want to compensate for the
 single-channel sum; use `* 1.41` (i.e. `√2`) at the
 extremes.
 
+## Timbre choice: osc vs additive vs inharmonic
+
+Three ways to produce a tone, ranked by cost and expressiveness:
+
+| When you want…                                    | Use                                    |
+|---------------------------------------------------|----------------------------------------|
+| A cheap default, stock saw/square character       | `osc(saw, f)`, `osc(sqr, f)`           |
+| Control over the spectrum, formants, no aliasing  | `additive(f, shape, N)`                |
+| Bells, plates, stiff strings, non-integer partials | `inharmonic(f, ratio, amp, N)`        |
+
+Rules of thumb:
+
+- **`osc(saw/sqr, f)`** is fine for chiptune, lo-fi, sidechain
+  tests, anything where you don't care about timbre. It also
+  aliases above ~1 kHz — that's *part* of the 8-bit sound, so
+  keep it when you want it.
+- **`additive(f, shape, N)`** is the default for anything you'd
+  want to hear as musical on a good system. Pick any shape fn
+  that matches your mood: `warm_shape` for pads, `bright_shape`
+  for edgy leads, `vowel_ee`/`vowel_ah` for vocal pads,
+  `cello_shape` for bowed textures. `N=8` for pads, `16` for
+  leads, up to `24` for characterful features.
+- **`inharmonic(f, ratio, amp, N)`** when the spectrum
+  deliberately departs from integer multiples. Strike a
+  bar? `bar_partials`. Bowed string with body resonance?
+  `stiff_cello` + `cello_shape`. Dreamy non-tonal texture?
+  `phi_partials`.
+
+All three compose with envelopes, effects, pans the same way:
+
+```
+play voice:
+  let env = swell(midi_gate(), 0.1, 0.4)
+  additive(midi_freq(), cello_shape, 16) * env * 0.2 |> reverb(2.5, 0.15)
+
+voice
+```
+
+Nothing else in the patch cares which synthesis style you
+picked — swap `osc(saw, midi_freq())` ↔ `additive(midi_freq(),
+saw_shape, 16)` ↔ `inharmonic(midi_freq(), stiff_string,
+soft_decay, 16)` freely.
+
+### Workaround: tabular ratio / shape functions
+
+When writing a ratio function from a table (e.g.
+`bar_partials` with its five specific values), prefer the
+`wave(0, [...])` lookup over nested `if/else`:
+
+```
+# Smoother — no else-if chain parser quirks.
+def bar_partials(n):
+  let tab = [1.0, 2.756, 5.404, 8.933, 13.345]
+  tab[int(n) - 1]
+```
+
+instead of:
+
+```
+def bar_partials(n):
+  if n == 1 then 1.0
+  else (if n == 2 then 2.756
+        else (if n == 3 then 5.404
+              else (if n == 4 then 8.933
+                    else 13.345)))
+```
+
+Both work today; the array form is the tidier idiom until
+the parser gets proper `else if` chaining (queued). The
+stdlib ships the parenthesised form for now — a local patch
+can override with the array form if you prefer.
+
 ## Versioning while you compose
 
 Aither has no built-in undo or rollback. The patch file is
@@ -435,6 +507,14 @@ Helpers: `gain`, `fold`, `tremolo`, `slew`, `prev`, `ease`.
 Envelopes: `discharge`, `pluck`, `swell`, `adsr`.
 Character: `drive`, `wrap`, `bitcrush`, `downsample`, `dropout`.
 Stereo: `pan`, `haas`, `width`, `mono`.
+Spectrum: `sum(N, fn)` (engine), `additive(f, shape, N)`,
+`inharmonic(f, ratio, amp, N)`.
+Shape fns: `saw_shape`, `sqr_shape`, `tri_shape`, `warm_shape`,
+`bright_shape`, `bowed_shape`, `vowel_ah`, `vowel_ee`,
+`cello_shape`.
+Ratio fns: `stiff_string`, `stiff_cello`, `bar_partials`,
+`plate_partials`, `phi_partials`.
+Amp fns: `soft_decay`, `bell_decay`, `bright_decay`.
 
 `prev(x)` returns the previous sample's value of any expression.
 Useful for forward cross-play feedback:

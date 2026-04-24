@@ -383,6 +383,148 @@ play synth:
 percussive + bowed + synth
 ```
 
+## Spectral synthesis
+
+`osc(saw, 440)` gives you a fine saw when timbre doesn't
+matter. When it does, aither treats *sine* as the only real
+oscillator primitive and builds everything else out of sums
+of sines. This is the Fourier view: every physical resonant
+system vibrates as a sum of sines. Writing your timbre as
+a sum of sines means writing the physics directly.
+
+The engine primitive is `sum(N, fn)` — evaluate `fn(1) +
+fn(2) + ... + fn(N)` at codegen and emit the unrolled sum.
+The stdlib wraps it in two user-facing defs.
+
+### `additive(freq, shape, max_n)` — harmonic partials
+
+Partials at integer multiples of `freq`. `shape(n, pf)`
+gives the amplitude of the nth partial (whose frequency is
+`pf`). Partials above Nyquist contribute zero, so the math
+itself band-limits.
+
+```
+play saw_lead:
+  additive(220, saw_shape, 16) * 0.3
+
+saw_lead
+```
+
+That's a 16-harmonic saw. No aliasing, no filter needed.
+
+Shape functions you get for free:
+
+| Shape           | Sounds like                              |
+|-----------------|------------------------------------------|
+| `saw_shape`     | clean saw (1/n)                          |
+| `sqr_shape`     | clean square (odd harmonics only)        |
+| `tri_shape`     | triangle (odd harmonics, 1/n²)           |
+| `warm_shape`    | rolled-off (1/n²) — dark, hollow         |
+| `bright_shape`  | slow roll-off (1/√n) — edgy, harsh       |
+| `bowed_shape`   | softer than saw (1/(n+0.5))              |
+| `vowel_ah`      | human "ah" — formant peaks near 700 / 1200 Hz |
+| `vowel_ee`      | human "ee" — formant peaks near 270 / 2300 Hz |
+| `cello_shape`   | cello body resonances + gentle high-freq taper |
+
+### `inharmonic(freq, ratio, amp, max_n)` — arbitrary partials
+
+Partials at user-chosen frequency ratios. `ratio(n)`
+returns the multiplier (so the nth partial is at
+`freq * ratio(n)`); `amp(n, pf)` its amplitude. Use this
+for bells, plates, stiff strings — anything that doesn't
+sit on integer multiples.
+
+```
+play bell:
+  let strike = impulse(0.5)
+  let env = pluck(strike, 2.0)
+  inharmonic(440, bar_partials, bell_decay, 5) * env * 0.3
+
+bell
+```
+
+Ratio functions (input `n`, returns frequency multiplier):
+
+| Ratio            | Physics                                  |
+|------------------|------------------------------------------|
+| `stiff_string`   | piano / taut string, slight sharpening   |
+| `stiff_cello`    | cello-sized string, gentler sharpening   |
+| `bar_partials`   | metal bar (1, 2.756, 5.404, 8.933, 13.345) |
+| `plate_partials` | metal plate (1, 2.295, 3.873, 5.612, 7.682) |
+| `phi_partials`   | φⁿ spacing — shimmery, bell-like, no fundamental |
+
+Amp functions (input `(n, pf)`, returns amplitude):
+
+| Amp             | Roll-off                                  |
+|-----------------|-------------------------------------------|
+| `soft_decay`    | 1/√n — bright but not harsh               |
+| `bell_decay`    | 1/n — classic bell roll-off               |
+| `bright_decay`  | 1/n^0.3 — very slow roll-off, edgy bell   |
+
+### Worked example — a cello
+
+```
+play cello:
+  let f   = 110                         # A2
+  let gate = if (t mod 4) < 2 then 1 else 0
+  let env = swell(gate, 0.25, 0.6)      # bow attack + release
+  inharmonic(f, stiff_cello, cello_shape, 24) * env * 0.2
+
+cello |> reverb(2.5, 0.2)
+```
+
+Why this sounds cello-ish:
+
+- **`stiff_cello`** gives a realistic partial spacing for a
+  thick vibrating string — not quite-harmonic, with each
+  higher partial slightly sharp. That slight inharmonicity
+  is what distinguishes a physical string from a pure saw
+  wave.
+- **`cello_shape`** layers three Gaussian resonance peaks
+  around 200, 400, and 1500 Hz (A0 top plate, T1 back, and
+  bridge brightness) on top of a gentle 1/n base. Multiplied
+  partial-by-partial, this is the body filter built into the
+  amplitude spectrum rather than bolted on afterwards.
+- **24 partials** covers the full audible range at 110 Hz
+  without crossing Nyquist (24 × 110 ≈ 2.6 kHz is well
+  under 24 kHz).
+
+Try `additive(f, cello_shape, 24)` instead — you'll hear
+a cleaner, more synthetic cello because the integer-ratio
+partials lose the string-physics character.
+
+### Cost
+
+`sum(N, ...)` compiles to N textual instances of its body.
+At `N = 16` with `phasor` + `sin` + scalar math inside the
+lambda, that's 16 phasor state slots and 16 sine calls per
+sample — around 1 µs per voice on modern hardware. Default
+to `N = 8` for cheap pads, `16` for leads, `24` for
+characterful instruments. Push to 32 for extreme formant
+detail; past that, spend the CPU on something else.
+
+### Writing your own shape or ratio
+
+Any def `(n, pf) → float` is a valid `shape`. Any def
+`(n) → float` is a valid `ratio`. Read a spectrogram of an
+instrument you like and transcribe the peaks:
+
+```
+def my_shape(n, pf):
+  let basis = 1.0 / n
+  let peak1 = exp(-pow((pf - 450) / 80, 2)) * 3.0
+  let peak2 = exp(-pow((pf - 1600) / 200, 2)) * 2.0
+  basis * (1.0 + peak1 + peak2)
+
+play mine:
+  additive(220, my_shape, 16) * 0.3
+
+mine
+```
+
+The shape is just math. Tune the constants until it
+sounds right.
+
 ## Character effects
 
 Lo-fi / glitch stdlib:
