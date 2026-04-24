@@ -152,22 +152,28 @@ processing goes there.
 
 ## Controlling parts live
 
-Once a voice is loaded, you can control individual parts
-from the CLI without touching the file:
+Once a voice is loaded, you can mute / unmute / solo
+individual parts from the CLI without touching the file.
+Mute and solo are *performance gestures* — quick, binary,
+ephemeral. Mix decisions (specific gain levels) live in the
+patch's `gain()` calls, not in the CLI.
 
 ```
 ./aither parts bass                   # list parts with gain + state
-./aither part bass kick mute          # instant silence (20ms fade)
-./aither part bass kick unmute         # resume
-./aither part bass kick play 4        # fade in over 4 seconds
-./aither part bass kick stop 2        # fade out over 2 seconds
-./aither part bass kick gain 0.5 1    # fade to 50% over 1 second
+./aither mute bass kick               # silence one part within bass
+./aither mute bass kick 2             # ...with a 2-second fade
+./aither unmute bass kick             # resume
+./aither solo bass kick               # fade other parts in bass to 0
 ```
 
 Hot-reloading a patch preserves every part's current gain.
 Delete a `play` block and resend — that part disappears
 from the mix. Add a new `play` block and resend — it fades
 in at gain 1.
+
+To rebalance the mix, edit the patch's `gain()` calls and
+resend. The patch *is* the mix; in-engine gain knobs would
+be a parallel source of truth that drifts from the file.
 
 ## Live performance
 
@@ -213,6 +219,65 @@ without cycling stop+send:
 ./aither clear                  # stop everything
 ./aither clear 4                # fade everything out over 4s
 ```
+
+### Recording a session
+
+Capture aither's audio output with `ffmpeg` reading from PulseAudio's monitor
+source. List your sinks with `pactl list short sinks`, find the monitor
+matching your default output, then:
+
+```bash
+ffmpeg -f pulse -i alsa_output.pci-0000_00_1f.3.analog-stereo.monitor jam.wav
+```
+
+Or simpler — pipe the default monitor straight to file with `parec`:
+
+```bash
+parec --format=s16le --channels=2 --rate=48000 | \
+  ffmpeg -f s16le -ar 48000 -ac 2 -i - jam.wav
+```
+
+Either way you capture the system audio, which is whatever aither is
+sending to your speakers. Stop with `Ctrl+C`. Convert to opus / mp3 /
+flac after the fact:
+
+```bash
+ffmpeg -i jam.wav -c:a libopus -b:a 192k jam.opus
+```
+
+### Versioning with git
+
+Aither has no built-in undo. The patch file *is* the source
+of truth, the engine holds runtime state but not history.
+Use git as your time machine.
+
+```bash
+git init                              # before your first session
+git add patches/ && git commit -m "set"
+```
+
+During the set:
+
+```bash
+git add bass.aither && git commit -m "drop"   # snapshot a sweet spot
+git diff bass.aither                          # what did I just change?
+git checkout bass.aither                      # restore last committed version
+```
+
+Two patterns that pay off:
+
+- **Commit when something works.** Don't wait for "polished" — commit
+  the working drop, the working breakdown, the working transition.
+  You can `git rebase -i` to clean up later. During the set, every
+  commit is a checkpoint you can fall back to in five seconds.
+- **`git stash` to try a wild idea.** `git stash`, edit aggressively,
+  send. If the new sound rules, commit. If it's a mess,
+  `git stash pop` and you're back to where you were.
+
+A failed `aither send` (compile error) doesn't lose the previously
+loaded voice — the engine returns `ERR` and keeps running the prior
+version. The risk is "patch compiled fine but produces silence /
+NaN / wrong audio." That's exactly what `git checkout` is for.
 
 ## Observability
 

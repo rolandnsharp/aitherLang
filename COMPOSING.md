@@ -157,6 +157,59 @@ Use `wave` + `impulse` when you want *discrete events*
 (bells, plucks). Use the quantized-LFO trick when you
 want a melody that *breathes*.
 
+### Tempo, beats, bars (drop-in helpers)
+
+Most patches re-derive the same tempo math at the top of the
+file. These four lines (or a subset) handle 95% of cases:
+
+```
+def at_bpm(bpm):    bpm / 60                    # bps from bpm
+def tphase(rate):   (t * rate) mod 1            # wall-clock phasor (shared)
+def beat(rate):     tphase(rate)                # alias, reads better
+def bar(rate, n):   tphase(rate / n)            # n-beat bar position
+```
+
+Then a patch begins:
+
+```
+let tempo = at_bpm(140)
+let bt    = beat(tempo)              # shared beat phase
+let br    = bar(tempo, 16)           # 16-beat bar phase
+```
+
+These are conventions, not language features — drop them at
+the top of any patch. If you find yourself writing them in
+every file for a month, promote them to `stdlib.aither`.
+
+**Shared time vs voice-local time.** The helpers above use
+`t` (wall clock), so two voices using `beat(tempo)` lock
+together regardless of when each loaded. Use `phasor(rate)`
+when you want voice-local time — its accumulator is per-call-site
+and starts at 0 when the voice starts.
+
+| Need                                  | Use                |
+|---------------------------------------|--------------------|
+| Two voices in lockstep on the beat    | `tphase(rate)`     |
+| Each voice has its own clock          | `phasor(rate)`     |
+| Smooth start (no first-sample pop)    | `phasor(rate)`     |
+| Shared start, smooth start            | both — see below   |
+
+The `t`-based helpers can pop on first sample because the
+first value is wherever wall-clock phase happens to land.
+Your existing `let fadeIn = ease(pos / N)` at the top of
+each patch hides this. If you need wall-clock sync *and*
+sample-zero smoothness without a fade, snapshot the start
+phase once and offset a voice-local phasor:
+
+```
+var startPhase = -1
+startPhase = if startPhase < 0 then (t * tempo) mod 1 else startPhase
+let bt = (phasor(tempo) + startPhase) mod 1
+```
+
+The state-migration model preserves `startPhase` across hot
+reloads, so subsequent edits don't re-snap.
+
 ### Rhythm is oscillation (see docs/guides/RHYTHM_PHILOSOPHY.md)
 
 The phasor *is* the clock. Every rhythmic concept derives
@@ -207,6 +260,21 @@ let patternXfade = ease(longPhase * 2 - 0.5)      # A↔B every 32 bars
 Slow phasors are bar positions. Fast phasors are beats.
 Audio-rate phasors are pitches. Same primitive, different
 timescale.
+
+A bar-as-phasor is more powerful than a bar-as-counter
+because it is a *signal*. Things you can do to a continuous
+phase that you can't do to an integer:
+
+```
+let bar       = phasor(tempo / 16)
+let intensity = ease(bar)                # rises across each bar
+let lastBeat  = ease((bar - 0.94) * 16)  # rises in the last beat
+```
+
+A counter could tell you *which* bar; a phasor tells you
+*where in the bar* you are, with full audio-rate resolution.
+Crossfade, swell, gate, modulate — all just functions of the
+phase.
 
 ### Sidechain / pump (duck one layer with another's envelope)
 
@@ -264,6 +332,46 @@ stays constant across the field. The classic manual form
 is still available if you want to compensate for the
 single-channel sum; use `* 1.41` (i.e. `√2`) at the
 extremes.
+
+## Versioning while you compose
+
+Aither has no built-in undo or rollback. The patch file is
+the source of truth; the engine holds runtime state but
+not history. That's deliberate — git is the time machine.
+
+A composition session looks like:
+
+```bash
+git init && git add . && git commit -m "session start"
+# ...edit, send, listen, edit, send...
+git add piece.aither && git commit -m "verse arc working"
+# ...try a bigger structural change...
+git diff piece.aither           # what did I just change?
+git checkout piece.aither       # nope — restore last commit
+```
+
+Two habits that pay off across long composition sessions:
+
+- **Commit at every milestone**, however small. The piece
+  arrives at a working drop, an interesting breakdown, a
+  good crossfade — commit it. `git rebase -i` cleans up
+  later. The cost of the commit is zero; the cost of
+  losing a sweet spot you can't recreate is hours.
+- **`git stash` before a bigger experiment.** `git stash`,
+  rewrite half the file, send. If the rewrite is better,
+  commit. If it's worse, `git stash pop` and you're back
+  to a known-good state in one keystroke.
+
+A failed `aither send` (compile error) does NOT lose the
+voice — the engine returns `ERR` and keeps the prior
+version running. The actual failure mode worth guarding
+against is "patch compiled, but the audio is wrong"
+(silence, NaN-induced reset, accidental gain blowout, the
+piece structurally broken). That's exactly what
+`git checkout` is for.
+
+The aither workflow assumes git underneath. Treat your
+patches directory as a git repo from day one.
 
 ## Common bugs I have hit
 
