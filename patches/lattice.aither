@@ -1,0 +1,109 @@
+# lattice — pure f(state) additive. 24 partials are a projection of
+# a small state vector: two slow lattice phasors, per-voice age,
+# per-voice spectrum-feedback. Knobs reshape the dynamical SYSTEM
+# the partials read from, not the partials themselves.
+#
+# Why this is aither-native: in any other paradigm, "additive synth"
+# = a stack of partials with per-partial controls (envelopes, filters,
+# detune sliders). Here, partials have NO individual controls. They
+# have a PROJECTION FUNCTION that reads state. Move the state, the
+# whole spectrum reorganizes coherently — never randomly.
+#
+# The unique territory: cross-coupling between things modular synths
+# keep walled off — per-voice age × per-partial index × global lattice
+# × spectrum self-feedback — all braided into one expression.
+#
+# State variables actively read per sample:
+#   t          global time   → drives lat1, lat2 phasors
+#   dt         sample period → per-voice age integrator
+#   freq, gate per-voice MIDI input
+#   $age       per-voice elapsed seconds (integrates dt while held)
+#   $fb        per-voice feedback (last sample's output)
+#   lat1, lat2 global lattice coords (incommensurate slow sines)
+#   midi_cc    8 knobs reshape the lattice itself
+#
+# ============================================================ KNOBS
+#   K1 (CC 74) — LATTICE WARP    0   = pure integer harmonics
+#                                 0.6 = lattice-deformed inharmonic
+#                                       (spectrum walks coherently)
+#   K2 (CC 71) — LATTICE RATE    0.05 Hz drift → 1.2 Hz flutter
+#   K3 (CC 76) — BLOOM           0   = instant chord (all 24 at once)
+#                                 1.0 = partials wake one-by-one over
+#                                       ~24s — spectrum literally grows
+#   K4 (CC 77) — INDEX COUPLING  per-partial sensitivity to lat2
+#                                 0   = all partials warp together
+#                                 0.4 = each partial warps differently
+#   K5 (CC 93) — FEEDBACK        spectrum reads its own past sample
+#                                 (mild instability → slow drift)
+#   K6 (CC 18) — BRIGHTNESS      amp falloff exponent (0.5..1.8)
+#   K7 (CC 19) — RELEASE         envelope tail (0.4..4.4 s)
+#   K8 (CC 16) — REVERB wet      0..0.6
+#
+# How to drive it:
+#   - Hold a single key, sweep K3 (BLOOM): hear the spectrum form
+#     in front of you. This is something no other synth can do —
+#     the partial structure is paced by per-voice integration of dt.
+#   - With K1 (WARP) up, sweep K2 (RATE): the spectrum walks around
+#     the harmonic origin coherently, not randomly, because every
+#     partial reads the SAME 2-coord lattice.
+#   - K5 (FEEDBACK) past 0.5 starts to destabilise — the spectrum
+#     reads its own previous output. Welcome to the edge.
+
+let warp_depth = midi_cc(74) * 0.6
+let lat_rate   = 0.05 + midi_cc(71) * 1.15
+let bloom      = 0.01 + midi_cc(76) * 1.0
+let idx_couple = 0.05 + midi_cc(77) * 0.4
+let feedback   = midi_cc(93) * 0.4
+let bright     = 0.5 + midi_cc(18) * 1.3
+let release    = 0.4 + midi_cc(19) * 4.0
+let revWet     = midi_cc(16) * 0.6
+
+# Lattice — two incommensurate slow sines computed ONCE per sample,
+# read by every partial of every held voice. This is the small
+# dynamical system whose state the spectrum projects.
+let lat1 = sin(TAU * phasor(lat_rate * 0.137))
+let lat2 = sin(TAU * phasor(lat_rate * 0.211))
+
+play lattice:
+  midi_keyboard((freq, gate) =>
+    # Per-voice age: integrate dt while gated, reset on release.
+    # `dt` is the sample period — the most fundamental unit of
+    # "now" the engine has. Integrating it gives a per-key clock
+    # nobody else needs to schedule.
+    $age = 0.0
+    $age = if gate > 0.5 then $age + dt else 0.0
+
+    # Per-voice spectrum-feedback. Read previous sample BEFORE
+    # writing this sample's output (classic state pattern).
+    $fb = 0.0
+    let fbIn = $fb
+
+    let env = swell(gate, 0.005, release)
+
+    let voice = sum(24, n =>
+      # FREQUENCY: integer harmonic + lattice-driven warp.
+      # The same 2 lattice numbers drive all 24 partials, so the
+      # spectrum moves coherently, not as 24 independent walks.
+      let warp = warp_depth * (lat1 + lat2 * sin(n * idx_couple))
+      let r    = n * (1 + warp)
+
+      # AMPLITUDE: per-partial wake gated by per-voice age.
+      # Partial n enters at age = n * bloom seconds. The spectrum
+      # blooms outward from the fundamental — sample-accurate,
+      # because $age is integrated from dt every sample.
+      let wake = ease(($age - n * bloom) / bloom)
+      let amp  = wake * (1.0 / pow(n, bright)) * (1 + lat2 * 0.2)
+
+      # Frequency feedback — previous-sample output bends pitch.
+      # Tiny coefficient (0.04) so K5=0.4 still stays musical.
+      let pf = freq * r * (1 + feedback * fbIn * 0.04)
+      if pf >= 22000 then 0
+      else amp * sin(TAU * phasor(pf)))
+
+    $fb = voice
+    voice * env * 0.05)
+
+let dry  = lattice
+let mono = (dry[0] + dry[1]) * 0.5
+let wet  = mono |> reverb(2.5, 0.4)
+dry + [wet, wet] * revWet
