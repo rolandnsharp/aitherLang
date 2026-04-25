@@ -431,7 +431,7 @@ fits the sound you're after; the engine doesn't care.
 |-------------------------------------------------------------|----------------------------------------|
 | A musical sound from its spectrum (pads, leads, vocal-like) | `additive(f, shape, N)`                |
 | Bells, plates, stiff strings — non-integer partials         | `inharmonic(f, ratio, amp, N)`         |
-| Plucked / bowed / struck physical instruments               | `pluck_string`, `bowed_string`, `struck_bar`, `tuning_fork` (stdlib) |
+| Plucked / bowed / struck physical instruments               | `pluck_string`, `bowed_string`, `struck_bar`, `tuning_fork` (stdlib — **WIP, sounds naive vs additive**) |
 | A vibrating physical object — transients, decay built-in    | `var x; var dx; ẍ + 2γẋ + ω²x = F(t)` (raw physics) |
 | Sidebanded / FM grit — aliasing as character                | inline `sin(carrier + sin(modf) * depth)` |
 | Chiptune / lo-fi / digital-sounding                         | `osc(saw, f)`, `osc(sqr, f)`           |
@@ -441,9 +441,17 @@ starter kits for the most common ones (additive, inharmonic);
 the rest you can write inline with `var`, `phasor`, `noise`,
 and a few cycles of math.
 
-### Physical instruments
+### Physical instruments (work in progress)
 
-The stdlib ships four physical-instrument defs for sounds where
+The stdlib ships four physical-instrument defs as starter sketches.
+**They sound naive compared to the additive recipes above** — reach
+for `additive` / `inharmonic` when you want a sound that feels like
+an instrument. Use these as templates you'd tune yourself, or wait
+until they're polished. Live test on 2026-04-25 confirmed each one
+produces an "approximately correct" sound (a recognizable pluck, a
+recognizable strike), not yet "good enough to want to play."
+
+For sounds where
 excitation-response physics is the discriminating character:
 
 - `tuning_fork(strike, freq)` — single damped HO, the canonical

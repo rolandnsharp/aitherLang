@@ -223,19 +223,22 @@ def soft_decay(n, pf):    1.0 / pow(n, 0.5)
 def bell_decay(n, pf):    1.0 / n
 def bright_decay(n, pf):  1.0 / pow(n, 0.3)
 
-# ---------------------------------------------------------------- physical instruments
-# Excitation-response physics. For sounds whose identity is in HOW
-# they respond to being struck, plucked, or bowed — additive can
-# fake the steady-state spectrum but loses the transient character.
-# Every def below has a comment explaining when its paradigm wins.
+# ---------------------------------------------------------------- physical instruments (WIP)
+# WORK IN PROGRESS — these defs sound naive compared to the additive
+# recipes above. The paradigm works, but parameter tuning for musical
+# quality requires physics-modeling intuition we haven't yet baked
+# into the defs. Live testing 2026-04-25 produced sounds that read
+# as "approximately right" but not "good as an instrument" — pluck
+# wasn't a satisfying pluck, bowed was thin, fork was on the edge of
+# xylophone-territory. Reach for additive/inharmonic for sounds you
+# want to actually play; treat these as starter sketches you'd tune
+# yourself before relying on them.
 #
-# `tuning_fork` is the canonical reference: a single damped HO, with
-# the integration written inline as `var x; var dx; dx += ... * dt;
-# x += dx * dt`. The equation is right there: ẍ + 2γẋ + ω²x =
-# strike·ω². The modal banks (`bowed_string`, `struck_bar`) run that
-# same equation per mode via `resonator`, the native integrator of
-# the same ODE — read `tuning_fork` once to understand what each
-# `resonator(...)` call inside the modal banks is doing.
+# Why physics still matters: for sounds whose identity is in HOW they
+# respond to being struck/plucked/bowed (excitation-response physics),
+# additive can fake the steady-state spectrum but loses the transient
+# character. The defs below are the right shape; they need a sound-
+# designer's hand to reach instrument quality.
 #
 # Hot-reload caveat: these defs use stateful primitives (var, delay,
 # resonator). On reload with parameter changes, the system can
