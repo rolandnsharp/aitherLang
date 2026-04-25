@@ -5,7 +5,7 @@
 ## inactive slots out before checking the MaxVoices limit.
 
 import std/[os, strutils]
-import ../engine
+import ../engine, ../midi, ../cli_output
 
 const Patch = """
 play tone:
@@ -46,7 +46,7 @@ let result = loadPatch(newPath, 0.0)
 doAssert result.len == 0,
   "new voice after stopping 12 should succeed, got: " & result
 
-let listing = listVoices()
+let listing = formatVoiceList(midiStatus(), voiceInfoList())
 doAssert "aither_test_slot_new" in listing,
   "new voice should appear in list: " & listing
 doAssert "aither_test_slot_0" notin listing,

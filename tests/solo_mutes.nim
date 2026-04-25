@@ -9,7 +9,7 @@
 ## engine.loadPatch, call soloVoice, parse listVoices output.
 
 import std/[os, strutils]
-import ../engine
+import ../engine, ../midi, ../cli_output
 
 const PatchA = """
 play tone:
@@ -33,7 +33,7 @@ doAssert engine.loadPatch(pathA, 0.0).len == 0
 doAssert engine.loadPatch(pathB, 0.0).len == 0
 
 # Sanity: both should be playing.
-let beforeSolo = engine.listVoices()
+let beforeSolo = formatVoiceList(midiStatus(), voiceInfoList())
 doAssert "aither_test_solo_a [playing]" in beforeSolo,
   "before solo, voice A should be [playing]:\n" & beforeSolo
 doAssert "aither_test_solo_b [playing]" in beforeSolo,
@@ -42,7 +42,7 @@ doAssert "aither_test_solo_b [playing]" in beforeSolo,
 # Solo A.
 doAssert engine.soloVoice("aither_test_solo_a", 0.0).len == 0
 
-let afterSolo = engine.listVoices()
+let afterSolo = formatVoiceList(midiStatus(), voiceInfoList())
 doAssert "aither_test_solo_a [playing]" in afterSolo,
   "after solo, voice A should be [playing]:\n" & afterSolo
 doAssert "aither_test_solo_b [muted]" in afterSolo,
@@ -55,13 +55,13 @@ doAssert "[stopped]" notin afterSolo,
 # no effect.
 doAssert engine.setMute("aither_test_solo_b", false).len == 0
 
-let afterUnmute = engine.listVoices()
+let afterUnmute = formatVoiceList(midiStatus(), voiceInfoList())
 doAssert "aither_test_solo_b [playing]" in afterUnmute,
   "after unmute, voice B should be back to [playing]:\n" & afterUnmute
 
 # Solo a different voice — A should now go to muted.
 doAssert engine.soloVoice("aither_test_solo_b", 0.0).len == 0
-let afterSolo2 = engine.listVoices()
+let afterSolo2 = formatVoiceList(midiStatus(), voiceInfoList())
 doAssert "aither_test_solo_a [muted]" in afterSolo2,
   "after solo B, A should be [muted]:\n" & afterSolo2
 doAssert "aither_test_solo_b [playing]" in afterSolo2,

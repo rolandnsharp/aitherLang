@@ -10,7 +10,7 @@
 ## contract (returns "" when nothing to do).
 
 import std/[os, strutils]
-import ../engine, ../midi
+import ../engine, ../midi, ../cli_output
 
 # Before any connect, the resubscribe call should be a no-op.
 doAssert midiResubscribeIfDropped() == "",
@@ -23,7 +23,7 @@ doAssert not midiSubscriptionActive(),
 # `list` output with no voices and no MIDI should be the literal
 # "(no voices)" — adding the MIDI header in the no-connect case
 # would clutter the output.
-let beforeAny = listVoices()
+let beforeAny = formatVoiceList(midiStatus(), voiceInfoList())
 doAssert "MIDI:" notin beforeAny,
   "listVoices should not show MIDI header when nothing was connected: " & beforeAny
 
@@ -36,7 +36,7 @@ tone
 const Path = "/tmp/aither_test_midi_resilience.aither"
 writeFile(Path, Patch)
 doAssert loadPatch(Path, 0.0).len == 0
-let afterLoad = listVoices()
+let afterLoad = formatVoiceList(midiStatus(), voiceInfoList())
 doAssert "MIDI:" notin afterLoad,
   "MIDI header still hidden when never connected: " & afterLoad
 doAssert "aither_test_midi_resilience" in afterLoad,
