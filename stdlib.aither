@@ -204,18 +204,16 @@ def cello_shape(n, pf):
 # bars and plates have well-known physical mode ratios.
 def stiff_string(n):  n * sqrt(1.0 + n * n * 0.0003)
 def stiff_cello(n):   n * sqrt(1.0 + n * n * 0.00008)
+# Tabular partials. `inharmonic(..., max_n)` iterates n in 1..max_n;
+# call with max_n <= table length (5 here) for the documented modes.
+# Beyond that the index wraps — that's harmless for higher max_n but
+# unphysical, so prefer a parametric ratio fn for richer spectra.
 def bar_partials(n):
-  if n == 1 then 1.0
-  else (if n == 2 then 2.756
-        else (if n == 3 then 5.404
-              else (if n == 4 then 8.933
-                    else 13.345)))
+  let p = [1.0, 2.756, 5.404, 8.933, 13.345]
+  p[n - 1]
 def plate_partials(n):
-  if n == 1 then 1.0
-  else (if n == 2 then 2.295
-        else (if n == 3 then 3.873
-              else (if n == 4 then 5.612
-                    else 7.682)))
+  let p = [1.0, 2.295, 3.873, 5.612, 7.682]
+  p[n - 1]
 def phi_partials(n):  pow(1.618, n - 1)
 
 # -------- amp functions (for inharmonic) --------

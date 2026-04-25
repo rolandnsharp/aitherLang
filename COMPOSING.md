@@ -9,6 +9,55 @@ evaluated 48,000 times a second. There is no score, no
 scheduler, no "when does X happen." Everything —
 melody, rhythm, sections, dynamics — is a signal.
 
+## What aither is for (and what it isn't)
+
+Aither is not a sequencer. It is not Tidal Cycles. It is not
+Sonic Pi. Those tools already do pattern-based melodic
+composition extremely well; aither would be a worse copy of
+them. What aither uniquely does is **build instruments and
+the orchestra around them** — sounds and textures and
+dynamics that no slider-driven synth and no batch-rendered
+DSL has ever been able to express.
+
+The natural division of labour:
+
+- **Aither makes the instrument and the orchestra.**
+  Spectral synthesis (additive, inharmonic, FM-per-partial)
+  is the default — `osc(saw, f)` is the exception you reach
+  for when you specifically want chiptune / lo-fi / aliased
+  character. For anything you want to sound *musical*, build
+  the spectrum directly: `additive(f, warm_shape, 8)` for
+  pads, `additive(f, bright_shape, 16)` for leads, `inharmonic`
+  for bells/plates/strings. Plus signal-native textures and
+  dynamics (LFO-modulated everything, polyrhythm via products
+  of LFOs, slow morphing via incommensurate rates), reactive
+  backing tracks designed for live performance.
+- **The human plays the melody.** The MIDI keyboard is the
+  voice in the music. The most striking aither result so far
+  (`fm_swarm.aither` — the "gothic Tesla organ") wasn't a
+  generated melody; it was a *timbre* the user discovered and
+  played melodies into.
+
+This is a discipline, not a limitation. Resist the urge to
+write `let melody = [220, 261, 329, ...]` in a patch. If you
+need a melody, plug in the keyboard and play one. The patch's
+job is to make the instrument so beautiful, and the backing
+so alive, that whatever the human plays sounds like more than
+the sum of the keystrokes.
+
+When a backing track needs harmonic motion (chord
+progressions, bassline walks) and rhythm (drums, percussion),
+those ARE in scope — they're orchestra, not melody. Use
+arrays of root frequencies indexed by quantized LFOs (chord
+progressions), `phasor`-shaped envelopes (drum hits), `prev()`
+edge-detection for downbeat events. These tools *set the
+stage*; they don't replace the soloist.
+
+For solo aither pieces (no live performer), lean toward
+ambient, drone, generative — genres where evolution and
+texture ARE the music. The math-driven non-repetition is the
+point.
+
 ## File structure
 
 Every file has three kinds of thing and exactly one final
@@ -32,7 +81,10 @@ play kick:
   [s, s]
 
 play bass:
-  let s = osc(saw, 55) |> lpf(150 + kEnv * 1500, 0.85) * sc
+  # Additive saw — same character as osc(saw, 55) but band-limited
+  # by construction (no aliasing) and the spectrum is directly
+  # tunable via the shape function. This is the preferred default.
+  let s = additive(55, saw_shape, 8) |> lpf(150 + kEnv * 1500, 0.85) * sc
   [s, s]
 
 # 4. final expression: the voice's output
@@ -313,13 +365,13 @@ Stdlib has four stereo helpers:
 ```
 # pan a mono signal left↔right (pos in [-1, 1])
 let panPos = sin(TAU * pos / 50)             # 50s cycle
-osc(saw, 110) * 0.3 |> pan(panPos)
+additive(110, warm_shape, 8) * 0.3 |> pan(panPos)
 
 # psychoacoustic width via a 1-30 ms delay on one channel
-osc(sin, 220) * 0.2 |> haas(8)               # right delayed 8 ms
+sin(TAU * phasor(220)) * 0.2 |> haas(8)      # right delayed 8 ms
 
 # mid-side width: 0 → mono, 1 → unchanged, >1 → exaggerated stereo
-let stereo = [osc(saw, 440) * 0.2, osc(saw, 441) * 0.2]
+let stereo = [additive(440, saw_shape, 8) * 0.2, additive(441, saw_shape, 8) * 0.2]
 stereo |> width(1.6)
 
 # collapse a stereo signal to mono (e.g. for sidechain)
@@ -333,33 +385,46 @@ is still available if you want to compensate for the
 single-channel sum; use `* 1.41` (i.e. `√2`) at the
 extremes.
 
-## Timbre choice: osc vs additive vs inharmonic
+## Timbre choice: prefer additive
 
-Three ways to produce a tone, ranked by cost and expressiveness:
+`additive(f, shape, N)` is the default oscillator for almost
+everything. Build sounds out of partial-amp functions; the
+spectrum *is* the timbre. `osc(saw/sqr, f)` is the exception,
+not the rule.
 
 | When you want…                                    | Use                                    |
 |---------------------------------------------------|----------------------------------------|
-| A cheap default, stock saw/square character       | `osc(saw, f)`, `osc(sqr, f)`           |
-| Control over the spectrum, formants, no aliasing  | `additive(f, shape, N)`                |
+| Anything musical (pads, leads, bass, vocal-like)  | `additive(f, shape, N)` — DEFAULT      |
 | Bells, plates, stiff strings, non-integer partials | `inharmonic(f, ratio, amp, N)`        |
+| Deliberately chiptune / lo-fi / aliased character | `osc(saw, f)`, `osc(sqr, f)`           |
 
 Rules of thumb:
 
-- **`osc(saw/sqr, f)`** is fine for chiptune, lo-fi, sidechain
-  tests, anything where you don't care about timbre. It also
-  aliases above ~1 kHz — that's *part* of the 8-bit sound, so
-  keep it when you want it.
-- **`additive(f, shape, N)`** is the default for anything you'd
-  want to hear as musical on a good system. Pick any shape fn
-  that matches your mood: `warm_shape` for pads, `bright_shape`
-  for edgy leads, `vowel_ee`/`vowel_ah` for vocal pads,
-  `cello_shape` for bowed textures. `N=8` for pads, `16` for
-  leads, up to `24` for characterful features.
+- **`additive(f, shape, N)`** is the default. Pick any shape
+  fn that matches your mood: `warm_shape` for pads,
+  `bright_shape` for edgy leads, `vowel_ee`/`vowel_ah` for
+  vocal pads, `cello_shape` for bowed textures, `saw_shape`
+  for a clean band-limited saw. `N=8` for pads, `16` for
+  leads, up to `24` for characterful features. CPU is linear
+  in N — `N=8` is essentially free, `N=24` is fine for one
+  voice, push past 32 only with reason.
 - **`inharmonic(f, ratio, amp, N)`** when the spectrum
   deliberately departs from integer multiples. Strike a
   bar? `bar_partials`. Bowed string with body resonance?
   `stiff_cello` + `cello_shape`. Dreamy non-tonal texture?
-  `phi_partials`.
+  `phi_partials`. Bell hits? `bar_partials` + `bell_decay`.
+- **`osc(saw/sqr, f)`** is for chiptune, lo-fi, "broken hardware"
+  character, sidechain test signals, kick body sweep — anywhere
+  you specifically want the digital aliased sound or you don't
+  care about the spectrum at all. NOT the default. Aliases above
+  ~1 kHz; that's a feature when you want it, a bug otherwise.
+
+The reason additive is the default isn't aesthetic — it's that
+aither's signal-native model and `sum(N, fn)` primitive are
+*built* for spectral construction. Reaching for `osc(saw)`
+leaves most of aither's unique value on the table. The only
+patch where I'd default to `osc` is one that aims at chiptune
+or breakbeat character on purpose.
 
 All three compose with envelopes, effects, pans the same way:
 
@@ -376,34 +441,23 @@ picked — swap `osc(saw, midi_freq())` ↔ `additive(midi_freq(),
 saw_shape, 16)` ↔ `inharmonic(midi_freq(), stiff_string,
 soft_decay, 16)` freely.
 
-### Workaround: tabular ratio / shape functions
+### Tabular ratio / shape functions
 
-When writing a ratio function from a table (e.g.
-`bar_partials` with its five specific values), prefer the
-`wave(0, [...])` lookup over nested `if/else`:
-
-```
-# Smoother — no else-if chain parser quirks.
-def bar_partials(n):
-  let tab = [1.0, 2.756, 5.404, 8.933, 13.345]
-  tab[int(n) - 1]
-```
-
-instead of:
+A ratio fn that maps `n → multiplier` from a fixed table
+(e.g. `bar_partials` with its five modes) is just a
+let-bound array and a lookup:
 
 ```
 def bar_partials(n):
-  if n == 1 then 1.0
-  else (if n == 2 then 2.756
-        else (if n == 3 then 5.404
-              else (if n == 4 then 8.933
-                    else 13.345)))
+  let p = [1.0, 2.756, 5.404, 8.933, 13.345]
+  p[n - 1]
 ```
 
-Both work today; the array form is the tidier idiom until
-the parser gets proper `else if` chaining (queued). The
-stdlib ships the parenthesised form for now — a local patch
-can override with the array form if you prefer.
+The stdlib ships this form. `else if` chains also parse
+if you prefer them, but the array form reads better and
+lets you sketch a custom tuning by editing one line.
+Out-of-range indices wrap (`p[5]` reads `p[0]`), so either
+size your table to `max_n` or clamp inside the fn.
 
 ## Versioning while you compose
 

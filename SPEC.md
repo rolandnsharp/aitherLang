@@ -253,6 +253,29 @@ See "Program structure" below.
 Literal arrays of all-constant numbers are compile-time
 hoisted; they allocate once per voice, not per sample.
 
+### Let-bound arrays + indexing
+
+A `let` binding whose RHS is a numeric-literal array is
+hoisted to a static const and may be indexed by any
+expression that evaluates to a number. The legal scopes
+are top-level, play body, and `def` body — so a constant
+table can live next to the code that uses it:
+
+```
+def bar_partials(n):
+  let p = [1.0, 2.756, 5.404, 8.933, 13.345]
+  p[n - 1]
+
+let roots = [110.0, 87.31, 130.81, 98.0]
+play bass:
+  osc(saw, roots[int(phasor(0.25) * 4)]) * 0.2
+```
+
+The index expression is truncated to `int` and wrapped to
+the table size (`p[n] === p[(int)n % len]`), so out-of-range
+reads cycle rather than crash. v1 doesn't allow passing
+arrays into `def` parameters or returning them from a `def`.
+
 ### Mutable arrays
 
 ```
