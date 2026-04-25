@@ -43,6 +43,12 @@ type
     names: Table[string, string]
     # name -> aither function name (for fn-valued params like `shape`)
     fns: Table[string, string]
+    # name -> nkLambda node. Lambda-valued params: a def can take a
+    # lambda as an argument, and the param name resolves to an inline
+    # lambda call site at use. Distinct from `fns` because lambdas have
+    # no callable name — they're substituted body-and-all at the call.
+    # Powers `def poly(n_voices, voice_fn): sum(n_voices, n => voice_fn(...))`.
+    lambdas: Table[string, Node]
     # name -> (lExpr, rExpr). Stereo-valued bindings (params, lets).
     stereoNames: Table[string, tuple[l, r: string]]
     # name -> (C symbol, length). Play-local numeric-literal arrays that
@@ -137,6 +143,7 @@ proc push(parent: Scope): Scope =
   Scope(parent: parent,
         names: initTable[string, string](),
         fns: initTable[string, string](),
+        lambdas: initTable[string, Node](),
         stereoNames: initTable[string, tuple[l, r: string]](),
         arrays: initTable[string, tuple[sym: string; length: int]](),
         numLits: initTable[string, float64]())
@@ -176,6 +183,16 @@ proc lookupFn(sc: Scope; name: string): string =
     if name in s.fns: return s.fns[name]
     s = s.parent
   ""
+
+proc lookupLambda(sc: Scope; name: string): Node =
+  ## Walk the scope chain for a lambda binding. Returns nil if the name
+  ## isn't bound to a lambda — caller falls through to other resolution
+  ## paths (named def, builtin, scalar local).
+  var s = sc
+  while s != nil:
+    if name in s.lambdas: return s.lambdas[name]
+    s = s.parent
+  nil
 
 proc lookup(sc: Scope; name: string): string =
   var s = sc
@@ -312,6 +329,20 @@ proc emitDefInline(c: Ctx; sc: Scope; def: Node; call: Node): string =
   var preface = ""
   for i, p in def.params:
     let a = args[i]
+    # Lambda-valued arg: either a literal `(a, b) => ...` at the call
+    # site, or an ident that already resolves to a lambda in scope (the
+    # def-of-def case where one def passes its own lambda param to
+    # another). Bind in inner.lambdas so callees of `p(...)` inline the
+    # body. Checked before isFnName because a lambda doesn't satisfy
+    # isFnName but must take the function-arg slot all the same.
+    if a.kind == nkLambda:
+      inner.lambdas[p] = a
+      continue
+    if a.kind == nkIdent:
+      let lam = sc.lookupLambda(a.str)
+      if lam != nil:
+        inner.lambdas[p] = lam
+        continue
     # Function-valued arg: a bare ident naming a known builtin/def. Bind
     # in inner.fns so calls to `p(...)` resolve to the concrete function.
     # isFnName respects shadowing — a local `let saw = ...` (or any other
@@ -513,6 +544,37 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
     let els  = if n.kids[2] != nil: c.emitExpr(sc, n.kids[2]) else: "0.0"
     &"(({cond}) != 0.0 ? ({thn}) : ({els}))"
   of nkCall:
+    # Lambda-valued param? Inline the body, binding call args to lambda
+    # params. Pre-empts the named-fn / builtin / native paths because a
+    # lambda has no name to dispatch through. Powers `voice_fn(f, g)`
+    # inside `def poly(n_voices, voice_fn): ...`.
+    let lamNode = sc.lookupLambda(n.str)
+    if lamNode != nil:
+      if n.kids.len != lamNode.params.len:
+        raise newException(ValueError,
+          "lambda '" & n.str & "' takes " & $lamNode.params.len &
+          " args, got " & $n.kids.len & " " & errLoc(n))
+      let inner = push(sc)
+      var preface = ""
+      for i, p in lamNode.params:
+        let argC = c.emitExpr(sc, n.kids[i])
+        let tmp = c.fresh("p_" & p)
+        preface.add &"double {tmp} = ({argC}); "
+        inner.names[p] = tmp
+        # Literal propagation through lambda params — same logic as
+        # emitDefInline. Lets a lambda body call sum(p, ...) when p is
+        # bound to a numeric literal at the call site.
+        let argN = n.kids[i]
+        if argN.kind == nkNum:
+          inner.numLits[p] = argN.num
+        elif argN.kind == nkIdent:
+          let v = sc.lookupNumLit(argN.str)
+          if v.ok: inner.numLits[p] = v.val
+      let body = lamNode.kids[0]
+      let bodyC =
+        if body.kind == nkBlock: c.emitBlockExpr(inner, body)
+        else: c.emitExpr(inner, body)
+      return "(({ " & preface & "double __r = (" & bodyC & "); __r; }))"
     # If the call target is a fn-valued param, resolve to the concrete name.
     let resolved = sc.lookupFn(n.str)
     let name = if resolved.len > 0: resolved else: n.str

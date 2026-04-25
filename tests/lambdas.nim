@@ -184,12 +184,118 @@ block sumArity:
     doAssert "sum" in e.msg.toLowerAscii(),
       "error should mention sum, got: " & e.msg
 
-# --- 14. Lambda with multi-arg: error (v1 is single-param only).
-# `(a, b) => a + b` isn't valid syntax; the parser only sees `n => ...`
-# starting from a bare ident. A raw paren'd tuple in lambda position
-# falls back to normal expr parsing, so we test a different corner:
-# an explicitly-constructed nkLambda with 2 params via our own AST.
-# Skipped here — the parser doesn't produce such nodes, and the sum
-# handler's 1-param check guards against them if somehow constructed.
+# --- 14. Multi-arg lambda parses as nkLambda with N params.
+# `(a, b) => a + b` is valid syntax; tryParseParenLambda picks it up
+# at the open paren, restoring on misses so plain grouping `(expr)`
+# still works.
+block multiArgParse:
+  let ast = parseProgram("def f(g): g(3, 4)\nf((a, b) => a + b)")
+  # Find the call to f, walk to the lambda arg.
+  var foundLam = false
+  proc walk(n: Node) =
+    if n == nil: return
+    if n.kind == nkLambda and n.params.len == 2 and
+       n.params[0] == "a" and n.params[1] == "b":
+      foundLam = true
+    for k in n.kids: walk(k)
+  walk(ast)
+  doAssert foundLam, "expected nkLambda with params [a, b] in AST"
+
+# --- 15. Multi-arg lambda inlined through a def-call: 2-arg lambda
+# bound to `g`, body of f calls g(3, 4), result = 3 + 4 = 7.
+block multiArgInline:
+  const P = "def f(g): g(3, 4)\nf((a, b) => a + b)"
+  let v = newVoice(48000.0)
+  v.load(parseProgram(P), 48000.0)
+  let s = v.tick(0.0)
+  doAssert abs(s.l - 7.0) < 1e-9,
+    "f((a,b) => a+b) where f(g) = g(3,4) should give 7.0, got " & $s.l
+
+# --- 16. Per-param binding with different values in each position. Pin
+# correctness when the args are non-symmetric (a appears once, b twice).
+block multiArgAsymmetric:
+  const P = "def f(g): g(3, 5)\nf((a, b) => a + b * 2)"
+  # 3 + 5 * 2 = 13
+  let v = newVoice(48000.0)
+  v.load(parseProgram(P), 48000.0)
+  let s = v.tick(0.0)
+  doAssert abs(s.l - 13.0) < 1e-9,
+    "asymmetric multi-arg lambda should give 13.0, got " & $s.l
+
+# --- 17. Multi-arg lambda with let-prefixed body — same body grammar
+# as single-arg lambdas, just with a different param header.
+block multiArgLetBody:
+  const P = """
+def f(g): g(2, 3)
+f((a, b) =>
+  let s = a + b
+  s * s)
+"""
+  # (2 + 3)^2 = 25
+  let v = newVoice(48000.0)
+  v.load(parseProgram(P), 48000.0)
+  let s = v.tick(0.0)
+  doAssert abs(s.l - 25.0) < 1e-9,
+    "multi-arg lambda with let body should give 25.0, got " & $s.l
+
+# --- 18. Plain grouping `(expr)` still parses correctly — the lookahead
+# in tryParseParenLambda must restore on miss so this isn't mis-routed.
+block parenGroupingPreserved:
+  const P = "(2 + 3) * 4"
+  let v = newVoice(48000.0)
+  v.load(parseProgram(P), 48000.0)
+  let s = v.tick(0.0)
+  doAssert abs(s.l - 20.0) < 1e-9,
+    "(2 + 3) * 4 should give 20.0, got " & $s.l
+
+# --- 19. Single-arg paren lambda `(n) => ...` works the same as `n => ...`.
+# Lets users write either form when they want explicit parens.
+block parenSingleArg:
+  const P = "def f(g): g(7)\nf((n) => n * 3)"
+  let v = newVoice(48000.0)
+  v.load(parseProgram(P), 48000.0)
+  let s = v.tick(0.0)
+  doAssert abs(s.l - 21.0) < 1e-9,
+    "(n) => n*3 invoked as g(7) should give 21.0, got " & $s.l
+
+# --- 20. sum(N, multi-arg-lambda) errors clearly. sum's iteration
+# protocol is one-arg (the iteration index), so a 2-arg lambda is
+# meaningless there.
+block sumRejectsMultiArg:
+  const P = "sum(4, (a, b) => a + b)"
+  try:
+    let v = newVoice(48000.0)
+    v.load(parseProgram(P), 48000.0)
+    doAssert false, "sum with multi-arg lambda should error"
+  except CatchableError as e:
+    doAssert "one parameter" in e.msg or "lambda" in e.msg,
+      "error should explain the arity, got: " & e.msg
+
+# --- 21. Lambda call arity mismatch surfaces a clear error.
+block lambdaArityMismatch:
+  const P = "def f(g): g(1)\nf((a, b) => a + b)"
+  try:
+    let v = newVoice(48000.0)
+    v.load(parseProgram(P), 48000.0)
+    doAssert false, "calling 2-arg lambda with 1 arg should error"
+  except CatchableError as e:
+    doAssert "arg" in e.msg or "lambda" in e.msg,
+      "error should mention args/lambda, got: " & e.msg
+
+# --- 22. Lambda passed to def, which forwards it to another def.
+# Pins the def-of-def lambda-binding case (the foundation of how
+# midi_keyboard delegates to poly).
+block lambdaForwarding:
+  const P = """
+def inner(h): h(10, 20)
+def outer(h): inner(h)
+outer((a, b) => a + b)
+"""
+  # 10 + 20 = 30
+  let v = newVoice(48000.0)
+  v.load(parseProgram(P), 48000.0)
+  let s = v.tick(0.0)
+  doAssert abs(s.l - 30.0) < 1e-9,
+    "lambda forwarded through two defs should give 30.0, got " & $s.l
 
 echo "lambdas ok"

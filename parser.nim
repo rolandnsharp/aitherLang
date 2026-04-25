@@ -268,6 +268,56 @@ proc parseIfExpr(p: var Parser): Node =
   p.idx = save
   Node(kind: nkIf, kids: @[cond, thn, nil], line: line)
 
+proc parseLambdaBody(p: var Parser; line: int; params: seq[string]): Node =
+  ## Parse `=>`-prefix lambda body — already past the `=>`. Body may be a
+  ## plain expression or a let-prefixed sequence terminated by a final
+  ## expression. Used by both the single-arg (`n => ...`) and multi-arg
+  ## (`(a, b) => ...`) entry points so the body grammar stays in one place.
+  var stmts: seq[Node] = @[]
+  while p.isKw("let"):
+    let letLine = p.peek().line
+    discard p.advance()
+    let name = p.expect(tkIdent, "binding name").str
+    discard p.expect(tkAssign)
+    let rhs = p.parseExpr()
+    stmts.add Node(kind: nkLet, str: name, kids: @[rhs], line: letLine)
+    while p.peek().kind == tkSemi: discard p.advance()
+  let finalExpr = p.parseExpr()
+  let body =
+    if stmts.len == 0: finalExpr
+    else:
+      stmts.add finalExpr
+      Node(kind: nkBlock, kids: stmts, line: line)
+  Node(kind: nkLambda, params: params, kids: @[body], line: line)
+
+proc tryParseParenLambda(p: var Parser): Node =
+  ## Lookahead-and-commit: detect `(IDENT (, IDENT)*) =>` at the current
+  ## position. On match, consume the parens + arrow + body and return the
+  ## nkLambda node. On miss, restore p.idx so the caller can parse `(...)`
+  ## as plain grouping. Returns nil on miss.
+  let saved = p.idx
+  let line = p.peek().line
+  discard p.advance()                           # consume `(`
+  if p.peek().kind != tkIdent:
+    p.idx = saved; return nil
+  var params: seq[string] = @[]
+  params.add p.advance().str
+  while p.peek().kind == tkComma:
+    discard p.advance()
+    if p.peek().kind != tkIdent:
+      p.idx = saved; return nil
+    params.add p.advance().str
+  if p.peek().kind != tkRParen:
+    p.idx = saved; return nil
+  # Need `)` then `=>` — peek at idx+1 without committing.
+  if p.idx + 1 >= p.toks.len or
+     p.toks[p.idx + 1].kind != tkOp or
+     p.toks[p.idx + 1].str != "=>":
+    p.idx = saved; return nil
+  discard p.advance()                           # `)`
+  discard p.advance()                           # `=>`
+  p.parseLambdaBody(line, params)
+
 proc parsePrimary(p: var Parser): Node =
   let t = p.peek()
   case t.kind
@@ -275,6 +325,11 @@ proc parsePrimary(p: var Parser): Node =
     discard p.advance()
     return Node(kind: nkNum, num: t.num, line: t.line)
   of tkLParen:
+    # Multi-arg lambda `(a, b, ...) => expr` competes with `(expr)` plain
+    # grouping. Try the lambda parse first; on miss the helper restores
+    # idx and we fall through to grouping.
+    let lam = p.tryParseParenLambda()
+    if lam != nil: return lam
     discard p.advance()
     let e = p.parseExpr()
     discard p.expect(tkRParen)
@@ -292,34 +347,12 @@ proc parsePrimary(p: var Parser): Node =
     if p.peek().kind == tkLParen:
       let args = p.parseArgList()
       return Node(kind: nkCall, str: t.str, kids: args, line: t.line)
-    # Single-arg lambda: `n => body`. v1 only supports one param and
-    # only in builtin-arg position (codegen rejects lambdas elsewhere).
-    # The body may be a plain expression or a let-prefixed sequence:
-    #   n => let pf = n*freq; <expr using pf>
-    # Since lambdas typically appear inside parens (a sum() arg), the
-    # tokenizer has already dropped newlines between the `let` lines.
-    # Stmts are separated by the expression boundaries that `parseExpr`
-    # already respects (a `let` or the start of the final expr ends
-    # the previous rhs), plus optional semicolons.
+    # Single-arg lambda: `n => body`. The multi-arg form `(a, b) => body`
+    # is handled by tryParseParenLambda in the tkLParen branch above.
+    # Codegen rejects lambdas outside builtin-arg / def-arg positions.
     if p.peek().kind == tkOp and p.peek().str == "=>":
       discard p.advance()
-      var stmts: seq[Node] = @[]
-      while p.isKw("let"):
-        let letLine = p.peek().line
-        discard p.advance()
-        let name = p.expect(tkIdent, "binding name").str
-        discard p.expect(tkAssign)
-        let rhs = p.parseExpr()
-        stmts.add Node(kind: nkLet, str: name, kids: @[rhs], line: letLine)
-        while p.peek().kind == tkSemi: discard p.advance()
-      let finalExpr = p.parseExpr()
-      let body =
-        if stmts.len == 0: finalExpr
-        else:
-          stmts.add finalExpr
-          Node(kind: nkBlock, kids: stmts, line: t.line)
-      return Node(kind: nkLambda, params: @[t.str],
-                  kids: @[body], line: t.line)
+      return p.parseLambdaBody(t.line, @[t.str])
     return Node(kind: nkIdent, str: t.str, line: t.line)
   of tkOp:
     if t.str == "-":
