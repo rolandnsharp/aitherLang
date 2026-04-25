@@ -18,8 +18,22 @@ import dsp
 {.passL: "-lasound".}
 
 const OverflowSlotMidi = DspPoolSize - 128
+const MaxPolyphony* = 16
+  ## Cap on simultaneously-held MIDI notes. Allocator stages new notes
+  ## into slots 1..MaxPolyphony; `midi_voice_freq(n)` / `_gate(n)` read
+  ## the nth slot. Beyond this, the oldest held note is evicted.
 
 type
+  HeldNote* = object
+    ## One slot in the polyphonic held-notes table. The audio thread
+    ## reads each field independently; the MIDI thread is the sole
+    ## writer. A torn read (note updated before velocity, etc.) costs
+    ## at most one sample of stale audio — keys are pressed at <100 Hz
+    ## while audio reads at 48 kHz, so the visibility is sub-perceptual.
+    note*:     Atomic[int32]      # MIDI note 0..127, or -1 if never used
+    velocity*: Atomic[float64]    # > 0 = held; 0 = released or empty
+    onAt*:     Atomic[int64]      # global note-on counter at allocation
+
   MidiState* = object
     cc*:        array[128, Atomic[float64]]
     notes*:     array[128, Atomic[float64]]
@@ -27,10 +41,63 @@ type
     lastFreq*:  Atomic[float64]
     lastGate*:  Atomic[float64]
     lastNote*:  Atomic[int32]                # which note currently holds gate
+    # Polyphonic held-notes table. Voice index n in 1..MaxPolyphony maps
+    # to held[n-1]. Slot allocation policy: re-trigger on duplicate note,
+    # else first slot with note==-1, else first slot with velocity==0
+    # (released — its synth state may still be ringing), else steal the
+    # slot with the lowest onAt. Documented in SPEC.md "Voice stealing".
+    held*:      array[MaxPolyphony, HeldNote]
+    onCounter*: Atomic[int64]                # monotonic note-on counter
 
 var midiState*: MidiState
 
+# Atomic zero-init leaves note=0 (= MIDI C-1, a valid pitch). Use -1 as
+# the sentinel for "never held" so midi_voice_freq returns 0 on a fresh
+# engine. Module-init runs once at process start, before any patch loads.
+block initHeldSlots:
+  for i in 0 ..< MaxPolyphony:
+    midiState.held[i].note.store(-1'i32)
+
 # ---- writer API (called from MIDI thread or tests) ----------------------
+
+proc allocateSlot(note: int; vel: float64; onAt: int64) =
+  ## Stage a held note into the polyphonic table. Caller has already
+  ## written the mono lastFreq/lastGate. Order of slot operations
+  ## matters for tearing: write onAt + velocity first, then note last,
+  ## so a reader that catches mid-write either sees the old slot
+  ## intact or the new note coherent.
+  let n = int32(note)
+  # 1. Same note still held → re-trigger in place. Keeps voice index
+  #    stable for the same key being repeated.
+  for i in 0 ..< MaxPolyphony:
+    if midiState.held[i].note.load() == n and
+       midiState.held[i].velocity.load() > 0.0:
+      midiState.held[i].onAt.store(onAt)
+      midiState.held[i].velocity.store(vel)
+      return
+  # 2. First empty slot (velocity == 0). Covers both never-used slots
+  #    (note == -1) and released slots (note set, velocity dropped).
+  #    Iterate by index so voice indices stay packed at the low end —
+  #    a release frees up its slot for the next note.
+  for i in 0 ..< MaxPolyphony:
+    if midiState.held[i].velocity.load() == 0.0:
+      midiState.held[i].onAt.store(onAt)
+      midiState.held[i].velocity.store(vel)
+      midiState.held[i].note.store(n)
+      return
+  # 3. All slots actively held: evict the oldest (lowest onAt). The
+  #    user has gone past MaxPolyphony — explicit choice to drop
+  #    earlier notes rather than ignore the new one.
+  var oldestIdx = 0
+  var oldestAt = midiState.held[0].onAt.load()
+  for i in 1 ..< MaxPolyphony:
+    let t = midiState.held[i].onAt.load()
+    if t < oldestAt:
+      oldestAt = t
+      oldestIdx = i
+  midiState.held[oldestIdx].onAt.store(onAt)
+  midiState.held[oldestIdx].velocity.store(vel)
+  midiState.held[oldestIdx].note.store(n)
 
 proc midiNoteOn*(note, velocity: int) =
   if note < 0 or note >= 128: return
@@ -41,6 +108,8 @@ proc midiNoteOn*(note, velocity: int) =
   midiState.lastGate.store(vel)
   midiState.lastNote.store(int32(note))
   discard midiState.trigs[note].fetchAdd(1'u32)
+  let onAt = midiState.onCounter.fetchAdd(1'i64) + 1'i64
+  allocateSlot(note, vel, onAt)
 
 proc midiNoteOff*(note: int) =
   if note < 0 or note >= 128: return
@@ -49,6 +118,14 @@ proc midiNoteOff*(note: int) =
   # a stale note-off from killing a newer held note.
   if midiState.lastNote.load() == int32(note):
     midiState.lastGate.store(0.0)
+  # Polyphonic: zero the velocity in any slot holding this note. Note
+  # field is preserved so the synth's release tail can still read freq;
+  # the slot becomes reusable on the next allocation.
+  let n = int32(note)
+  for i in 0 ..< MaxPolyphony:
+    if midiState.held[i].note.load() == n and
+       midiState.held[i].velocity.load() > 0.0:
+      midiState.held[i].velocity.store(0.0)
 
 proc midiCc*(cc, value: int) =
   if cc < 0 or cc >= 128: return
@@ -62,6 +139,11 @@ proc midiResetAll*() =
   midiState.lastFreq.store(0.0)
   midiState.lastGate.store(0.0)
   midiState.lastNote.store(-1'i32)
+  for i in 0 ..< MaxPolyphony:
+    midiState.held[i].note.store(-1'i32)
+    midiState.held[i].velocity.store(0.0)
+    midiState.held[i].onAt.store(0'i64)
+  midiState.onCounter.store(0'i64)
 
 # ---- natives invoked from TCC-compiled C --------------------------------
 
@@ -78,6 +160,22 @@ proc nMidiFreq*(): cdouble {.cdecl, exportc: "n_midi_freq".} =
 
 proc nMidiGate*(): cdouble {.cdecl, exportc: "n_midi_gate".} =
   midiState.lastGate.load()
+
+proc nMidiVoiceFreq*(n: cint): cdouble {.cdecl, exportc: "n_midi_voice_freq".} =
+  ## Hz of the nth held voice (n in 1..MaxPolyphony, 1-based to match
+  ## sum's iteration index). 0 if the slot has never held a note. A
+  ## released slot keeps its freq so synth release tails still read a
+  ## valid pitch — the gate primitive is the released-vs-held signal.
+  if n < 1 or n > MaxPolyphony: return 0.0
+  let note = midiState.held[n - 1].note.load()
+  if note < 0: return 0.0
+  440.0 * pow(2.0, (float64(note) - 69.0) / 12.0)
+
+proc nMidiVoiceGate*(n: cint): cdouble {.cdecl, exportc: "n_midi_voice_gate".} =
+  ## Velocity of the nth held voice (1-based). 0 after release; 0 for
+  ## empty slots. Standard MIDI gate semantics — drives ADSR/swell.
+  if n < 1 or n > MaxPolyphony: return 0.0
+  midiState.held[n - 1].velocity.load()
 
 # Per-voice edge detect. Pool slot holds the last-seen global counter for
 # note n; emit 1.0 on the sample when the counter advanced. Consume-once

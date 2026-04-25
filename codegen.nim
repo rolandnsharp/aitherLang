@@ -205,7 +205,7 @@ proc lookup(sc: Scope; name: string): string =
 # libm1, shape primitives, stateful inlined builtins, math helpers, MIDI.
 const BuiltinFns = ["saw", "tri", "sqr", "phasor", "noise", "abs", "pow",
                     "midi_cc", "midi_note", "midi_freq", "midi_gate",
-                    "midi_trig"]
+                    "midi_trig", "midi_voice_freq", "midi_voice_gate"]
 
 # True when `name` resolves to a value (scalar local, stereo local, top
 # lets/vars/arrays, play block, stereo let). Values shadow function
@@ -693,7 +693,12 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
       let off = c.registerRegion("midi_trig", 1)
       return "(s->idx = " & off & ", n_midi_trig((DspState*)s, (int)(" &
              c.emitExpr(sc, n.kids[0]) & ")))"
-    if name in ["midi_cc", "midi_note", "midi_trig", "midi_freq", "midi_gate"]:
+    if name == "midi_voice_freq" and n.kids.len == 1:
+      return "n_midi_voice_freq((int)(" & c.emitExpr(sc, n.kids[0]) & "))"
+    if name == "midi_voice_gate" and n.kids.len == 1:
+      return "n_midi_voice_gate((int)(" & c.emitExpr(sc, n.kids[0]) & "))"
+    if name in ["midi_cc", "midi_note", "midi_trig", "midi_freq",
+                "midi_gate", "midi_voice_freq", "midi_voice_gate"]:
       raise newException(ValueError,
         name & ": wrong arg count " & errLoc(n))
     # wave(freq, array) — array must resolve to a compile-time constant.
@@ -1190,6 +1195,8 @@ proc emit*(c: Ctx; program: Node): string =
   pre.add "extern double n_midi_freq(void);\n"
   pre.add "extern double n_midi_gate(void);\n"
   pre.add "extern double n_midi_trig(DspState*,int);\n"
+  pre.add "extern double n_midi_voice_freq(int);\n"
+  pre.add "extern double n_midi_voice_gate(int);\n"
   # VoiceState — DspState prefix is *exactly* the Nim layout; new fields
   # go after.
   # NOTE: voice.nim depends on this exact layout for state migration:

@@ -69,11 +69,13 @@ proc registerNatives(s: TccState) =
   discard s.addSymbol("shape_saw",   cast[pointer](shapeSaw))
   discard s.addSymbol("shape_tri",   cast[pointer](shapeTri))
   discard s.addSymbol("shape_sqr",   cast[pointer](shapeSqr))
-  discard s.addSymbol("n_midi_cc",   cast[pointer](nMidiCc))
-  discard s.addSymbol("n_midi_note", cast[pointer](nMidiNote))
-  discard s.addSymbol("n_midi_freq", cast[pointer](nMidiFreq))
-  discard s.addSymbol("n_midi_gate", cast[pointer](nMidiGate))
-  discard s.addSymbol("n_midi_trig", cast[pointer](nMidiTrig))
+  discard s.addSymbol("n_midi_cc",         cast[pointer](nMidiCc))
+  discard s.addSymbol("n_midi_note",       cast[pointer](nMidiNote))
+  discard s.addSymbol("n_midi_freq",       cast[pointer](nMidiFreq))
+  discard s.addSymbol("n_midi_gate",       cast[pointer](nMidiGate))
+  discard s.addSymbol("n_midi_trig",       cast[pointer](nMidiTrig))
+  discard s.addSymbol("n_midi_voice_freq", cast[pointer](nMidiVoiceFreq))
+  discard s.addSymbol("n_midi_voice_gate", cast[pointer](nMidiVoiceGate))
 
 proc compileProgram(program: Node; patchPath: string; sr: float64):
     tuple[lib: TccState; tickFn: TickFn; size: int;
