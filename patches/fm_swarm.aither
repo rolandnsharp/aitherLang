@@ -52,9 +52,17 @@ let voices = midi_keyboard((f, g) =>
     let cf   = n * f
     let modf = cf * modr * (1 + motion * sin(t * n / 11 + n * 0.3))
     let mv   = sin(TAU * phasor(modf)) * depth
-    if cf >= 22000 then 0
+    # Tighter partial gate. FM at depth ~1.17 rad spreads each partial
+    # by roughly ±3*modf — so for cf+sidebands not to fold back as
+    # aliased low-freq crackle, cap when the upper sideband region
+    # nears Nyquist. Especially audible at low octaves where the
+    # density of valid partials is highest.
+    if cf + modf * 3 >= 22000 then 0
     else (1.0 / pow(n, 0.55)) * sin(TAU * phasor(cf) + mv))
-  voice * env * 0.10)
+  # Per-voice gain trimmed from the mono 0.10 → 0.04 so a 3-4 note
+  # chord doesn't slam the master soft-clipper. One held key sounds
+  # ~8 dB quieter than the old mono patch; chords stay clean.
+  voice * env * 0.04)
 
 let s = voices |> reverb(2.8, 0.3)
 [s, s]

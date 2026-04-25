@@ -288,9 +288,12 @@ play organ:
       let cf   = n * f
       let modf = cf * modr * (1 + motion * sin(t * n / 11 + n * 0.3))
       let mv   = sin(TAU * phasor(modf)) * depth
-      if cf >= 22000 then 0
+      # Tighter cap: FM sidebands extend roughly ±3*modf around each
+      # partial, so cap when that range threatens Nyquist. Removes
+      # low-octave crackle from aliased lower sidebands.
+      if cf + modf * 3 >= 22000 then 0
       else (1.0 / pow(n, 0.55)) * sin(TAU * phasor(cf) + mv))
-    voice * env * 0.10)
+    voice * env * 0.04)              # 0.10 → 0.04: chord-headroom
   let s = voices |> reverb(2.8, 0.3)
   [s, s] * organLvl
 
