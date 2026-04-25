@@ -1,0 +1,120 @@
+# backing — chord progression, drums, atmosphere. No lead voice; the
+# human plays fm_swarm (or any other lead) on top via MIDI.
+#
+# 100 BPM, Am F C G in a 4-bar phrase. Bass walks the roots, a power
+# pad follows the chord, drums hold the pulse, a bell rings on bar
+# one of each phrase, a slow texture breathes underneath. The mid-high
+# range (300-2000 Hz) is deliberately sparse so the played-in lead
+# sits in the audio centre without competition.
+#
+# Knobs (Minilab, when used together with fm_swarm):
+#   none on backing — these are all knobs for fm_swarm. backing is the
+#   *stage*; the keyboard is the soloist.
+
+let pos    = t - start_t
+let fadeIn = ease(pos / 6)
+
+let tempo   = 100.0 / 60                            # beats / sec
+let barR    = tempo / 4                              # bars / sec
+let phraseR = tempo / 16                             # phrases / sec (4 bars)
+
+let beat    = phasor(tempo)                          # 0..1 each beat
+let bar     = phasor(barR)                           # 0..1 each bar
+let phrase  = phasor(phraseR)                        # 0..1 each phrase
+
+# Chord progression — Am, F, C, G — as a table indexed by the bar
+# number inside the phrase (0..3). roots = A2/F2/C3/G2: bass-register
+# motion that doesn't cross the lead's mid range.
+let roots = [110.0, 87.31, 130.81, 98.0]
+let chordIdx = int(phrase * 4)
+let root = roots[chordIdx]
+
+# Per-chord third multiplier. Am gets a minor third, the rest get
+# major. The else-if chain demonstrates the cleaner alternative to
+# the parenthesised cascade.
+def chord_third(idx):
+  if idx == 0 then 1.189      # Am minor third (A → C)
+  else if idx == 1 then 1.260 # F major (F → A)
+  else if idx == 2 then 1.260 # C major (C → E)
+  else 1.260                  # G major (G → B)
+
+# Energy ebb-and-flow over a 32-bar cycle. Pad and texture lean on it
+# so the piece breathes; drums stay constant.
+let energy = (sin(TAU * t * (phraseR / 8)) + 1) * 0.5
+
+# ---------------------------------------------------------- BASS ----
+play bass:
+  # Root for the first half of each bar, fifth for the second half.
+  # Drops one octave so it sits below 110 Hz — well clear of the lead.
+  let onFifth = if bar > 0.5 then 1 else 0
+  let f = root * 0.5 * (if onFifth > 0.5 then 1.5 else 1.0)
+  let env = pow(1 - beat, 6) * 0.6 + 0.4
+  let s = additive(f, warm_shape, 8) * env * 0.18 |> lpf(450, 0.4)
+  [s, s]
+
+# ---------------------------------------------------------- PAD ----
+play pad:
+  # Root + third + fifth, warm-shaped additive. Filtered hard at 700 Hz
+  # so the pad sits BELOW the lead's typical fundamental range.
+  let third = root * chord_third(chordIdx)
+  let vRoot  = additive(root, warm_shape, 6)
+  let vThird = additive(third, warm_shape, 5) * 0.6
+  let vFifth = additive(root * 1.5, warm_shape, 5) * 0.7
+  let mix = (vRoot + vThird + vFifth) * 0.05 * (0.5 + energy * 0.5)
+  let s = mix |> lpf(700, 0.3)
+  [s, s]
+
+# ---------------------------------------------------------- KICK ----
+play kick:
+  let env = pow(1 - beat, 14)
+  let pitch = 50 + env * 220
+  let body = sin(TAU * phasor(pitch)) * env
+  let s = body * 0.5
+  [s, s]
+
+# ---------------------------------------------------------- SNARE ----
+play snare:
+  # Backbeat — fires on beats 2 and 4 (second half of each bar).
+  # Within the half-bar we use the local phasor to shape the envelope.
+  let halfPhase = (bar * 2) mod 1
+  let onBack = if bar > 0.5 then 1 else 0
+  let env = pow(1 - halfPhase, 30) * onBack
+  let body = noise() * 0.7 + sin(TAU * phasor(195)) * 0.3
+  let s = body * env * 0.18 |> hpf(900, 0.25)
+  [s, s]
+
+# ---------------------------------------------------------- HAT ----
+play hat:
+  let hPhase = phasor(tempo * 2)               # 8th-note pulse
+  let env = pow(1 - hPhase, 18)
+  let s = noise() * env * 0.08 |> hpf(7000, 0.3)
+  [s, s]
+
+# ---------------------------------------------------------- BELL ----
+play bell:
+  # Bar one of every phrase: when chordIdx wraps 3 → 0, fire the strike.
+  # prev() catches that transition. The bell sits well above the lead
+  # (~880 Hz fundamental) so its first partial sparkles without
+  # smudging the keyboard line.
+  let strike = if chordIdx == 0 and prev(chordIdx) != 0 then 1.0 else 0.0
+  let env = pluck(strike, 3.0)
+  let f = root * 8                                  # 880 Hz at A2
+  inharmonic(f, bar_partials, bell_decay, 5) * env * 0.15 |> reverb(2.5, 0.35)
+
+# ---------------------------------------------------------- TEXTURE ----
+play texture:
+  # Three incommensurate LFOs modulate a sub-octave drone. Pure
+  # atmosphere — never a melody, just slow harmonic breathing under
+  # the bass.
+  let lfo1 = (sin(TAU * t * 0.07)  + 1) * 0.5
+  let lfo2 = (sin(TAU * t * 0.113) + 1) * 0.5
+  let lfo3 = (sin(TAU * t * 0.041) + 1) * 0.5
+  let drift = lfo1 * lfo2 + lfo3 * 0.3
+  let f = root * 0.5
+  let s = additive(f, warm_shape, 4) * drift * 0.04 * energy |> lpf(350, 0.3)
+  [s, s]
+
+# Final mix. Everything sums; the master tanh in the engine handles
+# soft-clipping. fadeIn ramps the whole stage up over 6 seconds.
+let drums = (kick + snare + hat)
+(drums + bass + pad + bell + texture) * fadeIn
