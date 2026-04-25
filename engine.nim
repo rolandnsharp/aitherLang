@@ -623,7 +623,7 @@ proc handleCmd(line: string): string =
 
 # ----------------------------------------------------------------------- engine
 
-proc startEngine() =
+proc startEngine*() =
   if aither_audio_init(SampleRate, Channels, BufferFrames,
                        audioCallback, nil) != 0:
     quit "audio init failed", 1
@@ -671,7 +671,7 @@ proc startEngine() =
 
 # ----------------------------------------------------------------------- client
 
-proc sendCmd(cmd: string) =
+proc sendCmd*(cmd: string) =
   var sock = newSocket(AF_UNIX, SOCK_STREAM, IPPROTO_IP)
   try:
     sock.connectUnix(SocketPath)
@@ -683,73 +683,5 @@ proc sendCmd(cmd: string) =
   finally:
     sock.close()
 
-# -------------------------------------------------------------------------- CLI
-
-when isMainModule:
-  let args = commandLineParams()
-  if args.len == 0:
-    echo "usage: aither <start|send|stop|mute|unmute|solo|clear|list|kill> [args]"
-    echo ""
-    echo "  start                       launch engine"
-    echo "  send <file> [fade]          load patch (instant or fade-in seconds)"
-    echo "  stop <name> [fade]          fade out & remove voice"
-    echo "  mute <voice> [play] [fade]  silence whole voice or one play block"
-    echo "  unmute <voice> [play] [fade] resume voice or play block"
-    echo "  solo <voice> [play] [fade]  fade out other voices, or other plays in this voice"
-    echo "  clear [fade]                stop all voices"
-    echo "  list                        show active voices"
-    echo "  scope [name]                per-voice RMS/peak/clips/envelope (all if no name; 'master' for mix bus)"
-    echo "  retrigger <name>            reset start_t so the composition plays from the top"
-    echo "  parts <voice>               list named parts (play blocks) with gain + state"
-    echo "  midi list                   show ALSA seq ports"
-    echo "  midi connect <spec>         subscribe to a specific port (e.g. '28:0')"
-    echo "  midi disconnect             drop MIDI and re-open the sequencer"
-    echo "  kill                        shut down engine"
-    quit 0
-
-  case args[0]
-  of "start":
-    startEngine()
-  of "send":
-    if args.len < 2: quit "usage: aither send <file> [fade]"
-    let extra = if args.len >= 3: " " & args[2] else: ""
-    sendCmd("send " & absolutePath(args[1]) & extra)
-  of "stop":
-    if args.len < 2: quit "usage: aither stop <name> [fade]"
-    let extra = if args.len >= 3: " " & args[2] else: ""
-    sendCmd("stop " & args[1] & extra)
-  of "mute":
-    if args.len < 2: quit "usage: aither mute <voice> [play] [fade]"
-    let extra = if args.len >= 3: " " & args[2 .. ^1].join(" ") else: ""
-    sendCmd("mute " & args[1] & extra)
-  of "unmute":
-    if args.len < 2: quit "usage: aither unmute <voice> [play] [fade]"
-    let extra = if args.len >= 3: " " & args[2 .. ^1].join(" ") else: ""
-    sendCmd("unmute " & args[1] & extra)
-  of "solo":
-    if args.len < 2: quit "usage: aither solo <voice> [play] [fade]"
-    let extra = if args.len >= 3: " " & args[2 .. ^1].join(" ") else: ""
-    sendCmd("solo " & args[1] & extra)
-  of "clear":
-    let extra = if args.len >= 2: " " & args[1] else: ""
-    sendCmd("clear" & extra)
-  of "list":
-    sendCmd("list")
-  of "scope":
-    let extra = if args.len >= 2: " " & args[1] else: ""
-    sendCmd("scope" & extra)
-  of "retrigger":
-    if args.len < 2: quit "usage: aither retrigger <name>"
-    sendCmd("retrigger " & args[1])
-  of "parts":
-    if args.len < 2: quit "usage: aither parts <voice>"
-    sendCmd("parts " & args[1])
-  of "midi":
-    if args.len < 2: quit "usage: aither midi list|connect <spec>|disconnect"
-    let rest = args[1 .. ^1].join(" ")
-    sendCmd("midi " & rest)
-  of "kill":
-    sendCmd("kill")
-  else:
-    echo "unknown command: " & args[0]
-    quit 1
+# [CLI dispatch moved to aither.nim — engine.nim is now a library
+#  module. Build entry point is `nim c aither.nim`.]

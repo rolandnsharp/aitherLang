@@ -101,8 +101,13 @@ proc formatMidiHeader*(m: MidiStatus): string =
   let state = if m.active: "active" else: "DROPPED"
   "MIDI: " & m.portInfo & " [" & state & "]"
 
+proc trimDot(s: string): string =
+  # `formatFloat(x, ffDecimal, 0)` returns "1234." with a trailing dot;
+  # strip it so freq strings read as "1234 Hz" not "1234. Hz".
+  if s.endsWith("."): s[0 ..< s.len - 1] else: s
+
 proc fmtHz(v: float64): string =
-  if v >= 1000.0: formatFloat(v, ffDecimal, 0) & " Hz"
+  if v >= 1000.0: trimDot(formatFloat(v, ffDecimal, 0)) & " Hz"
   else: formatFloat(v, ffDecimal, 1) & " Hz"
 
 proc formatSpectrum*(s: SpectrumSummary): string =
@@ -117,7 +122,8 @@ proc formatSpectrum*(s: SpectrumSummary): string =
   lines.add "  Fundamental: " & fund
   lines.add "  Centroid:   " & fmtHz(s.centroidHz)
   lines.add "  ZCR:        " &
-            formatFloat(s.zeroCrossingRate, ffDecimal, 0) & " / sec"
+            trimDot(formatFloat(s.zeroCrossingRate, ffDecimal, 0)) &
+            " / sec"
   lines.add "  Top peaks:"
   for i, p in s.peaks:
     let idx = align($(i + 1), 2)
@@ -131,7 +137,7 @@ proc formatAudit*(path: string; seconds, sr: float64;
   ## `audit` adds a one-line header above the spectrum summary so the
   ## reader sees what was rendered. seconds + sr come from the renderer.
   "audit: " & path & " (" & formatFloat(seconds, ffDecimal, 1) &
-    "s @ " & formatFloat(sr, ffDecimal, 0) & " Hz)\n" &
+    "s @ " & trimDot(formatFloat(sr, ffDecimal, 0)) & " Hz)\n" &
     formatSpectrum(s)
 
 proc formatVoiceList*(midi: MidiStatus; voices: seq[VoiceInfo]): string =

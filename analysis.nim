@@ -190,35 +190,53 @@ proc zeroCrossingRate*(samples: openArray[float64]; sr: float64): float64 =
 
 proc estimateFundamental*(samples: openArray[float64];
                           sr: float64): float64 =
-  ## Biased autocorrelation, lag range 40 Hz – 4 kHz. Returns 0.0 when
-  ## the best-lag confidence drops below 0.3 (treats input as
-  ## non-pitched).
+  ## Normalised autocorrelation over lag range 40 Hz – 4 kHz. Returns
+  ## 0.0 when no lag yields a clear peak — drum/noise mixes have only
+  ## smoothly-decaying autocorr and shouldn't masquerade as pitched.
+  ##
+  ## Algorithm: compute r[lag] / (n - lag) (unbiased), pick the lag
+  ## whose value is a local maximum AND ≥ 0.4 of r[0]/(n) (the
+  ## zero-lag normalised energy). Without the local-max requirement,
+  ## broadband content trivially wins at the smallest lag because the
+  ## signal is highly correlated with a 1-sample shift of itself.
   if samples.len < 64: return 0.0
   let minLag = max(2, int(sr / 4000.0))
   let maxLag = min(samples.len div 2, int(sr / 40.0))
-  if minLag >= maxLag: return 0.0
+  if minLag >= maxLag - 1: return 0.0
 
-  # r0 = sum of squares (unbiased denominator for confidence).
-  var r0 = 0.0
-  for v in samples: r0 += v * v
+  template autocorr(lag: int): float64 =
+    block:
+      let nLag = samples.len - lag
+      if nLag <= 0: 0.0
+      else:
+        var s = 0.0
+        for i in 0 ..< nLag: s += samples[i] * samples[i + lag]
+        s / float64(nLag)
+
+  let r0 = autocorr(0)
   if r0 < 1e-12: return 0.0
+  let threshold = 0.4 * r0
 
-  var bestLag = -1
-  var bestVal = 0.0
-  var lag = minLag
-  while lag <= maxLag:
-    var s = 0.0
-    let n = samples.len - lag
-    for i in 0 ..< n:
-      s += samples[i] * samples[i + lag]
-    if s > bestVal:
-      bestVal = s
-      bestLag = lag
+  # Walk lags; return the FIRST local maximum that crosses the
+  # threshold. The first peak corresponds to the period itself
+  # (subsequent peaks are integer multiples). Without the local-max
+  # requirement, broadband content trivially wins at the smallest
+  # lag because the signal correlates with a 1-sample shift of itself.
+  var prev = autocorr(minLag)
+  var cur = autocorr(minLag + 1)
+  var lag = minLag + 1
+  while lag < maxLag:
+    let nxt = autocorr(lag + 1)
+    if cur > prev and cur > nxt and cur >= threshold:
+      let denom = prev - 2.0 * cur + nxt
+      let offset =
+        if abs(denom) < 1e-12: 0.0
+        else: 0.5 * (prev - nxt) / denom
+      return sr / (float64(lag) + offset)
+    prev = cur
+    cur = nxt
     lag += 1
-  if bestLag < 0: return 0.0
-  let confidence = bestVal / r0
-  if confidence < 0.3: return 0.0
-  sr / float64(bestLag)
+  0.0
 
 proc analyze*(samples: openArray[float64]; sr: float64;
               nPeaks: int = 8): SpectrumSummary =
