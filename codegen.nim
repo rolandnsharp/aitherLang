@@ -93,6 +93,7 @@ const NativeArities = {
   "lp1": 2, "hp1": 2, "lpf": 3, "hpf": 3, "bpf": 3, "notch": 3,
   "delay": 3, "fbdelay": 4, "reverb": 3,
   "impulse": 1, "resonator": 3, "discharge": 2,
+  "dho": 3, "dho_v": 3,
   "tremolo": 3, "slew": 2,
   "wave": -1,                      # special: freq + array
 }.toTable
@@ -473,7 +474,7 @@ proc delayBufSlots(c: Ctx; name: string; maxTimeArg: Node): int =
 proc nativeSlotSize(c: Ctx; name: string; kids: seq[Node]): int =
   case name
   of "lp1", "hp1", "impulse", "discharge", "tremolo", "slew", "wave": 1
-  of "lpf", "hpf", "bpf", "notch", "resonator":                       2
+  of "lpf", "hpf", "bpf", "notch", "resonator", "dho", "dho_v":       2
   of "delay", "fbdelay":          delayBufSlots(c, name, kids[2])
   of "reverb":
     # Matches dsp.nim nReverb's total = sum(2+L for combLens) + sum(1+L for apLens).
@@ -1183,6 +1184,8 @@ proc emit*(c: Ctx; program: Node): string =
   pre.add "extern double n_reverb(DspState*,double,double,double);\n"
   pre.add "extern double n_impulse(DspState*,double);\n"
   pre.add "extern double n_resonator(DspState*,double,double,double);\n"
+  pre.add "extern double n_dho(DspState*,double,double,double);\n"
+  pre.add "extern double n_dho_v(DspState*,double,double,double);\n"
   pre.add "extern double n_discharge(DspState*,double,double);\n"
   pre.add "extern double n_tremolo(DspState*,double,double,double);\n"
   pre.add "extern double n_slew(DspState*,double,double);\n"

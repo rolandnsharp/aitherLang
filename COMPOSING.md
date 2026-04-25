@@ -424,6 +424,76 @@ is still available if you want to compensate for the
 single-channel sum; use `* 1.41` (i.e. `√2`) at the
 extremes.
 
+## DHO — the universal oscillator
+
+`dho(force, freq, damp)` is one primitive that integrates the
+damped harmonic oscillator:
+
+```
+ddx = -k*x - c*dx + force      with k = (TAU*freq)^2, c = 2*damp*omega
+```
+
+Its parameter regions ARE the synthesis paradigms. Sweep `damp`
+or change what you wire into `force` and you walk between named
+paradigms without ever changing primitive:
+
+| Region                                  | What you get                                |
+|-----------------------------------------|---------------------------------------------|
+| `damp = 0, force = 0, init dx ≠ 0`      | free sine — an additive partial             |
+| `damp ≈ 0.005, force = impulse`         | struck bell / modal physical instrument     |
+| `damp ≈ 0.2, force = audio_in`          | resonant bandpass — subtractive filter      |
+| `damp = 1.0, force = step`              | critical-damped slew — envelope shape       |
+| `damp ≈ 0, freq = 0.5 Hz, force = 0`    | LFO / sub-audio modulator                   |
+| chained at formant Hz, `force = speech` | vowel / wood-box body resonance             |
+
+Three small expressions, same primitive, categorically different
+sounds:
+
+```
+# Bell strike — long ring at 440 Hz
+dho(if t < dt then 100000000 else 0, 440, 0.005)
+
+# Resonant filter — narrow bandpass at 800 Hz, driven by external audio
+dho(audio_in * 50000, 800, 0.2)
+
+# Slow envelope — sub-audio critically-damped slew driven by gate
+dho(g * 1500, 5, 1.0)
+```
+
+For demonstration, `patches/dho_walk.aither` wires K1 to `damp` on
+a struck DHO. Holding a key and turning the knob walks audibly
+from sustained sine → bell → pluck → thunk → silence — one
+oscillator, one parameter, every paradigm.
+
+`dho_v(force, freq, damp)` returns the velocity (`dx`) of the same
+equation at its own call site. Useful for chained physics (one
+oscillator's velocity drives another's force) and as an audio
+output — velocity sounds different from position for resonant
+systems (it's a 90°-shifted, frequency-emphasised view).
+
+**Why this is `f(state)`-native.** In a modular synth you pick a
+"filter module" or an "FM module"; the paradigm is baked into
+the cabling. DHO inverts that: the parameters ARE the paradigm.
+A patch that reads `dho(force, freq, damp)` lets the user — and
+the running knob — slide continuously between the paradigms
+without re-routing. This is what `f(state) → sample` looks like
+when one equation generalises a half-dozen named techniques.
+
+**Force is in acceleration units.** `force` adds directly to
+`ddx`, so a constant force settles to `x = force / k`. At audio
+frequencies `k = (TAU*freq)^2` is huge — a 440 Hz oscillator has
+`k ≈ 7.6M`, so impulse-style strikes need force on the order of
+`1e7`–`1e8` to ring at unit amplitude. For LFO/envelope use at
+sub-audio `freq`, `k` is small and modest force values work
+directly. Wrap with a stdlib def if you want a normalised
+interface for one specific use; the raw primitive keeps the math
+visible at the call site.
+
+DHO does NOT replace `additive` for hundred-partial drones —
+`sin(TAU * phasor(f))` stays the cheap workhorse for sums of
+many sines. DHO is for *expressive single voices* where one knob
+should walk continuously between named timbres.
+
 ## Timbre choice: which paradigm for which sound
 
 Aither's contract is `f(state) → sample`. Synthesis paradigms

@@ -185,6 +185,36 @@ proc nResonator*(s: var DspState; input, freq, decay: float64): float64 {.cdecl,
   s.pool[i]   += s.pool[i+1] * invSr
   s.pool[i]
 
+# Damped harmonic oscillator. The universal second-order linear
+# system: ddx = -k*x - c*dx + force, with k = omega^2, c = 2*damp*omega,
+# omega = TAU*freq. Sweep `damp` and you walk through every named
+# synthesis paradigm — sustained sine (0), bell (~0.005), pluck (~0.2),
+# critical (1.0), overdamped/silence (>1). `force` is added directly to
+# acceleration, so the steady state under constant force is force/k.
+# Semi-implicit (symplectic) Euler matches stdlib's tuning_fork.
+proc nDho*(s: var DspState; force, freq, damp: float64): float64 {.cdecl, exportc: "n_dho".} =
+  let i = s.claim(2)
+  let omega = TAU * freq
+  let k = omega * omega
+  let c = 2.0 * damp * omega
+  let invSr = 1.0 / s.sr
+  s.pool[i+1] += (-c * s.pool[i+1] - k * s.pool[i] + force) * invSr
+  s.pool[i]   += s.pool[i+1] * invSr
+  s.pool[i]
+
+# Velocity output of the same DHO equation. Separate call site, so it
+# owns its own (x, dx) state — chain DHO physics by feeding one
+# oscillator's velocity into another's force without sharing slots.
+proc nDhoV*(s: var DspState; force, freq, damp: float64): float64 {.cdecl, exportc: "n_dho_v".} =
+  let i = s.claim(2)
+  let omega = TAU * freq
+  let k = omega * omega
+  let c = 2.0 * damp * omega
+  let invSr = 1.0 / s.sr
+  s.pool[i+1] += (-c * s.pool[i+1] - k * s.pool[i] + force) * invSr
+  s.pool[i]   += s.pool[i+1] * invSr
+  s.pool[i+1]
+
 proc nDischarge*(s: var DspState; input, rate: float64): float64 {.cdecl, exportc: "n_discharge".} =
   let i = s.claim()
   s.pool[i] = max(input, s.pool[i] * (1.0 - rate / s.sr))

@@ -62,6 +62,8 @@ proc registerNatives(s: TccState) =
   discard s.addSymbol("n_reverb",    cast[pointer](nReverb))
   discard s.addSymbol("n_impulse",   cast[pointer](nImpulse))
   discard s.addSymbol("n_resonator", cast[pointer](nResonator))
+  discard s.addSymbol("n_dho",       cast[pointer](nDho))
+  discard s.addSymbol("n_dho_v",     cast[pointer](nDhoV))
   discard s.addSymbol("n_discharge", cast[pointer](nDischarge))
   discard s.addSymbol("n_tremolo",   cast[pointer](nTremolo))
   discard s.addSymbol("n_slew",      cast[pointer](nSlew))

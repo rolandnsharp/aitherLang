@@ -1,0 +1,40 @@
+# dho_walk — one DHO, one knob walks through every paradigm.
+#
+# K1 (CC 74) sweeps damping from 0.001 to 5.0. Hold a key (or just
+# audit — there's a t=0 kickoff and a slow re-strike so the demo
+# always has signal); turn K1 and hear ONE oscillator walk through:
+#
+#   damp ≈ 0.001  → sustained sine            (LFO / additive partial)
+#   damp ≈ 0.005  → long bell ring            (modal physical model)
+#   damp ≈ 0.05   → quick pluck               (Karplus-territory)
+#   damp ≈ 0.5    → percussive thunk          (envelope / transient)
+#   damp ≈ 1.0    → critical, no oscillation  (slew limiter)
+#   damp > 1      → overdamped, near silence  (DC-coupled lowpass)
+#
+# This is the point of dho: parameter regions ARE the synthesis
+# paradigms. No mode switch. One equation, one knob.
+
+# K1: exponential damp 0.001 → ~2.0 so the audible regions
+# (sine 0.001, bell 0.005, pluck 0.05, thunk 0.5, critical 1.0)
+# are spaced evenly across the knob, not crushed into the bottom.
+let damp = pow(10, -3 + midi_cc(74) * 3.3)
+let f    = if midi_freq() > 0 then midi_freq() else 220.0
+let g    = midi_gate()
+
+# Three excitation sources, summed into one force:
+#   - kickoff: one-sample impulse at t=0 so offline audit always rings
+#   - edge:    one-sample impulse on note-on (percussive attack)
+#   - sustain: continuous low-amplitude noise WHILE HELD
+#              the DHO acts as a narrow resonator on noise:
+#                low damp  → sustained tone (subtractive territory)
+#                high damp → resonator absorbs noise (envelope/silence)
+# Force is in acceleration units; ~1e8 → unit amplitude at audio freq
+# for impulses; sustained noise needs much less because it pumps
+# energy continuously.
+let held    = if g > 0.5 then 1.0 else 0.0
+let kickoff = if t < dt then 100000000.0 else 0.0
+let edge    = (if g > 0.5 and prev(g) < 0.5 then 1.0 else 0.0) * 100000000.0
+let sustain = noise() * held * 1500000.0
+let strike  = kickoff + edge + sustain
+
+dho(strike, f, damp) * 0.15
