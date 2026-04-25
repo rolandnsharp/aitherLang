@@ -222,3 +222,20 @@ def phi_partials(n):  pow(1.618, n - 1)
 def soft_decay(n, pf):    1.0 / pow(n, 0.5)
 def bell_decay(n, pf):    1.0 / n
 def bright_decay(n, pf):  1.0 / pow(n, 0.3)
+
+# ---------------------------------------------------------------- polyphony
+# A MIDI keyboard plays polyphonically. `voice_fn(freq, gate)` describes
+# what one held key sounds like; poly fans it out across all currently-
+# held notes via sum-unrolling. Every voice is its own independent set
+# of synth state regions — phasor, ADSR, filters, etc. all per-voice.
+# Empty slots short-circuit to 0 so the unused voices add nothing to
+# the mix.
+def poly(n_voices, voice_fn):
+  sum(n_voices, n =>
+    let f = midi_voice_freq(n)
+    let g = midi_voice_gate(n)
+    if f > 0 then voice_fn(f, g) else 0)
+
+# 95% case — 8 voices is generous for a keyboard performance and cheap
+# at codegen. Use poly(N, ...) when you want a different voice count.
+def midi_keyboard(voice_fn):  poly(8, voice_fn)
