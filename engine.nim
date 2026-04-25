@@ -2,6 +2,8 @@
 
 import std/[os, net, strutils, math, locks, tables]
 import parser, voice, miniaudio, midi
+import engine_types, cli_output
+export engine_types
 
 const
   SampleRate    = 48000'u32
@@ -13,7 +15,6 @@ const
 
 const Stdlib = staticRead("stdlib.aither")
 
-const EnvBins = 20          # sparkline slots
 const EnvBinSamples = 2400  # 50ms per bin at 48 kHz
 const PeakDecay = 0.99993   # ~300ms exponential decay
 const RmsAlpha  = 1.04e-4   # ~200ms smoothing
@@ -37,6 +38,9 @@ type
     fadeDelta:  float64
     stats:      Stats
     nanLogged:  bool        # one log line per voice per session, then quiet
+
+  # Public data structs (VoiceInfo, StatsSnapshot, etc.) live in
+  # engine_types.nim — exported up so callers see them through engine.
 
 proc update(s: var Stats; gl, gr: float64) {.inline.} =
   let al = abs(gl)
@@ -366,77 +370,107 @@ proc isNumeric(s: string): bool {.inline.} =
   try: discard parseFloat(s); true
   except ValueError: false
 
-const SparkBlocks = [" ", "\u2581", "\u2582", "\u2583", "\u2584", "\u2585", "\u2586", "\u2587", "\u2588"]
+# [Removed: SparkBlocks / dBOf / envBar / fmtDb moved to cli_output.nim
+#  in Phase 0 of the analysis-CLI work. Engine now returns raw stats;
+#  cli_output handles every conversion from linear to dB and every
+#  sparkline render.]
 
-proc dBOf(v: float64): float64 {.inline.} =
-  if v < 1e-9: -180.0 else: 20.0 * log10(v)
+# ----- Data extraction (snapshot under mtx) -----------------------------
+# Engine returns these structs; cli_output.nim formats them. Side
+# effects that look like part of the text (clips clear-on-read) happen
+# here under mtx so the formatter can stay pure.
 
-proc envBar(v: float32): string =
-  let f = v.float64
-  if f < 1e-5: return SparkBlocks[0]
-  let db = dBOf(f)
-  let idx = clamp(int((db + 60.0) / 60.0 * 8.0 + 0.5), 0, 8)
-  SparkBlocks[idx]
+proc voiceStateOf(s: Slot): VoiceState =
+  if not s.active:           vsStopped
+  elif s.muted:              vsMuted
+  elif s.fadeDelta < 0.0:    vsFadingOut
+  elif s.fadeDelta > 0.0:    vsFadingIn
+  else:                      vsPlaying
 
-proc fmtDb(v: float64): string =
-  if v < 1e-9: return "  -inf"
-  let db = dBOf(v)
-  formatFloat(db, ffDecimal, 1)
+proc partStateOf(g, d: float64): PartState =
+  if d > 0.0:    psFadingIn
+  elif d < 0.0:  psFadingOut
+  elif g <= 0.0: psSilent
+  else:          psPlaying
 
-# One-line meter summary suitable for tacking onto a command response.
-# Same conventions as scopeReport (fmtDb, env sparkline) but compact
-# and parseable: `<name>  rms=<dB> peak=<dB> clips=<n> env=<bars>`.
-proc meterLine(name: string; s: Stats): string =
-  var spark = ""
-  for k in 0 ..< EnvBins:
-    let v = s.envRing[(s.envBinIdx + k) mod EnvBins]
-    spark &= (if v.float64 < 1e-5: "·" else: envBar(v))
-  let rms = sqrt(max(s.rmsSqL, s.rmsSqR))
-  let peak = max(s.peakL, s.peakR)
-  name & "  rms=" & fmtDb(rms).strip() & "dB peak=" & fmtDb(peak).strip() &
-    "dB clips=" & $s.clips & " env=" & spark
+proc snapshotStats(s: Stats): StatsSnapshot =
+  StatsSnapshot(
+    rmsL: sqrt(s.rmsSqL), rmsR: sqrt(s.rmsSqR),
+    peakL: s.peakL, peakR: s.peakR,
+    clips: s.clips,
+    envRing: s.envRing, envBinIdx: s.envBinIdx)
 
-proc statsReport(header: string; s: Stats): string =
-  var spark = ""
-  for k in 0 ..< EnvBins:
-    spark &= envBar(s.envRing[(s.envBinIdx + k) mod EnvBins])
-  let rmsL = sqrt(s.rmsSqL)
-  let rmsR = sqrt(s.rmsSqR)
-  header & "\n" &
-  "  RMS   L " & fmtDb(rmsL) & " dB   R " & fmtDb(rmsR) & " dB\n" &
-  "  peak  L " & fmtDb(s.peakL) & " dB   R " & fmtDb(s.peakR) &
-       " dB   clips=" & $s.clips & "\n" &
-  "  env   " & spark
+proc snapshotPartsOf(v: NativeVoice): seq[PartInfo] =
+  for i, name in v.partNames:
+    result.add PartInfo(
+      name: name,
+      state: partStateOf(v.partGains[i], v.partFadeDeltas[i]),
+      gain: v.partGains[i])
 
-proc voiceReport(i: int): string =
-  let state =
-    if not slots[i].active:        "stopped"
-    elif slots[i].muted:           "muted"
-    elif slots[i].fadeDelta < 0.0: "fading-out"
-    elif slots[i].fadeDelta > 0.0: "fading-in"
-    else:                          "playing"
-  let header = slots[i].name & "  " & state & "  gain=" &
-               formatFloat(slots[i].fadeGain, ffDecimal, 2)
-  let rep = statsReport(header, slots[i].stats)
-  slots[i].stats.clips = 0          # clear-on-read
-  rep
+proc voiceInfoList*(): seq[VoiceInfo] =
+  ## Snapshot of all voices + their parts. Used by `list`.
+  acquire(mtx)
+  for i in 0 ..< slotCount:
+    result.add VoiceInfo(
+      name: slots[i].name,
+      state: voiceStateOf(slots[i]),
+      gain: slots[i].fadeGain,
+      parts: snapshotPartsOf(slots[i].voice))
+  release(mtx)
 
-proc masterReport(): string =
-  let rep = statsReport("master", master)
-  master.clips = 0                  # clear-on-read
-  rep
+proc midiStatus*(): MidiStatus =
+  MidiStatus(portInfo: lastConnectInfo, active: midiSubscriptionActive())
 
-proc scopeReport(name: string): string =
+proc voiceStatsSnapshot*(name: string): ScopeQuery =
+  ## "" or "*" → master + all voices. "master" → master only. Otherwise
+  ## just the named voice (or empty if no such voice). Clears clips.
+  acquire(mtx)
   if name == "master":
-    return masterReport()
-  if name.len == 0 or name == "*":
-    var parts: seq[string] = @[masterReport()]
+    result.found = true
+    result.snapshots.add VoiceStats(
+      name: "master", isMaster: true, stats: snapshotStats(master))
+    master.clips = 0
+  elif name.len == 0 or name == "*":
+    result.found = true
+    result.snapshots.add VoiceStats(
+      name: "master", isMaster: true, stats: snapshotStats(master))
+    master.clips = 0
     for i in 0 ..< slotCount:
-      parts.add voiceReport(i)
-    return parts.join("\n\n")
+      result.snapshots.add VoiceStats(
+        name: slots[i].name, isMaster: false,
+        state: voiceStateOf(slots[i]), gain: slots[i].fadeGain,
+        stats: snapshotStats(slots[i].stats))
+      slots[i].stats.clips = 0
+  else:
+    let idx = findSlot(name)
+    if idx >= 0:
+      result.found = true
+      result.snapshots.add VoiceStats(
+        name: slots[idx].name, isMaster: false,
+        state: voiceStateOf(slots[idx]), gain: slots[idx].fadeGain,
+        stats: snapshotStats(slots[idx].stats))
+      slots[idx].stats.clips = 0
+  release(mtx)
+
+proc partsSnapshot*(voiceName: string): PartsQuery =
+  acquire(mtx)
+  result.voiceName = voiceName
+  let idx = findSlot(voiceName)
+  if idx >= 0:
+    result.found = true
+    result.parts = snapshotPartsOf(slots[idx].voice)
+  release(mtx)
+
+proc voiceMeterAfterSend*(name: string):
+    tuple[found: bool, stats: StatsSnapshot] =
+  ## One-line meter snapshot tacked onto `send` responses. Does NOT
+  ## clear clips (the OK is informational, not the official scope read).
+  acquire(mtx)
   let idx = findSlot(name)
-  if idx < 0: return "not found: " & name
-  voiceReport(idx)
+  if idx >= 0:
+    result.found = true
+    result.stats = snapshotStats(slots[idx].stats)
+  release(mtx)
 
 proc parseFloatArg(s: string; fallback: float64 = 0.0): float64 =
   if s.len == 0: return fallback
@@ -447,24 +481,6 @@ proc findPart(voice: NativeVoice; name: string): int =
   for i, n in voice.partNames:
     if n == name: return i
   -1
-
-proc partStateWord(g, d: float64): string =
-  if d > 0.0: "fading-in"
-  elif d < 0.0: "fading-out"
-  elif g <= 0.0: "silent"
-  else: "playing"
-
-proc partsReport(voiceName: string): string =
-  let idx = findSlot(voiceName)
-  if idx < 0: return "not found: " & voiceName
-  let v = slots[idx].voice
-  if v.partNames.len == 0: return "(no parts)"
-  var lines: seq[string] = @[]
-  for i, name in v.partNames:
-    let state = partStateWord(v.partGains[i], v.partFadeDeltas[i])
-    lines.add "  " & name & "  [" & state & "]  gain=" &
-              formatFloat(v.partGains[i], ffDecimal, 2)
-  voiceName & "\n" & lines.join("\n")
 
 proc setPartGainTarget(voice: NativeVoice; part: int;
                        target, fade: float64) =
@@ -506,34 +522,8 @@ proc soloPart(voiceName, partName: string; fade: float64): string =
   release(mtx)
   ""
 
-proc listVoices*(): string =
-  var lines: seq[string]
-  # MIDI status header — silent when nothing was ever connected, but
-  # surfaces both the active port AND the dropped-but-recoverable
-  # state so the operator doesn't have to guess whether a silent
-  # keyboard is a patch bug or a lost subscription (issue 4c).
-  if lastConnectInfo.len > 0:
-    let state = if midiSubscriptionActive(): "active" else: "DROPPED"
-    lines.add "MIDI: " & lastConnectInfo & " [" & state & "]"
-  for i in 0 ..< slotCount:
-    let state =
-      if not slots[i].active:           "stopped"
-      elif slots[i].muted:              "muted"
-      elif slots[i].fadeDelta < 0.0:    "fading-out"
-      elif slots[i].fadeDelta > 0.0:    "fading-in"
-      else:                             "playing"
-    lines.add slots[i].name & " [" & state & "] gain=" &
-              formatFloat(slots[i].fadeGain, ffDecimal, 2)
-    # Per-play gains so the operator can see what's currently muted
-    # without a separate `parts` round-trip. Voices with no plays keep
-    # the single-line format so existing scripts don't break.
-    let v = slots[i].voice
-    for k, pname in v.partNames:
-      let g = v.partGains[k]
-      let suffix = if g <= 0.0: " (muted)" else: ""
-      lines.add "  " & alignLeft(pname, 8) & " gain=" &
-                formatFloat(g, ffDecimal, 2) & suffix
-  if lines.len == 0: "(no voices)" else: lines.join("\n")
+# [Removed: listVoices text builder moved to cli_output.formatVoiceList.
+#  Engine returns voiceInfoList() + midiStatus(); cli_output composes.]
 
 # ------------------------------------------------------------- command parsing
 
@@ -547,12 +537,9 @@ proc handleCmd(line: string): string =
     let err = loadPatch(parts[1], fade)
     if err.len > 0: "ERR " & err
     else:
-      # Tack on a one-line meter snapshot so the operator gets feedback
-      # without a separate `scope` round-trip. For a fresh load the
-      # numbers may be -inf / 0 until the first audio buffer runs.
       let baseName = splitFile(parts[1]).name
-      let idx = findSlot(baseName)
-      if idx >= 0: "OK " & meterLine(baseName, slots[idx].stats)
+      let snap = voiceMeterAfterSend(baseName)
+      if snap.found: "OK " & formatMeterLine(baseName, snap.stats)
       else: "OK"
   of "stop":
     if parts.len < 2: return "ERR usage: stop <name> [fade-seconds]"
@@ -592,17 +579,18 @@ proc handleCmd(line: string): string =
     let err = clearAll(fade)
     if err.len > 0: "ERR " & err else: "OK"
   of "list":
-    "OK\n" & listVoices()
+    "OK\n" & formatVoiceList(midiStatus(), voiceInfoList())
   of "scope":
     let target = if parts.len >= 2: parts[1] else: ""
-    "OK\n" & scopeReport(target)
+    let q = voiceStatsSnapshot(target)
+    "OK\n" & formatScope(target, q)
   of "retrigger":
     if parts.len < 2: return "ERR usage: retrigger <name>"
     let err = retriggerVoice(parts[1])
     if err.len > 0: "ERR " & err else: "OK"
   of "parts":
     if parts.len < 2: return "ERR usage: parts <voice>"
-    "OK\n" & partsReport(parts[1])
+    "OK\n" & formatParts(partsSnapshot(parts[1]))
   of "midi":
     if parts.len < 2:
       return "ERR usage: midi list|connect <spec>|disconnect"
