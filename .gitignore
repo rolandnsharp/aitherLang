@@ -3,15 +3,12 @@ aither_dbg
 nimcache/
 *.so
 .DS_Store
+.claude/
 
 # recording captures
 *.mp4
 *.wav
 # test binaries (source files tracked, compiled outputs aren't)
-tests/codegen_kick
-tests/tcc_dsp
-tests/tcc_hello
-tests/tcc_tick
-tests/migration
-tests/linemap
-tests/playblocks
+tests/*
+!tests/*.nim
+!tests/*.aither
