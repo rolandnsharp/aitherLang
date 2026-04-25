@@ -1,0 +1,75 @@
+# tesla3 — fm_swarm baseline + ONE genuinely new dimension:
+# xenharmonic spread. Partials interpolate between integer
+# harmonics (1, 2, 3, …) and golden-ratio spacing (φ⁰, φ¹, φ²…)
+# under one knob. At spread=0 it's the gothic Tesla organ. At
+# spread=1 it's a fully xenharmonic shimmer with no fundamental.
+# Sweep the knob and you walk through music's harmonic logic into
+# something that has no name.
+#
+# Defaults at all-knob-CC=0 sit on the original Tesla recipe.
+# Sliders gate four spectral bands so you sculpt WHICH partials
+# participate. Wiggle each knob/slider once to seed it, then
+# explore.
+#
+# ============================================================ MIX
+# Sliders gate spectral bands (sliders at 0 → silence in that band):
+#   Slider 1 (CC 82) — BASS    partials 1-2
+#   Slider 2 (CC 83) — LOW-MID partials 3-6
+#   Slider 3 (CC 85) — HIGH-MID partials 7-12
+#   Slider 4 (CC 17) — SHIMMER partials 13-16
+#
+# ============================================================ SHAPE
+#   K1 (CC 74) — FM DEPTH        gothic 1.17 → 4 rad
+#   K2 (CC 71) — MOD RATIO       gothic 3.06 → 7
+#   K3 (CC 76) — XENHARMONIC     0 = pure integer harmonics
+#                                 1 = golden-ratio spacing
+#                                 ★ THE unique knob ★
+#   K4 (CC 77) — DRIFT amount    gothic 0.6% → 1.5% per-partial drift
+#   K5 (CC 93)     — DRIFT SPEED slow → fast modulator wobble
+#   K6 (CC 18) — BRIGHTNESS      0.55..1.5 amp falloff exponent
+#   K7 (CC 19) — RELEASE         0.68..5 s envelope tail
+#   K8 (CC 16) — REVERB wet
+#
+# Polyphonic via midi_keyboard. Each held key gets its own 16
+# xenharmonic-FM-modulated partials.
+
+let depth      = 1.17 + midi_cc(74) * 2.83
+let ratio      = 3.06 + midi_cc(71) * 4.0
+let xeno       = midi_cc(76)                          # ★ harmonic ↔ phi
+let drift      = 0.006 + midi_cc(77) * 0.009
+let drift_rate = 1.0 + midi_cc(93) * 4.0              # K5 normal: slow→fast
+let bright     = 0.55 + midi_cc(18) * 0.95
+let release    = 0.68 + midi_cc(19) * 4.32
+let revWet     = midi_cc(16) * 0.6
+
+play tesla3:
+  midi_keyboard((freq, gate) =>
+    let env = swell(gate, 0.005, release)
+    let voice = sum(16, n =>
+      # Xenharmonic interpolation: partial ratio is a blend of integer
+      # harmonic (n) and golden-ratio spacing (φ^(n-1)). The single
+      # knob walks from "saw with formant" through "detuned cluster"
+      # to "phi-shimmer with no fundamental."
+      let r_harm = n
+      let r_phi  = pow(1.618, n - 1)
+      let r      = r_harm * (1 - xeno) + r_phi * xeno
+      let cf     = freq * r
+
+      # Per-partial FM modulator with slow incommensurate drift
+      let modf = cf * ratio * (1 + drift * sin(t * drift_rate * n / 11 + n * 0.3))
+      let mv   = sin(TAU * phasor(modf)) * depth
+
+      # Slider band gating — sliders are the spectrum mixer
+      let band = if n <= 2 then midi_cc(82)
+                 else if n <= 6 then midi_cc(83)
+                 else if n <= 12 then midi_cc(85)
+                 else midi_cc(17)
+
+      if cf + modf * 3 >= 22000 then 0
+      else band * (1.0 / pow(n, bright)) * sin(TAU * phasor(cf) + mv))
+    voice * env * 0.05)
+
+let dry    = tesla3
+let monoIn = (dry[0] + dry[1]) * 0.5
+let wet    = monoIn |> reverb(2.8, 0.35)
+dry + [wet, wet] * revWet

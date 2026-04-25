@@ -1,0 +1,115 @@
+# cathedral_set — ambient cathedral. No rhythm, no kick, no bass.
+# Slow drone, sparse pentatonic bell strikes, vowel-morphing choir,
+# glass-bell lead on the keys. Cinematic / hypnotic / sacred.
+#
+# ============================================================ MIXER (sliders)
+#   Slider 1 (CC 82) — DRONE   low fundamental D drone with breathing
+#   Slider 2 (CC 83) — BELLS   sparse pentatonic bell strikes
+#   Slider 3 (CC 85) — CHOIR   D-A vowel pad with formant morph
+#   Slider 4 (CC 17) — SHIMMER  high airy glass texture, self-playing
+#
+# ============================================================ INSTRUMENT KNOBS (1-4)
+#   K1 (CC 74) — DRONE BRIGHTNESS  dark cavern → bright open
+#   K2 (CC 71) — BELL RATE         silent → frequent striking
+#   K3 (CC 76) — VOWEL MORPH       AH (open) → EE (tight)
+#   K4 (CC 77) — LEAD SHIMMER      static → swarming partials
+#
+# ============================================================ MASTER FX (knobs 5-8)
+#   K5 (CC 93) — CATHEDRAL SIZE    intimate room → vast cavern
+#   K6 (CC 18) — BITCRUSH          clean → broken radio
+#   K7 (CC 19) — REVERB wet        dry → completely drowned
+#   K8 (CC 16) — DRIVE             clean → fat saturation
+#
+# Lead on keys: glass-bell using phi-spaced partials. Polyphonic.
+# Played notes are NOT scale-locked — explore freely.
+
+let pos    = t - start_t
+let fadeIn = ease(pos / 8)
+
+let droneLvl  = midi_cc(82)
+let bellLvl   = midi_cc(83)
+let choirLvl  = midi_cc(85)
+let shimLvl   = midi_cc(17)
+
+let droneBri    = midi_cc(74)
+let bellRate    = 0.2 + midi_cc(71) * 1.8
+let vowelMorph  = midi_cc(76)
+let leadShimmer = midi_cc(77) * 0.012
+
+let revSize  = 4.0 + midi_cc(93) * 8.0
+let crushBits = 16 - midi_cc(18) * 12
+let revWet   = 0.3 + midi_cc(19) * 0.7
+let driveAmt = 1.0 + midi_cc(16) * 1.8
+
+# D minor pentatonic for bell strikes (mid octave)
+let bellPitches = [293.66, 349.23, 392.0, 440.0, 523.25]
+
+play drone:
+  # Slow low-D drone with octave layer + slow breathing
+  let breathe = (sin(TAU * pos * 0.04) + 1) * 0.5
+  let cut     = 600 + droneBri * 4000
+  let raw     = additive(73.42, warm_shape, 14) + additive(146.83, warm_shape, 8) * 0.4
+  let s       = raw * (0.4 + breathe * 0.5) |> lpf(cut, 0.4) |> gain(droneLvl * 0.07)
+  pan(s, sin(TAU * pos * 0.03) * 0.4)
+
+play bells:
+  # Sparse pentatonic bell strikes. Pitch picked by slow walk through
+  # bellPitches; rate controlled by K2.
+  let bTrig   = impulse(bellRate)
+  let pickP   = phasor(bellRate / 5)
+  let pickIdx = int(pickP * 5)
+  let bFreq   = bellPitches[pickIdx]
+  let bEnv    = pluck(bTrig, 3.0)
+  let voice   = inharmonic(bFreq, bar_partials, bell_decay, 5)
+  let s       = voice * bEnv * 0.4 |> gain(bellLvl * 0.6)
+  pan(s, sin(TAU * pos * 0.13) * 0.5)
+
+play choir:
+  # 2-voice (D + A) vowel pad. K3 morphs between AH (open) and EE (tight).
+  let v1 = (additive(146.83, vowel_ah, 10) * (1 - vowelMorph) + additive(146.83, vowel_ee, 10) * vowelMorph)
+  let v2 = (additive(220.0,  vowel_ah, 8)  * (1 - vowelMorph) + additive(220.0,  vowel_ee, 8)  * vowelMorph)
+  let breathe = (sin(TAU * pos * 0.06) + 1) * 0.5
+  let stack = (v1 + v2) * (0.3 + breathe * 0.4) * 0.05
+  let s = stack |> gain(choirLvl * 0.5)
+  pan(s, sin(TAU * pos * 0.05) * 0.3)
+
+play shimmer:
+  # Self-playing high glass shimmer. Sparse random-ish high pings on a
+  # phi-spaced spectrum, plus a slow airy noise wash. Always D-rooted.
+  let pingTrig = impulse(0.7)
+  let pickP    = phasor(0.13)
+  let pickIdx  = int(pickP * 5)
+  let pingF    = bellPitches[pickIdx] * 4
+  let pingEnv  = pluck(pingTrig, 2.5)
+  let ping     = sum(4, n =>
+    let r  = pow(1.618, n)
+    let pf = pingF * r
+    if pf >= 22000 then 0
+    else (1.0 / pow(n, 0.5)) * sin(TAU * phasor(pf))) * pingEnv * 0.15
+  let air      = (noise() |> hpf(6000, 0.4)) * 0.04
+  let s        = (ping + air) |> gain(shimLvl * 0.7)
+  pan(s, sin(TAU * pos * 0.07) * 0.6)
+
+play lead:
+  # Glass bell — integer harmonics + phi shimmer (K4). Always full vol.
+  midi_keyboard((freq, gate) =>
+    let strike = if gate > 0.5 and prev(gate) < 0.5 then 1.0 else 0.0
+    let env  = pluck(strike, 4.0) + swell(gate, 0.01, 0.4) * 0.4
+    let harm = sum(8, n =>
+      let pf = n * freq
+      if pf >= 22000 then 0
+      else (1.0 / pow(n, 0.7)) * sin(TAU * phasor(pf)))
+    let shim = sum(5, n =>
+      let r  = pow(1.618, n)
+      let pf = freq * r * (1 + leadShimmer * sin(t * n / 7 + n * 0.3))
+      if pf >= 22000 then 0
+      else (0.3 / pow(n, 0.5)) * sin(TAU * phasor(pf)))
+    (harm + shim) * env * 0.22)
+
+# Master FX chain
+let dry      = drone + bells + choir + shimmer + lead
+let mono     = (dry[0] + dry[1]) * 0.5
+let crushed  = bitcrush(mono, crushBits)
+let driven   = drive(crushed, driveAmt)
+let wet      = driven |> reverb(revSize, 0.5)
+([driven, driven] + [wet, wet] * revWet) * fadeIn

@@ -1,0 +1,67 @@
+# attractor — each of 16 partials carries its own private Lorenz
+# attractor. The x-coordinate micro-modulates that partial's
+# frequency; the z-coordinate pulses its amplitude. Per-partial
+# timescales mean no two partials ever sync up.
+#
+# What you hear: a single held key produces 16 sines at integer
+# multiples of the played pitch — but each sine wobbles in pitch
+# AND amplitude according to its own chaotic ODE. The result is
+# coherent (deterministic math, definite pitch centre) but never
+# repeats (Lorenz is non-periodic). Each held key is its own
+# universe of chaos.
+#
+# Why this is new: no commercial synth ships per-partial chaos
+# oscillators because the parameter space is hopeless on a slider
+# panel. With $state inside sum(N, n => ...), each iteration claims
+# its own ($x, $y, $z) attractor. 16 partials × 3 state vars × 8
+# voices = 384 simultaneous Lorenz integrators. Modern CPU laughs.
+#
+# Knobs:
+#   K1 (CC 74) — CHAOS DEPTH    how far frequency drifts (0..2%)
+#   K2 (CC 71) — CHAOS SPEED    base timescale of the attractors
+#   K3 (CC 76) — BRIGHTNESS     amp falloff exponent (1.0=warm, 0.3=harsh)
+#   K4 (CC 77) — AMP CHAOS      how much z-coord modulates amplitude
+#   K5 (CC 93, INVERTED) — REVERB wet
+#   K6 (CC 18) — ATTACK         envelope attack
+#   K7 (CC 19) — RELEASE        envelope release
+#   K8 (CC 16) — DRIVE          post saturation
+#
+# Polyphonic via midi_keyboard. Each held key gets its own 16-attractor
+# universe; chord-presses are independent chaos systems summed.
+
+let chaos_depth = midi_cc(74) * 0.02
+let chaos_speed = 20 + midi_cc(71) * 80
+let bright      = 0.3 + midi_cc(76) * 0.9
+let amp_chaos   = midi_cc(77)
+let revWet      = (1 - midi_cc(93)) * 0.5
+let attack      = 0.02 + midi_cc(18) * 1.5
+let release     = 0.3  + midi_cc(19) * 3.0
+let driveAmt    = 1.0 + midi_cc(16) * 2.0
+
+play swarm:
+  midi_keyboard((freq, gate) =>
+    let env = swell(gate, attack, release)
+    let voice = sum(16, n =>
+      # Per-partial Lorenz attractor with seeded initial conditions
+      # (different per partial so they don't all evolve identically).
+      $x = 0.1 + n * 0.01
+      $y = 0.0
+      $z = 0.0
+      # Per-partial timescale: higher partials evolve a bit faster.
+      let ddt = dt * (chaos_speed + n * 1.5)
+      # Lorenz equations: dx = σ(y-x), dy = x(ρ-z) - y, dz = xy - βz
+      $x = $x + 10.0 * ($y - $x) * ddt
+      $y = $y + ($x * (28.0 - $z) - $y) * ddt
+      $z = $z + ($x * $y - 2.67 * $z) * ddt
+      # x drives micro-frequency drift, z drives amplitude pulse.
+      let f       = freq * n * (1 + $x * chaos_depth)
+      let amp_mod = 1 - amp_chaos + amp_chaos * (sin($z * 0.2) + 1) * 0.5
+      if f >= 22000 then 0
+      else amp_mod * sin(TAU * phasor(f)) / pow(n, bright))
+    voice * env * 0.04)
+
+# Light master chain: drive → mono collapse for reverb → wet mixed back
+let dry    = swarm |> drive(driveAmt)
+let monoIn = (dry[0] + dry[1]) * 0.5
+let wet    = monoIn |> reverb(3.0, 0.4)
+dry + [wet, wet] * revWet

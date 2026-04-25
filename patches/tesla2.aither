@@ -1,0 +1,82 @@
+# tesla2 — gothic Tesla organ with two-layer FM, AM cross-modulation,
+# per-partial drift, and slider-gated spectral bands.
+#
+# Each of 16 partials carries TWO FM operators stacked: operator A
+# modulates operator B's phase, B modulates the carrier. That's
+# nested FM that no commercial synth exposes per-partial. Operator A
+# also amplitude-modulates the carrier independently. Per-partial
+# slow drift on the modulators keeps the spectrum alive (the
+# "cathedral motion" from fm_swarm).
+#
+# Defaults (every knob at CC=0) sit near the gothic-Tesla recipe:
+# 16 partials, inner FM depth ~1.17 rad, mod ratio ~3.06, drift ~0.6%.
+# Wiggle the knobs to explore — every dimension is a different
+# territory of sound nobody's heard.
+#
+# ============================================================ MIX (sliders)
+# Slider-gated spectral bands. Each band has a baseline 0.15 weight
+# even at slider=0 so a key always sounds; pull sliders up to boost.
+#   Slider 1 (CC 82) — BASS band (partials 1-2)
+#   Slider 2 (CC 83) — LOW-MID band (partials 3-6)
+#   Slider 3 (CC 85) — HIGH-MID band (partials 7-12)
+#   Slider 4 (CC 17) — SHIMMER band (partials 13-16)
+#
+# ============================================================ FM STACK (knobs)
+#   K1 (CC 74) — INNER FM DEPTH    1.17..4 rad   (default: gothic 1.17)
+#   K2 (CC 71) — OUTER FM DEPTH    0..2 rad      (default: 0 — adds layered chaos)
+#   K3 (CC 76) — INNER MOD RATIO   3.06..7      (default: gothic 3.06)
+#   K4 (CC 77) — OUTER MOD RATIO   1..5         (default: 1 — change for cross-rate FM)
+#
+# ============================================================ MOTION & MIX
+#   K5 (CC 93 INVERTED) — DRIFT      0.6..2.5% per-partial slow detune
+#   K6 (CC 18) — AM DEPTH            0..1 amplitude modulation from outer operator
+#   K7 (CC 19) — RELEASE             0.68..5 s envelope tail
+#   K8 (CC 16) — REVERB wet
+#
+# Polyphonic via midi_keyboard — chord-press for cathedral organ
+# voicings. Each held key runs its own 16 partials × 3 operators.
+
+let inner_depth   = 1.17 + midi_cc(74) * 3.0
+let outer_depth   = midi_cc(71) * 2.0
+let inner_ratio   = 3.06 + midi_cc(76) * 4.0
+let outer_ratio   = 1.0 + midi_cc(77) * 4.0
+let drift         = 0.006 + (1 - midi_cc(93)) * 0.019    # K5 inverted
+let am_depth      = midi_cc(18)
+let release       = 0.68 + midi_cc(19) * 4.32
+let revWet        = midi_cc(16) * 0.6
+
+play tesla2:
+  midi_keyboard((freq, gate) =>
+    let env = swell(gate, 0.005, release)
+    let voice = sum(16, n =>
+      let cf = n * freq
+
+      # Outer operator A — its own slow drift, incommensurate per partial
+      let modf_a = cf * outer_ratio * (1 + drift * sin(t * n / 7 + n * 0.41))
+      let mv_a   = sin(TAU * phasor(modf_a)) * outer_depth
+
+      # Inner operator B — phase-modulated by A, drift at a different rate
+      let modf_b = cf * inner_ratio * (1 + drift * sin(t * n / 11 + n * 0.3))
+      let mv_b   = sin(TAU * phasor(modf_b) + mv_a) * inner_depth
+
+      # AM cross-modulation: outer operator amplitude-modulates the carrier
+      # at the SAME rate it phase-modulates B. Couples FM and AM by
+      # construction — no commercial synth offers this per-partial.
+      let am = 1 - am_depth + am_depth * (sin(TAU * phasor(modf_a)) + 1) * 0.5
+
+      # Slider band weight (always-on baseline + slider boost)
+      let baseline = 0.15
+      let band = baseline + (if n <= 2 then midi_cc(82)
+                             else if n <= 6 then midi_cc(83)
+                             else if n <= 12 then midi_cc(85)
+                             else midi_cc(17))
+
+      # Tighter cap accounting for outer + inner sideband fan-out
+      if cf + modf_b * 3 + modf_a * 2 >= 22000 then 0
+      else band * am * (1.0 / pow(n, 0.55)) * sin(TAU * phasor(cf) + mv_b))
+    voice * env * 0.03)
+
+let dry    = tesla2
+let monoIn = (dry[0] + dry[1]) * 0.5
+let wet    = monoIn |> reverb(2.8, 0.35)
+dry + [wet, wet] * revWet

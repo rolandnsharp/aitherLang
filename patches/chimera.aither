@@ -1,0 +1,94 @@
+# chimera — four distinct additive spectra mixed in real time.
+#
+# Each held key drives FOUR independent additive stacks: a bright
+# saw, a hollow pulse (odd harmonics), a vowel-formant peak, and an
+# inharmonic bell. The four sliders are mix levels; the eight knobs
+# shape each spectrum's character and global behaviour.
+#
+# Mix freely. A slider-1-only patch is a saw lead. A slider-3-only
+# patch is a vocal pad. Mixing all four produces sonic territory
+# that doesn't have a name yet — a saw's brightness with a vowel's
+# voice with a bell's inharmonic shimmer underneath. That's the
+# chimera.
+#
+# Why this is more than a 4-way crossfade: each spectrum has its
+# OWN per-partial detune at incommensurate rates, so the spectra
+# never lock-step even when mixed. Each held key also runs all four
+# spectra independently — chord-press = 4×N×V partials all moving
+# on their own.
+#
+# ============================================================ MIX
+# Sliders set spectrum mix levels (0..1, additive blend):
+#   Slider 1 (CC 82) — SAW    bright integer harmonics
+#   Slider 2 (CC 83) — PULSE  odd harmonics only (clarinet/square)
+#   Slider 3 (CC 85) — VOWEL  formant peak (vocal pad character)
+#   Slider 4 (CC 17) — BELL   inharmonic stiff-string partials
+#
+# ============================================================ SHAPE
+# Knobs shape each spectrum or behave globally:
+#   K1 (CC 74) — SAW  brightness  (falloff exponent 0.5..2)
+#   K2 (CC 71) — PULSE brightness (falloff exponent 0.5..2)
+#   K3 (CC 76) — VOWEL formant Hz (300..2300, slides through spectrum)
+#   K4 (CC 77) — BELL  stretch    (inharmonic spread, piano-like)
+#   K5 (CC 93 INV) — REVERB wet
+#   K6 (CC 18) — ATTACK
+#   K7 (CC 19) — RELEASE
+#   K8 (CC 16) — DETUNE   per-partial drift across ALL four spectra
+#
+# Polyphonic via midi_keyboard; chord-presses are independent chimeras.
+
+let bright_a   = 0.5 + midi_cc(74) * 1.5
+let bright_b   = 0.5 + midi_cc(71) * 1.5
+let formant_hz = 300 + midi_cc(76) * 2000
+let stretch    = midi_cc(77) * 0.0008
+let detune     = midi_cc(16) * 0.008
+let attack     = 0.01 + midi_cc(18) * 1.5
+let release    = 0.2  + midi_cc(19) * 3.0
+let revWet     = (1 - midi_cc(93)) * 0.5
+
+play chimera:
+  midi_keyboard((freq, gate) =>
+    let env = swell(gate, attack, release)
+
+    # Spectrum A — saw (all integer harmonics, 1/n^bright_a)
+    # Detune at rate t*n/7 — base spectrum drift.
+    let spec_a = sum(16, n =>
+      let pf = freq * n * (1 + detune * sin(t * n / 7 + n * 0.3))
+      if pf >= 22000 then 0
+      else (1.0 / pow(n, bright_a)) * sin(TAU * phasor(pf)))
+
+    # Spectrum B — pulse (odd harmonics only)
+    # Detune at rate t*n/11 — incommensurate with A so they never sync.
+    let spec_b = sum(16, n =>
+      let pf = freq * n * (1 + detune * sin(t * n / 11 + n * 0.5))
+      if n mod 2 == 0 then 0
+      else if pf >= 22000 then 0
+      else (1.0 / pow(n, bright_b)) * sin(TAU * phasor(pf)))
+
+    # Spectrum C — vowel (Gaussian formant peak boosts the partial
+    # whose frequency lands inside the formant band)
+    let spec_c = sum(12, n =>
+      let pf = freq * n * (1 + detune * sin(t * n / 13 + n * 0.7))
+      let formant = exp(-pow((pf - formant_hz) / 200, 2)) * 3.0
+      if pf >= 22000 then 0
+      else (1.0 / pow(n, 0.6)) * (1 + formant) * sin(TAU * phasor(pf)))
+
+    # Spectrum D — bell (inharmonic stiff-string ratios)
+    # Each partial sharpens slightly, like a real piano string.
+    let spec_d = sum(8, n =>
+      let stiff = sqrt(1 + n * n * stretch)
+      let pf = freq * n * stiff * (1 + detune * sin(t * n / 17 + n * 0.2))
+      if pf >= 22000 then 0
+      else (1.0 / pow(n, 0.5)) * sin(TAU * phasor(pf)))
+
+    let mix = spec_a * midi_cc(82)
+            + spec_b * midi_cc(83)
+            + spec_c * midi_cc(85)
+            + spec_d * midi_cc(17)
+    mix * env * 0.05)
+
+# Master: light drive then reverb send.
+let dry    = chimera
+let monoIn = (dry[0] + dry[1]) * 0.5
+let wet    = monoIn |> reverb(2.5, 0.35)
+dry + [wet, wet] * revWet

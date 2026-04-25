@@ -1,0 +1,59 @@
+# sculpt — direct slider-to-partial spectral control.
+#
+# Eight controls map to eight partials. Sliders 1-4 weight the lower
+# four; knobs 1-4 weight the next four. Move a control, hear THAT
+# partial. Pure additive — no filter, no drive, no chorus, just sums
+# of sines with live amplitudes you control.
+#
+# All controls at 0 = silence. Pull anything up to hear the partial
+# at that harmonic of the held key. Dial in your own custom timbre
+# by combining partials.
+#
+# ============================================================ MIXER
+# Lower partials (sliders):
+#   Slider 1 (CC 82) — partial  1  (fundamental — the played pitch)
+#   Slider 2 (CC 83) — partial  2  (octave above)
+#   Slider 3 (CC 85) — partial  3  (octave + fifth)
+#   Slider 4 (CC 17) — partial  4  (two octaves above)
+#
+# Upper partials (knobs 1-4):
+#   K1 (CC 74) — partial  5  (two octaves + major third)
+#   K2 (CC 71) — partial  6  (two octaves + fifth)
+#   K3 (CC 76) — partial  8  (three octaves above)
+#   K4 (CC 77) — partial 10  (very high, glassy)
+#
+# ============================================================ BEHAVIOUR
+#   K5 (CC 93 INVERTED) — REVERB wet level
+#   K6 (CC 18) — ATTACK   (0.005..1.5 s)
+#   K7 (CC 19) — RELEASE  (0.1..3 s)
+#   K8 (CC 16) — STEREO width via slow pan motion (0..1)
+#
+# Polyphonic via midi_keyboard — chord-press to play multiple notes
+# each driving its own slider-shaped spectrum.
+
+let attack  = 0.005 + midi_cc(18) * 1.495
+let release = 0.1   + midi_cc(19) * 2.9
+let revWet  = (1 - midi_cc(93)) * 0.5
+let widen   = midi_cc(16)
+let pos     = t - start_t
+
+play sculpt:
+  midi_keyboard((freq, gate) =>
+    let env = swell(gate, attack, release)
+    let p1  = midi_cc(82) * sin(TAU * phasor(freq * 1))
+    let p2  = midi_cc(83) * sin(TAU * phasor(freq * 2))
+    let p3  = midi_cc(85) * sin(TAU * phasor(freq * 3))
+    let p4  = midi_cc(17) * sin(TAU * phasor(freq * 4))
+    let p5  = midi_cc(74) * sin(TAU * phasor(freq * 5))
+    let p6  = midi_cc(71) * sin(TAU * phasor(freq * 6))
+    let p8  = midi_cc(76) * sin(TAU * phasor(freq * 8))
+    let p10 = midi_cc(77) * sin(TAU * phasor(freq * 10))
+    (p1 + p2 + p3 + p4 + p5 + p6 + p8 + p10) * env * 0.08)
+
+# Master: stereo via slow pan, plus reverb send.
+let dry    = sculpt
+let monoIn = (dry[0] + dry[1]) * 0.5
+let panAmt = sin(TAU * pos * 0.07) * widen * 0.4
+let stereo = pan(monoIn, panAmt)
+let wet    = monoIn |> reverb(2.5, 0.3)
+stereo + [wet, wet] * revWet

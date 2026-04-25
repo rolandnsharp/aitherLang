@@ -1,0 +1,93 @@
+# cello_max — additive cello with morphable formula. CPU-budgeted
+# version: body resonance moved from per-partial Gaussians to
+# master-bus bandpass filters (4 BPFs once vs 80 exps per sample).
+#
+# ============================================================ BODY (sliders)
+# Sliders boost master-bus bandpass filters at the four cello body
+# resonances. Adds the "string in a wooden box" character on top of
+# the raw partial stack.
+#   Slider 1 (CC 82) — A0  ~200 Hz top-plate resonance (BPF mix)
+#   Slider 2 (CC 83) — T1  ~400 Hz back-plate (BPF mix)
+#   Slider 3 (CC 85) — BRIDGE ~1500 Hz (BPF mix)
+#   Slider 4 (CC 17) — SHIMMER ~3000 Hz (BPF mix)
+#
+# ============================================================ FORMULA MORPH (knobs 1-4)
+#   K1 (CC 74) — RATIO EXPONENT    pow(n, 0.5..2)
+#                ★ partial spacing topology
+#                ★ 0.5 = compressed cluster (no fundamental)
+#                ★ 1.0 = pure integer harmonics
+#                ★ 1.5 = stretched piano-bell territory
+#                ★ 2.0 = exponentially spaced (alien shimmer)
+#
+#   K2 (CC 71) — FM DEPTH          0..3.5 rad per partial
+#                ★ 0    = clean additive (pure sines)
+#                ★ 0.5  = warm chorus-like sidebands
+#                ★ 1.5  = metallic bell character (DX7-style)
+#                ★ 2.5+ = broken-radio territory
+#
+#   K3 (CC 76) — MOD RATIO         0.5..8
+#                ★ each integer multiple = different sound regime
+#                ★ 1 = unison FM, 2 = octave, 3 = Tesla-organ,
+#                  5 = gong, 7 = aggressive metallic; fractionals
+#                  give inharmonic cluster textures
+#
+#   K4 (CC 77) — DRIFT             0..2% per-partial slow detune
+#                ★ adds cathedral motion (incommensurate per partial)
+#
+# ============================================================ EXPRESSION (knobs 5-8)
+#   K5 (CC 93) — VIBRATO RATE      0.5..30 Hz
+#                ★ <4 Hz = drift/breathing
+#                ★ 4-10 Hz = traditional vibrato
+#                ★ >15 Hz = audio-rate FM (becomes a second modulator)
+#
+#   K6 (CC 18) — VIBRATO DEPTH     0..12% pitch deviation
+#
+#   K7 (CC 19) — BRIGHTNESS EXP    0.3..2.0
+#                ★ 0.3 = harsh (square-like, all partials present)
+#                ★ 1.0 = warm cello baseline
+#                ★ 2.0 = dim (only fundamental + low partials)
+#
+#   K8 (CC 16) — REVERB wet        0..1.5
+
+let ratio_exp  = 0.5 + midi_cc(74) * 1.5
+let fm_depth   = midi_cc(71) * 3.5
+let mod_ratio  = 0.5 + midi_cc(76) * 7.5
+let drift      = midi_cc(77) * 0.02
+let vib_rate   = 0.5 + midi_cc(93) * 29.5
+let vib_depth  = midi_cc(18) * 0.12
+let bright     = 0.3 + midi_cc(19) * 1.7
+let revWet     = midi_cc(16) * 1.5
+
+let a0_amp  = midi_cc(82)
+let t1_amp  = midi_cc(83)
+let bri_amp = midi_cc(85)
+let shi_amp = midi_cc(17)
+
+play cello_max:
+  midi_keyboard((freq, gate) =>
+    let env = swell(gate, 0.2, 0.6)
+    let vib = sin(TAU * t * vib_rate) * vib_depth
+    let voice = sum(12, n =>
+      let r       = pow(n, ratio_exp)
+      let pf_base = freq * r * (1 + vib)
+      let pf      = pf_base * (1 + drift * sin(t * n / 11 + n * 0.3))
+      let modf    = pf * mod_ratio
+      let mv      = sin(TAU * phasor(modf)) * fm_depth
+      let basis   = 1.0 / pow(n, bright)
+      if pf + modf * 3 >= 22000 then 0
+      else basis * sin(TAU * phasor(pf) + mv))
+    voice * env * 0.06)
+
+# Master chain: body resonance via parallel BPFs + reverb send.
+# Body filters run ONCE on the mixed signal — much cheaper than
+# per-partial Gaussians. Each slider mixes its band on top of the
+# dry voice.
+let dry  = cello_max
+let mono = (dry[0] + dry[1]) * 0.5
+let res  = (mono
+         + bpf(mono,  200, 0.7) * a0_amp  * 1.5
+         + bpf(mono,  400, 0.7) * t1_amp  * 1.2
+         + bpf(mono, 1500, 0.7) * bri_amp * 0.8
+         + bpf(mono, 3000, 0.7) * shi_amp * 0.6)
+let wet  = res |> reverb(3.0, 0.4)
+[res, res] + [wet, wet] * revWet
