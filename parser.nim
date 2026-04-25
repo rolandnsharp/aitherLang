@@ -1,10 +1,10 @@
 ## aither parser — tokenizer + recursive descent → AST
 
-import std/[strutils]
+import std/[strutils, sets]
 
 type
   TokKind* = enum
-    tkNum, tkIdent, tkKeyword, tkOp,
+    tkNum, tkIdent, tkStateIdent, tkKeyword, tkOp,
     tkLParen, tkRParen, tkLBracket, tkRBracket,
     tkComma, tkColon, tkSemi, tkAssign, tkAugAssign,
     tkNewline, tkIndent, tkDedent, tkEof
@@ -31,6 +31,12 @@ type
 
   ParseError* = object of CatchableError
 
+# `var` lives on as a reserved keyword purely so parseStmt can produce a
+# focused migration error — the language no longer has a var keyword;
+# state is declared with the `$` sigil. Removing `var` from this list
+# would let it be parsed as a plain identifier, which is friendlier for
+# new code but loses the chance to redirect users running pre-sigil
+# patches with a clear message.
 const Keywords = ["var", "let", "def", "play", "if", "then", "else",
                   "mod", "and", "or", "not"]
 
@@ -138,6 +144,27 @@ proc tokenize*(source: string): seq[Token] =
         emit(tkOp, "|>"); i += 2; col += 2
       else:
         raise newException(ParseError, "unexpected '|' at " & $line & ":" & $col)
+    of '$':
+      # `$IDENT` is a state binding: visible state lives off the `$`. The
+      # tokenizer produces a single tkStateIdent so the parser can spot
+      # state references in one step, and so the no-whitespace rule (the
+      # `$` sigil must hug its name) is enforced where the spelling is
+      # decided rather than scattered across the parser. Whitespace, a
+      # digit, or any non-ident-start char after `$` is an error so the
+      # mistake is caught at the syntactic boundary.
+      let dollarLine = line
+      let dollarCol = col
+      i += 1; col += 1
+      if i >= n or not (source[i].isAlphaAscii() or source[i] == '_'):
+        raise newException(ParseError,
+          "`$` must be followed immediately by an identifier (no space) at " &
+          $dollarLine & ":" & $dollarCol)
+      var s = ""
+      while i < n and (source[i].isAlphaAscii() or source[i].isDigit() or
+                       source[i] == '_'):
+        s.add source[i]; i += 1; col += 1
+      result.add Token(kind: tkStateIdent, str: s,
+                       line: dollarLine, col: dollarCol)
     of '=':
       if i + 1 < n and source[i+1] == '>':
         # `=>` introduces a lambda body: `n => expr`. Checked ahead of
@@ -181,6 +208,15 @@ proc tokenize*(source: string): seq[Token] =
 type Parser = object
   toks: seq[Token]
   idx: int
+  # Per-scope tracking of state names: the first `$x = expr` in a scope
+  # is a declaration (nkVar), every subsequent `$x = expr` in the same
+  # scope is an assignment (nkAssign). State scopes nest like def and
+  # lambda bodies do. Top-level statements share `stateScopes[0]` with
+  # play bodies — that matches the codegen rule that a `$x` inside a
+  # play resolves to the same file-level slot a top-level `$x` would
+  # get, which is what users expect from "this state lives for the
+  # whole patch."
+  stateScopes: seq[HashSet[string]]
 
 proc peek(p: Parser; off: int = 0): Token {.inline.} =
   if p.idx + off < p.toks.len: p.toks[p.idx + off]
@@ -219,6 +255,21 @@ proc matchKw(p: var Parser; kw: string): bool =
 proc isKw(p: Parser; kw: string): bool =
   let t = p.peek()
   t.kind == tkKeyword and t.str == kw
+
+proc pushStateScope(p: var Parser) =
+  p.stateScopes.add initHashSet[string]()
+
+proc popStateScope(p: var Parser) =
+  if p.stateScopes.len > 0: discard p.stateScopes.pop()
+
+proc seenInCurrentScope(p: Parser; name: string): bool =
+  if p.stateScopes.len == 0: return false
+  name in p.stateScopes[^1]
+
+proc markSeenInCurrentScope(p: var Parser; name: string) =
+  if p.stateScopes.len == 0:
+    p.stateScopes.add initHashSet[string]()
+  p.stateScopes[^1].incl name
 
 proc skipNewlines(p: var Parser) =
   ## Used between top-level statements only. Tolerates stray
@@ -279,20 +330,41 @@ proc parseIfExpr(p: var Parser): Node =
   Node(kind: nkIf, kids: @[cond, thn, nil], line: line)
 
 proc parseLambdaBody(p: var Parser; line: int; params: seq[string]): Node =
-  ## Parse `=>`-prefix lambda body — already past the `=>`. Body may be a
-  ## plain expression or a let-prefixed sequence terminated by a final
-  ## expression. Used by both the single-arg (`n => ...`) and multi-arg
-  ## (`(a, b) => ...`) entry points so the body grammar stays in one place.
+  ## Parse `=>`-prefix lambda body — already past the `=>`. Body is a
+  ## sequence of `let` and `$state` declarations / assignments, mixed in
+  ## any order, terminated by a final expression. `$state` inside a
+  ## lambda body gets per-iteration storage when the lambda is unrolled
+  ## by `sum(N, ...)` — each iteration claims fresh pool slots, and the
+  ## sequential update reads the just-assigned value (so `$dx = $dx +
+  ## ...; $x = $x + $dx * dt` integrates the way physics expects).
+  ## Used by both `n => ...` and `(a, b) => ...` entry points so the
+  ## body grammar stays in one place.
+  pushStateScope(p)
   var stmts: seq[Node] = @[]
-  while p.isKw("let"):
-    let letLine = p.peek().line
-    discard p.advance()
-    let name = p.expect(tkIdent, "binding name").str
-    discard p.expect(tkAssign)
-    let rhs = p.parseExpr()
-    stmts.add Node(kind: nkLet, str: name, kids: @[rhs], line: letLine)
-    while p.peek().kind == tkSemi: discard p.advance()
+  while true:
+    if p.isKw("let"):
+      let letLine = p.peek().line
+      discard p.advance()
+      let name = p.expect(tkIdent, "binding name").str
+      discard p.expect(tkAssign)
+      let rhs = p.parseExpr()
+      stmts.add Node(kind: nkLet, str: name, kids: @[rhs], line: letLine)
+      while p.peek().kind == tkSemi: discard p.advance()
+    elif p.peek().kind == tkStateIdent and
+         p.idx + 1 < p.toks.len and
+         p.toks[p.idx + 1].kind == tkAssign:
+      let stateLine = p.peek().line
+      let name = p.advance().str
+      discard p.expect(tkAssign)
+      let rhs = p.parseExpr()
+      let kind = if p.seenInCurrentScope(name): nkAssign else: nkVar
+      if kind == nkVar: p.markSeenInCurrentScope(name)
+      stmts.add Node(kind: kind, str: name, kids: @[rhs], line: stateLine)
+      while p.peek().kind == tkSemi: discard p.advance()
+    else:
+      break
   let finalExpr = p.parseExpr()
+  popStateScope(p)
   let body =
     if stmts.len == 0: finalExpr
     else:
@@ -363,6 +435,14 @@ proc parsePrimary(p: var Parser): Node =
     if p.peek().kind == tkOp and p.peek().str == "=>":
       discard p.advance()
       return p.parseLambdaBody(t.line, @[t.str])
+    return Node(kind: nkIdent, str: t.str, line: t.line)
+  of tkStateIdent:
+    # `$x` on the RHS reads the state slot named x. We emit a regular
+    # nkIdent — the codegen's identifier resolution already finds state
+    # bindings (top-level via topVarSet, def-body via the scope chain
+    # populated by emitBlockExpr's nkVar handling). The leading `$` is a
+    # surface-syntax marker for the reader, not a separate AST kind.
+    discard p.advance()
     return Node(kind: nkIdent, str: t.str, line: t.line)
   of tkOp:
     if t.str == "-":
@@ -479,6 +559,12 @@ proc parseDef(p: var Parser): Node =
   discard p.expect(tkRParen)
   discard p.expect(tkColon)
 
+  # def bodies own their own state scope: a `$x = ...` inside a def is
+  # per-call-site state, distinct from any same-named state at file
+  # level. The scope stack tracks first-sight locally so the user can
+  # write `$prev_g = 0.0; $prev_g = gate` and only the first line gets
+  # the slot-allocation treatment.
+  pushStateScope(p)
   var stmts: seq[Node]
   if p.peek().kind == tkNewline:
     discard p.advance()
@@ -492,6 +578,7 @@ proc parseDef(p: var Parser): Node =
       stmts.add p.parseStmt()
       if p.peek().kind == tkSemi: discard p.advance()
       else: break
+  popStateScope(p)
 
   let body = if stmts.len == 1: stmts[0]
              else: Node(kind: nkBlock, kids: stmts, line: line)
@@ -531,11 +618,21 @@ proc parseStmt(p: var Parser): Node =
   let t = p.peek()
   var n: Node
   if t.kind == tkKeyword and t.str == "var":
+    p.fail("'var' keyword removed; use `$" & "name = ...` for state declarations")
+  elif t.kind == tkStateIdent and
+       p.idx + 1 < p.toks.len and
+       p.toks[p.idx + 1].kind == tkAssign:
+    # `$name = expr` — declaration on first sight, assignment thereafter.
+    # First-sight is per-scope: top-level + play bodies share scope 0
+    # (so `$x` declared at top-level and reassigned inside a play work
+    # the same way `var x = 0; play foo: x = ...` did before). Def
+    # bodies push their own scope; lambda bodies likewise.
     discard p.advance()
-    let name = p.expect(tkIdent).str
     discard p.expect(tkAssign)
     let v = p.parseExpr()
-    n = Node(kind: nkVar, str: name, kids: @[v], line: t.line)
+    let kind = if p.seenInCurrentScope(t.str): nkAssign else: nkVar
+    if kind == nkVar: p.markSeenInCurrentScope(t.str)
+    n = Node(kind: kind, str: t.str, kids: @[v], line: t.line)
   elif t.kind == tkKeyword and t.str == "let":
     discard p.advance()
     let name = p.expect(tkIdent).str
@@ -584,11 +681,17 @@ proc parseStmt(p: var Parser): Node =
 proc parseProgram*(source: string): Node =
   let toks = tokenize(source)
   var p = Parser(toks: toks, idx: 0)
+  # Top-level state scope. play bodies don't push their own scope —
+  # they share this one so file-level state is reachable from every
+  # play (matching the codegen rule that play-body `$x` resolves to
+  # the same `s->v_x` as top-level `$x`).
+  pushStateScope(p)
   var stmts: seq[Node]
   p.skipNewlines()
   while p.peek().kind != tkEof:
     stmts.add p.parseStmt()
     p.skipNewlines()
+  popStateScope(p)
   Node(kind: nkBlock, kids: stmts, line: 1)
 
 proc setSource*(n: Node; source: string) =
