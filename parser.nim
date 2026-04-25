@@ -221,7 +221,17 @@ proc isKw(p: Parser; kw: string): bool =
   t.kind == tkKeyword and t.str == kw
 
 proc skipNewlines(p: var Parser) =
-  while p.peek().kind in {tkNewline, tkSemi}: discard p.advance()
+  ## Used between top-level statements only. Tolerates stray
+  ## tkIndent/tkDedent left over from multi-line continuation
+  ## expressions (e.g. an `if cond then x \n   else y` where the
+  ## else line is indented for readability — the leading whitespace
+  ## emits a tkIndent that the if-parser consumed, and the next
+  ## top-level line emits the matching tkDedent which lands here).
+  ## Safe at top level because aither has no indent-delimited blocks
+  ## there — def/play bodies parse their own tkIndent/tkDedent and
+  ## never call this helper.
+  while p.peek().kind in {tkNewline, tkSemi, tkIndent, tkDedent}:
+    discard p.advance()
 
 proc node(k: NodeKind; line: int = 0): Node =
   Node(kind: k, line: line)
