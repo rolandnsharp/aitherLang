@@ -9,24 +9,25 @@
 # the bow / pluck loop alive but doesn't re-strike. `gate` directly
 # feeds the bow signal for the bowed string (continuous excitation).
 #
-# The rising-edge idiom inlines $-state inside the lambda body —
-# each polyphonic voice gets its own $prev_g slot when sum() unrolls
-# the lambda, so a chord doesn't re-strike held voices when the next
-# note presses.
+# `prev(gate)` is the rising-edge idiom — stdlib def with per-call-
+# site $state. Inside midi_keyboard's per-voice lambda, each unrolled
+# iteration is a fresh call site, so each voice gets its own one-
+# sample memory. Chord-presses don't re-strike held voices.
 
 play fork:
+  # `prev()` is per-call-site, so inside midi_keyboard's per-voice
+  # lambda each unrolled iteration gets its own one-sample memory.
+  # The stdlib `def prev(x): $last = 0; let out = $last; $last = x; out`
+  # is the canonical pattern — reach for it instead of inline $state
+  # whenever you just need previous-sample memory of any expression.
   midi_keyboard((freq, gate) =>
-    $prev_g = 0.0
-    let strike = if gate > 0.5 and $prev_g < 0.5 then 1.0 else 0.0
-    $prev_g = gate
+    let strike = if gate > 0.5 and prev(gate) < 0.5 then 1.0 else 0.0
     tuning_fork(strike * 30, freq) * 0.05)
 
 play pluck:
   # Karplus-Strong pluck — brightness slides via CC 74.
   midi_keyboard((freq, gate) =>
-    $prev_g = 0.0
-    let strike = if gate > 0.5 and $prev_g < 0.5 then 1.0 else 0.0
-    $prev_g = gate
+    let strike = if gate > 0.5 and prev(gate) < 0.5 then 1.0 else 0.0
     pluck_string(noise() * strike * 2.0, freq, 0.4 + midi_cc(74) * 0.5) * 0.4)
 
 play bowed:
@@ -40,9 +41,7 @@ play bowed:
 play bar:
   # Struck metal bar — bright transient mellowing to fundamental ring.
   midi_keyboard((freq, gate) =>
-    $prev_g = 0.0
-    let strike = if gate > 0.5 and $prev_g < 0.5 then 1.0 else 0.0
-    $prev_g = gate
+    let strike = if gate > 0.5 and prev(gate) < 0.5 then 1.0 else 0.0
     struck_bar(strike * 8, freq) * 0.05)
 
 # `play` values are stereo (mirrored when the body is mono), so a sum
