@@ -6,7 +6,7 @@
 ## alignment, sparkline glyphs.
 
 import std/[math, strutils]
-import engine_types
+import engine_types, analysis
 
 const SparkBlocks = [" ", "▁", "▂", "▃", "▄",
                      "▅", "▆", "▇", "█"]
@@ -100,6 +100,39 @@ proc formatMidiHeader*(m: MidiStatus): string =
   if m.portInfo.len == 0: return ""
   let state = if m.active: "active" else: "DROPPED"
   "MIDI: " & m.portInfo & " [" & state & "]"
+
+proc fmtHz(v: float64): string =
+  if v >= 1000.0: formatFloat(v, ffDecimal, 0) & " Hz"
+  else: formatFloat(v, ffDecimal, 1) & " Hz"
+
+proc formatSpectrum*(s: SpectrumSummary): string =
+  ## Multi-line spectral summary. Used by `audit` and `spectrum`.
+  ## Pure function on a SpectrumSummary; analysis.nim does the math.
+  var lines: seq[string]
+  lines.add "  RMS:        " & formatFloat(s.rmsDb, ffDecimal, 1) &
+            " dB    Peak: " & formatFloat(s.peakDb, ffDecimal, 1) & " dB"
+  let fund =
+    if s.fundamentalHz <= 0.0: "(no clear pitch — non-tonal)"
+    else: fmtHz(s.fundamentalHz)
+  lines.add "  Fundamental: " & fund
+  lines.add "  Centroid:   " & fmtHz(s.centroidHz)
+  lines.add "  ZCR:        " &
+            formatFloat(s.zeroCrossingRate, ffDecimal, 0) & " / sec"
+  lines.add "  Top peaks:"
+  for i, p in s.peaks:
+    let idx = align($(i + 1), 2)
+    let freq = align(fmtHz(p.freqHz), 12)
+    let mag = formatFloat(p.magDb, ffDecimal, 1) & " dB"
+    lines.add "    " & idx & ".  " & freq & "  " & mag
+  lines.join("\n")
+
+proc formatAudit*(path: string; seconds, sr: float64;
+                  s: SpectrumSummary): string =
+  ## `audit` adds a one-line header above the spectrum summary so the
+  ## reader sees what was rendered. seconds + sr come from the renderer.
+  "audit: " & path & " (" & formatFloat(seconds, ffDecimal, 1) &
+    "s @ " & formatFloat(sr, ffDecimal, 0) & " Hz)\n" &
+    formatSpectrum(s)
 
 proc formatVoiceList*(midi: MidiStatus; voices: seq[VoiceInfo]): string =
   var lines: seq[string]
