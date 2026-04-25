@@ -150,12 +150,18 @@ osc(my_shape, 440)
 
 ## Lambdas
 
-Single-argument anonymous function with the syntax
-`name => expr`:
+Anonymous function. Single-argument form is bare:
 
 ```
 sum(16, n => sin(TAU * phasor(n * 440)) / n)
 #   ^^^^^^^  the lambda binds `n` for the body
+```
+
+Multi-argument form puts the params in parens:
+
+```
+midi_keyboard((freq, gate) =>
+  additive(freq, warm_shape, 8) * adsr(gate, 0.01, 0.2, 0.7, 0.4))
 ```
 
 The body may be a plain expression, or a `let`-prefixed
@@ -172,11 +178,15 @@ expression (and to later `let`s). Semicolons between lets
 are accepted but optional — newlines inside the enclosing
 `(...)` are whitespace (see "Group-depth tokenization").
 
-**Restrictions (v1)**:
-- Single parameter only: `n => ...`, not `(a, b) => ...`.
-- Only legal as an argument to a builtin — currently `sum`.
-  A lambda stored in a `let` or returned from a `def` is a
-  compile error with a message pointing at the right shape.
+**Restrictions**:
+- Lambda is only legal as an argument to a builtin or a `def`
+  parameter. A lambda stored in a `let` or returned from a `def`
+  is a compile error.
+- `sum` requires a single-arg lambda (its iteration index).
+- A multi-arg lambda passed to a `def` is inlined at every call
+  to that param: `def poly(n_voices, voice_fn): sum(n_voices, n =>
+  voice_fn(midi_voice_freq(n), midi_voice_gate(n)))` — `voice_fn`
+  is bound to the lambda the caller passed, not a runtime value.
 
 Lambdas capture any variable in their enclosing lexical
 scope — enclosing `let`s, `def` parameters, and globals all
@@ -500,15 +510,17 @@ reader can tell "this number comes from a knob you turned"
 apart from a derived DSP signal. State is engine-owned —
 hot-reloading a patch preserves held notes and knob values.
 
-| Function        | Description                                      |
-|-----------------|--------------------------------------------------|
-| `midi_cc(n)`    | CC `n` value, `0..1`. `n` in `0..127`.           |
-| `midi_note(n)`  | Velocity `0..1` while note `n` is held; 0 else. |
-| `midi_freq()`   | Hz of the most recent note-on (mono).            |
-| `midi_gate()`   | Velocity `0..1` of the most recent note-on; 0 after note-off. |
-| `midi_trig(n)`  | 1.0 for a single sample on each note-on for `n`; 0 otherwise. Per-voice edge detect. |
+| Function              | Description                                      |
+|-----------------------|--------------------------------------------------|
+| `midi_cc(n)`          | CC `n` value, `0..1`. `n` in `0..127`.           |
+| `midi_note(n)`        | Velocity `0..1` while note `n` is held; 0 else. |
+| `midi_freq()`         | Hz of the most recent note-on (mono).            |
+| `midi_gate()`         | Velocity `0..1` of the most recent note-on; 0 after note-off. |
+| `midi_trig(n)`        | 1.0 for a single sample on each note-on for `n`; 0 otherwise. Per-voice edge detect. |
+| `midi_voice_freq(n)`  | Hz of the nth held voice (1..16); 0 if slot empty. Stable per held note. |
+| `midi_voice_gate(n)`  | Velocity of the nth held voice (1..16); 0 after release or empty. |
 
-If no MIDI device is connected, all five return 0 and the
+If no MIDI device is connected, all return 0 and the
 patch still runs. There is no binding step — the patch IS
 the routing. Example:
 
@@ -517,6 +529,18 @@ play bass: osc(saw, midi_freq()) * midi_gate() * 0.3
 play kick: discharge(midi_trig(36), 30) * sin(TAU * phasor(60))
 (bass + kick) * midi_cc(80)
 ```
+
+**Polyphony**. Use `midi_keyboard` (stdlib) — it wraps
+`midi_voice_freq` / `midi_voice_gate` over 8 voices via
+sum-unrolling. The raw primitives are for unusual cases
+(non-default voice counts via `poly(N, ...)`, or hand-rolled
+allocation logic).
+
+Voice stealing: when a 17th note arrives, the slot with the
+lowest `onAt` (oldest held) is evicted. When a slot's note is
+released its velocity drops to 0 and the slot becomes
+re-allocatable; the freq stays set so a synth's release tail
+still reads a valid pitch.
 
 See "CLI" below for `aither midi list / connect / disconnect`.
 
@@ -602,6 +626,21 @@ def prev(x):                              # one-sample memory
 - `haas(mono_sig, ms)` — 1-30 ms delay on one channel for width
 - `width(stereo_sig, amount)` — mid-side width (0 mono, 1 unchanged, >1 exaggerated)
 - `mono(stereo_sig)` — collapse to single channel
+
+### Polyphony
+
+- `poly(n_voices, voice_fn)` — fan a per-key synth across N voices
+- `midi_keyboard(voice_fn)` — `poly(8, voice_fn)`, the front-door form
+
+`voice_fn` is a 2-arg lambda `(freq, gate) => synth_expr`. Each
+held key drives one voice independently; sums of phasor-based
+synthesis stack at codegen time.
+
+```
+play piano:
+  midi_keyboard((freq, gate) =>
+    additive(freq, warm_shape, 8) * adsr(gate, 0.01, 0.2, 0.7, 0.4))
+```
 
 ---
 

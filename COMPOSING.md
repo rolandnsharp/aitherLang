@@ -167,6 +167,39 @@ sections. Quantize only when the genre demands it.
 
 ## Idioms
 
+### Playing from MIDI (polyphonic)
+
+A MIDI keyboard plays polyphonically — pressing three keys
+produces three notes simultaneously. To make a polyphonic
+instrument, wrap your per-key synthesis in `midi_keyboard`:
+
+```
+play piano:
+  midi_keyboard((freq, gate) =>
+    additive(freq, warm_shape, 8) * adsr(gate, 0.01, 0.2, 0.7, 0.4))
+```
+
+The lambda describes what each held key sounds like;
+`midi_keyboard` handles voice allocation, voice stealing
+(oldest evicted at the 9th note), and summing. CC reads
+(`midi_cc(74)`, etc.) are global and belong outside the
+lambda — every voice shares the same knob.
+
+For a different voice count, use `poly(N, ...)` directly:
+
+```
+play piano:
+  poly(16, (freq, gate) => ...)        # 16 voices
+```
+
+The mono primitives `midi_freq()` / `midi_gate()` still exist
+(they return the most-recent note) for monophonic synth-lead
+behaviour.
+
+The deepest layer is `midi_voice_freq(n)` / `midi_voice_gate(n)`
+— for hand-rolled allocation logic that doesn't fit `poly`'s
+shape.
+
 ### Smoothstep (ease 0→1)
 
 `ease(x)` is stdlib — smoothstep with inputs clamped to
@@ -426,20 +459,18 @@ leaves most of aither's unique value on the table. The only
 patch where I'd default to `osc` is one that aims at chiptune
 or breakbeat character on purpose.
 
-All three compose with envelopes, effects, pans the same way:
+All three compose with envelopes, effects, pans the same way.
+Wrapped in `midi_keyboard` so chords work:
 
 ```
 play voice:
-  let env = swell(midi_gate(), 0.1, 0.4)
-  additive(midi_freq(), cello_shape, 16) * env * 0.2 |> reverb(2.5, 0.15)
-
-voice
+  midi_keyboard((freq, gate) =>
+    additive(freq, cello_shape, 16) * swell(gate, 0.1, 0.4) * 0.2) |> reverb(2.5, 0.15)
 ```
 
 Nothing else in the patch cares which synthesis style you
-picked — swap `osc(saw, midi_freq())` ↔ `additive(midi_freq(),
-saw_shape, 16)` ↔ `inharmonic(midi_freq(), stiff_string,
-soft_decay, 16)` freely.
+picked — swap `osc(saw, freq)` ↔ `additive(freq, saw_shape, 16)`
+↔ `inharmonic(freq, stiff_string, soft_decay, 16)` freely.
 
 ### Tabular ratio / shape functions
 
