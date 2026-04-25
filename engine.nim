@@ -184,7 +184,7 @@ proc annotateErr(msg, userSrc, userPath: string): string =
     i = rp + 1
   msg
 
-proc loadPatch(filename: string; fadeIn: float64): string =
+proc loadPatch*(filename: string; fadeIn: float64): string =
   if not fileExists(filename): return "file not found: " & filename
   let userSrc = readFile(filename)
   let baseName = splitFile(filename).name
@@ -269,7 +269,7 @@ proc retriggerVoice(name: string): string =
   release(mtx)
   ""
 
-proc stopVoice(name: string; fade: float64): string =
+proc stopVoice*(name: string; fade: float64): string =
   let idx = findSlot(name)
   if idx < 0: return "not found: " & name
   acquire(mtx)
@@ -290,7 +290,7 @@ proc clearAll(fade: float64): string =
   release(mtx)
   ""
 
-proc setMute(name: string; muted: bool): string =
+proc setMute*(name: string; muted: bool): string =
   let idx = findSlot(name)
   if idx < 0: return "not found: " & name
   acquire(mtx)
@@ -298,15 +298,23 @@ proc setMute(name: string; muted: bool): string =
   release(mtx)
   ""
 
-proc soloVoice(name: string; fade: float64): string =
+proc soloVoice*(name: string; fade: float64): string =
   let idx = findSlot(name)
   if idx < 0: return "not found: " & name
   acquire(mtx)
   for i in 0 ..< slotCount:
     if i == idx:
+      # Targeted voice: ensure it's playing and unmuted. Fade in if it
+      # had been silent.
+      slots[i].muted = false
       slots[i].fadeDelta = if slots[i].fadeGain < 1.0: fadeDeltaFor(fade) else: 0.0
     else:
-      slots[i].fadeDelta = -fadeDeltaFor(if fade > 0.0: fade else: DefaultFadeMs / 1000.0)
+      # Other voices: mute (recoverable via `unmute`), not stop. The
+      # old behaviour faded gain to 0 then marked the slot inactive,
+      # which `unmute` couldn't revive — forcing a re-`send` and losing
+      # running state. Mute leaves the voice ticking silently so an
+      # operator can toggle it back instantly.
+      slots[i].muted = true
   release(mtx)
   ""
 
@@ -454,7 +462,7 @@ proc soloPart(voiceName, partName: string; fade: float64): string =
   release(mtx)
   ""
 
-proc listVoices(): string =
+proc listVoices*(): string =
   var lines: seq[string]
   for i in 0 ..< slotCount:
     let state =
