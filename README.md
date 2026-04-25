@@ -1,30 +1,88 @@
 # aither
 
-A language for real-time audio signal processing.
+A live-coded language for audio. The contract is `f(state) → sample`.
 
-Everything is a signal computed 48,000 times per second.
-Files are named parts composed into a single stereo output.
-Hot-reload any file; state persists.
+The engine calls your function 48,000 times per second. You return a
+stereo sample. The engine sends it to the speakers. That's the whole
+contract — the engine has no opinion about whether you're doing
+additive synthesis, physical modeling, FM, granular, sample playback,
+or something nobody has named yet. Your patch IS the synthesis method.
 
 ```
-def ease(x):
-  let c = clamp(x, 0, 1)
-  c * c * (3 - 2 * c)
+play piano:
+  midi_keyboard((freq, gate) =>
+    additive(freq, warm_shape, 16) * adsr(gate, 0.01, 0.2, 0.7, 0.4))
 
-let tempo = 140.0 / 60.0
-let kEnv  = discharge(impulse(tempo), 10)
-let sc    = 1 - kEnv * 0.75           # sidechain, in scope for every play
-
-play kick:
-  sin(TAU * phasor(50 + discharge(impulse(tempo), 35) * 170)) * kEnv
-
-play bass:
-  osc(saw, 55) |> lpf(150 + kEnv * 1500, 0.85) * sc
-
-(kick + bass) |> drive(1.1)           # final expression = voice output
+piano |> reverb(2.5, 0.2)
 ```
 
-Save as `bass.aither` and play it.
+Polyphonic warm pad — `midi_keyboard` provides 8 voices of polyphony,
+`additive` builds the spectrum from 16 sine waves, `adsr` shapes each
+key's amplitude. Edit the shape function and resend; the chord ringing
+under your fingers re-tunes mid-note.
+
+Compiled to native code in milliseconds. Hot-reloaded without
+dropping state. State persists across edits — every var, every filter,
+every delay tail.
+
+## What aither is
+
+A function-of-state language for sound. The state is yours: every
+`var` you declare, every filter's internal memory, every phasor's
+phase, every reverb's tail buffer. Aither preserves it across
+hot-reloads by per-helper-type identity, so editing one helper
+doesn't shift the storage of everything after it. The function is
+yours: you write what synthesis you want by writing the math.
+
+The stdlib ships starter kits for the common cases — `additive`,
+`inharmonic`, the shape/ratio library, envelopes, filters, reverb,
+stereo helpers, polyphony — but none of them are the LANGUAGE.
+They're convenience defs. The language is the contract:
+`f(state) → sample`, evaluated at audio rate, hot-reloadable,
+composable.
+
+## Five paradigms, one interface
+
+Different musical ideas want different math. Aither's interface
+supports all of them through the same `f(state) → sample` contract:
+
+**Stateless function of time** — pure math, no memory:
+```
+sin(TAU * 440 * t) * 0.3
+```
+
+**Phase accumulation** — explicit state, hot-swappable:
+```
+var phase = 0.0
+phase = (phase + 440 / sr) mod 1.0
+sin(TAU * phase) * 0.3
+```
+
+**Additive synthesis** — sums of sines via the `sum` fold:
+```
+sum(16, n => sin(TAU * phasor(n * 440)) / n) * 0.3
+```
+
+**Physical modeling** — damped harmonic oscillator, the universal
+physical primitive `ẍ + 2γẋ + ω²x = F(t)`:
+```
+var x = 0.0
+var dx = 0.0
+let w2 = 440 * 440
+dx = dx + (-2 * dx - w2 * x + impulse(2) * w2) * dt
+x = x + dx * dt
+x * 0.3
+```
+
+**Spatial / field-based** — multi-dimensional state for spatial
+processes:
+```
+var x_pos = 0.0; var y_pos = 0.0
+# ...wave equation across (x_pos, y_pos)...
+```
+
+The engine doesn't know which paradigm you picked. It calls your
+function and plays the result. Use any. Mix any. Invent new ones.
 
 ## Build
 
@@ -32,148 +90,153 @@ Save as `bass.aither` and play it.
 make
 ```
 
-One binary, ~500 KB. Linux-only for now (system audio via miniaudio).
+One binary, ~970 KB. Linux-only for now (system audio via miniaudio,
+MIDI via ALSA seq).
 
 ## Use
 
 ```
 aither start                          launch engine
-aither send bass.aither               load & play
-aither send bass.aither 2             ...with 2-second fade in
-aither stop bass 1                    fade out over 1 second
-aither mute bass                      silence whole voice (state keeps running)
-aither mute bass kick                 silence one play within bass
-aither mute bass kick 2               ...with 2-second fade
-aither unmute bass kick               restore
-aither solo bass kick                 fade other plays in bass to 0
+aither send piano.aither              load & play
+aither send piano.aither 2            ...with 2-second fade in
+aither stop piano 1                   fade out over 1 second
+aither mute piano                     silence whole voice (state keeps running)
+aither solo piano                     fade other voices to muted
 aither list                           show active voices + per-play gains
-aither parts bass                     focused per-play view for one voice
+aither parts piano                    focused per-play view for one voice
 aither scope master                   master-bus RMS / peak / clips / envelope
 aither spectrum [voice]               FFT of voice's recent buffer (or master)
-aither audit bass.aither 2            offline render + spectral analysis
-aither retrigger bass                 reset start_t so the piece plays from top
+aither audit piano.aither 2           offline render + spectral analysis
+aither retrigger piano                reset start_t so the piece plays from top
 aither midi list                      ALSA seq input ports
 aither midi connect 28:0              subscribe to a specific port
 aither clear 2                        fade everything out
 aither kill                           shut down
 ```
 
-### MIDI input
+## MIDI input
 
-On `aither start` the engine auto-connects to the first
-ALSA seq input port it finds. Primitives exposed to patches:
-
-```
-midi_cc(n)        # knob/slider n — value 0..1
-midi_note(n)      # velocity 0..1 while note n is held
-midi_freq()       # Hz of the most recent note-on (mono)
-midi_gate()       # velocity 0..1 of that note; 0 after release
-midi_trig(n)      # 1.0 for one sample on each note-on for n
-```
-
-There is no binding step — the patch IS the routing:
+On `aither start` the engine auto-connects to the first ALSA seq
+input port it finds. The polyphonic front door is `midi_keyboard`:
 
 ```
-play lead: osc(saw, midi_freq()) * midi_gate() * 0.3
-play kick: discharge(midi_trig(36), 30) * sin(TAU * phasor(60))
-(lead + kick) * midi_cc(80)
+play piano:
+  midi_keyboard((freq, gate) =>
+    additive(freq, vowel_ah, 12) * adsr(gate, 0.01, 0.3, 0.7, 0.5))
 ```
 
-If no device is present all five return 0 — the patch still
-runs. Hot-reload preserves held notes and knob positions.
+Press multiple keys; hear multiple voices. 8-voice polyphony, oldest
+note evicted at the 9th held key. The lambda runs once per held key
+with that key's frequency and gate.
 
-Each file is a voice. The filename is the name. Edit the
-file, resend it, and the voice hot-swaps without dropping
-state. Edit individual parts live with `aither mute /
-unmute / solo …`. To rebalance the mix, edit the patch's
-`gain()` calls and resend — mixing decisions live in the
-score, not in the CLI.
+For controllers (knobs, sliders, pads) and monophonic synths:
 
 ```
-aither start &
-aither send examples/bass.aither
-aither send examples/kick.aither
-aither send examples/hat.aither
-aither clear 2                    # fade everything out
-aither kill
+midi_cc(n)        # knob/slider n — 0..1
+midi_freq()       # Hz of most recent note (mono)
+midi_gate()       # velocity 0..1, 0 after release (mono)
+midi_trig(n)      # 1.0 for one sample on each note-on for note n
+midi_note(n)      # velocity while note n is held; 0 else
 ```
+
+If no device is connected all return 0 — the patch still runs.
+Hot-reload preserves held notes and knob positions.
 
 ## The model
 
-A file has three kinds of declaration, then a final expression.
+A file is a voice. Three kinds of declaration, then a final
+expression that's the voice's stereo output.
 
 ```
-def ease(x): …                    # helper function (reusable, isolated)
-let tempo = 140.0 / 60.0           # file-level binding, visible to all parts
-var counter = 0                    # file-level persistent state
+def warm_pad(f, g):                  # helper — your choice of synthesis
+  additive(f, warm_shape, 12) * swell(g, 0.4, 1.2) * 0.15
 
-play kick: …                       # named, engine-controllable part
-play bass: …
+let pos = t - start_t                # file-level binding, visible to all parts
+let breathe = (sin(TAU * pos / 30) + 1) * 0.5
 
-(kick + bass) |> drive(1.1)        # final expression = voice output
+play pad:
+  midi_keyboard((f, g) => warm_pad(f, g))
+
+play drone:
+  additive(110, warm_shape, 8) * 0.05 * breathe
+
+(pad + drone) |> reverb(3.0, 0.3)    # final expression = voice output
 ```
 
-Parts return either a float (mono) or `[L, R]` (stereo).
-Arithmetic is polymorphic: `kick + bass` works whether
-either is mono or stereo. The final expression *is* the
-mix; subgrouping, sidechain, and mastering are just
-expressions:
-
-```
-let lowend = (kick + bass) |> drive(1.2)
-let mids   = lead + pad
-(lowend + mids) |> reverb(2.5, 0.2)
-```
+Parts return float (mono) or `[L, R]` (stereo). Arithmetic is
+polymorphic: `pad + drone` works whether either is mono or stereo.
+The final expression IS the mix; subgrouping, sidechain, mastering
+are just expressions.
 
 ## Signal primitives
 
-Hardcoded: `sin cos tan exp log pow sqrt abs floor clamp
-int min max` (math), `saw tri sqr` (shapes), `phasor noise`
-(stateful sources).
+**Hardcoded math:** `sin cos tan exp log pow sqrt abs floor clamp
+int min max mod`. No surprises.
 
-Native DSP: `lpf hpf bpf notch lp1 hp1` (filters),
-`delay fbdelay reverb` (time/space), `impulse resonator
-discharge` (physics), `wave tremolo slew` (modulation /
-sequence).
+**Stateful sources:** `phasor(freq)` for ramp 0→1 at `freq` Hz;
+`noise()` for white noise. Plus `var` for any state you declare
+yourself — that's the entire memory model. A filter is `var s1; var
+s2; ...`. A delay is `var buf[N]; var idx; ...`. A damped HO is
+`var x; var dx; ...`. The language doesn't distinguish "primitive
+state" from "user state."
 
-Stdlib (pure aither, in `stdlib.aither`): `osc pulse gain
-fold prev drive wrap bitcrush downsample dropout pluck
-swell adsr pan haas width mono`, plus the spectral synthesis
-layer: `additive` / `inharmonic` wrapping `sum(N, fn)` over
-`saw_shape`, `warm_shape`, `vowel_ee`, `cello_shape`,
-`stiff_string`, `bar_partials`, `phi_partials`, and others.
+**Compile-time fold:** `sum(N, n => expr)` unrolls into N parallel
+expressions at codegen time. The standard composition primitive for
+anything you want N copies of (additive partials, modal banks,
+voice pools).
 
-### Additive synthesis
+**Native DSP** in `dsp.nim`, callable from any patch: `lpf hpf bpf
+notch lp1 hp1 delay fbdelay reverb impulse resonator discharge
+tremolo slew wave`.
 
-`sum(N, fn)` evaluates `fn(1) + fn(2) + ... + fn(N)` at
-codegen; lambdas `n => expr` make the fold notation match
-the math. Build timbres as sums of sines — the stdlib's
-`additive` / `inharmonic` defs are ~3-line wrappers over
-`sum`:
+**Stdlib starter kits** (pure aither, in `stdlib.aither`):
+
+- Spectral synthesis: `additive(freq, shape, max_n)`, `inharmonic`.
+  Most patches stop here.
+- Shape functions: `saw_shape`, `warm_shape`, `bright_shape`,
+  `vowel_ah`, `vowel_ee`, `cello_shape`, etc.
+- Ratio functions for inharmonic: `stiff_string`, `bar_partials`,
+  `phi_partials`, etc.
+- Polyphony: `midi_keyboard(voice_fn)`, `poly(N, voice_fn)`.
+- Envelopes: `pluck`, `swell`, `adsr`.
+- Stereo: `pan`, `haas`, `width`, `mono`.
+- Effects: `drive`, `wrap`, `bitcrush`, `downsample`, `dropout`,
+  `fold`, `gain`.
+- Misc: `prev`, `ease`.
+- Oscillator wrappers: `osc(saw, f)`, `osc(sqr, f)`, `osc(sin, f)` —
+  for chiptune / lo-fi character or convenience. Aliases above ~1 kHz.
+
+These are recipes, not the language. Read them, copy them, ignore
+them, replace them. The language is the contract above; everything
+else is your code.
+
+## Examples across paradigms
+
+### Polyphonic vowel pad (additive)
 
 ```
-play cello:
-  let gate = if (t mod 4) < 2 then 1 else 0
-  let env  = swell(gate, 0.25, 0.6)
-  inharmonic(110, stiff_cello, cello_shape, 24) * env * 0.2
+play choir:
+  midi_keyboard((f, g) =>
+    additive(f, vowel_ah, 16) * swell(g, 0.5, 1.5) * 0.12)
 
-cello |> reverb(2.5, 0.2)
+choir |> reverb(3.5, 0.3)
 ```
 
-24 partials at cello-physics spacing, body-resonance amp
-curve, gated bow envelope, plate reverb. No filter needed —
-the amplitude spectrum IS the filter.
-
-## A taste
-
-### Minimal
+### Tuning fork (physical model — damped harmonic oscillator)
 
 ```
-play beep:
-  osc(sin, 440) * 0.2
-
-beep
+play tuning_fork:
+  var x = 0.0
+  var dx = 0.0
+  let w2 = 440 * 440
+  dx = dx + (-2 * dx - w2 * x + impulse(2) * w2) * dt
+  x = x + dx * dt
+  x * 0.3
 ```
+
+Same equation as a real tuning fork. Strike (impulse), ring at
+440 Hz, decay naturally. No envelope needed — the physics has decay
+baked in.
 
 ### FM feedback (one sample of memory)
 
@@ -182,11 +245,9 @@ play fm:
   var fb = 0.0
   fb = sin(TAU * phasor(440 + fb * 500))
   fb * 0.3
-
-fm
 ```
 
-### Acid bass
+### Acid bass (subtractive — saw through filter)
 
 ```
 let notes = wave(2, [55, 55, 82, 55, 73, 55, 98, 55])
@@ -194,11 +255,9 @@ let env   = discharge(impulse(2), 8)
 
 play acid:
   osc(saw, notes) |> lpf(200 + env * 4000, 0.85) |> gain(0.4)
-
-acid
 ```
 
-### Coupled physics (Lorenz attractor)
+### Chaos (coupled physics — Lorenz attractor)
 
 ```
 play chaos:
@@ -207,83 +266,73 @@ play chaos:
   let dx = 10 * (y - x); let dy = x * (28 - z) - y; let dz = x * y - 2.67 * z
   x = x + dx * ddt; y = y + dy * ddt; z = z + dz * ddt
   [x / 22, (z - 25) / 18] * 0.1
-
-chaos
 ```
 
-## Why
+All five examples are `f(state) → sample`. The engine doesn't know
+which is which.
 
-The interface is `f(state) → sample`. The engine has zero
-opinions about signal processing — it does not know what a
-sine wave is, what a filter is, what decay means. It calls
-your function 48,000 times per second and sends the result
-to the speakers.
+## Verifying a sound
 
-Everything else — oscillators, filters, envelopes, reverb,
-physical models — is your code, composed freely from two
-stateful primitives (`phasor`, `noise`) and the C math
-library. Most stdlib is compiled Nim for performance; the
-composition layer on top is written in aither itself.
+`./aither audit patch.aither 2` renders 2 seconds offline and prints
+a spectral summary — top peaks, fundamental, centroid, RMS. Lets you
+verify the spectrum you wrote IS the spectrum you hear before you
+bother playing it.
 
-`var` is memory: a value that survives across samples and
-across hot-reloads. That is the entire state model. No
-graphs, no message passing, no nodes, no wires.
+```
+$ ./aither audit examples/cello.aither 2
+audit: examples/cello.aither (2.0s @ 48000 Hz)
+  RMS:        -18.4 dB    Peak: -3.2 dB
+  Fundamental: 110.0 Hz
+  Centroid:   1842 Hz
+  Top peaks:
+    1.   110.0 Hz   0.0 dB
+    2.   220.3 Hz  -6.1 dB
+    3.   330.7 Hz  -8.2 dB
+    ...
+```
 
-Hot-reload preserves more than top-level `var`s. Every
-stateful helper call site — each filter, delay buffer,
-reverb tail, phasor phase — is keyed by helper type and
-per-type index, so inserting a new oscillator or effect
-doesn't shift the storage of everything after it. Existing
-voices keep ringing while the edit takes effect.
-
-`play` blocks make named parts controllable live. CLI
-commands mute / solo / fade / retrigger individual parts
-without touching the file. Composition mode (one file with
-the final expression written as a mix of parts) and live-jam
-mode (many files, each one part) are both valid — you pick
-per piece.
+`./aither spectrum [voice]` does the same against the engine's
+recent ~0.5 s of audio for a live voice — verify a played sound on
+the fly.
 
 ## Compared to
 
-**SuperCollider**: a client/server with a graph of
-precompiled UGens, sequenced from a Smalltalk-derived
-language. Powerful and battle-tested, but the DSP itself
-lives in C++ you don't see. aither is one language with one
-model (`f(state) → sample`), the stdlib's composition layer
-is written in the language, and there is no graph — patches
-are just expressions.
+**SuperCollider** — graph of precompiled UGens sequenced from a
+Smalltalk dialect. The DSP itself lives in C++ you don't see and
+can't easily change. Aither's stdlib is written in aither; you can
+read the cello, edit it, hear the result on the next reload.
 
-**FAUST**: a beautiful functional DSL that compiles a
-block-diagram algebra to fast C++/Rust/LLVM/Wasm. Excellent
-for designing plugins; the model is compile-then-run, and
-state is implicit inside `~` and delay lines. aither also
-compiles — each patch is transpiled to C and compiled
-in-process by TCC on load, so edits are running native code
-within a few milliseconds. State is explicit and named
-(`var x = 0.0`), and hot reload preserves it.
+**FAUST** — block-diagram functional DSL that compiles ahead of
+time to fast C++. Excellent for plugins; the compile-then-run model
+means you can't sweep a knob mid-render. Aither also compiles —
+each patch is transpiled to C and compiled in-process by TCC on
+load — so edits are running native code within milliseconds.
 
-**Sonic Pi / Tidal / Strudel**: friendly live-coding layers
-on top of synths and samples — you sequence pre-built
-instruments through pattern notation. aither is a level
-lower: you write the oscillator, the filter, the reverb.
-Sequencing is just a wavetable oscillator running at beat
-rate, not a separate concept.
+**Sonic Pi / Tidal / Strudel** — friendly live-coding pattern
+languages on top of synths and samples. You sequence pre-built
+instruments. Aither is a level lower: you write the oscillator, the
+spectrum, the envelope. Sequencing is `wave(beat_rate, [...])`,
+not a separate concept.
 
 The trade-off is honest: aither is slower per sample than a
-compiled FAUST patch or a SuperCollider UGen written in
-C++. For the kind of pieces aither targets — live-coded,
-evolving, feedback-heavy, generative — that trade-off is
-worth it. For mixing 50 high-quality reverb tails
-simultaneously, use a DAW.
+compiled FAUST patch or a SuperCollider UGen written in C++. For
+the kind of pieces aither targets — live-coded, evolving,
+keyboard-played — that trade-off is worth it. For mixing 50
+high-quality reverb tails simultaneously, use a DAW.
 
 ## Read more
 
-- [PHILOSOPHY.md](PHILOSOPHY.md) — the design vision
+- [PHILOSOPHY.md](PHILOSOPHY.md) — the contract, the five paradigms,
+  why composition over graphs
 - [SPEC.md](SPEC.md) — complete language reference
-- [COMPOSING.md](COMPOSING.md) — the signal-native composition way
+- [COMPOSING.md](COMPOSING.md) — composition idioms, common patterns,
+  what to reach for and when
 - [GUIDE.md](GUIDE.md) — hands-on how-to for writing and performing
-- [ARCHITECTURE.md](ARCHITECTURE.md) — how the implementation fits together
-- [stdlib.aither](stdlib.aither) — the composition layer, in aither
+- [ARCHITECTURE.md](ARCHITECTURE.md) — implementation overview
+- [SOUND_FRONTIERS.md](SOUND_FRONTIERS.md) — unexplored regions of
+  additive synthesis to chase
+- [BUGS_AND_ISSUES.md](BUGS_AND_ISSUES.md) — known issues + session logs
+- [stdlib.aither](stdlib.aither) — the starter kits, in aither
 
 ## Architecture
 
@@ -292,22 +341,21 @@ parser.nim         ~560 lines   tokenizer + recursive descent → AST
 codegen.nim       ~1350 lines   AST → C source + per-helper-type state layout
 voice.nim          ~260 lines   TCC compile → dlopen'd tick(); hot-reload migration
 dsp.nim            ~205 lines   native DSP primitives (filters, delay, reverb…)
-midi.nim           ~235 lines   ALSA seq input + auto-resubscribe
+midi.nim           ~235 lines   ALSA seq input + auto-resubscribe + held-notes
 engine.nim         ~735 lines   audio callback + UNIX socket server + stats
 engine_types.nim    ~50 lines   data structs returned by engine procs
 cli_output.nim     ~155 lines   text formatters for list/scope/parts/spectrum/audit
 analysis.nim       ~250 lines   pure FFT + spectral feature extraction
 render.nim          ~65 lines   offline patch render to in-memory buffer
 aither.nim         ~105 lines   CLI dispatch (entry point)
-stdlib.aither      ~225 lines   composition layer (additive, inharmonic, osc, …)
+stdlib.aither      ~225 lines   starter-kit defs (additive, inharmonic, midi_keyboard, …)
 ```
 
-About 4250 lines Nim total. A patch is parsed to an AST,
-transpiled to C, handed to TCC which compiles it to machine
-code in memory, and the resulting `tick(state, t)` function
-pointer is called once per sample from the audio callback.
-Hot reload compiles the new code off the audio thread, then
-swaps pointers under a brief mutex while migrating state
-regions by `(typeName, perTypeIdx, size)` identity.
+About 4250 lines Nim total. A patch is parsed to an AST, transpiled
+to C, handed to TCC which compiles it to machine code in memory, and
+the resulting `tick(state, t)` function pointer is called once per
+sample from the audio callback. Hot reload compiles the new code off
+the audio thread, then swaps pointers under a brief mutex while
+migrating state regions by `(typeName, perTypeIdx, size)` identity.
 Dependencies: Nim's stdlib, libtcc, ALSA, and the system audio
 library.

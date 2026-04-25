@@ -22,16 +22,19 @@ DSL has ever been able to express.
 The natural division of labour:
 
 - **Aither makes the instrument and the orchestra.**
-  Spectral synthesis (additive, inharmonic, FM-per-partial)
-  is the default — `osc(saw, f)` is the exception you reach
-  for when you specifically want chiptune / lo-fi / aliased
-  character. For anything you want to sound *musical*, build
-  the spectrum directly: `additive(f, warm_shape, 8)` for
-  pads, `additive(f, bright_shape, 16)` for leads, `inharmonic`
-  for bells/plates/strings. Plus signal-native textures and
-  dynamics (LFO-modulated everything, polyrhythm via products
-  of LFOs, slow morphing via incommensurate rates), reactive
-  backing tracks designed for live performance.
+  The contract is `f(state) → sample` evaluated 48,000 times
+  per second; aither's job is to make that function easy to
+  write and reload. Stdlib starter kits cover the common
+  paradigms — `additive` / `inharmonic` for spectrum-first
+  design (cheap, perfectly band-limited, hot-reload-clean),
+  `var` + `dt` for time-domain physics (transients and decay
+  built into the equations), `osc(saw)` for chiptune /
+  aliased character, FM via inline `sin(... + sin(...) * d)`
+  for sidebanded grit. Pick whichever paradigm fits the
+  sound. Plus signal-native textures and dynamics (LFO-modulated
+  everything, polyrhythm via products of LFOs, slow morphing
+  via incommensurate rates), reactive backing tracks designed
+  for live performance.
 - **The human plays the melody.** The MIDI keyboard is the
   voice in the music. The most striking aither result so far
   (`fm_swarm.aither` — the "gothic Tesla organ") wasn't a
@@ -418,46 +421,59 @@ is still available if you want to compensate for the
 single-channel sum; use `* 1.41` (i.e. `√2`) at the
 extremes.
 
-## Timbre choice: prefer additive
+## Timbre choice: which paradigm for which sound
 
-`additive(f, shape, N)` is the default oscillator for almost
-everything. Build sounds out of partial-amp functions; the
-spectrum *is* the timbre. `osc(saw/sqr, f)` is the exception,
-not the rule.
+Aither's contract is `f(state) → sample`. Synthesis paradigms
+are different ways of WRITING that function. Pick whichever
+fits the sound you're after; the engine doesn't care.
 
-| When you want…                                    | Use                                    |
-|---------------------------------------------------|----------------------------------------|
-| Anything musical (pads, leads, bass, vocal-like)  | `additive(f, shape, N)` — DEFAULT      |
-| Bells, plates, stiff strings, non-integer partials | `inharmonic(f, ratio, amp, N)`        |
-| Deliberately chiptune / lo-fi / aliased character | `osc(saw, f)`, `osc(sqr, f)`           |
+| When you want…                                              | Reach for                              |
+|-------------------------------------------------------------|----------------------------------------|
+| A musical sound from its spectrum (pads, leads, vocal-like) | `additive(f, shape, N)`                |
+| Bells, plates, stiff strings — non-integer partials         | `inharmonic(f, ratio, amp, N)`         |
+| A vibrating physical object — transients, decay built-in    | `var x; var dx; ẍ + 2γẋ + ω²x = F(t)` (raw physics) |
+| Plucked / hammered strings                                  | Karplus-Strong: `delay` + `lp1` + feedback |
+| Sidebanded / FM grit — aliasing as character                | inline `sin(carrier + sin(modf) * depth)` |
+| Chiptune / lo-fi / digital-sounding                         | `osc(saw, f)`, `osc(sqr, f)`           |
 
-Rules of thumb:
+These are recipes, not language commitments. The stdlib ships
+starter kits for the most common ones (additive, inharmonic);
+the rest you can write inline with `var`, `phasor`, `noise`,
+and a few cycles of math.
 
-- **`additive(f, shape, N)`** is the default. Pick any shape
-  fn that matches your mood: `warm_shape` for pads,
-  `bright_shape` for edgy leads, `vowel_ee`/`vowel_ah` for
-  vocal pads, `cello_shape` for bowed textures, `saw_shape`
-  for a clean band-limited saw. `N=8` for pads, `16` for
-  leads, up to `24` for characterful features. CPU is linear
-  in N — `N=8` is essentially free, `N=24` is fine for one
-  voice, push past 32 only with reason.
-- **`inharmonic(f, ratio, amp, N)`** when the spectrum
-  deliberately departs from integer multiples. Strike a
-  bar? `bar_partials`. Bowed string with body resonance?
-  `stiff_cello` + `cello_shape`. Dreamy non-tonal texture?
-  `phi_partials`. Bell hits? `bar_partials` + `bell_decay`.
-- **`osc(saw/sqr, f)`** is for chiptune, lo-fi, "broken hardware"
-  character, sidechain test signals, kick body sweep — anywhere
-  you specifically want the digital aliased sound or you don't
-  care about the spectrum at all. NOT the default. Aliases above
-  ~1 kHz; that's a feature when you want it, a bug otherwise.
+Rules of thumb for picking:
 
-The reason additive is the default isn't aesthetic — it's that
-aither's signal-native model and `sum(N, fn)` primitive are
-*built* for spectral construction. Reaching for `osc(saw)`
-leaves most of aither's unique value on the table. The only
-patch where I'd default to `osc` is one that aims at chiptune
-or breakbeat character on purpose.
+- **Additive (`additive`/`inharmonic`) is the most hot-reload-
+  friendly.** Sums of sines have no conserved quantities, so
+  parameter changes during reload are musically smooth. Best
+  default for live-coded music.
+- **Physics (`var`-based damped HOs, Karplus, etc.) gets you
+  transients and decay shape from the equation itself.** No
+  manual envelopes. But a parameter change during reload can
+  cause a transient as the system re-equilibrates — wrap
+  parameters in `slew()` if it bothers you.
+- **`osc(saw)` and FM** are honest about being aliased
+  paradigms. Reach for them when the aliasing IS the character
+  (chiptune, broken-radio, DX7 grit). Otherwise additive gives
+  you what you actually wanted, cleaner.
+- **All paradigms compose freely.** A patch can mix additive
+  pads, a `var`-based bell, a Karplus pluck, and a saw bass —
+  they're all just `f(state) → sample` and the engine sums
+  them.
+
+Shape functions for `additive` cover the common moods:
+`warm_shape` for pads, `bright_shape` for edgy leads,
+`vowel_ee`/`vowel_ah` for vocal pads, `cello_shape` for bowed
+textures, `saw_shape` for a clean band-limited saw. `N=8` for
+pads, `16` for leads, up to `24` for characterful features.
+CPU is linear in N — `N=8` is essentially free, `N=24` is fine
+for one voice, push past 32 only with reason.
+
+Inharmonic ratio functions: `bar_partials` (struck metal),
+`plate_partials` (struck plate), `phi_partials` (φ-spaced
+shimmer), `stiff_string` (piano-like), `stiff_cello` (cello
+body). Each is a `n → frequency_multiplier` def — write your
+own for unusual tunings.
 
 All three compose with envelopes, effects, pans the same way.
 Wrapped in `midi_keyboard` so chords work:
