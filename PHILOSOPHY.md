@@ -197,12 +197,17 @@ aither stop kick 4          # fade out over 4 seconds
 ## Why the language defines itself
 
 The only builtins hardcoded in the evaluator are math
-functions (`sin`, `cos`, `exp`, `pow`...) and two stateful
-primitives (`phasor`, `noise`).
+functions (`sin`, `cos`, `exp`, `pow`...), two stateful
+primitives (`phasor`, `noise`), and one compile-time fold
+(`sum(N, lambda)`). The fold isn't really runtime — it
+unrolls into N parallel expressions at codegen, each with
+its own state slot. That's why `additive(f, shape, 16)`
+gives you 16 independent phasor states with no extra
+ceremony.
 
 Everything else — oscillators, filters, effects, envelopes,
-physics models — is written in aither itself and shipped
-as the standard library.
+physics models, additive synthesis, formant instruments — is
+written in aither itself and shipped as the standard library.
 
 ```
 def osc(shape, freq):

@@ -49,6 +49,8 @@ aither solo bass kick                 fade other plays in bass to 0
 aither list                           show active voices + per-play gains
 aither parts bass                     focused per-play view for one voice
 aither scope master                   master-bus RMS / peak / clips / envelope
+aither spectrum [voice]               FFT of voice's recent buffer (or master)
+aither audit bass.aither 2            offline render + spectral analysis
 aither retrigger bass                 reset start_t so the piece plays from top
 aither midi list                      ALSA seq input ports
 aither midi connect 28:0              subscribe to a specific port
@@ -286,20 +288,26 @@ simultaneously, use a DAW.
 ## Architecture
 
 ```
-parser.nim      ~485 lines   tokenizer + recursive descent → AST
-codegen.nim     ~975 lines   AST → C source + per-helper-type state layout
-voice.nim       ~225 lines   TCC compile → dlopen'd tick(); hot-reload migration
-dsp.nim         ~200 lines   native DSP primitives (filters, delay, reverb...)
-engine.nim      ~565 lines   audio callback + UNIX socket CLI + stats
-stdlib.aither   ~140 lines   composition layer (osc, drive, adsr, pan, prev…)
+parser.nim         ~560 lines   tokenizer + recursive descent → AST
+codegen.nim       ~1350 lines   AST → C source + per-helper-type state layout
+voice.nim          ~260 lines   TCC compile → dlopen'd tick(); hot-reload migration
+dsp.nim            ~205 lines   native DSP primitives (filters, delay, reverb…)
+midi.nim           ~235 lines   ALSA seq input + auto-resubscribe
+engine.nim         ~735 lines   audio callback + UNIX socket server + stats
+engine_types.nim    ~50 lines   data structs returned by engine procs
+cli_output.nim     ~155 lines   text formatters for list/scope/parts/spectrum/audit
+analysis.nim       ~250 lines   pure FFT + spectral feature extraction
+render.nim          ~65 lines   offline patch render to in-memory buffer
+aither.nim         ~105 lines   CLI dispatch (entry point)
+stdlib.aither      ~225 lines   composition layer (additive, inharmonic, osc, …)
 ```
 
-About 2500 lines total. A patch is parsed to an AST,
+About 4250 lines Nim total. A patch is parsed to an AST,
 transpiled to C, handed to TCC which compiles it to machine
-code in memory, and the resulting `tick(state)` function
+code in memory, and the resulting `tick(state, t)` function
 pointer is called once per sample from the audio callback.
 Hot reload compiles the new code off the audio thread, then
-swaps pointers under a brief mutex while copying matching
-state regions across.
-Dependencies: Nim's stdlib, libtcc, and the system audio
+swaps pointers under a brief mutex while migrating state
+regions by `(typeName, perTypeIdx, size)` identity.
+Dependencies: Nim's stdlib, libtcc, ALSA, and the system audio
 library.

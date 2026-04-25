@@ -292,6 +292,22 @@ sparkline (last second). Clip counter clears on read, so
 "did my last edit introduce clipping?" is always answered
 by one scope call.
 
+For spectral feedback (top peaks, fundamental estimate,
+centroid):
+
+```
+./aither spectrum                # FFT of master's recent ~0.5s
+./aither spectrum bass           # FFT of one voice's recent buffer
+./aither audit bass.aither 2     # offline render + FFT, no engine needed
+```
+
+`spectrum` works against the engine's recent samples — handy
+for live diagnosis ("is my detuned saw really at 110 Hz?").
+`audit` is offline (parses + compiles + ticks + analyses
+in-process, ~100 ms turnaround) — handy for verifying a
+patch produces the spectrum you intended before you bother
+playing it.
+
 ## Time-based expressions
 
 ### `t` — absolute time
@@ -747,4 +763,6 @@ all voices including master.
 - [COMPOSING.md](COMPOSING.md) — signal-native composition idioms
 - [PHILOSOPHY.md](PHILOSOPHY.md) — design vision
 - [ARCHITECTURE.md](ARCHITECTURE.md) — implementation overview
+- [SOUND_FRONTIERS.md](SOUND_FRONTIERS.md) — unexplored regions of additive synthesis to chase
+- [BUGS_AND_ISSUES.md](BUGS_AND_ISSUES.md) — known issues + session logs
 - [stdlib.aither](stdlib.aither) — the composition layer

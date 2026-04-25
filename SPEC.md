@@ -670,55 +670,105 @@ and accepts commands over a UNIX socket.
 |----------------------------------|-----------------------------------------------------|
 | `scope [voice]`                  | per-voice RMS / peak / clips / envelope sparkline   |
 | `scope master`                   | master-bus stats (pre-tanh mix)                     |
+| `spectrum [voice]`               | FFT analysis of voice's recent buffer (or master)   |
+| `audit <patch> [seconds]`        | render patch offline + spectral analysis            |
 
-Clips counters clear on read.
+Clips counters clear on read. `spectrum` runs against the
+engine's last ~0.5 s of audio per voice; `audit` is fully
+offline (no engine connection required, ~100 ms turnaround).
 
 ---
 
 ## Implementation
 
-### Parser (`parser.nim`, ~465 lines)
+### Parser (`parser.nim`, ~560 lines)
 
-Indentation-sensitive tokenizer + recursive-descent parser
-→ AST. Handles: literals, identifiers, operators, function
-calls, `var`, `let`, `def`, `play`, `if/then/else`, `|>`,
-arrays, array indexing, comments. Precedence climbing for
-expressions.
+Indentation-sensitive tokenizer with group-depth handling
+(newlines inside `(...)` and `[...]` are whitespace) +
+recursive-descent parser → AST. Handles: literals, identifiers,
+operators, function calls, `var`, `let`, `def`, `play`, `lambda`,
+`if/then/else`, `else if` chains, `|>`, arrays, array indexing,
+comments. Precedence climbing for expressions.
 
-### Evaluator (`eval.nim`, ~1150 lines)
+### Codegen (`codegen.nim`, ~1350 lines)
 
-Bytecode compiler + stack VM. Each patch compiles to a
-main chunk plus one chunk per `def`. Play blocks compile
-inline into the main chunk with their result stored to a
-named local. Polymorphic binary arithmetic for length-2
-stereo. Per-voice state: float64 pool (4 MB) for native
-DSP, call-site state for def-local `var`, named slots for
-top-level `var`.
+AST → C source. Each patch transpiles to a single C source
+string containing `tick(state, t)` and `init(state)`. The C
+is compiled in-process by TCC (~milliseconds). Per-helper-type
+state region tracking lets hot reload migrate state across
+edits — a new oscillator inserted in the middle doesn't shift
+the storage of every state slot after it.
 
-### Native DSP (`dsp.nim`, ~200 lines)
+`sum(N, lambda)` is a special form: walks the lambda body N
+times with `n` substituted, emitting N parallel C expressions.
+Numeric literals propagate through `let` and `def` parameters
+so `additive(f, shape, 16)` resolves `max_n = 16` at compile
+time.
 
-Filters, delays, reverb, resonator, discharge, tremolo,
-slew, wave. Each function claims state slots from the
-per-voice pool. Pool access is bounds-checked — overflow
-degrades to a shared safe slot rather than segfaulting.
+### Voice (`voice.nim`, ~260 lines)
 
-### Engine (`engine.nim`, ~500 lines)
+Owns the TCC compilation, dlopen of the resulting library, and
+the per-voice float64 state pool. Hot-reload commits a new
+compile under a brief mutex, migrates state by region identity
+(skips NaN-poisoned regions to recover cleanly).
 
-Audio callback via miniaudio. Socket CLI. Voice table with
-per-part gain fades. Per-voice and master-bus rolling stats
-(RMS, peak, clips, 50 ms envelope bins for sparklines).
-Tanh soft-clip on the master.
+### Native DSP (`dsp.nim`, ~205 lines)
 
-### Stdlib (`stdlib.aither`, ~100 lines)
+Filters, delays, reverb, resonator, discharge, tremolo, slew,
+wave. Each function claims state slots from the per-voice pool.
+Pool access is bounds-checked — overflow degrades to a shared
+safe slot rather than segfaulting.
 
-Oscillator wrappers, helpers, character effects, envelopes,
-stereo helpers. Pure aither code, baked into the binary as
-a const string.
+### Engine (`engine.nim`, ~735 lines)
+
+Audio callback via miniaudio. UNIX socket server. Voice table
+with per-part gain fades. Per-voice and master-bus rolling stats
+(RMS, peak, clips, 50 ms envelope bins for sparklines, plus a
+0.5 s float32 ring per voice for `spectrum`'s FFT). Tanh
+soft-clip on the master. Voice slots sweep on `send` so stopped
+voices don't leak the table.
+
+### MIDI (`midi.nim`, ~235 lines)
+
+ALSA seq input thread. Auto-resubscribes if the port is dropped.
+Engine logs a clear line on drop / recovery so silent failure
+isn't a debugging blind spot.
+
+### Engine types + CLI output (`engine_types.nim` ~50 lines,
+`cli_output.nim` ~155 lines)
+
+Engine procs return data structures (`VoiceInfo`,
+`StatsSnapshot`, `MidiStatus`, `SpectrumSummary`); formatters in
+`cli_output.nim` turn those into text. Lets engine state be
+tested without parsing strings.
+
+### Analysis + render (`analysis.nim` ~250 lines, `render.nim`
+~65 lines)
+
+`analysis.nim` is pure FFT + spectral feature extraction (no
+engine knowledge). `render.nim` runs a patch offline through
+the same parse → codegen → TCC → tick path the engine uses,
+returning an in-memory buffer. Together they power
+`./aither audit` and `./aither spectrum`.
+
+### CLI dispatch (`aither.nim`, ~105 lines)
+
+Entry point. Either runs the engine in-process (`start`) or
+sends a command over the socket. `audit` is the one offline
+command — uses `render` + `analysis` + `cli_output` directly
+without engine connection.
+
+### Stdlib (`stdlib.aither`, ~225 lines)
+
+Oscillator wrappers, spectral synthesis (`additive`,
+`inharmonic`, plus the shape/ratio/amp library), character
+effects, envelopes, stereo helpers, prev. Pure aither code,
+baked into the binary as a const string.
 
 ### Totals
 
-~2300 lines Nim + ~100 lines aither. One binary, ~500 KB.
-No runtime dependencies beyond the system audio library.
+~4250 lines Nim + ~225 lines aither. One binary, ~970 KB.
+Runtime dependencies: libtcc, ALSA, the system audio library.
 
 ---
 
