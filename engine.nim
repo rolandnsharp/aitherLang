@@ -259,6 +259,12 @@ proc loadPatch*(filename: string; fadeIn: float64): string =
     inc slotCount
     release(mtx)
     stderr.writeLine "ok (new " & baseName & ")"
+  # Auto-resubscribe MIDI if the input thread had silently died (issue
+  # 4c). Cheap when nothing dropped (returns "" immediately); on actual
+  # recovery we log so the operator knows their keyboard is back.
+  let midiStatus = midiResubscribeIfDropped()
+  if midiStatus.len > 0:
+    stderr.writeLine "[aither] MIDI " & midiStatus
   ""
 
 proc retriggerVoice(name: string): string =
@@ -464,6 +470,13 @@ proc soloPart(voiceName, partName: string; fade: float64): string =
 
 proc listVoices*(): string =
   var lines: seq[string]
+  # MIDI status header — silent when nothing was ever connected, but
+  # surfaces both the active port AND the dropped-but-recoverable
+  # state so the operator doesn't have to guess whether a silent
+  # keyboard is a patch bug or a lost subscription (issue 4c).
+  if lastConnectInfo.len > 0:
+    let state = if midiSubscriptionActive(): "active" else: "DROPPED"
+    lines.add "MIDI: " & lastConnectInfo & " [" & state & "]"
   for i in 0 ..< slotCount:
     let state =
       if not slots[i].active:           "stopped"

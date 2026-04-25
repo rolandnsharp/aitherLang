@@ -11,7 +11,7 @@
 ##   * `midi_trig(n)` is the only primitive with per-voice pool state
 ##     (one slot tracks the last-seen global trig counter for note n).
 
-import std/[atomics, math, os]
+import std/[atomics, math, os, strutils]
 import dsp
 
 {.compile: "alsa_midi.c".}
@@ -123,9 +123,23 @@ proc cbCc(cc, value: cint) {.cdecl.} = midiCc(int(cc), int(value))
 
 var midiThread: Thread[void]
 var midiThreadStarted: bool
+# Subscription bookkeeping. Tracks the last successful connect so we
+# can auto-resubscribe after an unexpected event-loop exit (the failure
+# mode BUGS_AND_ISSUES.md issue 4c described — Minilab silently stops
+# triggering after a few patch reloads, but `aither midi list` still
+# shows the port).
+var midiThreadActive: Atomic[bool]            # set true before thread run; false on exit
+var midiShuttingDown: Atomic[bool]            # suppresses drop log on intentional close
+var lastConnectInfo*: string = ""              # human-readable spec (for `list`)
+var lastConnectClient: int = -1                # ALSA client id of the last subscribe
+var lastConnectPort: int = -1                  # ALSA port id of the last subscribe
 
 proc midiRunLoop() {.thread, nimcall.} =
   aither_alsa_run(cbNoteOn, cbNoteOff, cbCc)
+  midiThreadActive.store(false)
+  if not midiShuttingDown.load():
+    stderr.writeLine "[aither] MIDI subscription dropped — next `aither send` " &
+                     "will attempt auto-resubscribe"
 
 # Public API --------------------------------------------------------------
 
@@ -150,6 +164,20 @@ proc midiAutoConnect*(): string =
   var buf = newString(256)
   if aither_alsa_auto_connect(cstring(buf), cint(buf.len)) == 0:
     buf.setLen(buf.cstring.len)
+    lastConnectInfo = buf
+    # Parse "name (client:port)" trailer. Storing the numeric address
+    # gives midiResubscribe something to call without re-running the
+    # full first-port discovery.
+    let lp = buf.rfind('(')
+    let rp = buf.rfind(')')
+    if lp > 0 and rp > lp + 1:
+      let inner = buf[lp+1 ..< rp]
+      let colon = inner.find(':')
+      if colon > 0:
+        try:
+          lastConnectClient = parseInt(inner[0 ..< colon])
+          lastConnectPort = parseInt(inner[colon+1 .. ^1])
+        except ValueError: discard
     return buf
   ""
 
@@ -159,17 +187,47 @@ proc midiConnect*(spec: string): bool =
   var client, port: cint
   if aither_alsa_parse_address(cstring(spec), addr client, addr port) != 0:
     return false
-  aither_alsa_connect_from(client, port) == 0
+  if aither_alsa_connect_from(client, port) != 0:
+    return false
+  lastConnectClient = int(client)
+  lastConnectPort = int(port)
+  lastConnectInfo = spec & " (" & $client & ":" & $port & ")"
+  true
 
 proc midiStartThread*() =
   ## Spawn the blocking input thread. Idempotent.
   if midiThreadStarted: return
+  midiShuttingDown.store(false)
+  midiThreadActive.store(true)
   createThread(midiThread, midiRunLoop)
   midiThreadStarted = true
 
 proc midiShutdown*() =
   ## Close the sequencer (which unblocks the input thread) and join.
   if not midiThreadStarted: return
+  midiShuttingDown.store(true)
   aither_alsa_close()
   joinThread(midiThread)
   midiThreadStarted = false
+
+proc midiSubscriptionActive*(): bool =
+  ## True when the input loop is alive and the last subscription is
+  ## current. False after a drop or before the first connect.
+  midiThreadActive.load()
+
+proc midiResubscribeIfDropped*(): string =
+  ## If the input thread has exited unexpectedly AND we have a stored
+  ## connect address, close + reopen + re-subscribe + restart. Returns
+  ## a status string ("" = nothing to do, "ok ..." = recovered,
+  ## "fail ..." = couldn't recover) for the caller to log.
+  if midiThreadActive.load(): return ""
+  if lastConnectClient < 0: return ""
+  # Thread is gone but the seq may still be open — close cleanly first.
+  midiShutdown()
+  if not midiOpen():
+    return "fail: ALSA seq open"
+  if aither_alsa_connect_from(cint(lastConnectClient),
+                              cint(lastConnectPort)) != 0:
+    return "fail: subscribe to " & $lastConnectClient & ":" & $lastConnectPort
+  midiStartThread()
+  "ok: resubscribed to " & lastConnectInfo
