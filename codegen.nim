@@ -494,8 +494,17 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
     of ">":  &"((({a}) > ({b})) ? 1.0 : 0.0)"
     of "<=": &"((({a}) <= ({b})) ? 1.0 : 0.0)"
     of ">=": &"((({a}) >= ({b})) ? 1.0 : 0.0)"
-    of "and": &"(((({a}) != 0.0) && (({b}) != 0.0)) ? 1.0 : 0.0)"
-    of "or":  &"(((({a}) != 0.0) || (({b}) != 0.0)) ? 1.0 : 0.0)"
+    # Eager eval: aither's `and` / `or` do NOT short-circuit. Both
+    # operands always run, even when the result is determined by the
+    # first. This matters for the rising-edge idiom `g > 0.5 and
+    # prev(g) < 0.5` — `prev(g)` is the call site that updates prev's
+    # last-sample slot. With short-circuit (`&&`), prev() doesn't run
+    # while g is low, so its slot freezes at the last high value, and
+    # the second note-on never fires. Bitwise `&` / `|` on the 0/1
+    # results of the comparisons gives the same logical answer without
+    # the conditional skip.
+    of "and": &"(((({a}) != 0.0) & (({b}) != 0.0)) ? 1.0 : 0.0)"
+    of "or":  &"(((({a}) != 0.0) | (({b}) != 0.0)) ? 1.0 : 0.0)"
     else: raise newException(ValueError,
             "bad binop: " & n.str & " " & errLoc(n))
   of nkIf:
