@@ -41,9 +41,9 @@ def ease(x):
 # Each call site gets its own 1-sample buffer via call-site state,
 # so `prev(a) + prev(b)` are independent.
 def prev(x):
-  var last = 0.0
-  let out = last
-  last = x
+  $last = 0.0
+  let out = $last
+  $last = x
   out
 
 def fold(signal, amount):
@@ -70,9 +70,9 @@ def bitcrush(signal, bits):
 # Sample-rate reduction via hold. `rate` is Hz of the sampling clock.
 # Try rate=2000 for crunchy 8-bit-era grit, rate=100 for pitched aliasing.
 def downsample(signal, rate):
-  var held = 0.0
-  held = if impulse(rate) > 0.5 then signal else held
-  held
+  $held = 0.0
+  $held = if impulse(rate) > 0.5 then signal else $held
+  $held
 
 # Periodic dropout / gate. Signal plays for `duty` (0..1) of each cycle.
 def dropout(signal, rate, duty):
@@ -90,24 +90,24 @@ def pluck(trig, decay):
 # seconds; when `gate` drops, falls toward 0 over `release` seconds.
 # Exponential (1-pole) approach.
 def swell(gate, attack, release):
-  var level = 0.0
-  let time = if gate > level then attack else release
+  $level = 0.0
+  let time = if gate > $level then attack else release
   let rate = if time > 0 then dt / time else 1
-  level = level + (gate - level) * rate
-  level
+  $level = $level + (gate - $level) * rate
+  $level
 
 # Full ADSR. `gate > 0.5` triggers attack; falling gate triggers release.
 # a/d/r in seconds, s in 0..1 (sustain level). Exponential approach
 # through four phases; decays to near-silence during release.
 def adsr(gate, a, d, s, r):
-  var level  = 0.0
-  var peaked = 0.0
-  let target = if gate > 0.5 then (if peaked > 0.5 then s else 1.0) else 0.0
-  let time   = if gate > 0.5 then (if peaked > 0.5 then d else a) else r
+  $level  = 0.0
+  $peaked = 0.0
+  let target = if gate > 0.5 then (if $peaked > 0.5 then s else 1.0) else 0.0
+  let time   = if gate > 0.5 then (if $peaked > 0.5 then d else a) else r
   let rate   = if time > 0 then dt / time else 1
-  level = level + (target - level) * rate
-  peaked = if gate < 0.5 then 0.0 else (if level > 0.98 then 1.0 else peaked)
-  level
+  $level = $level + (target - $level) * rate
+  $peaked = if gate < 0.5 then 0.0 else (if $level > 0.98 then 1.0 else $peaked)
+  $level
 
 # ---------------------------------------------------------------- stereo
 
@@ -249,18 +249,18 @@ def bright_decay(n, pf):  1.0 / pow(n, 0.3)
 # Tuning fork — one damped harmonic oscillator, the canonical
 # physical primitive. Why include it: simplest physics example,
 # perfect teaching reference. Single mode, fixed damping; you can
-# hear the equation directly. The `var x; var dx` integration here
-# is what `resonator(input, ω, decay)` does for each mode of the
-# modal banks below — same math, fewer keystrokes.
+# hear the equation directly. The `$x; $dx` integration here is what
+# `resonator(input, ω, decay)` does for each mode of the modal banks
+# below — same math, fewer keystrokes.
 def tuning_fork(strike, freq):
   let omega = TAU * freq
   let omega2 = omega * omega
   let gamma = 4.0
-  var x = 0.0
-  var dx = 0.0
-  dx = dx + (-2 * gamma * dx - omega2 * x + strike * omega2) * dt
-  x = x + dx * dt
-  x
+  $x = 0.0
+  $dx = 0.0
+  $dx = $dx + (-2 * gamma * $dx - omega2 * $x + strike * omega2) * dt
+  $x = $x + $dx * dt
+  $x
 
 # Plucked string — Karplus-Strong. Why physics over additive: real
 # strings lose energy to the body and to internal damping, with
@@ -272,11 +272,11 @@ def tuning_fork(strike, freq):
 # `brightness` in 0..1: 0 = dark (LP cutoff ~1 kHz, fast decay),
 # 1 = bright (cutoff ~9 kHz, near-lossless feedback).
 def pluck_string(strike, freq, brightness):
-  var loop = 0.0
+  $loop = 0.0
   let period = 1.0 / freq
-  let damped = lp1(loop, 1000 + brightness * 8000)
-  loop = strike + delay(damped, period, 0.05) * (0.99 - (1 - brightness) * 0.05)
-  loop
+  let damped = lp1($loop, 1000 + brightness * 8000)
+  $loop = strike + delay(damped, period, 0.05) * (0.99 - (1 - brightness) * 0.05)
+  $loop
 
 # Bowed string — modal bank with continuous noisy excitation.
 # Why physics over additive: the bow is a continuous chaotic
@@ -284,16 +284,24 @@ def pluck_string(strike, freq, brightness):
 # the shared bow signal. The stick-slip "scratch" of the rosin and
 # the way tone blooms with bow pressure are excitation-driven —
 # additive would need explicit time-varying spectrum design that's
-# basically impossible to get right. Each `resonator` call is one
-# mode integrating the same damped HO as `tuning_fork`. Damping
+# basically impossible to get right. Each iteration integrates the
+# same damped HO equations as `tuning_fork` for one mode. Damping
 # scales with mode frequency (light, ω·γ ≈ 0.0003·modeF) so all
-# modes ring well past the bow's transients.
+# modes ring well past the bow's transients. With $-state allowed
+# in lambda bodies the integrator can live inline rather than
+# delegating to `resonator`, so the equation reads at the call site.
 def bowed_string(bow, freq):
   let damping = 0.0003
   sum(8, n =>
     let modeF = freq * n
+    let omega = TAU * modeF
+    let omega2 = omega * omega
     let gamma = damping * modeF
-    resonator(bow, TAU * modeF, 2 * gamma) / pow(n, 0.5))
+    $x = 0.0
+    $dx = 0.0
+    $dx = $dx + (-2 * gamma * $dx - omega2 * $x + bow * omega2) * dt
+    $x = $x + $dx * dt
+    $x / pow(n, 0.5))
 
 # Struck bar — modal bank with bar_partials ratios and
 # mode-dependent damping. Why physics over additive: a struck metal
@@ -308,8 +316,14 @@ def bowed_string(bow, freq):
 def struck_bar(strike, freq):
   sum(5, n =>
     let modeF = freq * bar_partials(n)
+    let omega = TAU * modeF
+    let omega2 = omega * omega
     let gamma = 0.0008 * modeF + n * 0.5
-    resonator(strike, TAU * modeF, 2 * gamma) / pow(n, 0.5))
+    $x = 0.0
+    $dx = 0.0
+    $dx = $dx + (-2 * gamma * $dx - omega2 * $x + strike * omega2) * dt
+    $x = $x + $dx * dt
+    $x / pow(n, 0.5))
 
 # ---------------------------------------------------------------- polyphony
 # A MIDI keyboard plays polyphonically. `voice_fn(freq, gate)` describes
