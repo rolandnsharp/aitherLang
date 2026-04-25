@@ -357,16 +357,30 @@ proc emitBlockExpr(c: Ctx; sc: Scope; blk: Node): string =
       return "({ " & pre & "double __r = (" & c.emitExpr(sc, s) & "); __r; })"
     case s.kind
     of nkLet:
-      let tmp = c.fresh("l_" & s.str)
-      let v = c.emitExpr(sc, s.kids[0])
-      pre.add &"double {tmp} = ({v}); "
-      sc.names[s.str] = tmp
-      # Literal propagation: see the matching comment in emitDefInline.
-      if s.kids[0].kind == nkNum:
-        sc.numLits[s.str] = s.kids[0].num
-      elif s.kids[0].kind == nkIdent:
-        let nv = sc.lookupNumLit(s.kids[0].str)
-        if nv.ok: sc.numLits[s.str] = nv.val
+      let rhs = s.kids[0]
+      # Numeric-literal array let: hoist to a static const so def bodies
+      # can express tabular data (`let p = [2.0, 3.0, 5.0]; p[n - 1]`).
+      # Without this, a def body forced the parenthesised `if/else`
+      # cascade for any constant-table lookup.
+      if rhs.kind == nkArr and rhs.kids.len > 0 and
+         rhs.kids.allIt(it.kind == nkNum):
+        let sym = c.fresh("arr_def_" & s.str)
+        var items: seq[string] = @[]
+        for k in rhs.kids: items.add numLit(k.num)
+        c.arrayDecls.add &"static const double {sym}[{rhs.kids.len}] = {{" &
+          items.join(", ") & "};\n"
+        sc.arrays[s.str] = (sym, rhs.kids.len)
+      else:
+        let tmp = c.fresh("l_" & s.str)
+        let v = c.emitExpr(sc, rhs)
+        pre.add &"double {tmp} = ({v}); "
+        sc.names[s.str] = tmp
+        # Literal propagation: see the matching comment in emitDefInline.
+        if rhs.kind == nkNum:
+          sc.numLits[s.str] = rhs.num
+        elif rhs.kind == nkIdent:
+          let nv = sc.lookupNumLit(rhs.str)
+          if nv.ok: sc.numLits[s.str] = nv.val
     of nkVar:
       # `var` inside a def body -> claim two pool slots keyed under a
       # "var" helper-type region: one "inited" flag, one value. On the
@@ -872,15 +886,28 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
         else:
           case st.kind
           of nkLet:
-            let v = c.emitExpr(inner, st.kids[0])
-            let tmp = c.fresh("l_" & st.str)
-            blk.add &"    double {tmp} = ({v});\n"
-            inner.names[st.str] = tmp
-            if st.kids[0].kind == nkNum:
-              inner.numLits[st.str] = st.kids[0].num
-            elif st.kids[0].kind == nkIdent:
-              let nv = inner.lookupNumLit(st.kids[0].str)
-              if nv.ok: inner.numLits[st.str] = nv.val
+            let rhs = st.kids[0]
+            # Same numeric-array hoist as the scalar def-body path —
+            # so a stereo-returning def (e.g. one that takes a pos and
+            # returns [L, R]) can also use a constant-table lookup.
+            if rhs.kind == nkArr and rhs.kids.len > 0 and
+               rhs.kids.allIt(it.kind == nkNum):
+              let sym = c.fresh("arr_def_" & st.str)
+              var items: seq[string] = @[]
+              for k in rhs.kids: items.add numLit(k.num)
+              c.arrayDecls.add &"static const double {sym}[{rhs.kids.len}] = {{" &
+                items.join(", ") & "};\n"
+              inner.arrays[st.str] = (sym, rhs.kids.len)
+            else:
+              let v = c.emitExpr(inner, rhs)
+              let tmp = c.fresh("l_" & st.str)
+              blk.add &"    double {tmp} = ({v});\n"
+              inner.names[st.str] = tmp
+              if rhs.kind == nkNum:
+                inner.numLits[st.str] = rhs.num
+              elif rhs.kind == nkIdent:
+                let nv = inner.lookupNumLit(rhs.str)
+                if nv.ok: inner.numLits[st.str] = nv.val
           of nkVar:
             # `var` inside a stereo-def inline: treat as pool-backed
             # call-site state, matching emitBlockExpr's approach.
