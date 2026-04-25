@@ -2,7 +2,7 @@
 
 import std/[os, net, strutils, math, locks, tables]
 import parser, voice, miniaudio, midi
-import engine_types, cli_output
+import engine_types, cli_output, analysis
 export engine_types
 
 const
@@ -16,6 +16,17 @@ const
 const Stdlib = staticRead("stdlib.aither")
 
 const EnvBinSamples = 2400  # 50ms per bin at 48 kHz
+
+# Per-voice rolling buffer of the most recent ~0.5s of post-fade
+# stereo samples. Read by `aither spectrum` for offline-style FFT
+# analysis on the live engine state. float32 keeps the cost small
+# (~190 KB per voice, ~3 MB total at MaxVoices, plus the master).
+const RecentSamples = 24000
+
+type
+  RecentRing = object
+    l, r: array[RecentSamples, float32]
+    idx: int
 const PeakDecay = 0.99993   # ~300ms exponential decay
 const RmsAlpha  = 1.04e-4   # ~200ms smoothing
 
@@ -37,6 +48,7 @@ type
     fadeGain:   float64
     fadeDelta:  float64
     stats:      Stats
+    recent:     RecentRing  # rolling 0.5s buffer for `spectrum`
     nanLogged:  bool        # one log line per voice per session, then quiet
 
   # Public data structs (VoiceInfo, StatsSnapshot, etc.) live in
@@ -63,6 +75,7 @@ var
   slots: array[MaxVoices, Slot]
   slotCount: int
   master: Stats
+  masterRecent: RecentRing
   running: bool
   timeSec: float64
   timeFrac: float64
@@ -130,10 +143,18 @@ proc audioCallback(output: ptr UncheckedArray[cfloat], frameCount: cuint,
       let gl = l * slots[v].fadeGain
       let gr = r * slots[v].fadeGain
       update(slots[v].stats, gl, gr)
+      # Per-voice rolling buffer for `aither spectrum`. Wraps in place;
+      # snapshot reads from idx outward (oldest sample first).
+      slots[v].recent.l[slots[v].recent.idx] = float32(gl)
+      slots[v].recent.r[slots[v].recent.idx] = float32(gr)
+      slots[v].recent.idx = (slots[v].recent.idx + 1) mod RecentSamples
       lMix += gl
       rMix += gr
 
     update(master, lMix, rMix)
+    masterRecent.l[masterRecent.idx] = float32(lMix)
+    masterRecent.r[masterRecent.idx] = float32(rMix)
+    masterRecent.idx = (masterRecent.idx + 1) mod RecentSamples
     output[i * 2]     = cfloat(tanh(lMix))
     output[i * 2 + 1] = cfloat(tanh(rMix))
 
@@ -461,6 +482,25 @@ proc partsSnapshot*(voiceName: string): PartsQuery =
     result.parts = snapshotPartsOf(slots[idx].voice)
   release(mtx)
 
+proc snapshotRecent(r: RecentRing): seq[float64] =
+  ## Mono mix of the rolling buffer, oldest-first. Caller must hold mtx.
+  result.setLen(RecentSamples)
+  for k in 0 ..< RecentSamples:
+    let i = (r.idx + k) mod RecentSamples
+    result[k] = (r.l[i].float64 + r.r[i].float64) * 0.5
+
+proc voiceBufferSnapshot*(name: string): seq[float64] =
+  ## Mono mix of the latest ~0.5s. "" or "master" → master; named voice
+  ## → that voice. Empty seq if the named voice isn't found.
+  acquire(mtx)
+  if name.len == 0 or name == "master":
+    result = snapshotRecent(masterRecent)
+  else:
+    let idx = findSlot(name)
+    if idx >= 0:
+      result = snapshotRecent(slots[idx].recent)
+  release(mtx)
+
 proc voiceMeterAfterSend*(name: string):
     tuple[found: bool, stats: StatsSnapshot] =
   ## One-line meter snapshot tacked onto `send` responses. Does NOT
@@ -584,6 +624,14 @@ proc handleCmd(line: string): string =
     let target = if parts.len >= 2: parts[1] else: ""
     let q = voiceStatsSnapshot(target)
     "OK\n" & formatScope(target, q)
+  of "spectrum":
+    let target = if parts.len >= 2: parts[1] else: ""
+    let buf = voiceBufferSnapshot(target)
+    if buf.len == 0:
+      "ERR voice not found: " & target
+    else:
+      let summary = analyze(buf, float64(SampleRate))
+      "OK\n" & formatSpectrum(summary)
   of "retrigger":
     if parts.len < 2: return "ERR usage: retrigger <name>"
     let err = retriggerVoice(parts[1])
