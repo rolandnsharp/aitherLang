@@ -22,13 +22,13 @@ key's amplitude. Edit the shape function and resend; the chord ringing
 under your fingers re-tunes mid-note.
 
 Compiled to native code in milliseconds. Hot-reloaded without
-dropping state. State persists across edits — every var, every filter,
-every delay tail.
+dropping state. State persists across edits — every `$` slot, every
+filter, every delay tail.
 
 ## What aither is
 
 A function-of-state language for sound. The state is yours: every
-`var` you declare, every filter's internal memory, every phasor's
+`$state` you declare, every filter's internal memory, every phasor's
 phase, every reverb's tail buffer. Aither preserves it across
 hot-reloads by per-helper-type identity, so editing one helper
 doesn't shift the storage of everything after it. The function is
@@ -51,11 +51,12 @@ supports all of them through the same `f(state) → sample` contract:
 sin(TAU * 440 * t) * 0.3
 ```
 
-**Phase accumulation** — explicit state, hot-swappable:
+**Phase accumulation** — explicit state, hot-swappable. The `$`
+sigil marks state at every use site:
 ```
-var phase = 0.0
-phase = (phase + 440 / sr) mod 1.0
-sin(TAU * phase) * 0.3
+$phase = 0.0
+$phase = ($phase + 440 / sr) mod 1.0
+sin(TAU * $phase) * 0.3
 ```
 
 **Additive synthesis** — sums of sines via the `sum` fold:
@@ -66,19 +67,19 @@ sum(16, n => sin(TAU * phasor(n * 440)) / n) * 0.3
 **Physical modeling** — damped harmonic oscillator, the universal
 physical primitive `ẍ + 2γẋ + ω²x = F(t)`:
 ```
-var x = 0.0
-var dx = 0.0
+$x = 0.0
+$dx = 0.0
 let w2 = 440 * 440
-dx = dx + (-2 * dx - w2 * x + impulse(2) * w2) * dt
-x = x + dx * dt
-x * 0.3
+$dx = $dx + (-2 * $dx - w2 * $x + impulse(2) * w2) * dt
+$x = $x + $dx * dt
+$x * 0.3
 ```
 
 **Spatial / field-based** — multi-dimensional state for spatial
 processes:
 ```
-var x_pos = 0.0; var y_pos = 0.0
-# ...wave equation across (x_pos, y_pos)...
+$x_pos = 0.0; $y_pos = 0.0
+# ...wave equation across ($x_pos, $y_pos)...
 ```
 
 The engine doesn't know which paradigm you picked. It calls your
@@ -174,11 +175,13 @@ are just expressions.
 int min max mod`. No surprises.
 
 **Stateful sources:** `phasor(freq)` for ramp 0→1 at `freq` Hz;
-`noise()` for white noise. Plus `var` for any state you declare
-yourself — that's the entire memory model. A filter is `var s1; var
-s2; ...`. A delay is `var buf[N]; var idx; ...`. A damped HO is
-`var x; var dx; ...`. The language doesn't distinguish "primitive
-state" from "user state."
+`noise()` for white noise. Plus the `$` sigil for any state you
+declare yourself — that's the entire memory model. A filter is
+`$s1; $s2; ...`. A delay is `$buf[N]; $idx; ...`. A damped HO is
+`$x; $dx; ...`. The language doesn't distinguish "primitive
+state" from "user state." Every reference to memory wears the
+`$` so the reader can see which values carry state and which
+are recomputed each sample.
 
 **Compile-time fold:** `sum(N, n => expr)` unrolls into N parallel
 expressions at codegen time. The standard composition primitive for
@@ -226,12 +229,12 @@ choir |> reverb(3.5, 0.3)
 
 ```
 play tuning_fork:
-  var x = 0.0
-  var dx = 0.0
+  $x = 0.0
+  $dx = 0.0
   let w2 = 440 * 440
-  dx = dx + (-2 * dx - w2 * x + impulse(2) * w2) * dt
-  x = x + dx * dt
-  x * 0.3
+  $dx = $dx + (-2 * $dx - w2 * $x + impulse(2) * w2) * dt
+  $x = $x + $dx * dt
+  $x * 0.3
 ```
 
 Same equation as a real tuning fork. Strike (impulse), ring at
@@ -242,9 +245,9 @@ baked in.
 
 ```
 play fm:
-  var fb = 0.0
-  fb = sin(TAU * phasor(440 + fb * 500))
-  fb * 0.3
+  $fb = 0.0
+  $fb = sin(TAU * phasor(440 + $fb * 500))
+  $fb * 0.3
 ```
 
 ### Acid bass (subtractive — saw through filter)
@@ -261,11 +264,11 @@ play acid:
 
 ```
 play chaos:
-  var x = 0.1; var y = 0.0; var z = 0.0
+  $x = 0.1; $y = 0.0; $z = 0.0
   let ddt = dt * 50
-  let dx = 10 * (y - x); let dy = x * (28 - z) - y; let dz = x * y - 2.67 * z
-  x = x + dx * ddt; y = y + dy * ddt; z = z + dz * ddt
-  [x / 22, (z - 25) / 18] * 0.1
+  let dx = 10 * ($y - $x); let dy = $x * (28 - $z) - $y; let dz = $x * $y - 2.67 * $z
+  $x = $x + dx * ddt; $y = $y + dy * ddt; $z = $z + dz * ddt
+  [$x / 22, ($z - 25) / 18] * 0.1
 ```
 
 All five examples are `f(state) → sample`. The engine doesn't know

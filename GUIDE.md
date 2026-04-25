@@ -81,22 +81,24 @@ Two oscillators summed. Multiplication is amplitude.
 
 ### State
 
-`var` creates values that persist across samples:
+The `$` sigil creates values that persist across samples:
 
 ```
 play pluck:
-  var phase = 0.0
-  var env   = 1.0
-  phase = (phase + 440 / sr) mod 1.0
-  env = env * 0.9999
-  if env < 0.001 then env = 1 else env
-  sin(TAU * phase) * env
+  $phase = 0.0
+  $env   = 1.0
+  $phase = ($phase + 440 / sr) mod 1.0
+  $env = $env * 0.9999
+  if $env < 0.001 then $env = 1 else $env
+  sin(TAU * $phase) * $env
 
 pluck
 ```
 
-`var` survives hot-reload. Edit the file, resend — `phase`
-and `env` keep their current values.
+State survives hot-reload. Edit the file, resend — `$phase`
+and `$env` keep their current values. Every reference to
+state wears the `$` so the visual shape of a patch tells you
+which values carry memory.
 
 ### Helper functions
 
@@ -571,13 +573,13 @@ model to use is stylistic, not technical.
 
 ## Feedback
 
-### Self-feedback (`var` in one play)
+### Self-feedback (`$state` in one play)
 
 ```
 play fm:
-  var fb = 0.0
-  fb = sin(TAU * phasor(440 + fb * 500))
-  fb * 0.3
+  $fb = 0.0
+  $fb = sin(TAU * phasor(440 + $fb * 500))
+  $fb * 0.3
 
 fm
 ```
@@ -599,7 +601,7 @@ play echo:
 `prev(x)` is `x` delayed one sample. Works on any
 expression (stdlib def, not a compiler magic). For
 self-reference or referencing a later-defined play, use
-inline `var` instead.
+inline `$state` instead.
 
 ## Recipes
 
@@ -722,12 +724,12 @@ The damped harmonic oscillator is a universal primitive:
 
 ```
 play tuning_fork:
-  var x = 0.0
-  var dx = 0.0
+  $x = 0.0
+  $dx = 0.0
   let w2 = 440 * 440
-  dx = dx + (-2 * dx - w2 * x + impulse(2) * w2) * dt
-  x = x + dx * dt
-  x * 0.3
+  $dx = $dx + (-2 * $dx - w2 * $x + impulse(2) * w2) * dt
+  $x = $x + $dx * dt
+  $x * 0.3
 
 tuning_fork
 ```

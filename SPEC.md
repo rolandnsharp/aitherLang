@@ -36,16 +36,32 @@ since this voice started, independent of engine uptime.
 
 ## State
 
-`var` declares persistent state. Survives across samples
-and across hot-reloads. Auto-initialized on first load only.
+The `$` sigil declares persistent state. Survives across
+samples and across hot-reloads. Auto-initialized on first
+load only.
 
 ```
-var phase = 0.0
-var env   = 1.0
+$phase = 0.0
+$env   = 1.0
 ```
 
-On hot-reload, existing `var` values are preserved by name.
-New `var` declarations initialize to their default.
+Every reference to state wears the `$`, at every use site —
+so a reader can tell at a glance which values carry memory
+and which are recomputed each sample. The sigil is part of
+the name token, not a separator: `$phase` is one token;
+`$ phase` (with whitespace) is a tokenizer error.
+
+The first `$name = expr` in a scope is a declaration that
+allocates the slot; every later `$name = expr` is an
+assignment.
+
+```
+$x = 0.0
+$x = $x + 0.001     # subsequent assignment, reads then writes
+```
+
+On hot-reload, existing state values are preserved by name.
+Newly-introduced state initializes to its default.
 
 `let` declares per-sample values. Computed fresh each sample.
 
@@ -135,8 +151,8 @@ def chord(root):
 
 The last expression in the body is the return value.
 Functions have their own local scope — they cannot see
-file-level `let` bindings. File-level `var`s, other `def`s,
-and globals are visible.
+file-level `let` bindings. File-level `$state` slots,
+other `def`s, and globals are visible.
 
 ## First-class functions
 
@@ -220,9 +236,9 @@ def/let from a literal.
 
 `play name:` declares a named, independently-controllable
 part. Its body compiles inline into the main chunk (so it
-sees all file-level lets and vars). Its value is bound to
-a local named after the play, readable from the final
-expression and from later plays.
+sees all file-level lets and `$state` slots). Its value is
+bound to a local named after the play, readable from the
+final expression and from later plays.
 
 ```
 def ease(x):
@@ -289,10 +305,10 @@ arrays into `def` parameters or returning them from a `def`.
 ### Mutable arrays
 
 ```
-var buf = array(48000, 0.0)   # size N, initial value
-buf[i]                         # read
-buf[i] = x                     # write
-len(buf)                       # length
+$buf = array(48000, 0.0)   # size N, initial value
+$buf[i]                    # read
+$buf[i] = x                # write
+len($buf)                  # length
 ```
 
 Used for delay lines, reverb buffers, wavetables.
@@ -332,7 +348,7 @@ final expression broadcasts the mono to both channels.
 Separated by newlines or semicolons:
 
 ```
-var phase = 0.0; phase += 440 / sr; sin(TAU * phase)
+$phase = 0.0; $phase = $phase + 440 / sr; sin(TAU * $phase)
 ```
 
 ## Group-depth tokenization
@@ -364,7 +380,7 @@ A file has four kinds of top-level declaration:
 
 - `def name(args): body` — helper function
 - `let name = expr` — file-level binding, visible in all plays
-- `var name = init` — file-level persistent state
+- `$name = init` — file-level persistent state (declaration on first sight)
 - `play name: body` — named, controllable part
 
 Followed by exactly one **final expression** — the voice's
@@ -385,27 +401,35 @@ non-final position).
 | Declaration          | Visible                                  | State                              |
 |----------------------|------------------------------------------|------------------------------------|
 | file-level `let`     | everywhere below it                      | computed once per sample           |
-| file-level `var`     | everywhere (by name)                     | persistent, keyed by name          |
+| file-level `$state`  | everywhere (by name)                     | persistent, keyed by name          |
 | file-level `def`     | everywhere (hoisted)                     | n/a (callable)                     |
 | `play` body `let`    | inside that `play` only                  | computed once per sample           |
-| `play` body `var`    | file-level by name                       | persistent, shared by name         |
+| `play` body `$state` | file-level by name                       | persistent, shared by name         |
 | `def` body `let`     | inside that `def` only                   | computed once per call             |
-| `def` body `var`     | per-call-site                            | persistent per call location       |
+| `def` body `$state`  | per-call-site                            | persistent per call location       |
+| lambda body `let`    | inside that lambda iteration only        | computed once per iteration        |
+| lambda body `$state` | per-iteration of the unrolled `sum`      | persistent per iteration / sample  |
 
 **`def` cannot see file-level lets** — defs are isolated
 functions that take what they need as parameters. **`play`
 can see file-level lets** — plays are inlined blocks that
 share the file's scope.
 
-**`var` inside a play is file-level by name.** If two plays
-both write `var count = 0`, they share the slot. Use
-explicit names (`var kick_count`, `var bass_count`) for
-independence.
+**`$state` inside a play is file-level by name.** If two plays
+both write `$count = 0`, they share the slot. Use explicit
+names (`$kick_count`, `$bass_count`) for independence.
 
-**`var` inside a def is per-call-site.** Each location the
+**`$state` inside a def is per-call-site.** Each location the
 def is called from gets its own state slot. This is what
 makes `osc(sin, 440) + osc(sin, 880)` work — two
 independent phasors without any ceremony.
+
+**`$state` inside a lambda body is per-iteration.** When
+`sum(N, n => …)` unrolls, every one of the N iterations
+gets its own slot — so `sum(8, n => $x = 0; $x = $x + n; $x)`
+runs eight independent counters. This is how inline
+modal banks (`sum(K, n => $x = 0; $dx = 0; …)`) get
+per-mode physics state without delegating to a helper def.
 
 ---
 
@@ -619,9 +643,9 @@ def gain(signal, amount): signal * amount
 def fold(signal, amount): ...             # triangle wrap
 def ease(x): ...                          # smoothstep: canonical fade curve
 def prev(x):                              # one-sample memory
-  var last = 0.0
-  let out = last
-  last = x
+  $last = 0.0
+  let out = $last
+  $last = x
   out
 ```
 
@@ -665,12 +689,12 @@ play piano:
 
 ## State semantics
 
-### Top-level `var`
+### Top-level `$state`
 
-Keyed by variable name. Safe to reorder. Shared by all
-plays and defs that reference the name.
+Keyed by name. Safe to reorder. Shared by all plays and
+defs that reference the name.
 
-### `var` inside `def`
+### `$state` inside `def`
 
 Keyed by call-site counter. Each call location gets
 independent state.
@@ -686,11 +710,22 @@ call order = same state slots = phase continuity.
 On hot-reload: same call order preserves state. Reordering
 calls may cause phase discontinuity (not a crash).
 
-### `var` inside `play`
+### `$state` inside `play`
 
-Currently file-level by name (same slot if two plays share
-a name). For per-play independence, use unique names or
-move state into a local `def` called from the play.
+File-level by name (same slot if two plays share a name).
+For per-play independence, use unique names or move state
+into a local `def` called from the play.
+
+### `$state` inside lambda body
+
+Per-iteration when the lambda is unrolled by `sum(N, ...)`.
+Each iteration claims its own slot with the same call-site
+counter mechanism the existing per-iteration `phasor` /
+`delay` state already uses. The first `$x = init` in a
+lambda body is the declaration; subsequent `$x = expr`
+lines assign — sequential update reads the just-written
+value, so `$dx = $dx + …; $x = $x + $dx * dt` integrates
+the way physics expects.
 
 ---
 
@@ -744,9 +779,9 @@ offline (no engine connection required, ~100 ms turnaround).
 Indentation-sensitive tokenizer with group-depth handling
 (newlines inside `(...)` and `[...]` are whitespace) +
 recursive-descent parser → AST. Handles: literals, identifiers,
-operators, function calls, `var`, `let`, `def`, `play`, `lambda`,
-`if/then/else`, `else if` chains, `|>`, arrays, array indexing,
-comments. Precedence climbing for expressions.
+operators, function calls, `$state`, `let`, `def`, `play`,
+`lambda`, `if/then/else`, `else if` chains, `|>`, arrays,
+array indexing, comments. Precedence climbing for expressions.
 
 ### Codegen (`codegen.nim`, ~1350 lines)
 
@@ -859,9 +894,9 @@ acid |> drive(1.1)
 
 ```
 play fm:
-  var fb = 0.0
-  fb = sin(TAU * phasor(440 + fb * 500))
-  fb * 0.3
+  $fb = 0.0
+  $fb = sin(TAU * phasor(440 + $fb * 500))
+  $fb * 0.3
 
 fm
 ```

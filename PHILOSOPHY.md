@@ -27,9 +27,11 @@ is not a function of time. Sound is a function of state.
 State has memory. Memory produces organic, living, evolving
 sound.
 
-In aither, state is `var`. A `var` declaration creates a
-value that persists across samples. It survives hot-reload.
-It is the instrument's memory — visible, named, yours.
+In aither, state is `$`. A `$name = init` declaration creates
+a value that persists across samples. Every later reference
+keeps the `$`, so memory is visible at every use site, not
+just at the declaration. State survives hot-reload. It is
+the instrument's memory — visible, named, yours.
 
 ## What the engine does
 
@@ -40,7 +42,7 @@ decay means. The engine:
 1. Calls your function 48,000 times per second
 2. Passes time (`t`), sample rate (`sr`), delta time (`dt`)
 3. Takes the return value and sends it to the speakers
-4. Preserves your `var` state across hot-reloads
+4. Preserves your `$` state across hot-reloads
 5. Soft-clips the output through `tanh`
 
 Everything else — oscillators, filters, envelopes, chaos
@@ -61,25 +63,25 @@ sin(TAU * 440 * t) * 0.3
 **Rhythmos (Earth)** — explicit state, phase accumulation.
 Stable, continuous, hot-swappable.
 ```
-var phase = 0.0
-phase = (phase + 440 / sr) mod 1.0
-sin(TAU * phase) * 0.3
+$phase = 0.0
+$phase = ($phase + 440 / sr) mod 1.0
+sin(TAU * $phase) * 0.3
 ```
 
 **Atomos (Air)** — discrete events, stochastic processes.
 Grains, particles, emergent textures.
 ```
-var next = 0.0
-if t >= next: next = t + 0.01 + noise() * 0.02
+$next = 0.0
+if t >= $next: $next = t + 0.01 + noise() * 0.02
 ```
 
 **Physis (Water)** — physical simulation. Springs, strings,
 membranes. Sound emerges from physics.
 ```
-var x = 0.0
-var dx = 0.0
-dx = dx + (-decay * dx - freq * freq * x + input) * dt
-x = x + dx * dt
+$x = 0.0
+$dx = 0.0
+$dx = $dx + (-decay * $dx - freq * freq * $x + input) * dt
+$x = $x + $dx * dt
 ```
 
 **Chora (Aither)** — spatial fields, reverb, room acoustics.
@@ -149,9 +151,9 @@ hides the loop in abstraction.
 Aither doesn't hide it:
 
 ```
-var fb = 0.0
-fb = sin(TAU * phasor(440 + fb * 500))
-fb * 0.3
+$fb = 0.0
+$fb = sin(TAU * phasor(440 + $fb * 500))
+$fb * 0.3
 ```
 
 `fb` on the right is the previous sample. `fb` on the left
@@ -214,8 +216,8 @@ def osc(shape, freq):
   shape(TAU * phasor(freq))
 
 def lpf(signal, cutoff, res):
-  var s1 = 0.0
-  var s2 = 0.0
+  $s1 = 0.0
+  $s2 = 0.0
   # ... SVF filter math ...
   v2
 ```
@@ -240,8 +242,9 @@ Both views are true. Both are necessary.
 stateless. It exists in its entirety as a mathematical
 object.
 
-`var phase = 0.0; phase += 440 / sr` is Heraclitean — a
-process, evolving, stateful. You can't compute sample
+`$phase = 0.0; $phase = $phase + 440 / sr` is Heraclitean — a
+process, evolving, stateful. The `$` makes the memory
+visible at every reference. You can't compute sample
 10,000 without living through samples 0-9,999.
 
 Aither lets you use both simultaneously. The first is
@@ -264,8 +267,8 @@ instead of writing the composition that produces the same
 result. A layer of abstraction inserts itself between the
 musician and the math.
 
-A feedback loop does not need `prev()` — `var` already
-holds one sample of memory. A sidechain does not need a
+A feedback loop does not need `prev()` — a `$state` slot
+already holds one sample of memory. A sidechain does not need a
 bus — file-level `let` bindings are already shared scope.
 A time-stretched hold does not need `hold()` — a `pos`-keyed
 ease is already a timeline. A scale lookup does not need

@@ -332,15 +332,16 @@ without a concrete musical need:
 2. **Two stateful builtin primitives: `phasor`, `noise`.**
    Everything stateful in user-visible stdlib is built from
    these (plus the native DSP helpers wrapped from `dsp.nim`).
-3. **`var` / `let` scope rules** — see SPEC.md Scope section.
-   Top-level `var` shared by name; `def` var per call-site;
-   `play` body `let` lexically block-scoped.
+3. **`$state` / `let` scope rules** — see SPEC.md Scope section.
+   Top-level `$state` shared by name; `def` `$state` per call-
+   site; lambda-body `$state` per-iteration; `play`/`def` body
+   `let` lexically block-scoped.
 4. **`play` blocks compile inline** into the main chunk so they
    see file-level lets. `def` bodies compile as separate
    functions.
 5. **Final expression is the voice output.** No implicit sum.
 6. **Stdlib embedded** as a const string. One binary.
-7. **Feedback is mutation.** Any `var` reading itself is the
+7. **Feedback is mutation.** Any `$state` reading itself is the
    entire state model for recurrence.
 8. **Sine is the only true oscillator primitive.** Saw/square/
    triangle and every named instrument are sums of sines via

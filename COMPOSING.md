@@ -27,7 +27,7 @@ The natural division of labour:
   write and reload. Stdlib starter kits cover the common
   paradigms — `additive` / `inharmonic` for spectrum-first
   design (cheap, perfectly band-limited, hot-reload-clean),
-  `var` + `dt` for time-domain physics (transients and decay
+  `$state` + `dt` for time-domain physics (transients and decay
   built into the equations), `osc(saw)` for chiptune /
   aliased character, FM via inline `sin(... + sin(...) * d)`
   for sidebanded grit. Pick whichever paradigm fits the
@@ -107,7 +107,7 @@ do what you'd expect.
   sees only what it receives. Good for filters, envelopes,
   math helpers. Calls get per-call-site state.
 - **`play name:`** — a named block inlined into the file's
-  flow. Sees all file-level lets and vars. Has an
+  flow. Sees all file-level lets and `$state` slots. Has an
   engine-controllable gain and a name you can `mute` /
   `solo` / `fade` from the CLI.
 
@@ -120,18 +120,21 @@ as functions vs. top-level blocks in any language.
 | Declaration          | Visible                                     | State model                       |
 |----------------------|---------------------------------------------|-----------------------------------|
 | file-level `let`     | everywhere below                            | computed once per sample          |
-| file-level `var`     | everywhere                                  | persistent, keyed by name         |
+| file-level `$state`  | everywhere                                  | persistent, keyed by name         |
 | file-level `def`     | everywhere (hoisted)                        | n/a (callable)                    |
 | `play` body `let`    | inside that `play` only                     | computed once per sample          |
-| `play` body `var`    | file-level by name (not play-local)         | persistent, shared by name        |
+| `play` body `$state` | file-level by name (not play-local)         | persistent, shared by name        |
 | `def` body `let`     | inside that `def` only                      | computed once per call            |
-| `def` body `var`     | per-call-site (each call gets own state)    | persistent per call location      |
+| `def` body `$state`  | per-call-site (each call gets own state)    | persistent per call location      |
+| lambda body `let`    | inside that iteration                       | computed once per iteration       |
+| lambda body `$state` | per-iteration of unrolled `sum`             | persistent per iteration / sample |
 
 A few consequences worth knowing:
 
 - `let` inside two different `play` blocks can share a name without collision — they're independently scoped.
-- `var` inside a `play` is file-level by name. Write `var kick_count = 0` and `var bass_count = 0` (not `var count` twice) if you want them independent.
+- `$state` inside a `play` is file-level by name. Write `$kick_count = 0` and `$bass_count = 0` (not `$count` twice) if you want them independent.
 - A `def` called from multiple places gets independent state per call site. That's why `osc(sin, 440) + osc(sin, 880)` gives two independent phasors without any ceremony.
+- `$state` in a `sum(N, lambda)` body gives every unrolled iteration its own slot, which is how a `sum(8, n => $x = 0; $dx = 0; …)` modal bank works as eight independent oscillators.
 
 ## The composition clock
 
@@ -290,12 +293,12 @@ sample-zero smoothness without a fade, snapshot the start
 phase once and offset a voice-local phasor:
 
 ```
-var startPhase = -1
-startPhase = if startPhase < 0 then (t * tempo) mod 1 else startPhase
-let bt = (phasor(tempo) + startPhase) mod 1
+$startPhase = -1
+$startPhase = if $startPhase < 0 then (t * tempo) mod 1 else $startPhase
+let bt = (phasor(tempo) + $startPhase) mod 1
 ```
 
-The state-migration model preserves `startPhase` across hot
+The state-migration model preserves `$startPhase` across hot
 reloads, so subsequent edits don't re-snap.
 
 ### Rhythm is oscillation (see docs/guides/RHYTHM_PHILOSOPHY.md)
@@ -432,13 +435,13 @@ fits the sound you're after; the engine doesn't care.
 | A musical sound from its spectrum (pads, leads, vocal-like) | `additive(f, shape, N)`                |
 | Bells, plates, stiff strings — non-integer partials         | `inharmonic(f, ratio, amp, N)`         |
 | Plucked / bowed / struck physical instruments               | `pluck_string`, `bowed_string`, `struck_bar`, `tuning_fork` (stdlib — **WIP, sounds naive vs additive**) |
-| A vibrating physical object — transients, decay built-in    | `var x; var dx; ẍ + 2γẋ + ω²x = F(t)` (raw physics) |
+| A vibrating physical object — transients, decay built-in    | `$x; $dx; ẍ + 2γẋ + ω²x = F(t)` (raw physics) |
 | Sidebanded / FM grit — aliasing as character                | inline `sin(carrier + sin(modf) * depth)` |
 | Chiptune / lo-fi / digital-sounding                         | `osc(saw, f)`, `osc(sqr, f)`           |
 
 These are recipes, not language commitments. The stdlib ships
 starter kits for the most common ones (additive, inharmonic);
-the rest you can write inline with `var`, `phasor`, `noise`,
+the rest you can write inline with `$state`, `phasor`, `noise`,
 and a few cycles of math.
 
 ### Physical instruments (work in progress)
@@ -469,11 +472,13 @@ excitation-response physics is the discriminating character:
 Additive does NOT cover these well. A plucked string with a
 bolted-on envelope sounds synthetic; the same sound via
 Karplus-Strong is unmistakable. The `tuning_fork` body shows
-the integration literally inline (`var x; var dx; dx = dx + …
-* dt; x = x + dx * dt`); the modal banks delegate per-mode
-integration to `resonator`, which iterates the same equation —
-read `tuning_fork` once to understand what `resonator` is doing
-in `bowed_string` / `struck_bar`.
+the integration literally inline (`$x = 0; $dx = 0; $dx = $dx +
+… * dt; $x = $x + $dx * dt`). The modal banks
+(`bowed_string`, `struck_bar`) iterate the same equation
+per-mode by writing the integration *inside* `sum(K, n => …)`
+— each unrolled iteration claims its own per-mode `$x` /
+`$dx` slots. Read `tuning_fork` once and the modal banks
+read like the same code N times over.
 
 ```
 play strings:
@@ -481,7 +486,7 @@ play strings:
     pluck_string(noise() * impulse(0.5) * gate, freq, 0.7) * 0.3)
 ```
 
-**Hot-reload caveat.** These defs use `var` for state. On reload
+**Hot-reload caveat.** These defs use `$state` slots for state. On reload
 with parameter changes, the system can transiently re-equilibrate
 (an audible click on big jumps). For knob-driven parameters
 (`midi_cc`), no issue — knobs change smoothly. For code edits,
@@ -495,7 +500,7 @@ Rules of thumb for picking:
   friendly.** Sums of sines have no conserved quantities, so
   parameter changes during reload are musically smooth. Best
   default for live-coded music.
-- **Physics (`var`-based damped HOs, Karplus, etc.) gets you
+- **Physics (`$state`-based damped HOs, Karplus, etc.) gets you
   transients and decay shape from the equation itself.** No
   manual envelopes. But a parameter change during reload can
   cause a transient as the system re-equilibrates — wrap
@@ -505,7 +510,7 @@ Rules of thumb for picking:
   (chiptune, broken-radio, DX7 grit). Otherwise additive gives
   you what you actually wanted, cleaner.
 - **All paradigms compose freely.** A patch can mix additive
-  pads, a `var`-based bell, a Karplus pluck, and a saw bass —
+  pads, a `$state`-based bell, a Karplus pluck, and a saw bass —
   they're all just `f(state) → sample` and the engine sums
   them.
 
@@ -710,8 +715,8 @@ play b:
   ...
 ```
 
-Self-feedback is more naturally written inline with `var`:
-`var last = 0.0; last = <new signal using last>; last`.
+Self-feedback is more naturally written inline with `$state`:
+`$last = 0.0; $last = <new signal using $last>; $last`.
 
 Always read `stdlib.aither` before inventing a function —
 it is short and probably already has what you need.
