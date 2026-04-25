@@ -1,0 +1,170 @@
+# acid_state — kick + acid bass with eight stable knobs.
+# K1 (bass paradigm crossfade) is the headline aither move.
+# The rest are dramatic-but-safe — every transition is audible
+# and the patch can't blow up regardless of knob position.
+#
+# 130 BPM, 4-on-the-floor, D minor pentatonic acid pattern.
+#
+# ============================================================ KNOBS
+#   K1 (CC 74) — BASS PARADIGM     acid (saw+DHO LPF)
+#                                   → bell-bass (struck DHO)
+#                                   → noise-formant (DHO BPF on noise)
+#                                   the proven aither move
+#
+#   K2 (CC 71) — HARMONY DENSITY   passive DHO resonators ring the
+#                                   live bass at intervals above the
+#                                   note. K2=0: single note (mono).
+#                                   K2=0.33: + octave. K2=0.66: +
+#                                   octave + fifth. K2=1: + 7th too,
+#                                   forming a jazz cluster from the
+#                                   same bass line. Same notes, same
+#                                   timbre, growing harmonic density.
+#                                   The K1-twin: K1 morphs timbre,
+#                                   K2 morphs density.
+#
+#   K3 (CC 76) — BASS GATE         masks bass notes by step:
+#                                   K3=0: every step plays
+#                                   K3=1: every other step muted
+#                                   makes the pattern breathe
+#
+#   K4 (CC 77) — KICK PATTERN      K4=0: 4-on-the-floor
+#                                   K4=0.5: half-time (1, 3 only)
+#                                   K4=1: off-beat (& of 1, & of 3)
+#
+#   K5 (CC 93) — BITCRUSH          16-bit clean → 4-bit lo-fi grit
+#                                   audible from K5=0.2
+#
+#   K6 (CC 18) — DELAY FEEDBACK    K6=0: dry. K6=1: dotted-eighth
+#                                   delay with strong feedback —
+#                                   bass notes echo into a wash
+#
+#   K7 (CC 19) — DRIVE             clean → fat saturation
+#   K8 (CC 16) — REVERB            small room → cathedral
+
+let tempo = 130 / 60.0
+
+let paradigm = midi_cc(74)
+let harmDens = midi_cc(71)
+let gateAmt  = midi_cc(76)
+let kickPat  = midi_cc(77)
+let crushAmt = midi_cc(93)
+let dlyAmt   = midi_cc(18)
+let driveAmt = 1.0 + midi_cc(19) * 2.5
+let revAmt   = midi_cc(16)
+
+let bassNotes = [
+  73.42,  73.42,  146.83, 73.42,
+  87.31,  73.42,  98.0,   73.42,
+  110.0,  73.42,  73.42,  146.83,
+  87.31,  110.0,  73.42,  73.42
+]
+
+let bassAccent = [
+  1.0, 0.4, 1.0, 0.4,
+  0.4, 0.4, 1.0, 0.4,
+  1.0, 0.4, 0.4, 1.0,
+  0.4, 1.0, 0.4, 0.4
+]
+
+# K3 BASS GATE: silence specific steps as K3 rises. At K3=0 every
+# step plays. At K3=1 only the accented steps play (every other
+# note muted), creating a sparse breathing pattern.
+let stepRate = tempo * 4
+let bPhase   = phasor(stepRate / 16)
+let bIdx     = int(bPhase * 16)
+let bAcc     = bassAccent[bIdx]
+let bGate    = if (bIdx mod 2) == 1 then (1.0 - gateAmt) else 1.0
+let bFreq    = bassNotes[bIdx]
+
+let bTrig = impulse(stepRate)
+let bEnv  = pluck(bTrig, 0.12 + bAcc * 0.25) * bGate
+
+# K4 KICK PATTERN: three rhythm regions. The bar phasor cycles every
+# 4 beats; thresholds change with K4.
+let beatPhase = phasor(tempo / 4)
+let bp16      = beatPhase * 4
+let bp_int    = int(bp16) mod 4
+let bp_eighth = int(bp16 * 2) mod 8
+
+let kickFires = (if kickPat < 0.33
+                 then 1.0
+                 else if kickPat < 0.66
+                      then (if bp_int == 0 or bp_int == 2 then 1.0 else 0.0)
+                      else (if bp_eighth == 1 or bp_eighth == 5 then 1.0 else 0.0))
+let kTrigRaw  = impulse(tempo * 2)    # 8th-note grid, gated by pattern
+let kTrig     = kTrigRaw * kickFires
+let kEnv      = discharge(kTrig, 8)
+
+play acid:
+  # === Three bass paradigms in parallel ===
+
+  # A — Acid: saw → DHO resonant LPF. Pushed deep into squelch
+  # territory (damp 0.025 = high Q) so K1=0 sounds aggressively
+  # acid, not generic.
+  let saw   = additive(bFreq, saw_shape, 10)
+  let cutA  = 600 + bEnv * 3200 * (0.5 + bAcc * 0.5)
+  let bassA = dho(saw * 80000.0, cutA, 0.025) * bEnv * (0.4 + bAcc * 0.6)
+
+  # B — Bell-bass: struck DHO at the note pitch, very low damp so
+  # the bell sustains and rings — clearly distinct from the acid
+  # squelch when you hold the knob there.
+  let bForceB = 22000.0 * bFreq
+  let bassB   = dho(bTrig * bForceB, bFreq, 0.008) * bEnv * (0.5 + bAcc * 0.5) * 0.4
+
+  # C — Noise-formant: very narrow Q (damp 0.025) so noise →
+  # whistling tone that's obviously different from saw or bell.
+  let nAmp  = bEnv * (0.3 + bAcc * 0.7) * 6000000.0
+  let bassC = dho(noise() * nAmp, bFreq * 3, 0.025) * 6.0
+
+  # K1 crossfade — three triangular zones
+  let wA = max(0, 1 - paradigm * 2)
+  let wB = (if paradigm < 0.5
+            then paradigm * 2
+            else 1 - (paradigm - 0.5) * 2)
+  let wC = max(0, (paradigm - 0.5) * 2)
+  let bassMix = bassA * wA + bassB * wB + bassC * wC
+
+  # === K2 HARMONY DENSITY: active harmonic voices stack on top of
+  # the bass mix as K2 rises. K2=0 mono. Each voice is a saw at the
+  # harmonic interval, gated by the same bEnv so rhythm stays locked.
+  let envH  = bEnv * (0.4 + bAcc * 0.6)
+  let h_oct = additive(bFreq * 2.0,  saw_shape, 6) * envH
+  let h_fth = additive(bFreq * 3.0,  saw_shape, 5) * envH
+  let h_7th = additive(bFreq * 3.56, saw_shape, 4) * envH
+  let w_oct = clamp(harmDens / 0.33,          0, 1)
+  let w_fth = clamp((harmDens - 0.33) / 0.33, 0, 1)
+  let w_7th = clamp((harmDens - 0.66) / 0.34, 0, 1)
+  let bassSig = (bassMix
+              + h_oct * w_oct * 0.36
+              + h_fth * w_fth * 0.30
+              + h_7th * w_7th * 0.26)
+
+  # === KICK ===
+  let pSweep   = 35 + discharge(kTrig, 30) * 130
+  let kickSub  = sin(TAU * phasor(pSweep)) * kEnv
+  let kickBody = dho(kTrig * 50000000.0, 200, 0.012) * 0.4
+  let kickClick = noise() * discharge(kTrig, 200) * 0.4
+  let kickSig  = kickSub * 0.7 + kickBody * 0.4 + kickClick * 0.25
+
+  let mix = kickSig * 0.5 + bassSig * 0.5
+  [mix, mix]
+
+let dry  = acid
+let mono = (dry[0] + dry[1]) * 0.5
+
+# K6 DELAY: dotted-eighth feedback delay (3/16 note at 130 BPM ≈ 0.346s)
+# fbdelay max_time needs a literal, so fix at 0.5s ceiling.
+let delayed = fbdelay(mono, 0.346, 0.5, dlyAmt * 0.7)
+let withDly = mono + delayed * dlyAmt
+
+# K5 BITCRUSH: 16-bit → 4-bit as K5 rises
+let crushBits = 16 - crushAmt * 12
+let crushed   = bitcrush(withDly, crushBits)
+
+# K7 DRIVE
+let driven = drive(crushed, driveAmt)
+
+# K8 REVERB: time + wet morph together
+let revTime = 1.5 + revAmt * 5
+let wet     = driven |> reverb(revTime, 0.4)
+([driven, driven] + [wet, wet] * revAmt) * 0.6
