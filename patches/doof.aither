@@ -34,21 +34,21 @@ let lIdx   = int(lLfo) mod 5
 let lStep  = if lIdx == 0 then 0 else if lIdx == 1 then 3 else if lIdx == 2 then 5 else if lIdx == 3 then 7 else 10
 let lRoot  = 220.0 * pow(2, lStep / 12)
 
-var lNote = 220.0
+$lNote = 220.0
 let lTrig = impulse(tempo)
-lNote = if lTrig > 0.5 then lRoot else lNote
+$lNote = if lTrig > 0.5 then lRoot else $lNote
 
 let lModRate = 0.11 + tens * 0.25
 let lModLfo  = (sin(TAU * pos * lModRate) + 1) * 0.5
 let lEnv     = discharge(lTrig, 6)
 let lCut     = 400 + lModLfo * (2000 + tens * 2500) + lEnv * 2200
-let lead     = osc(saw, lNote) |> lpf(lCut, 0.86) |> gain(0.18)
+let lead     = osc(saw, $lNote) |> lpf(lCut, 0.86) |> gain(0.18)
 
 # --- squelch: only blooms during the burst at end of each cycle ---
 let sTrig    = impulse(tempo * 2)
 let sEnv     = discharge(sTrig, 40)
 let sCut     = 800 + sEnv * 3200
-let squelch  = osc(saw, lNote * 2) |> lpf(sCut, 0.9) |> gain(burst * 0.16)
+let squelch  = osc(saw, $lNote * 2) |> lpf(sCut, 0.9) |> gain(burst * 0.16)
 let squelchG = squelch * sEnv
 
 # --- riser: noise sweep during burst, then silence ---

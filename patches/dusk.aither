@@ -34,11 +34,11 @@ play kick:
 
 play bass:
   let fund = 36.71 * pow(2, sStep / 12)         # D1-ish
-  var b = 36.71
+  $b = 36.71
   let bt  = impulse(bpm / 4)                     # changes every 4 beats
-  b = if bt > 0.5 then fund else b
+  $b = if bt > 0.5 then fund else $b
   let env = swell(bt, 0.02, 0.9)
-  let raw = osc(saw, b) |> lpf(200 + env * 400, 0.7) |> drive(1.3)
+  let raw = osc(saw, $b) |> lpf(200 + env * 400, 0.7) |> drive(1.3)
   let s   = raw * env * 0.35
   [s, s] * sc
 

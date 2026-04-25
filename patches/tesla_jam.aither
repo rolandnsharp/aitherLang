@@ -112,9 +112,9 @@ play drums:
   let kBoost = 1 + max(0, 1 - kPos * 16) * 0.3
   let kick   = ((kBody + kSub) |> lpf(kickCut, 0.4) |> gain(0.32)) * kBreak * kBoost
 
-  var snC = 0
-  snC = snC + impulse(tempo)
-  let snBack = snC mod 2
+  $snC = 0
+  $snC = $snC + impulse(tempo)
+  let snBack = $snC mod 2
   let snTrig = impulse(tempo) * snBack
   let snEnv  = discharge(snTrig, 28)
   let snTone = inharmonic(195, bar_partials, bell_decay, 5) * 0.3

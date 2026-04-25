@@ -19,14 +19,14 @@ let lStep    = scale[int(lLfo) mod 5]
 let lRoot    = 220.0 * pow(2, lStep / 12)
 let bRoot    = 55.0 * pow(2, lStep / 12)
 
-var bNote = 55.0
+$bNote = 55.0
 let bT    = impulse(tempo * 2)
-bNote = if bT > 0.5 then bRoot else bNote
+$bNote = if bT > 0.5 then bRoot else $bNote
 let bEnv  = discharge(bT, 18)
 
-var lNote = 220.0
+$lNote = 220.0
 let lT    = impulse(tempo)
-lNote = if lT > 0.5 then lRoot else lNote
+$lNote = if lT > 0.5 then lRoot else $lNote
 let lLfo2 = (sin(TAU * pos * 0.17) + 1) * 0.5
 let lEnv  = discharge(lT, 6)
 let lCut  = 400 + lLfo2 * 2500 + lEnv * 2500
@@ -41,13 +41,13 @@ play kick:
   [s, s]
 
 play bass:
-  let s = osc(saw, bNote) |> lpf(150 + bEnv * 1500, 0.85) |> drive(1.2) |> gain(0.42)
+  let s = osc(saw, $bNote) |> lpf(150 + bEnv * 1500, 0.85) |> drive(1.2) |> gain(0.42)
   let m = s * bEnv * sc
   [m, m]
 
 play lead:
-  let sL = osc(saw, lNote)          |> lpf(lCut, 0.86) |> drive(1.8) |> gain(0.16)
-  let sR = osc(saw, lNote * 1.005)  |> lpf(lCut, 0.86) |> drive(1.8) |> gain(0.16)
+  let sL = osc(saw, $lNote)          |> lpf(lCut, 0.86) |> drive(1.8) |> gain(0.16)
+  let sR = osc(saw, $lNote * 1.005)  |> lpf(lCut, 0.86) |> drive(1.8) |> gain(0.16)
   [sL * sc, sR * sc]
 
 play hats:

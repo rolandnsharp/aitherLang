@@ -12,14 +12,14 @@ let wP = 220 + (sin(TAU * pos * 0.023) + sin(TAU * pos * 0.041)) * 130
 let wD = 260 + sin(TAU * pos * 0.083) * 220
 
 # self-modulating sine — the worm.
-var fb = 0.0
-fb = sin(TAU * (phasor(wP + fb * wD)))
+$fb = 0.0
+$fb = sin(TAU * (phasor(wP + $fb * wD)))
 
 # gentle amplitude shaping so it's not flat — sparse peaks via a slow envelope.
 let gEnv = discharge(impulse(0.18), 0.35) * 0.8 + 0.2
 
 # limit and shape
-let worm = fb * gEnv |> lpf(3800, 0.35)
+let worm = $fb * gEnv |> lpf(3800, 0.35)
 
 # slow stereo pan, 14s cycle — scope will show the worm dancing.
 let panL = sin(TAU * pos / 14)

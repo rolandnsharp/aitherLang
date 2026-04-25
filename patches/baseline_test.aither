@@ -1,0 +1,12 @@
+# baseline_test — purest possible polyphonic additive. If THIS crackles
+# at low octaves, the crackle is engine/audio-chain, not patch design.
+# If it doesn't crackle, the crackle is something the swarm patches add.
+
+let release = 0.5 + midi_cc(76) * 4.5
+
+let voices = midi_keyboard((f, g) =>
+  let env = swell(g, 0.01, release)
+  additive(f, warm_shape, 16) * env * 0.04)
+
+let s = voices |> reverb(2.8, 0.3)
+[s, s]

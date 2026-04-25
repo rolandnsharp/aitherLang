@@ -12,12 +12,12 @@ let tempo = 70.0 / 60.0                             # 70 BPM, half-time
 # --- doof layer: time-since-this-var-appeared (reload persistence) ---
 # Fresh `var`s init to 0 on first compile; migration preserves them
 # across subsequent reloads. Perfect "seconds since the drop started".
-var dpos = 0
-dpos = dpos + dt
+$dpos = 0
+$dpos = $dpos + dt
 let dTempo = 145.0 / 60.0
-let d_build = ease(dpos / 10)                       # 10 s tension build
-let d_drop  = ease((dpos - 10) / 0.25)               # sharp drop at 10 s
-let d_cut   = 1 - ease((dpos - 9.5) / 0.5)           # riser cuts on drop
+let d_build = ease($dpos / 10)                       # 10 s tension build
+let d_drop  = ease(($dpos - 10) / 0.25)               # sharp drop at 10 s
+let d_cut   = 1 - ease(($dpos - 9.5) / 0.5)           # riser cuts on drop
 
 let dkTrig = impulse(dTempo)
 let dkEnv  = pluck(dkTrig, 0.22)
@@ -26,28 +26,28 @@ let dbTrig = impulse(dTempo * 4)
 let dbEnv  = pluck(dbTrig, 0.11)
 
 # --- second build-drop cycle: fresh counter for this edit ---
-var drop2pos = 0
-drop2pos = drop2pos + dt
-let d2_build = ease(drop2pos / 8)                    # 8 s swell
-let d2_drop  = ease((drop2pos - 8) / 0.25)           # sharp re-drop
-let d2_cutRiser = 1 - ease((drop2pos - 7.7) / 0.4)   # reverse cymbal cuts
+$drop2pos = 0
+$drop2pos = $drop2pos + dt
+let d2_build = ease($drop2pos / 8)                    # 8 s swell
+let d2_drop  = ease(($drop2pos - 8) / 0.25)           # sharp re-drop
+let d2_cutRiser = 1 - ease(($drop2pos - 7.7) / 0.4)   # reverse cymbal cuts
 
 # mid-section "empty the room" ducking: fade the doof kick+bass for
 # the last 2 seconds of the build so the drop hits against silence
-let d2_room = 1 - ease((drop2pos - 6) / 1.5) * (1 - ease((drop2pos - 8) / 0.2))
+let d2_room = 1 - ease(($drop2pos - 6) / 1.5) * (1 - ease(($drop2pos - 8) / 0.2))
 
 # hoover lead sequence — stepping through a 4-note pentatonic over 2 beats
 let hoovSeq = wave(dTempo / 2, [220, 330, 247, 294])
 
 # --- third drop: halftime dubstep switch-up ---
-var drop3pos = 0
-drop3pos = drop3pos + dt
-let d3_build = ease(drop3pos / 4.5)
+$drop3pos = 0
+$drop3pos = $drop3pos + dt
+let d3_build = ease($drop3pos / 4.5)
 # a 0.4 s silence gap from t=4.55 to t=4.95 — cut EVERYTHING briefly
-let d3_preSil  = 1 - ease((drop3pos - 4.5) / 0.05)
-let d3_postSil = ease((drop3pos - 4.95) / 0.05)
+let d3_preSil  = 1 - ease(($drop3pos - 4.5) / 0.05)
+let d3_postSil = ease(($drop3pos - 4.95) / 0.05)
 let d3_gate    = d3_preSil + d3_postSil
-let d3_drop    = ease((drop3pos - 5.0) / 0.05)
+let d3_drop    = ease(($drop3pos - 5.0) / 0.05)
 # post-drop: duck old doof to 30 %, cathedral ambient to 50 %
 let d3_doofScale = d3_gate * (1 - d3_drop * 0.7)
 let d3_cathScale = d3_gate * (1 - d3_drop * 0.5)
@@ -57,10 +57,10 @@ let htEnv  = pluck(htTrig, 0.6)
 
 # (2) wobble rate breathing — rate itself modulated by a slow sine,
 # integrated into phase so wobble stays coherent across the shift
-let wRate   = 1.0 + (sin(TAU * drop3pos * 0.067) + 1) * 1.8      # 1..4.6 Hz
-var wPhase  = 0
-wPhase      = (wPhase + wRate * dt) mod 1
-let wobble  = (sin(TAU * wPhase) + 1) * 0.5
+let wRate   = 1.0 + (sin(TAU * $drop3pos * 0.067) + 1) * 1.8      # 1..4.6 Hz
+$wPhase  = 0
+$wPhase      = ($wPhase + wRate * dt) mod 1
+let wobble  = (sin(TAU * $wPhase) + 1) * 0.5
 
 # user helper: super-saw (7-voice detuned saw unison, spread)
 def supersaw(freq, spread):
@@ -78,7 +78,7 @@ let step  = scale[int(drift) mod 6]
 # --- signal-native shake-ups (declared after `scale` so indexing works) ---
 # (1) key drift — quantize two irrational LFOs to the pentatonic, lifts
 # the whole halftime layer up and down through the scale continuously.
-let kLfo    = (sin(TAU * drop3pos * 0.047) + sin(TAU * drop3pos * 0.071) + 2) * 0.5 * 5
+let kLfo    = (sin(TAU * $drop3pos * 0.047) + sin(TAU * $drop3pos * 0.071) + 2) * 0.5 * 5
 let kIdx    = int(kLfo) mod 5
 let kStep   = scale[kIdx]
 let keyMod  = pow(2, kStep / 12)
@@ -242,7 +242,7 @@ play dhats:
   let closedH = noise() * cEnv2 |> hpf(8200, 0.25) |> gain(0.17)
   let openH   = noise() * oEnv2 |> hpf(6400, 0.3) |> gain(0.08)
   let sigH    = (closedH + openH) * d_drop
-  let pp      = sin(TAU * dpos * 0.3) * 0.4
+  let pp      = sin(TAU * $dpos * 0.3) * 0.4
   sigH |> pan(pp)
 
 play dtoms:
@@ -252,12 +252,12 @@ play dtoms:
   let tPit  = 95 + discharge(tTrig, 18) * 80
   let raw2  = sin(TAU * phasor(tPit)) * tEnv2 |> lpf(700, 0.3)
   let sigT  = raw2 * 0.32 * d_drop
-  let ppT   = sin(TAU * dpos * 0.19) * 0.55
+  let ppT   = sin(TAU * $dpos * 0.19) * 0.55
   sigT |> pan(ppT)
 
 play ddidge:
   # low buzzy drone — detuned saws, amp-modulated at ~3 Hz
-  let buzz = sin(TAU * dpos * 3.1) * 0.3 + 0.6
+  let buzz = sin(TAU * $dpos * 3.1) * 0.3 + 0.6
   let src  = osc(saw, 55) * 0.6 + osc(saw, 55.4) * 0.45
   let raw3 = src * buzz
   let filt3 = raw3 |> bpf(360, 0.88) |> drive(1.15)
@@ -278,7 +278,7 @@ play hoover:
   # pluck env per 16th. drops in sync with d2_drop.
   let hTrig = impulse(dTempo * 2)
   let hEnv  = pluck(hTrig, 0.14)
-  let wah   = 400 + hEnv * 2600 + (sin(TAU * drop2pos * 0.7) + 1) * 800
+  let wah   = 400 + hEnv * 2600 + (sin(TAU * $drop2pos * 0.7) + 1) * 800
   let raw   = supersaw(hoovSeq, 0.007) * 0.08
   let filt  = raw |> lpf(wah, 0.82) |> drive(1.2)
   let wet   = reverb(filt, 3, 0.35)
@@ -318,7 +318,7 @@ play drifter:
   # signal-native melody: two irrational LFOs summed → quantized to the
   # pentatonic → never repeats. Per-note pluck env triggered every 3
   # beats. pitch tracks keyMod so it shares the structural drift.
-  let dLfo   = (sin(TAU * drop3pos * 0.083) + sin(TAU * drop3pos * 0.0532) + 2) * 0.5 * 5
+  let dLfo   = (sin(TAU * $drop3pos * 0.083) + sin(TAU * $drop3pos * 0.0532) + 2) * 0.5 * 5
   let dIdx   = int(dLfo) mod 5
   let dStep  = scale[dIdx]
   let dFreq  = 440 * pow(2, dStep / 12) * keyMod
@@ -328,7 +328,7 @@ play drifter:
   let filt   = rawL * drEnv |> lpf(1400, 0.45)
   let wet    = reverb(filt, 4, 0.6)
   let mixD   = filt * 0.45 + wet * 0.45
-  let pp     = sin(TAU * drop3pos * 0.13) * 0.65
+  let pp     = sin(TAU * $drop3pos * 0.13) * 0.65
   mixD * d3_drop |> pan(pp)
 
 play ht_siren:
@@ -343,7 +343,7 @@ play formant:
   # vowel-like additive sine stack (approx an "aah" formant structure)
   # tuned to D3 with vibrato; swells in with d2_build, stays during drop.
   let f    = 146.83 * pow(2, step / 12)
-  let vib  = sin(TAU * drop2pos * 4.5) * 0.008
+  let vib  = sin(TAU * $drop2pos * 4.5) * 0.008
   let fb   = f * (1 + vib)
   let f1   = osc(sin, fb * 2.67) * 0.4        # formant 1 ~730 Hz
   let f2   = osc(sin, fb * 4.25) * 0.32       # formant 2 ~1090 Hz

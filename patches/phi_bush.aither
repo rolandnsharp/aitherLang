@@ -48,7 +48,7 @@ let acidNotes = [220.0, 247.5, 330.0, 412.5, 440.0, 412.5, 330.0, 247.5]
 
 play drone:
   # Outro: subtle pitch drift down via the outro fade timer for cinematic close.
-  let drift = 1 - ease((t - outroStart - 60) / 120) * 0.04
+  let drift = 1 - ease((t - $outroStart - 60) / 120) * 0.04
   let s = osc(sin, 55 * drift) * 0.4 + osc(sin, 82.5 * drift) * 0.3 + osc(sin, 110 * drift) * 0.35 + osc(sin, 165 * drift) * 0.25
   let breathe = 1 + lfoB * 0.2
   let w = s |> lpf(1400 + (lfoA + 1) * 900, 0.4) |> gain(0.23 * breathe)
@@ -60,19 +60,19 @@ play kick:
   let body  = sin(TAU * phasor(p)) * kEnv
   let sub   = sin(TAU * phasor(p * 0.5)) * kEnv * 0.7
   let click = noise() * discharge(kTrig, 400) * 0.4 |> hpf(2500, 0.3)
-  let kFade = 1 - ease((t - outroStart - 30) / 80)
+  let kFade = 1 - ease((t - $outroStart - 30) / 80)
   (body * 0.85 + sub + click * 0.4) |> lpf(380, 0.4) |> gain(0.5 * kFade)
 
 play bass:
   # Square wave bass with FM-style self-feedback for growl. Octave swell stays.
   let oct  = 1 + sin(TAU * pos * 0.017) * 0.06
   let f    = bassFreq * oct
-  var fb = 0.0
-  fb = sin(TAU * phasor(f + fb * 200))
-  let raw  = fb + osc(sqr, f) * 0.3
+  $fb = 0.0
+  $fb = sin(TAU * phasor(f + $fb * 200))
+  let raw  = $fb + osc(sqr, f) * 0.3
   let wob  = (sin(TAU * pos * 0.4) + 1) * 0.5
   let cut  = 250 + bEnv * 1300 + wob * 500
-  let bFade = 1 - ease((t - outroStart - 60) / 60)
+  let bFade = 1 - ease((t - $outroStart - 60) / 60)
   let s    = raw |> lpf(cut, 0.65) |> drive(1.4) |> gain(bEnv * sc * 0.32 * bFade)
   [s, s]
 
@@ -104,9 +104,9 @@ play hats:
 
 play ride:
   # 16th-note shimmer — pulled back, more sparse.
-  var rideStart = -1
-  rideStart = if rideStart < 0 then t else rideStart
-  let rFade = ease((t - rideStart) / 5)
+  $rideStart = -1
+  $rideStart = if $rideStart < 0 then t else $rideStart
+  let rFade = ease((t - $rideStart) / 5)
   let rP = phasor(tempo * 8)
   let rE = exp(-rP * 50)
   let s  = noise() * rE |> hpf(11000, 0.2) |> gain(0.05 * drumGate * rFade)
@@ -121,12 +121,12 @@ play stab:
 
 play clap:
   # Backbeat clap (every other kick). Auto-fades in over 3s.
-  var clapStart = -1
-  clapStart = if clapStart < 0 then t else clapStart
-  let cFade = ease((t - clapStart) / 3)
-  var clapCount = 0
-  clapCount = clapCount + kTrig
-  let isBack = clapCount mod 2
+  $clapStart = -1
+  $clapStart = if $clapStart < 0 then t else $clapStart
+  let cFade = ease((t - $clapStart) / 3)
+  $clapCount = 0
+  $clapCount = $clapCount + kTrig
+  let isBack = $clapCount mod 2
   let trig   = kTrig * isBack
   let env    = discharge(trig, 30)
   let s      = noise() * env |> bpf(1500, 0.4) |> gain(0.16 * drumGate * cFade)
@@ -134,9 +134,9 @@ play clap:
 
 play sparkle:
   # High pentatonic with octave doubling for sparkle.
-  var sparkleStart = -1
-  sparkleStart = if sparkleStart < 0 then t else sparkleStart
-  let cFade  = ease((t - sparkleStart) / 4)
+  $sparkleStart = -1
+  $sparkleStart = if $sparkleStart < 0 then t else $sparkleStart
+  let cFade  = ease((t - $sparkleStart) / 4)
   let cFreq  = wave(tempo, sparkleNotes)
   let cEnv   = discharge(impulse(tempo), 12)
   let layer1 = osc(sin, cFreq) + osc(sin, cFreq * 1.5) * 0.35
@@ -158,11 +158,11 @@ play riser:
   [s, s]
 
 # Mix with conservative headroom; reverb scaled by lfoA for atmospheric breathing.
-# OUTRO: outroStart captures `t` at first reload. outroFade ramps 1→0 over 270s
+# OUTRO: $outroStart captures `t` at first reload. outroFade ramps 1→0 over 270s
 # (~4.5 minutes) — gentle, smooth fade out for the end of the set.
-var outroStart = -1
-outroStart = if outroStart < 0 then t else outroStart
-let outroFade = 1 - ease((t - outroStart) / 270)
+$outroStart = -1
+$outroStart = if $outroStart < 0 then t else $outroStart
+let outroFade = 1 - ease((t - $outroStart) / 270)
 
 let dry      = (drone + kick + bass + acid + bell + hats + ride + stab + clap + sparkle + breath + riser) * 0.5
 let monoIn   = (dry[0] + dry[1]) * 0.5

@@ -1,0 +1,18 @@
+# Diagnostic A: cluster only, no drift, no stiffness. If this is
+# clean, drift is the CPU issue. If still crackly, cluster is at
+# fault (and we're CPU-bound on the 2x phasor count alone).
+let beat    = midi_cc(74) * 4.0
+let release = 0.5 + midi_cc(76) * 4.5
+
+let voices = midi_keyboard((f, g) =>
+  let env = swell(g, 0.01, release)
+  let voice = sum(16, n =>
+    let cf = n * f
+    let s1 = sin(TAU * phasor(cf - beat * 0.5))
+    let s2 = sin(TAU * phasor(cf + beat * 0.5))
+    if cf >= 22000 then 0
+    else (1.0 / pow(n, 1.5)) * (s1 + s2) * 0.5)
+  voice * env * 0.06)
+
+let s = voices |> reverb(2.8, 0.3)
+[s, s]
