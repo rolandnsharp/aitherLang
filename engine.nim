@@ -142,6 +142,23 @@ proc findSlot(name: string): int =
     if slots[i].name == name: return i
   -1
 
+# Compact stopped voices out of the slots array so they don't count
+# against MaxVoices. Caller must hold mtx — modifies slots / slotCount.
+# Inactive slots are the ones whose fade-out completed (audio callback
+# set active=false). Without sweeping, a session that stops 16 voices
+# without re-sending exhausts the table even though no voice is
+# audible. Order of remaining active slots is preserved.
+proc sweepInactiveSlots() =
+  var dst = 0
+  for src in 0 ..< slotCount:
+    if slots[src].active:
+      if dst != src:
+        slots[dst] = slots[src]
+      inc dst
+  for i in dst ..< slotCount:
+    slots[i] = Slot()
+  slotCount = dst
+
 proc fadeDeltaFor(seconds: float64): float64 =
   let s = if seconds <= 0.0: DefaultFadeMs / 1000.0 else: seconds
   1.0 / (s * float64(SampleRate))
@@ -227,8 +244,13 @@ proc loadPatch*(filename: string; fadeIn: float64): string =
     stderr.writeLine "compile FAIL"
     return "compile error: " & annotateErr(e.msg, userSrc, filename)
 
-  let idx = findSlot(baseName)
   acquire(mtx)
+  # Drop slots whose fade-out completed before deciding hot-swap vs new
+  # vs voice-limit-reached. Without this, a session that stopped 16
+  # voices without re-sending still saw "voice limit reached" even
+  # though every slot was silent (issue: voice slot leak on stop).
+  sweepInactiveSlots()
+  let idx = findSlot(baseName)
   let now = timeSec + timeFrac
   if idx >= 0:
     slots[idx].voice.commit(prepared)
@@ -274,6 +296,22 @@ proc retriggerVoice(name: string): string =
   slots[idx].voice.startT = timeSec + timeFrac
   release(mtx)
   ""
+
+proc markStoppedForTest*(name: string): bool =
+  ## Test-only: forcibly mark a voice inactive, simulating the audio
+  ## callback's "fade-out completed" branch. Lets tests exercise the
+  ## sweep logic without spinning up the audio thread.
+  let idx = findSlot(name)
+  if idx < 0: return false
+  acquire(mtx)
+  slots[idx].active = false
+  release(mtx)
+  true
+
+proc activeVoiceCount*(): int =
+  ## Test helper: number of currently-active slots (post-sweep semantics).
+  for i in 0 ..< slotCount:
+    if slots[i].active: inc result
 
 proc stopVoice*(name: string; fade: float64): string =
   let idx = findSlot(name)
