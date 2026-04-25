@@ -223,6 +223,91 @@ def soft_decay(n, pf):    1.0 / pow(n, 0.5)
 def bell_decay(n, pf):    1.0 / n
 def bright_decay(n, pf):  1.0 / pow(n, 0.3)
 
+# ---------------------------------------------------------------- physical instruments
+# Excitation-response physics. For sounds whose identity is in HOW
+# they respond to being struck, plucked, or bowed — additive can
+# fake the steady-state spectrum but loses the transient character.
+# Every def below has a comment explaining when its paradigm wins.
+#
+# `tuning_fork` is the canonical reference: a single damped HO, with
+# the integration written inline as `var x; var dx; dx += ... * dt;
+# x += dx * dt`. The equation is right there: ẍ + 2γẋ + ω²x =
+# strike·ω². The modal banks (`bowed_string`, `struck_bar`) run that
+# same equation per mode via `resonator`, the native integrator of
+# the same ODE — read `tuning_fork` once to understand what each
+# `resonator(...)` call inside the modal banks is doing.
+#
+# Hot-reload caveat: these defs use stateful primitives (var, delay,
+# resonator). On reload with parameter changes, the system can
+# transiently re-equilibrate (audible click on big jumps). Drive
+# parameters from `midi_cc` for smooth changes; large code edits to
+# a ringing instrument may pop.
+
+# Tuning fork — one damped harmonic oscillator, the canonical
+# physical primitive. Why include it: simplest physics example,
+# perfect teaching reference. Single mode, fixed damping; you can
+# hear the equation directly. The `var x; var dx` integration here
+# is what `resonator(input, ω, decay)` does for each mode of the
+# modal banks below — same math, fewer keystrokes.
+def tuning_fork(strike, freq):
+  let omega = TAU * freq
+  let omega2 = omega * omega
+  let gamma = 4.0
+  var x = 0.0
+  var dx = 0.0
+  dx = dx + (-2 * gamma * dx - omega2 * x + strike * omega2) * dt
+  x = x + dx * dt
+  x
+
+# Plucked string — Karplus-Strong. Why physics over additive: real
+# strings lose energy to the body and to internal damping, with
+# high frequencies decaying faster than low. This gives the
+# characteristic "pluck tail" where the sound darkens as it rings
+# out. Additive with a global envelope decays all partials together
+# and sounds synthetic. The delay-line + LP-feedback loop captures
+# the darkening naturally because the LP runs every loop iteration.
+# `brightness` in 0..1: 0 = dark (LP cutoff ~1 kHz, fast decay),
+# 1 = bright (cutoff ~9 kHz, near-lossless feedback).
+def pluck_string(strike, freq, brightness):
+  var loop = 0.0
+  let period = 1.0 / freq
+  let damped = lp1(loop, 1000 + brightness * 8000)
+  loop = strike + delay(damped, period, 0.05) * (0.99 - (1 - brightness) * 0.05)
+  loop
+
+# Bowed string — modal bank with continuous noisy excitation.
+# Why physics over additive: the bow is a continuous chaotic
+# forcing function; the modes ring AND re-excite each other through
+# the shared bow signal. The stick-slip "scratch" of the rosin and
+# the way tone blooms with bow pressure are excitation-driven —
+# additive would need explicit time-varying spectrum design that's
+# basically impossible to get right. Each `resonator` call is one
+# mode integrating the same damped HO as `tuning_fork`. Damping
+# scales with mode frequency (light, ω·γ ≈ 0.0003·modeF) so all
+# modes ring well past the bow's transients.
+def bowed_string(bow, freq):
+  let damping = 0.0003
+  sum(8, n =>
+    let modeF = freq * n
+    let gamma = damping * modeF
+    resonator(bow, TAU * modeF, 2 * gamma) / pow(n, 0.5))
+
+# Struck bar — modal bank with bar_partials ratios and
+# mode-dependent damping. Why physics over additive: a struck metal
+# bar's tonal evolution — bright transient that quickly mellows
+# into a long fundamental ring — is mode-dependent decay. An
+# additive version like `inharmonic(freq, bar_partials, ...) *
+# pluck(strike, decay)` decays all modes at the same rate and
+# never gives the natural shift from bright to dark. Damping has
+# two terms: 0.0008·modeF (frequency-proportional, physical bar
+# damping) plus n·0.5 (mode-index-proportional, kills high modes
+# faster) — that's the bright→dark evolution.
+def struck_bar(strike, freq):
+  sum(5, n =>
+    let modeF = freq * bar_partials(n)
+    let gamma = 0.0008 * modeF + n * 0.5
+    resonator(strike, TAU * modeF, 2 * gamma) / pow(n, 0.5))
+
 # ---------------------------------------------------------------- polyphony
 # A MIDI keyboard plays polyphonically. `voice_fn(freq, gate)` describes
 # what one held key sounds like; poly fans it out across all currently-

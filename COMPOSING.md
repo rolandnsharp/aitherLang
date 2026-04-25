@@ -431,8 +431,8 @@ fits the sound you're after; the engine doesn't care.
 |-------------------------------------------------------------|----------------------------------------|
 | A musical sound from its spectrum (pads, leads, vocal-like) | `additive(f, shape, N)`                |
 | Bells, plates, stiff strings — non-integer partials         | `inharmonic(f, ratio, amp, N)`         |
+| Plucked / bowed / struck physical instruments               | `pluck_string`, `bowed_string`, `struck_bar`, `tuning_fork` (stdlib) |
 | A vibrating physical object — transients, decay built-in    | `var x; var dx; ẍ + 2γẋ + ω²x = F(t)` (raw physics) |
-| Plucked / hammered strings                                  | Karplus-Strong: `delay` + `lp1` + feedback |
 | Sidebanded / FM grit — aliasing as character                | inline `sin(carrier + sin(modf) * depth)` |
 | Chiptune / lo-fi / digital-sounding                         | `osc(saw, f)`, `osc(sqr, f)`           |
 
@@ -440,6 +440,46 @@ These are recipes, not language commitments. The stdlib ships
 starter kits for the most common ones (additive, inharmonic);
 the rest you can write inline with `var`, `phasor`, `noise`,
 and a few cycles of math.
+
+### Physical instruments
+
+The stdlib ships four physical-instrument defs for sounds where
+excitation-response physics is the discriminating character:
+
+- `tuning_fork(strike, freq)` — single damped HO, the canonical
+  inline-physics example. Read its body to learn the pattern.
+- `pluck_string(strike, freq, brightness)` — Karplus-Strong: a
+  delay-line + LP-feedback loop. The LP runs every iteration so
+  the sound darkens as it rings out.
+- `bowed_string(bow, freq)` — modal bank with continuous noisy
+  excitation. The bow is whatever signal you pass in; try
+  `noise() * pressure + sin(TAU * phasor(freq) * vib_factor)`.
+- `struck_bar(strike, freq)` — modal bank with `bar_partials`
+  ratios and mode-dependent damping (high modes decay faster
+  than low ones — the metal-bar bright→dark evolution).
+
+Additive does NOT cover these well. A plucked string with a
+bolted-on envelope sounds synthetic; the same sound via
+Karplus-Strong is unmistakable. The `tuning_fork` body shows
+the integration literally inline (`var x; var dx; dx = dx + …
+* dt; x = x + dx * dt`); the modal banks delegate per-mode
+integration to `resonator`, which iterates the same equation —
+read `tuning_fork` once to understand what `resonator` is doing
+in `bowed_string` / `struck_bar`.
+
+```
+play strings:
+  midi_keyboard((freq, gate) =>
+    pluck_string(noise() * impulse(0.5) * gate, freq, 0.7) * 0.3)
+```
+
+**Hot-reload caveat.** These defs use `var` for state. On reload
+with parameter changes, the system can transiently re-equilibrate
+(an audible click on big jumps). For knob-driven parameters
+(`midi_cc`), no issue — knobs change smoothly. For code edits,
+large parameter swings on a ringing instrument may pop. This is
+acceptable for live coding; it's the same situation as any
+stateful filter with a large cutoff jump.
 
 Rules of thumb for picking:
 
@@ -649,6 +689,8 @@ Shape fns: `saw_shape`, `sqr_shape`, `tri_shape`, `warm_shape`,
 Ratio fns: `stiff_string`, `stiff_cello`, `bar_partials`,
 `plate_partials`, `phi_partials`.
 Amp fns: `soft_decay`, `bell_decay`, `bright_decay`.
+Physical instruments: `tuning_fork`, `pluck_string`,
+`bowed_string`, `struck_bar`.
 
 `prev(x)` returns the previous sample's value of any expression.
 Useful for forward cross-play feedback:

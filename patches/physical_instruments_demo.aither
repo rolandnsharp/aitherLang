@@ -1,0 +1,43 @@
+# Physical-instrument library demo — all four stdlib defs wrapped in
+# midi_keyboard so each is keyboard-playable. Solo / mute via:
+#   aither part physical_instruments_demo fork solo
+#   aither part physical_instruments_demo pluck solo
+#   aither part physical_instruments_demo bowed solo
+#   aither part physical_instruments_demo bar  solo
+#
+# Each play uses a per-voice rising-edge detector so a held note keeps
+# the bow / pluck loop alive but doesn't re-strike. `gate` directly
+# feeds the bow signal for the bowed string (continuous excitation).
+
+play fork:
+  # Tuning fork — single damped HO. Perfect transient + long sine ring.
+  midi_keyboard((freq, gate) =>
+    let strike = if gate > 0.5 and prev(gate) < 0.5 then 1.0 else 0.0
+    tuning_fork(strike * 30, freq) * 0.05)
+
+play pluck:
+  # Karplus-Strong pluck — brightness slides via CC 74.
+  midi_keyboard((freq, gate) =>
+    let strike = if gate > 0.5 and prev(gate) < 0.5 then 1.0 else 0.0
+    pluck_string(noise() * strike * 2.0, freq, 0.4 + midi_cc(74) * 0.5) * 0.4)
+
+play bowed:
+  # Bowed string — gate provides bow pressure; CC 71 mixes a tiny
+  # vibrato sine in for a more violin-like attack.
+  midi_keyboard((freq, gate) =>
+    let pressure = gate * (0.6 + midi_cc(71) * 0.4)
+    let bow = noise() * pressure + sin(TAU * phasor(freq * 0.001)) * pressure * 0.05
+    bowed_string(bow, freq) * gate * 0.04)
+
+play bar:
+  # Struck metal bar — bright transient mellowing to fundamental ring.
+  midi_keyboard((freq, gate) =>
+    let strike = if gate > 0.5 and prev(gate) < 0.5 then 1.0 else 0.0
+    struck_bar(strike * 8, freq) * 0.05)
+
+# `play` values are stereo (mirrored when the body is mono), so a sum
+# of plays is stereo and becomes the final output directly. Reverb on
+# the master would need a `mono()` collapse first; left out so each
+# instrument can be auditioned dry, then the user can add reverb to
+# whichever play wants it.
+fork + pluck + bowed + bar
