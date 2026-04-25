@@ -1,4 +1,4 @@
-## Step 3b regression test — a play-local `let` or `var` whose name
+## Step 3b regression test — a play-local `let` or `$state` whose name
 ## matches a play block must error at codegen time with a clear message,
 ## not crash later with a misleading type mismatch.
 ##
@@ -52,14 +52,14 @@ play bass:
 bass + bagpipes
 """, "play block")
 
-# 3b.3: var inside a play shadowing a play name
+# 3b.3: $state inside a play shadowing a play name
 mustFail("""
 play bass:
   sin(TAU * phasor(55)) * 0.3
 play other:
-  var bass = 0.0
-  bass = bass + 0.01
-  bass
+  $bass = 0.0
+  $bass = $bass + 0.01
+  $bass
 bass + other
 """, "play block")
 

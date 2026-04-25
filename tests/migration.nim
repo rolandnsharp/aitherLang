@@ -1,21 +1,21 @@
-## Item 1 test: top-level `var` values migrate by name across hot reload.
-## Patch A accumulates `phase` for 100 ticks (→ 1.0). Reload same patch;
+## Item 1 test: top-level `$state` values migrate by name across hot reload.
+## Patch A accumulates `$phase` for 100 ticks (→ 1.0). Reload same patch;
 ## first tick should see the migrated phase, not a fresh 0.
 
 import std/[os, tables]
 import ../parser, ../voice
 
 const PatchA = """
-var phase = 0
-phase = phase + 0.01
-phase
+$phase = 0
+$phase = $phase + 0.01
+$phase
 """
 
 const PatchB = """
-var phase = 0
-var freq = 440
-phase = phase + 0.01
-phase + freq * 0
+$phase = 0
+$freq = 440
+$phase = $phase + 0.01
+$phase + $freq * 0
 """
 
 let progA = parseProgram(PatchA)
@@ -52,9 +52,9 @@ doAssert abs(afterB.l - 1.03) < 1e-9,
 # assert against the compiled struct by running a tick that reads it.
 # Patch that returns freq:
 const PatchC = """
-var phase = 0
-var freq = 440
-freq
+$phase = 0
+$freq = 440
+$freq
 """
 v.load(parseProgram(PatchC), 48000.0)
 let afterC = v.tick(0.0)

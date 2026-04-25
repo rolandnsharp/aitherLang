@@ -144,11 +144,13 @@ block lambdaMisuse:
     doAssert "lambda" in e.msg.toLowerAscii(),
       "error should mention lambda, got: " & e.msg
 
-# --- 11. sum with non-literal N: error clearly.
+# --- 11. sum with non-literal N: error clearly. State (`$counter`) is
+# pool-backed at runtime, not a compile-time constant — so sum() must
+# refuse it the same way it refuses a let bound to a non-literal RHS.
 block nonLiteralN:
   const P = """
-var counter = 3
-sum(counter, n => n)
+$counter = 3
+sum($counter, n => n)
 """
   try:
     let v = newVoice(48000.0)

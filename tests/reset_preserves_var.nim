@@ -1,18 +1,20 @@
-## resetPool used to zero the entire DSP pool. That clobbered `var`
+## resetPool used to zero the entire DSP pool. That clobbered state
 ## storage too — meaning user-authored auto-fade-in patterns (e.g.
-## `var startTime = -1; startTime = if startTime < 0 then t else startTime`)
+## `$startTime = -1; $startTime = if $startTime < 0 then t else $startTime`)
 ## would re-trigger from scratch every time NaN tripped a reset. Now
 ## resetPool walks the regions and skips the "var" type, so user-named
-## state survives.
+## state survives. (Region typeName is still "var" for layout-stability
+## across the pre-/post-sigil migration boundary; the sigil is a parser
+## change, not a codegen one.)
 
 import std/[math]
 import ../parser, ../voice
 
 const Patch = """
 def step():
-  var counter = 0.0
-  counter = counter + 1.0
-  counter
+  $counter = 0.0
+  $counter = $counter + 1.0
+  $counter
 let c = step()
 c
 """

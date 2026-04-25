@@ -27,9 +27,9 @@ proc loadWith(src: string): NativeVoice =
 # --- 1. prev() of a counter — returns previous sample's value.
 block samplesDelay:
   const P = """
-var c = 0.0
-c = c + 1
-prev(c)
+$c = 0.0
+$c = $c + 1
+prev($c)
 """
   let v = loadWith(P)
   for i in 0..<5:
@@ -37,20 +37,20 @@ prev(c)
     let want = float64(i)             # at tick i, c was incremented to i+1
                                       #   prev returns last tick's c which was i
     doAssert abs(s.l - want) < 1e-9,
-      "tick " & $i & ": prev(c) = " & $s.l & " want " & $want
+      "tick " & $i & ": prev($c) = " & $s.l & " want " & $want
 
 # --- 2. prev(let-bound expr) and prev(inline expr) behave identically.
 block sameLetVsInline:
   const PL = """
-var c = 0.0
-c = c + 1
-let g = c
+$c = 0.0
+$c = $c + 1
+let g = $c
 prev(g)
 """
   const PI = """
-var c = 0.0
-c = c + 1
-prev(c)
+$c = 0.0
+$c = $c + 1
+prev($c)
 """
   let vl = loadWith(PL)
   let vi = loadWith(PI)
@@ -64,10 +64,10 @@ prev(c)
 # state. Without per-call-site keying, one would clobber the other.
 block independentSlots:
   const P = """
-var c = 0.0
-c = c + 1
-let p1 = prev(c)
-let p2 = prev(c * 2.0)
+$c = 0.0
+$c = $c + 1
+let p1 = prev($c)
+let p2 = prev($c * 2.0)
 p1 + p2
 """
   let v = loadWith(P)
@@ -83,10 +83,10 @@ p1 + p2
 # state — symmetric variant of (3).
 block sameExprIndependent:
   const P = """
-var c = 0.0
-c = c + 1
-let p1 = prev(c)
-let p2 = prev(c)
+$c = 0.0
+$c = $c + 1
+let p1 = prev($c)
+let p2 = prev($c)
 p1 - p2
 """
   let v = loadWith(P)
@@ -99,9 +99,9 @@ p1 - p2
 # sequence and confirm strike fires exactly once at the 0→1 transition.
 block risingEdge:
   const P = """
-var c = 0.0
-c = c + 1
-let g = if c >= 3 and c <= 5 then 1.0 else 0.0
+$c = 0.0
+$c = $c + 1
+let g = if $c >= 3 and $c <= 5 then 1.0 else 0.0
 let strike = if g > 0.5 and prev(g) < 0.5 then 1.0 else 0.0
 strike
 """
@@ -183,9 +183,9 @@ strike
 # `cond or update_state()` should run update_state regardless of cond.
 block orEager:
   const P = """
-var counter = 0.0
-counter = counter + 1
-let any = 1.0 or counter > 0
+$counter = 0.0
+$counter = $counter + 1
+let any = 1.0 or $counter > 0
 any
 """
   let v = loadWith(P)
