@@ -36,20 +36,25 @@
 #                    shimmer. The "epic gothic organ from Tesla" zone
 #                    needs this knob past 30%.
 
-let f       = midi_freq()
-let g       = midi_gate()
 let depth   = midi_cc(74) * 4.0                    # 0..4 radians
 let modr    = 0.5 + midi_cc(71) * 3.5              # 0.5..4 mod ratio
 let release = 0.5 + midi_cc(76) * 4.5
 let motion  = midi_cc(77) * 0.018                   # 0..1.8% drift
-let env     = swell(g, 0.01, release)
 
-let voice = sum(16, n =>
-  let cf   = n * f
-  let modf = cf * modr * (1 + motion * sin(t * n / 11 + n * 0.3))
-  let mv   = sin(TAU * phasor(modf)) * depth
-  if cf >= 22000 then 0
-  else (1.0 / pow(n, 0.55)) * sin(TAU * phasor(cf) + mv))
+# Polyphonic — pressing C-E-G plays all three Tesla-organ chord tones.
+# Each held note gets its own envelope, its own 16-partial FM stack,
+# and its own modulator drift. Reverb is shared across the polyphony
+# so chord voices share a single cathedral space rather than each
+# voice carrying its own tail.
+let voices = midi_keyboard((f, g) =>
+  let env = swell(g, 0.01, release)
+  let voice = sum(16, n =>
+    let cf   = n * f
+    let modf = cf * modr * (1 + motion * sin(t * n / 11 + n * 0.3))
+    let mv   = sin(TAU * phasor(modf)) * depth
+    if cf >= 22000 then 0
+    else (1.0 / pow(n, 0.55)) * sin(TAU * phasor(cf) + mv))
+  voice * env * 0.10)
 
-let s = voice * env * 0.10 |> reverb(2.8, 0.3)
+let s = voices |> reverb(2.8, 0.3)
 [s, s]

@@ -31,13 +31,14 @@
 #     top as a separate effect. Wet at 0.2 is conservative.
 # ---------------------------------------------------------------------
 
-let f     = midi_freq()
-let gate  = midi_gate()
-let env   = swell(gate, 0.25, 0.6)
 let blend = midi_cc(74)
 
-let bright = inharmonic(f, stiff_cello, cello_shape, 24)
-let warm   = additive(f, warm_shape, 24)
-let tone   = bright * (1 - blend) + warm * blend
+# Polyphonic cello — pressing C-E-G plays a three-note chord.
+let voices = midi_keyboard((f, gate) =>
+  let env    = swell(gate, 0.25, 0.6)
+  let bright = inharmonic(f, stiff_cello, cello_shape, 24)
+  let warm   = additive(f, warm_shape, 24)
+  let tone   = bright * (1 - blend) + warm * blend
+  tone * env * 0.2)
 
-tone * env * 0.2 |> reverb(2.5, 0.2)
+voices |> reverb(2.5, 0.2)

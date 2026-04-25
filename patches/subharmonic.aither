@@ -18,18 +18,21 @@
 #
 # Try high keys (C5+) so the subharmonics fall in audible range.
 
-let f       = midi_freq()
-let g       = midi_gate()
 let depth   = 0.4 + midi_cc(74) * 1.2              # 0.4..1.6 exponent
 let tilt    = midi_cc(71) * 1.5                     # 0..1.5 falloff
 let release = 0.5 + midi_cc(76) * 4.5               # 0.5..5.0 s
-let env     = swell(g, 0.01, release)
 
-let voice = sum(8, n =>
-  let pf = f / pow(n, depth)
-  let am = 0.5 / pow(n, tilt)
-  if pf < 30 then 0
-  else am * sin(TAU * phasor(pf)))
+# Polyphonic — chords get their own subharmonic stacks. Stacking notes
+# C-E-G with depth = right makes each note bloom downwards into its
+# own bass region.
+let voices = midi_keyboard((f, g) =>
+  let env = swell(g, 0.01, release)
+  let voice = sum(8, n =>
+    let pf = f / pow(n, depth)
+    let am = 0.5 / pow(n, tilt)
+    if pf < 30 then 0
+    else am * sin(TAU * phasor(pf)))
+  voice * env * 0.14)
 
-let s = voice * env * 0.14 |> reverb(2.5, 0.3)
+let s = voices |> reverb(2.5, 0.3)
 [s, s]

@@ -276,20 +276,22 @@ play stab:
   [mono, mono]
 
 play organ:
-  let f       = midi_freq()
-  let g       = midi_gate()
+  # Polyphonic Tesla organ — chord-friendly. CCs are global to all
+  # voices; each held note runs its own envelope + 16-partial FM stack.
   let depth   = midi_cc(74) * 4.0
   let modr    = 0.5 + midi_cc(71) * 3.5
   let release = 0.5 + midi_cc(76) * 4.5
   let motion  = midi_cc(77) * 0.018
-  let env     = swell(g, 0.01, release)
-  let voice = sum(16, n =>
-    let cf   = n * f
-    let modf = cf * modr * (1 + motion * sin(t * n / 11 + n * 0.3))
-    let mv   = sin(TAU * phasor(modf)) * depth
-    if cf >= 22000 then 0
-    else (1.0 / pow(n, 0.55)) * sin(TAU * phasor(cf) + mv))
-  let s = voice * env * 0.10 |> reverb(2.8, 0.3)
+  let voices = midi_keyboard((f, g) =>
+    let env = swell(g, 0.01, release)
+    let voice = sum(16, n =>
+      let cf   = n * f
+      let modf = cf * modr * (1 + motion * sin(t * n / 11 + n * 0.3))
+      let mv   = sin(TAU * phasor(modf)) * depth
+      if cf >= 22000 then 0
+      else (1.0 / pow(n, 0.55)) * sin(TAU * phasor(cf) + mv))
+    voice * env * 0.10)
+  let s = voices |> reverb(2.8, 0.3)
   [s, s] * organLvl
 
 let dry = drums + bass + pad + organ + shaker + arp + drone + riser + stab + fill + horn

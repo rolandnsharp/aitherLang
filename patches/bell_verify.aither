@@ -25,9 +25,12 @@
 #     not drown, the inharmonic tail.
 # ---------------------------------------------------------------------
 
-let g      = midi_gate()
-let strike = if g > 0.5 and prev(g) < 0.5 then 1.0 else 0.0
-let env    = pluck(strike, 2.0)
-let f      = midi_freq()
+# Polyphonic bell — each held key strikes its own bar-partial spectrum.
+# The rising-edge detector lives per-voice via the lambda body, so each
+# new keypress fires the strike for that voice independently.
+let voices = midi_keyboard((f, g) =>
+  let strike = if g > 0.5 and prev(g) < 0.5 then 1.0 else 0.0
+  let env    = pluck(strike, 2.0)
+  inharmonic(f, bar_partials, bell_decay, 5) * env * 0.3)
 
-inharmonic(f, bar_partials, bell_decay, 5) * env * 0.3 |> reverb(3.0, 0.4)
+voices |> reverb(3.0, 0.4)

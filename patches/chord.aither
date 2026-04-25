@@ -30,23 +30,28 @@ def cluster(n):
         else (if n == 3 then 1.414
               else 1.498))
 
-let f       = midi_freq()
-let g       = midi_gate()
 let morph   = midi_cc(74) * 2                       # 0..2 picks chord
 let bright  = 0.2 + midi_cc(71) * 1.2
 let release = 0.5 + midi_cc(76) * 4.5
-let env     = swell(g, 0.01, release)
 
-let voice = sum(4, n =>
-  let r1 = maj7(n)
-  let r2 = sus(n)
-  let r3 = cluster(n)
-  let r  = if morph < 1 then r1 * (1 - morph) + r2 * morph
-           else r2 * (2 - morph) + r3 * (morph - 1)
-  sum(6, k =>
-    let pf = k * f * r
-    if pf >= 24000 then 0
-    else (1.0 / pow(k, bright)) * sin(TAU * phasor(pf))))
+# Polyphonic — every held key plays its own four-voice chord above it.
+# Pressing two keys an octave apart yields two chord stacks, eight
+# voices total, all alive simultaneously. The summable abstraction
+# composes: midi_keyboard fans across keys, sum fans across chord
+# tones, sum fans across partials.
+let voices = midi_keyboard((f, g) =>
+  let env = swell(g, 0.01, release)
+  let voice = sum(4, n =>
+    let r1 = maj7(n)
+    let r2 = sus(n)
+    let r3 = cluster(n)
+    let r  = if morph < 1 then r1 * (1 - morph) + r2 * morph
+             else r2 * (2 - morph) + r3 * (morph - 1)
+    sum(6, k =>
+      let pf = k * f * r
+      if pf >= 24000 then 0
+      else (1.0 / pow(k, bright)) * sin(TAU * phasor(pf))))
+  voice * env * 0.07)
 
-let s = voice * env * 0.07 |> reverb(2.5, 0.3)
+let s = voices |> reverb(2.5, 0.3)
 [s, s]

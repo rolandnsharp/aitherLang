@@ -21,18 +21,19 @@ def prime_ratio(n):
                                       else (if n == 8 then 19.0
                                             else 23.0)))))))
 
-let f       = midi_freq()
-let g       = midi_gate()
 let bright  = 0.2 + midi_cc(74) * 1.3              # 0.2..1.5
 let detune  = midi_cc(71) * 0.012                   # 0..1.2% drift
 let release = 0.5 + midi_cc(76) * 4.5               # 0.5..5.0 s
-let env     = swell(g, 0.01, release)
 
-let voice = sum(9, n =>
-  let r  = prime_ratio(n) * (1 + detune * sin(t * n / 5 + n * 0.7))
-  let pf = f * r
-  if pf >= 24000 then 0
-  else (1.0 / pow(n, bright)) * sin(TAU * phasor(pf)))
+# Polyphonic — each held key spreads across its own 9 prime partials.
+let voices = midi_keyboard((f, g) =>
+  let env = swell(g, 0.01, release)
+  let voice = sum(9, n =>
+    let r  = prime_ratio(n) * (1 + detune * sin(t * n / 5 + n * 0.7))
+    let pf = f * r
+    if pf >= 24000 then 0
+    else (1.0 / pow(n, bright)) * sin(TAU * phasor(pf)))
+  voice * env * 0.18)
 
-let s = voice * env * 0.18 |> reverb(3.0, 0.35)
+let s = voices |> reverb(3.0, 0.35)
 [s, s]
