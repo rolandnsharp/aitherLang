@@ -499,6 +499,39 @@ piece structurally broken). That's exactly what
 The aither workflow assumes git underneath. Treat your
 patches directory as a git repo from day one.
 
+## Iterating with the analysis CLI
+
+When designing a sound, render and audit before bothering
+anyone with playback. `./aither audit patches/foo.aither 2`
+prints a spectral summary — top peaks, centroid, RMS,
+fundamental estimate — that lets you verify the patch is
+producing what you intended (correct fundamental, harmonic
+series falloff, no aliased peaks above Nyquist, expected
+brightness from the centroid). Offline: no engine required,
+~100 ms turnaround.
+
+```
+$ ./aither audit patches/cello.aither 2
+audit: patches/cello.aither (2.0s @ 48000 Hz)
+  RMS:        -18.4 dB    Peak: -3.2 dB
+  Fundamental: 220.0 Hz
+  Centroid:   1842 Hz
+  ZCR:        2114 / sec
+  Top peaks:
+     1.   220.1 Hz  0.0 dB
+     2.   440.3 Hz  -8.1 dB
+     ...
+```
+
+For live voices (engine running, MIDI playing in),
+`./aither spectrum [voice]` does the same against the
+engine's last ~0.5s of buffered output. With no argument it
+analyses the master mix; with a voice name it analyses just
+that voice's contribution. Use it to confirm a patch sounds
+the way you think when MIDI input is involved (e.g. a
+keyboard-driven additive lead — offline render sees no
+midi_freq and produces silence).
+
 ## Common bugs I have hit
 
 - **`wave(freq, notes)` cycles the whole array at `freq` Hz.**
