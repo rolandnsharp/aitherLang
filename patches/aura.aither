@@ -1,0 +1,55 @@
+# aura — first attempt at an aither-native sound.
+#
+# Combines two regions from SOUND_FRONTIERS.md:
+#
+#   * Region 1 — partial-index-modulated detuning. Each of 24 partials
+#     drifts at its own LFO rate (n / 7 Hz, with a per-partial phase
+#     offset). The amount is tiny (~0.4%) so individual partials don't
+#     audibly bend, but in aggregate the spectrum loses any "static"
+#     quality. The sound is *internally alive* without external
+#     modulation.
+#
+#   * Region 3 — time-varying shape. A formant-like resonance peak
+#     walks slowly across the harmonic indices over a 14-second cycle.
+#     The perceived "vowel" of the sound morphs without the pitch
+#     ever changing.
+#
+# Hold a key (any pitch — the swarm scales with the fundamental).
+# Listen for at least 15 seconds. If the sound feels static, the
+# patch is broken; if it feels alive, the regions are doing their
+# job.
+#
+# ----------------------------------------------------------- listen
+#   * SHIMMER — there should be a fine-grained chorus-like texture
+#     that no LFO rate alone could produce. That's the n/7 detuning.
+#   * VOWEL WALK — the brightest partial slowly moves up the spectrum
+#     and back. The perceived character should drift from "soft" to
+#     "open" to "edged" and back without you doing anything.
+#   * COHERENT — should still feel like one voice, not a chord, not
+#     a noise. If it loses the sense of pitch, the detuning is too
+#     wide.
+#
+# Adjust knobs (Minilab CC 74 / 71) to taste.
+#   CC 74: detuning depth (0 = static spectrum, 1 = wider swarm)
+#   CC 71: formant walk speed (0 = stationary, 1 = fast morph)
+# ----------------------------------------------------------- listen
+
+let f    = midi_freq()
+let g    = midi_gate()
+let env  = swell(g, 0.6, 1.8)
+
+let depth = 0.001 + midi_cc(74) * 0.008          # 0.1% .. 0.9% detuning
+let speed = 0.05 + midi_cc(71) * 0.4             # very slow .. fairly fast
+
+let walk    = (sin(t * speed) + 1) * 0.5          # 0..1
+let peak_n  = 3 + walk * 18                       # formant centre walks 3..21
+
+let voice = sum(24, n =>
+  let pf      = n * f * (1 + depth * sin(t * n / 7 + n * 0.41))
+  let basis   = 1.0 / pow(n, 0.65)
+  let formant = exp(-pow((n - peak_n) / 3.5, 2)) * 4
+  if pf >= 24000 then 0
+  else basis * (1 + formant) * sin(TAU * phasor(pf)))
+
+let s = voice * env * 0.09 |> reverb(3.5, 0.3)
+[s, s]

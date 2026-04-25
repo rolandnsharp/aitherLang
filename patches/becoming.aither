@@ -1,0 +1,48 @@
+# becoming — a 90-second arc through three voices, three timescales.
+#
+# A single shape (the triangle) modulates everything:
+#   ~5 Hz   → pitch vibrato (audio rate)
+#   ~0.06 Hz → melodic contour (16s sweep)
+#   ~0.011 Hz → the piece's whole arc (90s)
+#
+# Three layers (drone → body → wash) crossfade in triangular peaks.
+# The body migrates across stereo on a 24s cycle. Drone and wash stay
+# centered. A long reverb glues the whole field together. The piece
+# resolves to filtered noise as the drone dissolves into texture.
+
+let pos    = t - start_t
+let fadeIn = ease(pos / 4)
+
+# --- the fractal: same triangle, three timescales ---------------------
+let vibrato = tri(t * TAU * 5) * 0.005          # ~5 Hz pitch wobble
+let contour = tri(t * TAU * 0.06)               # 16s melodic sweep, -1..1
+let center  = 110 * pow(2, contour * 0.3)        # A2, drifts ~3 semitones
+let freq    = center * (1 + vibrato)
+
+# --- triangular section envelopes (the same shape, unrolled in time) --
+let dG = ease(max(0, 1 - abs(pos - 12) / 22))    # drone:  peak 12s, ±22
+let sG = ease(max(0, 1 - abs(pos - 45) / 28))    # body:   peak 45s, ±28
+let wG = ease(max(0, 1 - abs(pos - 75) / 22))    # wash:   peak 75s, ±22
+
+# --- layer 1: the seed (pure sine drone) ------------------------------
+let drone = osc(sin, freq) * dG * 0.35
+
+# --- layer 2: the body (detuned saw stack, slow filter opening) -------
+let stack = (osc(saw, freq) + osc(saw, freq * 1.007) + osc(saw, freq * 0.993)) / 3
+let body  = stack |> lpf(300 + sG * 1800, 0.55) |> gain(sG * 0.22)
+
+# --- layer 3: the dissolution (bandpass noise tracking pitch) ---------
+let wash = noise() |> bpf(freq * 5 + wG * 800, 0.85) |> gain(wG * 0.35)
+
+# --- the conversation: body migrates across the field -----------------
+let panPos = sin(TAU * pos * 0.042)              # 24s pan cycle
+let bodyLR = pan(body, panPos)                   # [L, R]
+
+# Drone + wash centered (scalar broadcasts onto each channel of bodyLR).
+let dry = bodyLR + drone + wash
+
+# Long reverb on the mono sum — wide tail without smearing the pan.
+let monoIn = (dry[0] + dry[1]) * 0.5
+let wet    = monoIn |> reverb(7, 0.45)
+
+(dry + wet * 0.5) * fadeIn

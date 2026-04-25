@@ -1,0 +1,52 @@
+# chord — one keypress plays a four-voice chord. MIDI-playable.
+#
+# `sum(4, n => additive(f * chord_ratio(n), shape, 8))` — for each
+# of the 4 chord tones, build a full 8-partial additive voice at a
+# scaled fundamental. The whole thing is one lambda body; aither
+# unrolls into 32 sine oscillators with their own state.
+#
+# Knobs (Minilab):
+#   CC 74 (knob 1) — CHORD TYPE morph. Three voicings interpolated
+#                    smoothly: left = major 7, middle = sus 4 + 9,
+#                    right = dissonant cluster (tritone + min2).
+#   CC 71 (knob 2) — BRIGHTNESS. Amp falloff inside each voice.
+#   CC 76 (knob 3) — RELEASE.
+
+def maj7(n):
+  if n == 1 then 1.0
+  else (if n == 2 then 1.25
+        else (if n == 3 then 1.5
+              else 1.875))
+
+def sus(n):
+  if n == 1 then 1.0
+  else (if n == 2 then 1.333
+        else (if n == 3 then 1.5
+              else 2.25))
+
+def cluster(n):
+  if n == 1 then 1.0
+  else (if n == 2 then 1.0595
+        else (if n == 3 then 1.414
+              else 1.498))
+
+let f       = midi_freq()
+let g       = midi_gate()
+let morph   = midi_cc(74) * 2                       # 0..2 picks chord
+let bright  = 0.2 + midi_cc(71) * 1.2
+let release = 0.5 + midi_cc(76) * 4.5
+let env     = swell(g, 0.01, release)
+
+let voice = sum(4, n =>
+  let r1 = maj7(n)
+  let r2 = sus(n)
+  let r3 = cluster(n)
+  let r  = if morph < 1 then r1 * (1 - morph) + r2 * morph
+           else r2 * (2 - morph) + r3 * (morph - 1)
+  sum(6, k =>
+    let pf = k * f * r
+    if pf >= 24000 then 0
+    else (1.0 / pow(k, bright)) * sin(TAU * phasor(pf))))
+
+let s = voice * env * 0.07 |> reverb(2.5, 0.3)
+[s, s]

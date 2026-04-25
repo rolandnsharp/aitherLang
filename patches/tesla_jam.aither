@@ -1,0 +1,298 @@
+# tesla_jam — backing track for jamming on the Tesla organ.
+# A minor, Am - F - C - G progression at 100 BPM.
+#
+# ============================================================ MIXER
+# Sliders set instrument levels:
+#   Slider 1 (CC 82) — DRUMS
+#   Slider 2 (CC 83) — BASS
+#   Slider 3 (CC 85) — PAD
+#   Slider 4 (CC 17) — ORGAN  (your Tesla organ — play on the keys)
+#
+# Wiggle each slider once after loading (CCs read 0 until movement).
+#
+# ============================================================ KNOBS
+# Knobs 1-4 own the organ:
+#   K1 (CC 74) — FM depth   (gothic-Tesla recipe: 37/127)
+#   K2 (CC 71) — mod ratio  (recipe: 93/127)
+#   K3 (CC 76) — release    (recipe: 5/127)
+#   K4 (CC 77) — motion     (recipe: 40/127)
+#
+# Knobs 5-8 RADICALLY modify the backing — go to the extremes:
+#   K5 (CC 93, INVERTED) — PAD TIMBRE
+#       Sweeps the partial-amp falloff exponent. Right (CW) = bright,
+#       edgy pad with high partials; left (CCW) = dark, hollow pad
+#       with only fundamentals. Same architecture as the organ but
+#       applied to a chord stack — three voices each with a custom
+#       additive spectrum.
+#   K6 (CC 18) — KICK PUNCH
+#       Single knob controls three kick parameters at once:
+#       pitch envelope depth, body cutoff, and decay length.
+#       Left = tight click (subby tap, no boom).
+#       Right = thunder (long pitch dive, deep body, slow decay).
+#       The kick character is the floor of the jam — this is where
+#       you reshape the energy.
+#   K7 (CC 19) — BASS DRIVE
+#       Saturation. 1× → 4× clean to crushed.
+#   K8 (CC 16) — BASS FM CHAOS
+#       Same trick as the Tesla organ but on the bass partials —
+#       each bass partial gets its own FM modulator. At 0 it's a
+#       clean additive saw bass. As you crank it, the bass walks
+#       through "subtle harmonic richness" → "metallic growl" →
+#       "broken-radio bass" without changing the underlying line.
+#       This is the radical knob.
+
+let pos    = t - start_t
+let fadeIn = ease(pos / 4)
+
+let tempo = 100.0 / 60                              # 100 BPM hardcoded
+
+let drumLvl  = midi_cc(82)
+let bassLvl  = midi_cc(83)
+let padLvl   = midi_cc(85)
+let organLvl = midi_cc(17)
+
+# Pad knob (K5 is inverted)
+let padExp = 0.4 + (1 - midi_cc(93)) * 1.6         # 0.4..2.0
+
+# Kick knob (K6) — punch/character. One knob, three parameters.
+let kickK     = midi_cc(18)
+let kickSweep = 60 + kickK * 280                    # pitch envelope depth
+let kickCut   = 200 + kickK * 600                   # body lpf cutoff
+let kickDec   = 8 + kickK * 35                      # discharge rate (slower=longer)
+
+# Bass knobs
+let bassDrive  = 1.0 + midi_cc(19) * 3.0            # 1..4x
+let bassChaos  = midi_cc(16) * 3.5                  # 0..3.5 rad FM depth
+
+let chordRoots = [110.0, 87.31, 130.81, 98.0]      # Am F C G
+let chordTops  = [165.0, 130.81, 196.0, 146.83]    # E C G D
+let chordMids  = [130.81, 110.0, 164.81, 123.47]   # C A E B
+
+let bassNotes = [
+  110.0, 110.0, 220.0, 110.0,
+  87.31, 87.31, 174.61, 87.31,
+  130.81, 130.81, 261.63, 130.81,
+  98.0, 98.0, 196.0, 98.0
+]
+
+let kTrig = impulse(tempo)
+let kEnv  = discharge(kTrig, kickDec)
+let sc    = 1 - kEnv * 0.75
+
+# Hoisted riser timing — riser uses a softer curve, pad duck uses a
+# sharper one so the duck is more localised to the climax moment.
+let riseP   = phasor(tempo / 32)
+let riseAmp = pow(riseP, 1.5)
+let padDuck = 1 - pow(riseP, 4) * 0.55
+
+# Set dynamics — every 64 beats a "verse dip" pulls pad/arp/horn down
+# to 30% for ~6 seconds (the middle of the cycle), then ramps back.
+# Creates a verse/chorus pulse over the longer arc.
+let setCycle = 64 / tempo
+let setPos   = (t mod setCycle) / setCycle
+let stripDip = if setPos < 0.4 then 0.0
+               else (if setPos < 0.5 then (setPos - 0.4) * 10
+                     else (if setPos < 0.6 then 1.0
+                           else (if setPos < 0.7 then 1 - (setPos - 0.6) * 10
+                                 else 0.0)))
+let stripped = 1 - stripDip * 0.7
+
+play drums:
+  let kP    = 40 + discharge(kTrig, 30) * kickSweep
+  let kBody = sin(TAU * phasor(kP)) * kEnv
+  let kSub  = sin(TAU * phasor(kP * 0.5)) * kEnv * 0.7
+  # Breakdown: kick fades out over last 4 beats of every 32-beat
+  # cycle, then snaps back. Synchronised with the riser peak so the
+  # tension peaks while the kick is silent — the drop hits when the
+  # cycle resets.
+  let kCycle = 32 / tempo
+  let kPos   = (t mod kCycle) / kCycle
+  let kBreak = if kPos > 0.875 then 1 - (kPos - 0.875) * 8 else 1.0
+  # Boost kick by +30% for first 2 beats after each reset — the "drop"
+  let kBoost = 1 + max(0, 1 - kPos * 16) * 0.3
+  let kick   = ((kBody + kSub) |> lpf(kickCut, 0.4) |> gain(0.32)) * kBreak * kBoost
+
+  var snC = 0
+  snC = snC + impulse(tempo)
+  let snBack = snC mod 2
+  let snTrig = impulse(tempo) * snBack
+  let snEnv  = discharge(snTrig, 28)
+  let snTone = inharmonic(195, bar_partials, bell_decay, 5) * 0.3
+  let snBody = noise() * 0.6 + snTone
+  let snare  = snBody * snEnv |> hpf(900, 0.25) |> gain(0.14)
+
+  let hP = phasor(tempo * 2)
+  let hE = exp(-hP * 60)
+  let hat = noise() * hE |> hpf(8000, 0.3) |> gain(0.05)
+
+  let dry = (kick + snare + hat) * drumLvl
+  let wet = dry |> reverb(2.0, 0.2)
+  let s = dry + wet * 0.4
+  [s, s]
+
+play bass:
+  let bFreq = wave(tempo / 16, bassNotes)
+  let bEnv  = discharge(impulse(tempo), 5) * 0.5 + 0.5
+  # FM-injected additive bass — each of 8 partials gets its own
+  # modulator. K8 (bassChaos) is the depth knob.
+  let voice = sum(8, n =>
+    let cf   = n * bFreq
+    let modf = cf * 2.01
+    let mv   = sin(TAU * phasor(modf)) * bassChaos
+    if cf >= 12000 then 0
+    else (1.0 / pow(n, 0.7)) * sin(TAU * phasor(cf) + mv))
+  let sub = additive(bFreq * 0.5, saw_shape, 4) * 0.3
+  let raw = voice + sub
+  let s = raw * bEnv |> lpf(450 + bassChaos * 600, 0.55) |> drive(bassDrive) |> gain(sc * bassLvl * 0.22)
+  [s, s]
+
+play pad:
+  # Three-voice chord with custom partial stack per voice.
+  # K5 (padExp) sweeps timbre; K6 (padShimmer) adds drift on every
+  # partial of every voice — 18 sines moving independently.
+  let topF  = wave(tempo / 16, chordTops)
+  let midF  = wave(tempo / 16, chordMids)
+  let rootF = wave(tempo / 16, chordRoots) * 2
+  let v1 = sum(6, n =>
+    let pf = n * topF * (1 + 0.003 * sin(t * n / 13 + n * 0.4))
+    if pf >= 24000 then 0
+    else (1.0 / pow(n, padExp)) * sin(TAU * phasor(pf)))
+  let v2 = sum(6, n =>
+    let pf = n * midF * (1 + 0.003 * sin(t * n / 17 + n * 0.7))
+    if pf >= 24000 then 0
+    else (1.0 / pow(n, padExp)) * sin(TAU * phasor(pf)))
+  let v3 = sum(6, n =>
+    let pf = n * rootF * (1 + 0.003 * sin(t * n / 19 + n * 0.2))
+    if pf >= 24000 then 0
+    else (1.0 / pow(n, padExp)) * sin(TAU * phasor(pf)))
+  let breathe = (sin(TAU * pos * 0.06) + 1) * 0.5
+  let sweep   = (sin(TAU * pos * 0.018) + 1) * 0.5         # 55-sec cycle
+  let cutoff  = 700 + sweep * 2400
+  let stack = (v1 + v2 + v3) * 0.05 * (0.5 + breathe * 0.5)
+  let s = stack |> lpf(cutoff, 0.55) |> gain(sc * padLvl * padDuck * stripped * 0.4)
+  pan(s, sin(TAU * pos * 0.04) * 0.3)
+
+play shaker:
+  # Doubles to 32nds during the breakdown window — keeps the energy
+  # rising through the kick drop.
+  let kCycle = 32 / tempo
+  let kPos   = (t mod kCycle) / kCycle
+  let busy   = if kPos > 0.75 then 2.0 else 1.0
+  let shP = phasor(tempo * 4 * busy)
+  let shE = exp(-shP * 70)
+  let s = noise() * shE |> hpf(7000, 0.25) |> gain(0.04)
+  pan(s, sin(TAU * pos * 0.31) * 0.5)
+
+play arp:
+  # Ascending root-3rd-5th-octave through each chord (16 quarter notes
+  # over the 16-beat progression cycle). Sits above the pad, below the
+  # organ. Soft additive tone, percussive envelope.
+  let arpNotes = [
+    220.0, 261.63, 329.63, 440.0,
+    174.61, 220.0, 261.63, 349.23,
+    261.63, 329.63, 392.0, 523.25,
+    196.0, 246.94, 293.66, 392.0
+  ]
+  let aF    = wave(tempo, arpNotes)
+  let aTrig = impulse(tempo)
+  let aEnv  = pluck(aTrig, 0.4)
+  let tone  = additive(aF, warm_shape, 8) * 0.07
+  let s = tone * aEnv |> lpf(2800, 0.4) |> gain(sc * stripped * 0.5)
+  pan(s, sin(TAU * pos * 0.13) * 0.4)
+
+play drone:
+  # 3-octave stack on A starting low (A2-A4), each octave drifting
+  # at its own pace. Low-mid harmonic anchor, not tinnitus territory.
+  let s = sum(3, n =>
+    let f     = 110.0 * pow(2, n - 1)
+    let drift = 0.0008 * sin(t * (0.3 + n * 0.07))
+    sin(TAU * phasor(f * (1 + drift))) / pow(n, 1.2))
+  let mono = s * 0.03
+  [mono, mono]
+
+play riser:
+  # Spectral build: as riseP grows, more partials of A2 (110 Hz) come
+  # online, filling the harmonic series. Each partial reads its own
+  # gate from riseP via a runtime `if` inside the sum lambda — the
+  # new lambda+sum combo doing what no commercial synth can express:
+  # 12 oscillators, each conditionally entering the mix on its own
+  # threshold, all unrolled at codegen. The result is a CHORDAL build
+  # rather than a noise sweep — pitched, harmonic, voiced like a pipe
+  # organ powering up.
+  let s = sum(12, n =>
+    let on = if n <= 1 + riseP * 11 then 1.0 else 0.0
+    let f  = 110 * n
+    if f >= 22000 then 0
+    else sin(TAU * phasor(f)) * on / pow(n, 0.7))
+  let mono = s * riseAmp * 0.06
+  [mono, mono]
+
+play fill:
+  # Stutter-chord fill during the kick-drop window (last 2 beats of
+  # every 32-beat cycle). 16 rapid chord stabs (8x faster than tempo)
+  # creating the "tension into the drop" tail. Uses sum + cascade
+  # ratios — Am triad one octave above the main stab.
+  let kCycle = 32 / tempo
+  let kPos   = (t mod kCycle) / kCycle
+  let active = if kPos > 0.9375 then 1.0 else 0.0
+  let trig   = impulse(tempo * 8) * active
+  let env    = pluck(trig, 0.06)
+  let chord = sum(3, n =>
+    let r = if n == 1 then 1.0
+            else (if n == 2 then 1.189
+                  else 1.498)
+    sin(TAU * phasor(440 * r)) / pow(n, 0.4))
+  let mono = (chord * env * 0.10) |> hpf(400, 0.3)
+  [mono, mono]
+
+play horn:
+  # One sustained chord-tone per chord (4 notes over 16 beats).
+  # Vocal/horn timbre via additive with vowel_ah formant. Swells in
+  # and tapers out over each held note.
+  let hornNotes = [659.25, 440.0, 392.0, 587.33]    # E5, A4, G4, D5
+  let hF = wave(tempo / 4, hornNotes)
+  let hP = phasor(tempo / 4)
+  let hE = pow(hP, 0.3) * (1 - pow(hP, 4))
+  let tone = additive(hF, vowel_ah, 8) * 0.05
+  let s = (tone * hE) |> lpf(2400, 0.4) |> gain(sc * stripped * 0.6)
+  pan(s, sin(TAU * pos * 0.07) * 0.4)
+
+play stab:
+  # A minor chord stab — fires once per 32-beat cycle, exactly when
+  # the riser peaks and resets. Six chord-tones using sum + lambda
+  # with the ratios written as a cascade inside the lambda body.
+  # This is the climax — the riser was building TO this moment.
+  let trig = impulse(tempo / 32)
+  let env  = pluck(trig, 2.0)
+  let s = sum(6, n =>
+    let r = if n == 1 then 1.0
+            else (if n == 2 then 1.189
+                  else (if n == 3 then 1.498
+                        else (if n == 4 then 2.0
+                              else (if n == 5 then 2.378
+                                    else 3.0))))
+    sin(TAU * phasor(110 * r)) / pow(n, 0.4))
+  let mono = (s * env * 0.15) |> reverb(3.5, 0.5)
+  [mono, mono]
+
+play organ:
+  let f       = midi_freq()
+  let g       = midi_gate()
+  let depth   = midi_cc(74) * 4.0
+  let modr    = 0.5 + midi_cc(71) * 3.5
+  let release = 0.5 + midi_cc(76) * 4.5
+  let motion  = midi_cc(77) * 0.018
+  let env     = swell(g, 0.01, release)
+  let voice = sum(16, n =>
+    let cf   = n * f
+    let modf = cf * modr * (1 + motion * sin(t * n / 11 + n * 0.3))
+    let mv   = sin(TAU * phasor(modf)) * depth
+    if cf >= 22000 then 0
+    else (1.0 / pow(n, 0.55)) * sin(TAU * phasor(cf) + mv))
+  let s = voice * env * 0.10 |> reverb(2.8, 0.3)
+  [s, s] * organLvl
+
+let dry = drums + bass + pad + organ + shaker + arp + drone + riser + stab + fill + horn
+let monoIn = (dry[0] + dry[1]) * 0.5
+let wet = monoIn |> reverb(3.5, 0.3)
+(dry + wet * 0.20) * fadeIn

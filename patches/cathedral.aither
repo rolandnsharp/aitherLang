@@ -39,6 +39,29 @@ let d2_room = 1 - ease((drop2pos - 6) / 1.5) * (1 - ease((drop2pos - 8) / 0.2))
 # hoover lead sequence — stepping through a 4-note pentatonic over 2 beats
 let hoovSeq = wave(dTempo / 2, [220, 330, 247, 294])
 
+# --- third drop: halftime dubstep switch-up ---
+var drop3pos = 0
+drop3pos = drop3pos + dt
+let d3_build = ease(drop3pos / 4.5)
+# a 0.4 s silence gap from t=4.55 to t=4.95 — cut EVERYTHING briefly
+let d3_preSil  = 1 - ease((drop3pos - 4.5) / 0.05)
+let d3_postSil = ease((drop3pos - 4.95) / 0.05)
+let d3_gate    = d3_preSil + d3_postSil
+let d3_drop    = ease((drop3pos - 5.0) / 0.05)
+# post-drop: duck old doof to 30 %, cathedral ambient to 50 %
+let d3_doofScale = d3_gate * (1 - d3_drop * 0.7)
+let d3_cathScale = d3_gate * (1 - d3_drop * 0.5)
+# halftime transport (tempo/4 = 1 hit per 1.65 s)
+let htTrig = impulse(dTempo / 4)
+let htEnv  = pluck(htTrig, 0.6)
+
+# (2) wobble rate breathing — rate itself modulated by a slow sine,
+# integrated into phase so wobble stays coherent across the shift
+let wRate   = 1.0 + (sin(TAU * drop3pos * 0.067) + 1) * 1.8      # 1..4.6 Hz
+var wPhase  = 0
+wPhase      = (wPhase + wRate * dt) mod 1
+let wobble  = (sin(TAU * wPhase) + 1) * 0.5
+
 # user helper: super-saw (7-voice detuned saw unison, spread)
 def supersaw(freq, spread):
   osc(saw, freq) + osc(saw, freq * (1 + spread)) * 0.8 + osc(saw, freq * (1 - spread)) * 0.8 + osc(saw, freq * (1 + spread * 2)) * 0.55 + osc(saw, freq * (1 - spread * 2)) * 0.55 + osc(saw, freq * 0.5) * 0.3 + osc(saw, freq * 2.0) * 0.25
@@ -51,6 +74,19 @@ let drift  = (sin(TAU * pos * 0.023) + sin(TAU * pos * 0.029) + 2) * 0.5 * 6
 # D-minor hexatonic; step drifts every ~40 s
 let scale = [0, 2, 3, 5, 7, 10]
 let step  = scale[int(drift) mod 6]
+
+# --- signal-native shake-ups (declared after `scale` so indexing works) ---
+# (1) key drift — quantize two irrational LFOs to the pentatonic, lifts
+# the whole halftime layer up and down through the scale continuously.
+let kLfo    = (sin(TAU * drop3pos * 0.047) + sin(TAU * drop3pos * 0.071) + 2) * 0.5 * 5
+let kIdx    = int(kLfo) mod 5
+let kStep   = scale[kIdx]
+let keyMod  = pow(2, kStep / 12)
+
+# (3) long-form kick dropout — slow phasor IS the bar position. Silences
+# the halftime kick in the last ~6 % of every 16-beat long bar.
+let longBar  = phasor(dTempo / 16)
+let kickHole = if longBar > 0.94 then 0 else 1
 
 # kick envelope + sidechain, sent into harmony layers
 let kTrig = impulse(tempo)
@@ -250,6 +286,59 @@ play hoover:
   let wide  = mixH |> haas(8)
   wide * d2_drop * (1 - dkEnv * 0.3)
 
+play ht_sub:
+  # deep sine sub-kick on each halftime hit; pitch rides the key drift
+  let subP = 41 * keyMod + discharge(htTrig, 36) * 30
+  let s    = sin(TAU * phasor(subP)) * htEnv * 0.75
+  let f    = s |> lpf(180, 0.3)
+  [f * d3_drop, f * d3_drop]
+
+play ht_wobble:
+  # reese / wobble bass — 3 detuned saws through wobble-LFO-modulated
+  # LPF; root tracks the keyMod drift too
+  let fW   = 55 * keyMod
+  let raw  = osc(saw, fW) + osc(saw, fW * 1.007) * 0.7 + osc(saw, fW * 0.994) * 0.6
+  let cut  = 140 + wobble * 1600
+  let filt = raw * 0.3 |> lpf(cut, 0.88) |> drive(1.35)
+  let sig  = filt * d3_drop * 0.55
+  [sig, sig]
+
+play ht_snare:
+  # snare on the off-hit (beat 3 of each halftime bar). Phase-gate the
+  # kick's halftime phasor at its midpoint.
+  let snPhase = phasor(dTempo / 4)
+  let snGate  = if snPhase > 0.5 and snPhase < 0.52 then 1 else 0
+  let snEnv   = discharge(snGate, 12)
+  let body    = sin(TAU * phasor(180)) * snEnv * 0.4
+  let crack   = noise() * snEnv * 0.6 |> bpf(1900, 0.3)
+  let raw     = (body + crack) |> hpf(200, 0.2) |> drive(1.3)
+  [raw * d3_drop * 0.55, raw * d3_drop * 0.55]
+
+play drifter:
+  # signal-native melody: two irrational LFOs summed → quantized to the
+  # pentatonic → never repeats. Per-note pluck env triggered every 3
+  # beats. pitch tracks keyMod so it shares the structural drift.
+  let dLfo   = (sin(TAU * drop3pos * 0.083) + sin(TAU * drop3pos * 0.0532) + 2) * 0.5 * 5
+  let dIdx   = int(dLfo) mod 5
+  let dStep  = scale[dIdx]
+  let dFreq  = 440 * pow(2, dStep / 12) * keyMod
+  let drTrig = impulse(dTempo / 3)
+  let drEnv  = pluck(drTrig, 0.4)
+  let rawL   = osc(sin, dFreq) * 0.3 + osc(saw, dFreq) * 0.07
+  let filt   = rawL * drEnv |> lpf(1400, 0.45)
+  let wet    = reverb(filt, 4, 0.6)
+  let mixD   = filt * 0.45 + wet * 0.45
+  let pp     = sin(TAU * drop3pos * 0.13) * 0.65
+  mixD * d3_drop |> pan(pp)
+
+play ht_siren:
+  # rising siren/riser glued to the build → cuts on the drop
+  let swF = 600 + d3_build * d3_build * 5500
+  let raw = osc(saw, swF * 0.5) * 0.2 + osc(saw, swF * 0.501) * 0.2
+  let filt = raw |> bpf(swF, 0.75)
+  let sig = filt * d3_build * (1 - d3_drop) * 0.35
+  [sig, sig]
+
 play formant:
   # vowel-like additive sine stack (approx an "aah" formant structure)
   # tuned to D3 with vibrato; swells in with d2_build, stays during drop.
@@ -267,5 +356,9 @@ play formant:
 # one final expression; stereo sum → gentle drive → tanh master.
 let dk_room = dkick * d2_room
 let db_room = dbass * d2_room
-let mix = (drone + pad + bells + kick + bass + rain + lead + echoes + wash + drise + dk_room + db_room + dhats + dtoms + ddidge + reverse + hoover + formant) * fin
+# Three rhythmic strata with independent drop3 scaling:
+let cathedralBed = (drone + pad + bells + kick + bass + rain + lead + echoes + wash) * d3_cathScale
+let doofBed      = (drise + dk_room + db_room + dhats + dtoms + ddidge + reverse + hoover + formant) * d3_doofScale
+let halftime     = ht_sub * kickHole + ht_wobble + ht_snare + ht_siren + drifter
+let mix = (cathedralBed + doofBed + halftime) * fin
 mix |> drive(1.1)

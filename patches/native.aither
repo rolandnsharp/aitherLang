@@ -1,0 +1,127 @@
+# native — signal-native composition. Every gate, every pitch, every
+# dynamic is driven by sums and products of low-frequency sine waves.
+# No `t mod`, no `impulse(rate)`, no if-gates as triggers. Form
+# emerges from the math of LFO ratios.
+#
+# Five voices, all driven by the same family of LFOs at related
+# rates. Each voice's gain, pitch, and texture are continuous
+# functions of those LFOs. The piece evolves over ~43 seconds per
+# section cycle, never literally repeating because of the phi-rate
+# in the lead pitch LFO.
+
+let pos    = t - start_t
+let fadeIn = ease(pos / 6)
+
+let tempo   = 90.0 / 60                            # 1.5 Hz beat
+let barR    = tempo / 4                             # 0.375 Hz
+let phraseR = tempo / 16                            # 0.0938 Hz
+let sectR   = tempo / 64                            # 0.0234 Hz, ~43s
+
+let beatLFO   = sin(TAU * t * tempo)
+let beat8LFO  = sin(TAU * t * tempo * 2)
+let barLFO    = sin(TAU * t * barR)
+let phraseLFO = sin(TAU * t * phraseR)
+let sectLFO   = sin(TAU * t * sectR)
+
+# Section energy: a slow ebb-and-flow over 43 seconds. Multiplied
+# into voice gains to produce a "verse / chorus" feel without any
+# explicit gate or section change.
+let energy     = (sectLFO + 1) * 0.5
+let halfEnergy = 0.5 + energy * 0.5                 # always >= 0.5
+
+# Chord progression: phraseR phasor is a sawtooth 0..1 over 4 bars.
+# Quantize into 4 equal segments → 4 chords (1 chord per bar).
+# Am (0 semitones), F (-4), C (+3), G (-2) from A reference.
+let phrasePhase = phasor(phraseR)
+let q1 = if phrasePhase > 0.25 then 1 else 0
+let q2 = if phrasePhase > 0.50 then 1 else 0
+let q3 = if phrasePhase > 0.75 then 1 else 0
+let chordIdx = q1 + q2 + q3                         # 0..3
+let r1 = if chordIdx < 0.5 then 0 else -4
+let r2 = if chordIdx < 1.5 then r1 else 3
+let chordSemis = if chordIdx < 2.5 then r2 else -2
+let rootMul = pow(2, chordSemis / 12.0)             # frequency multiplier
+
+play kick:
+  # Phasor-based envelope — the discontinuity at the phase wrap IS
+  # the transient. pow(1-phase, N) gives a sharp attack at the wrap
+  # then a smooth decay. Still signal-native (phasor is the canonical
+  # LFO), just with the kick punch sine can't deliver.
+  let kPhase = phasor(tempo)
+  let kPulse = pow(1 - kPhase, 14)
+  let kPitch = 45 + kPulse * 220
+  let body   = sin(TAU * phasor(kPitch)) * kPulse
+  let sub    = sin(TAU * phasor(kPitch * 0.5)) * kPulse * 0.7
+  let s = (body + sub) * 0.45
+  [s, s]
+
+play bass:
+  # Walks root and fifth of the CURRENT chord. rootMul shifts the
+  # base pitch to whichever chord is active; barLFO sign toggles
+  # root vs fifth within that chord.
+  let onFifth = if barLFO > 0 then 1 else 0
+  let f = 55 * rootMul * (1 + onFifth * 0.5)
+  let attack = pow((beatLFO + 1) * 0.5, 6) * 0.5 + 0.5
+  let s = additive(f, warm_shape, 6) * attack * energy * 0.18
+  [s, s]
+
+play hat:
+  # 8th-note hat — phasor wrap gives a real transient.
+  let hPhase = phasor(tempo * 2)
+  let pulse  = pow(1 - hPhase, 16)
+  let s = noise() * pulse |> hpf(7000, 0.3) |> gain(0.12)
+  [s, s]
+
+play snare:
+  # Backbeat snare — hits when the bar is in its second or fourth
+  # quarter. (sin(barLFO * 2) wraps around twice per bar; positive
+  # peaks land on beat 2 and beat 4.) Sharp envelope via phasor on
+  # a doubled-tempo phase.
+  let snPhase = phasor(tempo)
+  # Gate on backbeat: snPhase ~0..1; on beat 2 and 4, the bar phasor
+  # is at 0.25 or 0.75. We approximate by gating on bar-LFO sign.
+  let backHit = if barLFO > 0 then 1 else 0
+  let snPulse = pow(1 - snPhase, 30) * backHit
+  let body = noise() * 0.7 + sin(TAU * phasor(195)) * 0.3
+  let s = body * snPulse |> hpf(900, 0.25) |> gain(0.18)
+  [s, s]
+
+play pad:
+  # 4 voices of a stack rooted on the CURRENT chord (rootMul shifts
+  # the whole stack). Each voice's amplitude modulated by its own
+  # incommensurate LFO so texture evolves continuously.
+  let s = sum(4, n =>
+    let f  = 110 * rootMul * pow(2, (n - 1) * 0.5)
+    let am = (sin(TAU * t * (0.07 + n * 0.013)) + 1) * 0.5
+    sin(TAU * phasor(f)) * am / pow(n, 0.5))
+  let mono = s * halfEnergy * 0.05
+  [mono, mono]
+
+play lead:
+  # Pitch is a slow LFO at phi * phraseR (incommensurate — never
+  # repeats). The continuous LFO is quantized into 5 levels by
+  # summing 4 booleans, then mapped to minor pentatonic semitone
+  # offsets. Note attack on each beat.
+  let pitchLFO = sin(TAU * t * phraseR * 1.618)
+  let s1 = if pitchLFO > 0.6 then 1 else 0
+  let s2 = if pitchLFO > 0.2 then 1 else 0
+  let s3 = if pitchLFO > -0.2 then 1 else 0
+  let s4 = if pitchLFO > -0.6 then 1 else 0
+  let degree = s1 + s2 + s3 + s4                    # 0..4
+  let p1 = if degree < 0.5 then 0 else 3
+  let p2 = if degree < 1.5 then p1 else 5
+  let p3 = if degree < 2.5 then p2 else 7
+  let semis = if degree < 3.5 then p3 else 10
+  let f = 440 * rootMul * pow(2, semis / 12.0)
+  let lEnv = pow((beatLFO + 1) * 0.5, 4) * energy
+  let s = additive(f, warm_shape, 8) * lEnv * 0.08
+  [s, s]
+
+# Master — slow filter sweep tied to the phrase LFO. Gain rises
+# with the section energy; reverb sits at a fixed level.
+let dry    = kick + bass + hat + snare + pad + lead
+let monoIn = (dry[0] + dry[1]) * 0.5
+let cut    = 1200 + (phraseLFO + 1) * 0.5 * 3800
+let filt   = monoIn |> lpf(cut, 0.4)
+let wet    = monoIn |> reverb(3.0, 0.25)
+([filt, filt] + wet * 0.22) * fadeIn

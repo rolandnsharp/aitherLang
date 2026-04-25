@@ -1,0 +1,35 @@
+# subharmonic — partials BELOW the played note. MIDI-playable.
+#
+# Almost no synth lets you put partials below the fundamental.
+# Aither does: ratio(n) = 1/n^k means each successive partial is
+# pulled DOWN in pitch from the played note instead of up.
+#
+# Knobs (Minilab):
+#   CC 74 (knob 1) — DEPTH. How aggressively partials fall.
+#                    Left = shallow (subharmonics pile near the
+#                    fundamental, dense cluster), right = deep
+#                    (each partial drops a wide interval, sparse).
+#   CC 71 (knob 2) — TILT. Balance between high partials (fundamental)
+#                    and low ones (subharmonics).
+#                    Left = subharmonic-heavy (bass-blooming),
+#                    right = fundamental-heavy (cleaner pitch).
+#   CC 76 (knob 3) — RELEASE. Tail length.
+#                    Left = staccato, right = ambient drone.
+#
+# Try high keys (C5+) so the subharmonics fall in audible range.
+
+let f       = midi_freq()
+let g       = midi_gate()
+let depth   = 0.4 + midi_cc(74) * 1.2              # 0.4..1.6 exponent
+let tilt    = midi_cc(71) * 1.5                     # 0..1.5 falloff
+let release = 0.5 + midi_cc(76) * 4.5               # 0.5..5.0 s
+let env     = swell(g, 0.01, release)
+
+let voice = sum(8, n =>
+  let pf = f / pow(n, depth)
+  let am = 0.5 / pow(n, tilt)
+  if pf < 30 then 0
+  else am * sin(TAU * phasor(pf)))
+
+let s = voice * env * 0.14 |> reverb(2.5, 0.3)
+[s, s]

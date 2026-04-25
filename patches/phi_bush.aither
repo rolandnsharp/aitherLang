@@ -1,0 +1,171 @@
+# phi_bush — bush doof on Pythagorean ratios + golden ratio.
+# Conservative reconstruction after NaN debugging.
+
+let pos    = t - start_t
+let fadeIn = ease(pos / 4)
+let tempo  = 145 / 60
+
+let phi    = 1.6180339887
+let lfoA   = sin(TAU * pos * 0.02)
+let lfoB   = sin(TAU * pos * 0.02 * phi)
+let lfoC   = sin(TAU * pos * 0.02 * phi * phi)
+
+# Section structure
+let main      = ease((pos - 10) / 4)
+let peak      = ease((pos - 60) / 6)
+let drumGate  = main
+
+# Drum core + sidechain. Wall-clock 8-beat cycle drives a broken-beat
+# kick pattern (skips beat 3 and beat 7) for a less metronomic feel.
+# Plus the periodic micro-drop every 13s. All gates stateless.
+let dropPh   = (t * tempo / 32) mod 1
+let dropGate = if dropPh > 0.94 then 0 else 1
+let bp       = (t * tempo) mod 8
+let kSkip    = if bp >= 2.0 and bp < 3.0 then 0 else if bp >= 6.0 and bp < 7.0 then 0 else 1
+let kTrig    = impulse(tempo) * drumGate * dropGate * kSkip
+let kEnv     = discharge(kTrig, 10)
+let sc       = 1 - kEnv * 0.6
+
+# Bass walk: Pythagorean arch [1, 3/2, 2, 3, 2, 3/2, 4/3, 1] × 55 Hz
+let bassNotes = [55.0, 55.0, 82.5, 55.0, 110.0, 82.5, 73.333, 55.0]
+let bassFreq  = wave(tempo / 8, bassNotes)
+let bTrig     = impulse(tempo * 2)
+let bEnv      = discharge(bTrig, 14)
+
+# Bell trigger: every 4 beats (no burst gating; simpler / always-on)
+let bellTrig = impulse(tempo / 2)
+let bellEnv  = discharge(bellTrig, 1.6)
+
+# Burst: last 8% of every 4-bar phrase (~0.5s window every 6.6s)
+let barPh = phasor(tempo / 16)
+let burst = ease((barPh - 0.92) * 12.5)
+
+# High-pentatonic sparkle melody (file-level so wave() sees it as constant)
+let sparkleNotes = [880.0, 1320.0, 1100.0, 1760.0, 1320.0, 880.0, 1100.0, 1320.0]
+
+# Acid melodic phrase — slower, more contemplative for the breakdown.
+let acidNotes = [220.0, 247.5, 330.0, 412.5, 440.0, 412.5, 330.0, 247.5]
+
+play drone:
+  # Outro: subtle pitch drift down via the outro fade timer for cinematic close.
+  let drift = 1 - ease((t - outroStart - 60) / 120) * 0.04
+  let s = osc(sin, 55 * drift) * 0.4 + osc(sin, 82.5 * drift) * 0.3 + osc(sin, 110 * drift) * 0.35 + osc(sin, 165 * drift) * 0.25
+  let breathe = 1 + lfoB * 0.2
+  let w = s |> lpf(1400 + (lfoA + 1) * 900, 0.4) |> gain(0.23 * breathe)
+  [w, w]
+
+play kick:
+  # BREAKDOWN: kick muted to expose the atmospheric layers.
+  let p     = 36 + discharge(kTrig, 18) * 200
+  let body  = sin(TAU * phasor(p)) * kEnv
+  let sub   = sin(TAU * phasor(p * 0.5)) * kEnv * 0.7
+  let click = noise() * discharge(kTrig, 400) * 0.4 |> hpf(2500, 0.3)
+  let kFade = 1 - ease((t - outroStart - 30) / 80)
+  (body * 0.85 + sub + click * 0.4) |> lpf(380, 0.4) |> gain(0.5 * kFade)
+
+play bass:
+  # Square wave bass with FM-style self-feedback for growl. Octave swell stays.
+  let oct  = 1 + sin(TAU * pos * 0.017) * 0.06
+  let f    = bassFreq * oct
+  var fb = 0.0
+  fb = sin(TAU * phasor(f + fb * 200))
+  let raw  = fb + osc(sqr, f) * 0.3
+  let wob  = (sin(TAU * pos * 0.4) + 1) * 0.5
+  let cut  = 250 + bEnv * 1300 + wob * 500
+  let bFade = 1 - ease((t - outroStart - 60) / 60)
+  let s    = raw |> lpf(cut, 0.65) |> drive(1.4) |> gain(bEnv * sc * 0.32 * bFade)
+  [s, s]
+
+play acid:
+  # Breakdown spotlight — boosted, more drive, wider sweep.
+  let aFreq = wave(tempo, acidNotes)
+  let aEnv  = discharge(impulse(tempo), 5)
+  let raw   = osc(saw, aFreq) + osc(saw, aFreq * 1.005) * 0.5 + osc(saw, aFreq * 0.5) * 0.3
+  let cut   = 600 + (lfoB + 1) * 2000 + aEnv * 2500
+  let s     = raw * aEnv |> lpf(cut, 0.78) |> drive(1.4) |> gain(sc * 0.22)
+  pan(s, lfoC * 0.6)
+
+play bell:
+  # Pythagorean + phi partials with a slow ±10% pitch swell.
+  let pSwell = 1 + sin(TAU * pos * 0.025) * 0.2
+  let h1 = sin(TAU * phasor(220 * pSwell))
+  let h2 = sin(TAU * phasor(330 * pSwell)) * 0.5
+  let h3 = sin(TAU * phasor(440 * pSwell)) * 0.35
+  let h4 = sin(TAU * phasor(550 * pSwell)) * 0.22
+  let h5 = sin(TAU * phasor(220 * phi * pSwell)) * 0.32
+  let mix = (h1 + h2 + h3 + h4 + h5) * bellEnv * 0.07
+  pan(mix, lfoC * 0.7)
+
+play hats:
+  let hP = phasor(tempo * 4)
+  let hE = exp(-hP * 28)
+  let s  = noise() * hE |> hpf(7500, 0.3) |> gain(0.08 * drumGate)
+  [s, s]
+
+play ride:
+  # 16th-note shimmer — pulled back, more sparse.
+  var rideStart = -1
+  rideStart = if rideStart < 0 then t else rideStart
+  let rFade = ease((t - rideStart) / 5)
+  let rP = phasor(tempo * 8)
+  let rE = exp(-rP * 50)
+  let s  = noise() * rE |> hpf(11000, 0.2) |> gain(0.05 * drumGate * rFade)
+  pan(s, sin(TAU * pos * 0.13) * 0.5)
+
+play stab:
+  # Offbeat percussive saw — pulled back for the breakdown approach.
+  let sTrig = impulse(tempo * 2) - impulse(tempo)
+  let sEnv  = discharge(sTrig, 50)
+  let s     = osc(saw, 220 * 1.5) * sEnv |> bpf(900, 0.5) |> gain(0.16 * drumGate)
+  pan(s, lfoA * 0.4)
+
+play clap:
+  # Backbeat clap (every other kick). Auto-fades in over 3s.
+  var clapStart = -1
+  clapStart = if clapStart < 0 then t else clapStart
+  let cFade = ease((t - clapStart) / 3)
+  var clapCount = 0
+  clapCount = clapCount + kTrig
+  let isBack = clapCount mod 2
+  let trig   = kTrig * isBack
+  let env    = discharge(trig, 30)
+  let s      = noise() * env |> bpf(1500, 0.4) |> gain(0.16 * drumGate * cFade)
+  [s, s]
+
+play sparkle:
+  # High pentatonic with octave doubling for sparkle.
+  var sparkleStart = -1
+  sparkleStart = if sparkleStart < 0 then t else sparkleStart
+  let cFade  = ease((t - sparkleStart) / 4)
+  let cFreq  = wave(tempo, sparkleNotes)
+  let cEnv   = discharge(impulse(tempo), 12)
+  let layer1 = osc(sin, cFreq) + osc(sin, cFreq * 1.5) * 0.35
+  let layer2 = osc(sin, cFreq * 2) * 0.4
+  let s      = (layer1 + layer2) * cEnv |> gain(0.16 * cFade)
+  pan(s, sin(TAU * pos * 0.09) * 0.7)
+
+play breath:
+  # Wider noise wash with slower, broader sweep — preparing for breakdown.
+  let cutRaw = 1500 + lfoC * 800 + (lfoA + 1) * 500
+  let cut    = max(200, cutRaw)
+  let s      = noise() |> bpf(cut, 0.45) |> gain(0.13)
+  [s * 0.75, s * 0.92]
+
+play riser:
+  # Tamed: lower Q, narrower sweep, gentler peak.
+  let cut = 400 + burst * 3200
+  let s   = noise() |> bpf(cut, 0.4) |> gain(burst * 0.09)
+  [s, s]
+
+# Mix with conservative headroom; reverb scaled by lfoA for atmospheric breathing.
+# OUTRO: outroStart captures `t` at first reload. outroFade ramps 1→0 over 270s
+# (~4.5 minutes) — gentle, smooth fade out for the end of the set.
+var outroStart = -1
+outroStart = if outroStart < 0 then t else outroStart
+let outroFade = 1 - ease((t - outroStart) / 270)
+
+let dry      = (drone + kick + bass + acid + bell + hats + ride + stab + clap + sparkle + breath + riser) * 0.5
+let monoIn   = (dry[0] + dry[1]) * 0.5
+let wet      = monoIn |> reverb(3.5, 0.4)
+let wetGain  = 0.4 + (lfoA + 1) * 0.15
+(dry + wet * wetGain) * fadeIn * outroFade

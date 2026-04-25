@@ -1,0 +1,55 @@
+# fm_swarm — additive synthesis where every partial is FM-modulated.
+# MIDI-playable.
+#
+# RECIPE — "epic gothic organ from Tesla" (discovered 2026-04-25):
+#   Knob 1 (CC 74) ≈ 37/127   — FM depth ~1.17 rad
+#   Knob 2 (CC 71) ≈ 93/127   — mod ratio ~3.06 (near integer 3:1)
+#   Knob 3 (CC 76) ≈ 5/127    — release ~0.68 s (articulated)
+#   Knob 4 (CC 77) ≈ 40/127   — motion ~0.6% drift (cathedral shimmer)
+# Try it. Tweak from there.
+#
+# Each of the 16 partials has its own modulator at incommensurate
+# frequency (modf = n * f * 1.41), modulating the phase by `depth`
+# radians. So the spectrum isn't just a stack of pure sines — every
+# sine has sidebands of its own at non-harmonic distances. Cranked
+# up, it's pure spectral chaos. Cranked down, it's a soft additive
+# voice with shimmer.
+#
+# This kind of layered FM has been theoretically possible since DX7
+# but no commercial synth exposes "16 independent FM operators each
+# with its own modulator and amplitude" because the GUI for it is
+# hopeless. As a lambda, it's eight characters extra.
+#
+# Knobs (Minilab):
+#   CC 74 (knob 1) — FM DEPTH. Left = clean additive, right = pure
+#                    chaos. The whole sonic territory from "lush pad"
+#                    through "metallic bell" to "broken radio" lives
+#                    on this knob.
+#   CC 71 (knob 2) — MODULATOR RATIO. Tunes the modulator frequency
+#                    relative to the carrier. Integer-ish ratios sound
+#                    pitched; non-integer ratios sound bell-like.
+#   CC 76 (knob 3) — RELEASE.
+#   CC 77 (knob 4) — MOTION. Each partial's modulator gets its own
+#                    slow LFO drift. Left = static (modulators locked
+#                    together), right = each partial's sidebands move
+#                    at their own pace. Adds cathedral-like internal
+#                    shimmer. The "epic gothic organ from Tesla" zone
+#                    needs this knob past 30%.
+
+let f       = midi_freq()
+let g       = midi_gate()
+let depth   = midi_cc(74) * 4.0                    # 0..4 radians
+let modr    = 0.5 + midi_cc(71) * 3.5              # 0.5..4 mod ratio
+let release = 0.5 + midi_cc(76) * 4.5
+let motion  = midi_cc(77) * 0.018                   # 0..1.8% drift
+let env     = swell(g, 0.01, release)
+
+let voice = sum(16, n =>
+  let cf   = n * f
+  let modf = cf * modr * (1 + motion * sin(t * n / 11 + n * 0.3))
+  let mv   = sin(TAU * phasor(modf)) * depth
+  if cf >= 22000 then 0
+  else (1.0 / pow(n, 0.55)) * sin(TAU * phasor(cf) + mv))
+
+let s = voice * env * 0.10 |> reverb(2.8, 0.3)
+[s, s]

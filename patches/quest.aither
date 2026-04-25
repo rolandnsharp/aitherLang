@@ -1,0 +1,96 @@
+# quest — heroic exploration. 100 BPM, D minor pentatonic.
+# Pulse-wave lead + 16th-note arp over a sidechained pad + sub.
+# Loops cleanly. Drop in any side-scroller, dungeon, or vault scene.
+
+let pos    = t - start_t
+let fadeIn = ease(pos / 3)
+
+let tempo  = 100 / 60                    # 1.667 Hz beat (100 BPM)
+let kTrig  = impulse(tempo)              # quarter-note kick
+let kEnv   = discharge(kTrig, 12)
+let pump   = 1 - kEnv * 0.6              # sidechain duck
+
+# --- pad: D MAJOR chord (D2 F#2 A2 D3), filter slowly breathing ---
+let padCut = 750 + sin(TAU * pos * 0.07) * 250    # ~14s breath cycle
+let pd     = osc(sin, 73.42) + osc(sin, 92.50) + osc(sin, 110.0) + osc(sin, 146.83)
+let pad    = pd / 4 |> lpf(padCut, 0.4) |> gain(0.18 * pump)
+
+# --- sub bass: D1 → D2 octave bounce, pumped ---
+let subSeq = wave(tempo / 4, [36.7, 36.7, 73.42, 36.7])
+let sub    = osc(sin, subSeq) |> gain(0.4 * pump)
+
+# --- 16th-note arp through D MAJOR pentatonic, 4-beat loop ---
+let arpNotes = [587.3, 659.3, 740.0, 880.0, 740.0, 659.3, 587.3, 659.3, 587.3, 740.0, 880.0, 987.8, 880.0, 740.0, 587.3, 659.3]
+let arpFreq  = wave(tempo / 4, arpNotes)
+let arpTrig  = impulse(tempo * 4)
+let arpEnv   = discharge(arpTrig, 35)
+let arpRaw   = osc(sqr, arpFreq) * arpEnv
+let arp      = arpRaw |> lpf(900 + arpEnv * 2200, 0.55) |> gain(0.07 * pump)
+
+# --- lead: D MAJOR 7 arpeggio (D-F#-A-C#-D-C#-A-F#), narrow pulse + fbdelay ---
+let leadNotes = [587.3, 740.0, 880.0, 1108.7, 1174.7, 1108.7, 880.0, 740.0]
+let leadFreq  = wave(tempo / 8, leadNotes)
+let leadEnv   = discharge(impulse(tempo), 7)
+let leadRaw   = pulse(leadFreq, 0.18) * leadEnv |> lpf(2000 + leadEnv * 2200, 0.7) |> gain(0.13)
+let lead      = leadRaw + (leadRaw |> fbdelay(0.1875, 0.5, 0.45)) * 0.55
+
+# --- drums: thumping kick + 8th-note hat ---
+let kPitch = 50 + discharge(kTrig, 30) * 130
+let kick   = sin(TAU * phasor(kPitch)) * kEnv * 0.6
+let hatEnv = discharge(impulse(tempo * 2), 70)
+# NEW: slow tremolo (a helper type not used elsewhere) modulates hat presence.
+# Under per-type keying this only shifts the (nonexistent) tremolo state region;
+# the reverb tail, depth wash, lead phase, and all other state stay intact.
+let breathe = tremolo(1, 0.3, 0.6)
+let hat    = noise() * hatEnv * breathe |> hpf(7500, 0.3) |> gain(0.12)
+
+# --- bell ping: once every 8 beats, sparkle on phrase boundaries ---
+let bellEnv = discharge(impulse(tempo / 8), 1.5)
+let bell    = (osc(sin, 1318.5) + osc(sin, 1567.98) * 0.5) * bellEnv * 0.07
+
+# --- mix: drive into a short reverb for arcade atmosphere ---
+let dry = pad + sub + arp + lead + kick + hat + bell
+let wet = dry |> reverb(1.8, 0.3)
+
+# --- depth: becoming-style atmospheric undercurrent ---
+# Slow morph emerges over 60s, breathing the same triangle shape at
+# audio (vibrato), bar (LFO), and section (arc) timescales. Stays
+# beneath the rhythm; pans on a 40s cycle for stereo motion.
+let arc        = ease(pos / 60)
+let depthLfo   = tri(t * TAU * 0.04)                          # 25s breath
+let depthVib   = tri(t * TAU * 3) * 0.003                     # 3 Hz wobble
+let subDrone   = osc(sin, 36.7 * (1 + depthLfo * 0.004)) * 0.5 + osc(sin, 73.42 * (1 + depthVib)) * 0.5
+let depthDrone = subDrone * arc * 0.18
+let depthWash  = noise() |> bpf(440 + depthLfo * 300, 0.88) |> gain(arc * 0.10)
+let depthPan   = sin(TAU * pos * 0.025)                       # 40s pan cycle
+let depthLR    = pan(depthDrone + depthWash, depthPan)
+
+# --- counter-melody: warm triangle phrase a fifth above the lead ---
+# Slower than the lead (4 notes over 16 beats), sustained, sits up high
+# in the field. New stateful calls appended → no existing state disturbed.
+let counterNotes = [1318.5, 1174.7, 880.0, 1108.7]
+let counterFreq  = wave(tempo / 16, counterNotes)
+let counterEnv   = discharge(impulse(tempo / 4), 1.5)
+let counter      = osc(tri, counterFreq) * counterEnv |> lpf(2200, 0.4) |> gain(0.07)
+
+# --- snare on the backbeat: counter every kick, fire on odd hits ---
+var sCount   = 0
+sCount       = sCount + kTrig                       # ticks once per beat
+let isBack   = sCount mod 2                         # 0,1,0,1 across beats
+let snTrig   = kTrig * isBack                       # fires on beats 2 + 4
+let snEnv    = discharge(snTrig, 28)
+let snBody   = sin(TAU * phasor(180)) * 0.4 + noise() * 0.6
+let snare    = snBody * snEnv |> hpf(900, 0.2) |> gain(0.22)
+
+# --- glass: marimba-ish call-and-response answering the lead ---
+# Sine doubled at 2.01x for slight detuned shimmer; sharp percussive envelope;
+# pans on a slower 12s cycle than the depth so the field has multi-rate motion.
+let glassNotes = [1760.0, 1318.5, 1480.0, 1108.0]   # A6 E6 F#6 C#6 (D major triad + 7th)
+let glassFreq  = wave(tempo / 16, glassNotes)
+let glassEnv   = discharge(impulse(tempo / 2), 6)
+let glassRaw   = (osc(sin, glassFreq) + osc(sin, glassFreq * 2.01) * 0.3) * glassEnv
+let glassMid   = glassRaw |> lpf(3500, 0.3) |> gain(0.07)
+let glassLR    = pan(glassMid, sin(TAU * pos * 0.083))
+
+let driven = (dry * 0.7 + wet * 0.4 + counter + snare) |> drive(1.15)
+(driven + depthLR + glassLR) * fadeIn

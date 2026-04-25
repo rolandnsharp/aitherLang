@@ -1,0 +1,35 @@
+# cello — a clean, minimal bowed-string tone.
+# One play, low CPU. Used as a reference to test engine output quality.
+
+let pos = t - start_t
+let fin = ease(pos / 4)
+
+# Slow melodic drift through a minor arpeggio, bowed-note timing (~3 s/note).
+let notes = [130.81, 155.56, 196.00, 174.61, 146.83, 174.61, 196.00, 164.81]
+let pitch = wave(1.0 / 24, notes)                   # 24 s for 8 notes = 3 s each
+let pitchSlew = slew(pitch, 0.15)                    # glide between notes
+
+# Vibrato: 5.5 Hz, ±0.8 %
+let vib = sin(TAU * phasor(5.5)) * 0.008
+let f   = pitchSlew * (1 + vib)
+
+play cello:
+  # three detuned saws = bowed string timbre
+  let s1 = osc(saw, f)
+  let s2 = osc(saw, f * 1.003) * 0.8
+  let s3 = osc(saw, f * 0.997) * 0.8
+  let raw = (s1 + s2 + s3) * 0.25
+
+  # body resonance: LP around 800 Hz with moderate resonance
+  let body = raw |> lpf(800, 0.5) |> lpf(1600, 0.3)
+
+  # bowed envelope: slow attack, slow release on each note change
+  let trig = impulse(1.0 / 3)
+  let env  = swell(trig, 1.2, 2.0) * 0.7 + 0.3      # never fully releases — bowed
+
+  let sig  = body * env * 0.3
+
+  # gentle stereo width via Haas
+  sig |> haas(9)
+
+cello * fin
