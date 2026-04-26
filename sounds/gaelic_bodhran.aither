@@ -1,0 +1,63 @@
+# gaelic_bodhran.aither — Irish frame drum, self-running rhythm with pattern + drive knobs.
+#
+# WHAT IT IS
+# A self-playing bodhrán: 12-step cycle at 6 Hz (~2-second loop). Single-knob
+# crossfade morphs through three rhythmic densities (heartbeat → 6/8 jig →
+# 4/4 reel). A drive knob takes the wood thump from clean to fat saturated
+# boom. The drum is one expressive timbre with per-step velocities — the
+# "drum that sounds like a player, not a sequencer" pattern from COMPOSING.md.
+#
+# CONTROLS (default CC bindings — rebind to suit)
+#   CC 82 — VOLUME           overall level
+#   CC 74 — RHYTHM PATTERN   3-zone crossfade:
+#                              0.0 = slow heartbeat (pulse only)
+#                              0.5 = 6/8 jig
+#                              1.0 = driving 4/4 reel
+#   CC 71 — DRIVE            clean wood thump → fat saturated boom
+#
+# OUTPUTS  stereo (mono-summed inside), recommended gain factor 0.4.
+#
+# TO USE
+#   1. Copy lets + arrays + play block into your patch.
+#   2. Rebind midi_cc(...) numbers if they collide with other voices.
+#   3. Add `bodhran` to your master mix sum.
+
+let bodhranVol = midi_cc(82)
+let bodPattern = midi_cc(74)
+let bodDrive   = midi_cc(71)
+
+# 12-step velocity arrays — one per density level.
+let bodSlow = [1.0, 0,   0,   0,   0,   0,   0.7, 0,   0,   0,   0,   0]
+let bodJig  = [1.0, 0,   0.4, 0.5, 0,   0.4, 0.7, 0,   0.4, 0.5, 0,   0.4]
+let bodReel = [1.0, 0.4, 0.6, 0.4, 0.7, 0.4, 0.5, 0.4, 0.7, 0.4, 0.6, 0.4]
+
+play bodhran:
+  let stepRate = 6.0
+  let stepPh   = phasor(stepRate / 12)
+  let idx      = int(stepPh * 12)
+  let trig     = impulse(stepRate)
+
+  # 3-zone triangular crossfade weights (slope 2 = triangle width 1).
+  let vSlow = bodSlow[idx]
+  let vJig  = bodJig[idx]
+  let vReel = bodReel[idx]
+  let pwA = max(0, 1 - bodPattern * 2)
+  let pwB = (if bodPattern < 0.5 then bodPattern * 2 else 1 - (bodPattern - 0.5) * 2)
+  let pwC = max(0, (bodPattern - 0.5) * 2)
+  let vel = vSlow * pwA + vJig * pwB + vReel * pwC
+
+  let velTrig = trig * vel
+
+  # Wood-thump body: pitch sweeps 50 → ~85 Hz on each hit.
+  let pSweep = 50 + discharge(velTrig, 35) * 50
+  let boomEnv = discharge(velTrig, 18)
+  let boom = sin(TAU * phasor(pSweep)) * boomEnv * 0.7
+
+  # Skin-tap layer: filtered noise transient.
+  let tapEnv = discharge(velTrig, 80) * 0.5
+  let tap = (noise() |> hpf(2000, 0.5)) * tapEnv
+
+  let raw = boom + tap
+  let driven = drive(raw, 1 + bodDrive * 4)
+  let s = driven * bodhranVol * 0.4
+  [s, s]

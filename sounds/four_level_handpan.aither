@@ -1,0 +1,97 @@
+# four_level_handpan.aither — D-Kurd hand pan with 4-level rhythm + melody ladder.
+#
+# WHAT IT IS
+# A self-playing hand pan: 8-step cycle at 4 Hz (~2-second loop). Single-knob
+# ladder steps through four levels of progressively more complex rhythm AND
+# melody — not just density, but actual note sequences that get richer as the
+# knob rises. Uses 4 separate panTone instances with trigger-gating so
+# inactive levels never receive force, and per-voice sample-and-hold on the
+# fund so each level's notes don't slide during the envelope decay.
+#
+# Hand pan timbre: compound additive (1 : 2 : 3 partial ratio, the bell-clang
+# mode structure) with finite-decay pluck envelopes — clean mute when the
+# voice is dropped, no ring-memory bleed across levels.
+#
+# CONTROLS (default CC bindings — rebind to suit)
+#   CC 85 — VOLUME           overall level
+#   CC 76 — LADDER           4-zone crossfade through rhythm + melody:
+#                              0.00  L1  D-A alternation, 2 hits per cycle
+#                              0.33  L2  D-F-A triad arpeggio
+#                              0.67  L3  full up/down arpeggio pattern
+#                              1.00  L4  arpeggio + octave jump (A4 high)
+#
+# OUTPUTS  stereo (mono-summed inside), recommended gain factor 0.4.
+#
+# TO USE
+#   1. Copy the panTone def, the lets, the arrays, and the play block.
+#   2. Rebind midi_cc(...) numbers if they collide.
+#   3. Add `handpan2` to your master mix sum.
+
+let pan2Vol    = midi_cc(85)
+let pan2Ladder = midi_cc(76)
+
+# Hand-pan timbre — compound additive (1 : 1.998 : 3) with pluck envelopes
+# of differing decay times for natural "ring then settle" attack.
+def panTone(trig, fund):
+  let env1 = pluck(trig, 4.0)
+  let env2 = pluck(trig, 1.5)
+  let env3 = pluck(trig, 0.5)
+  let d1   = 1 + 0.0010 * sin(t * 0.71)
+  let d2   = 1 + 0.0008 * sin(t * 1.13 + 1.7)
+  let d3   = 1 + 0.0012 * sin(t * 1.39 + 2.4)
+  let p1   = sin(TAU * phasor(fund * d1))         * env1
+  let p2   = sin(TAU * phasor(fund * 1.998 * d2)) * env2 * 0.55
+  let p3   = sin(TAU * phasor(fund * 3.0 * d3))   * env3 * 0.40
+  p1 + p2 + p3
+
+# Per-level note sequences (D Kurd — D, F, A, C, D-octave).
+let pan2NotesL1 = [146.83, 146.83, 146.83, 146.83, 220.00, 220.00, 220.00, 220.00]
+let pan2NotesL2 = [146.83, 174.61, 220.00, 174.61, 146.83, 174.61, 220.00, 174.61]
+let pan2NotesL3 = [146.83, 174.61, 220.00, 261.63, 293.66, 261.63, 220.00, 174.61]
+let pan2NotesL4 = [146.83, 174.61, 220.00, 261.63, 293.66, 440.00, 261.63, 174.61]
+
+# Per-level velocity arrays (zero-velocity steps act as rests).
+let pan2VelL1 = [1.0, 0,   0,   0,   0.8, 0,   0,   0  ]
+let pan2VelL2 = [1.0, 0,   0.7, 0,   0.8, 0,   0.7, 0  ]
+let pan2VelL3 = [1.0, 0.5, 0.7, 0.5, 0.8, 0.5, 0.7, 0.5]
+let pan2VelL4 = [1.0, 0.6, 0.8, 0.7, 0.9, 0.8, 0.7, 0.6]
+
+play handpan2:
+  let stepRate = 4.0
+  let stepPh   = phasor(stepRate / 8)
+  let idx      = int(stepPh * 8)
+  let trig     = impulse(stepRate)
+
+  # 4-zone crossfade weights (slope 3 = triangle width 2/3). Each level
+  # has a soft entry/exit at its quarter-point on the ladder.
+  let p2w1 = max(0, 1 - pan2Ladder * 3)
+  let p2w2 = max(0, 1 - abs(pan2Ladder - 0.333) * 3)
+  let p2w3 = max(0, 1 - abs(pan2Ladder - 0.667) * 3)
+  let p2w4 = max(0, 1 - abs(pan2Ladder - 1.000) * 3)
+
+  # Per-voice trigger gating + sample-and-hold on the fund.
+  # Trigger is multiplied by both the per-step velocity AND the level
+  # weight, so an inactive level never injects energy into its panTone.
+  # $hN holds the most recent struck pitch through the envelope decay.
+  let t1 = trig * pan2VelL1[idx] * p2w1
+  $h1 = 146.83
+  $h1 = if t1 > 0.001 then pan2NotesL1[idx] else $h1
+  let v1 = panTone(t1, $h1)
+
+  let t2 = trig * pan2VelL2[idx] * p2w2
+  $h2 = 146.83
+  $h2 = if t2 > 0.001 then pan2NotesL2[idx] else $h2
+  let v2 = panTone(t2, $h2)
+
+  let t3 = trig * pan2VelL3[idx] * p2w3
+  $h3 = 146.83
+  $h3 = if t3 > 0.001 then pan2NotesL3[idx] else $h3
+  let v3 = panTone(t3, $h3)
+
+  let t4 = trig * pan2VelL4[idx] * p2w4
+  $h4 = 146.83
+  $h4 = if t4 > 0.001 then pan2NotesL4[idx] else $h4
+  let v4 = panTone(t4, $h4)
+
+  let s = (v1 + v2 + v3 + v4) * pan2Vol * 0.4
+  [s, s]
