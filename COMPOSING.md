@@ -771,6 +771,267 @@ lets you sketch a custom tuning by editing one line.
 Out-of-range indices wrap (`p[5]` reads `p[0]`), so either
 size your table to `max_n` or clamp inside the fn.
 
+## Live-performance knob design — the acid_complex recipe
+
+`patches/acid_complex.aither` works as a live-set patch because
+every per-instrument knob does something audibly radical while
+the music stays musical. Three knobs per instrument:
+
+1. **PARADIGM crossfade** — three categorically different synthesis
+   recipes computed in parallel, weighted by triangular zones across
+   the knob. Same notes, three sound worlds in one sweep.
+2. **CHARACTER** — one knob that controls multiple related parameters
+   together (sweep depth + body damp combined; cutoff + resonance
+   combined). Cleaner than two knobs that each do half a thing.
+3. **freq_shift** — the complex-algebra knob. ±400 Hz spectrum shift
+   on the instrument's output. Walks harmonic→inharmonic without
+   leaving the groove.
+
+Plus volume sliders per instrument so the performer mixes by hand.
+
+### The paradigm-crossfade pattern (the workhorse)
+
+```
+let paradigm = midi_cc(74)
+
+# Compute all three paradigms every sample. Cheap; the cost is
+# fixed regardless of knob position. Total CPU is the budget for
+# choosing freely between them.
+let A = ...   # paradigm A — recipe 1
+let B = ...   # paradigm B — recipe 2
+let C = ...   # paradigm C — recipe 3
+
+# Triangular crossfade weights, equal-power across three zones.
+let wA = max(0, 1 - paradigm * 2)
+let wB = (if paradigm < 0.5
+          then paradigm * 2
+          else 1 - (paradigm - 0.5) * 2)
+let wC = max(0, (paradigm - 0.5) * 2)
+let mix = A * wA + B * wB + C * wC
+```
+
+Three paradigms is the sweet spot — gives two distinct transitions
+in one knob throw. Each paradigm should be a real synthesis recipe
+(additive, struck DHO, noise+filter, FM), not three variations of
+the same idea. The cost-per-sample is fixed regardless of knob
+position, so the user gets free crossfade with no glitches.
+
+### The kick recipe — three paradigms in parallel
+
+From `patches/acid_complex.aither`:
+
+```
+# A — 808 sub: pitch-swept sine
+let sweepDepth = 60 + kickPunch * 180
+let pSweep   = 35 + discharge(kTrig, 30) * sweepDepth
+let kickA    = sin(TAU * phasor(pSweep)) * kEnv
+
+# B — DHO body strike: damp tightens with K2
+let bodyDamp = 0.04 - kickPunch * 0.025
+let kickB    = dho(kTrig * 50000000.0, 200, bodyDamp) * 0.5
+
+# C — FM-distorted boom: sine modulating sine, deeper with K2
+let fmDepth  = 0.5 + kickPunch * 4.0
+let modSig   = sin(TAU * phasor(pSweep * 1.5)) * fmDepth
+let kickC    = sin(TAU * phasor(pSweep) + modSig) * kEnv * 0.7
+
+# Triangular crossfade
+let kwA = max(0, 1 - kickParadigm * 2)
+let kwB = (if kickParadigm < 0.5
+           then kickParadigm * 2
+           else 1 - (kickParadigm - 0.5) * 2)
+let kwC = max(0, (kickParadigm - 0.5) * 2)
+let kickClick = noise() * discharge(kTrig, 200) * 0.3
+let kickRaw   = kickA * kwA + kickB * kwB + kickC * kwC + kickClick
+
+# Per-instrument freq_shift — the complex-algebra knob
+let kickShifted = freq_shift(kickRaw, kickShift)
+let kickSig     = kickShifted * kickVol * 0.5
+```
+
+Three kick paradigms fundamentally different in synthesis method
+(time-domain pitch sweep / physical model / FM). The PUNCH knob
+controls multiple aspects of each (sweep depth + body damp + FM
+depth) so you only need one character knob, not three. The
+freq_shift on the OUTPUT lets the kick walk into metallic-ping or
+subterranean-thud territory without changing the recipe.
+
+### The acid bass recipe — paradigm + density + shift
+
+```
+# A — Acid: saw → DHO resonant LPF
+let saw   = additive(bFreq, saw_shape, 10)
+let cutA  = 600 + bEnv * 3200 * (0.5 + bAcc * 0.5)
+let bassA = dho(saw * 80000.0, cutA, 0.025) * bEnv * (0.4 + bAcc * 0.6)
+
+# B — Bell-bass: struck DHO at the note pitch (force scaled by
+# frequency so peak amplitude stays consistent across notes)
+let bForceB = 22000.0 * bFreq
+let bassB   = dho(bTrig * bForceB, bFreq, 0.008) * bEnv * (0.5 + bAcc * 0.5) * 0.4
+
+# C — Noise-formant: white noise into resonant DHO BPF at 3rd harmonic
+let nAmp  = bEnv * (0.3 + bAcc * 0.7) * 6000000.0
+let bassC = dho(noise() * nAmp, bFreq * 3, 0.025) * 6.0
+
+# Same triangular crossfade
+let bwA = max(0, 1 - bassParadigm * 2)
+let bwB = (if bassParadigm < 0.5
+           then bassParadigm * 2
+           else 1 - (bassParadigm - 0.5) * 2)
+let bwC = max(0, (bassParadigm - 0.5) * 2)
+let bassMix = bassA * bwA + bassB * bwB + bassC * bwC
+
+# K5 DENSITY — sawtooth harmonic voices on octave/fifth/seventh
+let envH  = bEnv * (0.4 + bAcc * 0.6)
+let h_oct = additive(bFreq * 2.0,  saw_shape, 6) * envH
+let h_fth = additive(bFreq * 3.0,  saw_shape, 5) * envH
+let h_7th = additive(bFreq * 3.56, saw_shape, 4) * envH
+let w_oct = clamp(bassDensity / 0.33,          0, 1)
+let w_fth = clamp((bassDensity - 0.33) / 0.33, 0, 1)
+let w_7th = clamp((bassDensity - 0.66) / 0.34, 0, 1)
+let bassStack = (bassMix
+             + h_oct * w_oct * 0.36
+             + h_fth * w_fth * 0.30
+             + h_7th * w_7th * 0.26)
+
+let bassShifted = freq_shift(bassStack, bassShift)
+let bassSig     = bassShifted * bassVol * 0.5
+```
+
+Same pattern as kick, but the second knob (DENSITY) crossfades in
+harmonic voices rather than collapsing parameters. The harmony
+voices use the SAME `bFreq` so they always hit the right notes
+regardless of which pattern step is playing.
+
+### Why the amplitude normalization matters
+
+Different synthesis recipes naturally produce wildly different
+peak amplitudes:
+
+- Saw → DHO LPF: peaks around 0.5 (filtered)
+- Struck DHO at low freq: peak ≈ `force / (sr × ω)`, which scales
+  with frequency — for `bForceB = 22000 × bFreq`, peak ≈ 0.7
+  regardless of which note plays
+- Noise → narrow DHO BPF: very quiet from broadband averaging,
+  needs large gain (`* 6.0`) to match the others
+
+If you don't normalize, one paradigm dominates the crossfade and
+the other knob positions sound dead. Always set each paradigm to
+the same target peak (≈0.4-0.5) before applying weights.
+
+### Adapting this to a new instrument
+
+Copy the structure:
+
+1. Pick three categorically different recipes (additive / struck
+   DHO / noise-driven; or saw / FM / wavetable; or any triple).
+2. Normalize their peaks to the same level.
+3. Crossfade with triangular weights.
+4. Add ONE character knob that controls multiple related params.
+5. Add `freq_shift` on the OUTPUT for the complex-magic move.
+6. Wrap with a volume control (slider).
+
+Three knobs per instrument, eight instruments worth of expressivity
+in one patch. See `patches/acid_complex.aither` for the full kick +
+bass + didge + flute + pads layout.
+
+## Drums that sound like a player, not a sequencer
+
+The trick: don't trigger drums at constant velocity from `impulse(rate)`.
+Use a **velocity array** indexed by a step phasor, multiply the trigger
+by the velocity, and you get instant per-step dynamics that read as a
+real player's intent — accents on downbeats, ghost notes on off-beats,
+the whole "feel" of human playing — without per-note envelopes or
+event sequencing.
+
+The pattern (from `patches/gaelic_fairy.aither`'s bodhrán):
+
+```
+# 1. Velocity arrays of equal length per playing "style"
+let bodSlow = [1.0, 0,   0,   0,   0,   0,   0.7, 0,   0,   0,   0,   0]
+let bodJig  = [1.0, 0,   0.4, 0.5, 0,   0.4, 0.7, 0,   0.4, 0.5, 0,   0.4]
+let bodReel = [1.0, 0.4, 0.6, 0.4, 0.7, 0.4, 0.5, 0.4, 0.7, 0.4, 0.6, 0.4]
+
+play bodhran:
+  # 2. Step phasor + step trigger at the step rate
+  let stepRate = 6.0
+  let stepPh   = phasor(stepRate / 12)
+  let idx      = int(stepPh * 12)
+  let trig     = impulse(stepRate)
+
+  # 3. Triangular crossfade between three velocity arrays — one knob
+  #    morphs continuously from "slow heartbeat" through "6/8 jig"
+  #    to "driving 4/4 reel". Same rate, completely different feel.
+  let vSlow = bodSlow[idx]
+  let vJig  = bodJig[idx]
+  let vReel = bodReel[idx]
+  let pwA = max(0, 1 - bodPattern * 2)
+  let pwB = (if bodPattern < 0.5 then bodPattern * 2
+             else 1 - (bodPattern - 0.5) * 2)
+  let pwC = max(0, (bodPattern - 0.5) * 2)
+  let vel = vSlow * pwA + vJig * pwB + vReel * pwC
+
+  # 4. velTrig = trig × velocity. The drum hears a strike whose
+  #    intensity is the array's value at this step. Soft hits =
+  #    muffled tap, loud hits = full boom — zero per-note envelopes.
+  let velTrig = trig * vel
+
+  # 5. Two-layer drum body — pitched sub-thump (boom) + filtered
+  #    noise burst (tap), BOTH scaled by velocity. This split is
+  #    how every real percussion synth (TR-808, hand pan, kalimba)
+  #    models a struck membrane: pitched body + noise transient.
+  let pSweep  = 50 + discharge(velTrig, 35) * 50
+  let boomEnv = discharge(velTrig, 18)
+  let boom    = sin(TAU * phasor(pSweep)) * boomEnv * 0.7
+
+  let tapEnv  = discharge(velTrig, 80) * 0.5
+  let tap     = (noise() |> hpf(2000, 0.5)) * tapEnv
+
+  # 6. Drive the mix for wooden saturation character
+  let raw    = boom + tap
+  let driven = drive(raw, 1 + bodDrive * 4)
+  ...
+```
+
+### Why this sounds like a real drummer
+
+Every step gets its own velocity. Downbeats are `1.0`, the "and"s
+are `0.4`, the ghost notes might be `0.5` — the array IS the
+drummer's accent map. Multiplying `trig * vel` shapes both the
+boom amplitude AND the tap brightness in one move (because both
+are proportional to the velocity-scaled trigger).
+
+A drum machine that hits at constant velocity sounds robotic.
+A drum machine that has per-step accents sounds programmed.
+This pattern sounds *played*, because the velocity contour is
+itself a continuous signal — and crossfading between contours is
+the drummer changing feel mid-piece.
+
+### Adapting to other drum types
+
+The same skeleton works for kick, snare, hi-hat, conga, tabla,
+djembe — anything struck. Change three things:
+
+- **The body sound**: kick = pitch-swept low sine; snare = noise +
+  bandpass at ~200 Hz; hi-hat = high-passed noise burst; tabla =
+  modal physical model (DHO chain).
+- **The velocity arrays**: 16-step for 4/4, 12-step for 6/8, 7-step
+  for 7/8, etc. Three contrasting velocity contours per knob zone.
+- **The crossfade weights**: the triangular three-zone shape is the
+  proven default. For two styles use a simple linear crossfade.
+
+### When to reach for this
+
+- Any auto-rhythmic instrument (drums, plucked patterns, arpeggios).
+- When a normal `impulse + envelope` drum sounds too mechanical.
+- When you want one knob to morph between musical styles
+  (jig ↔ reel, march ↔ shuffle, four-on-floor ↔ broken-beat) on the
+  same underlying rate.
+
+The whole pattern is ~12 lines of aither for any drum. No event
+list, no scheduler, no per-step state — just a phasor, an array
+lookup, and a multiplication.
+
 ## Versioning while you compose
 
 Aither has no built-in undo or rollback. The patch file is

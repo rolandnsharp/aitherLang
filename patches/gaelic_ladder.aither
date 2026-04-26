@@ -9,6 +9,7 @@
 #
 # ============================================================ SLIDERS
 #   S1 (CC 82) — BODHRÁN VOL    Irish frame drum, auto-rhythm
+#   S2 (CC 83) — HAND PAN VOL   D-Kurd hand pan, 4-level velocity ladder
 #   S4 (CC 17) — WHISTLE VOL    Irish low whistle (keys)
 #
 # ============================================================ BODHRÁN (K1-K2)
@@ -34,11 +35,22 @@
 #                                  (50ms attack); K6=1 is jig/reel
 #                                  style (10ms attack with crisp tongue)
 #
-# ============================================================ MASTER (K7-K8)
-#   K7 (CC 19) — REVERB SIZE     small room → stone hall
-#   K8 (CC 16) — REVERB WET      dry → drowned
+# ============================================================ MASTER + DJEMBE
+#   K7 (CC 19) — REVERB          combined size + wet (both scale together)
+#   K8 (CC 16) — PAN COMPLEXITY  3-zone velocity ladder for the hand pan:
+#                                  K8=0    LEVEL 1  meditative — one
+#                                                    root D per cycle
+#                                  K8=0.5  LEVEL 2  flowing 8-hit cascade
+#                                                    ("do do do doo doo")
+#                                  K8=1    LEVEL 3  cascade + octave-up
+#                                                    sparkle layer on top
+#                                  3 zones because the hand pan's long
+#                                  sustain blurs finer distinctions —
+#                                  3 audibly-different states beats 4
+#                                  similar-sounding ones.
 
 let bodhranVol = midi_cc(82)
+let panVol     = midi_cc(83)
 let whistleVol = midi_cc(17)
 
 let bodPattern = midi_cc(74)
@@ -49,8 +61,9 @@ let vibrato      = midi_cc(77)
 let tone         = midi_cc(93)
 let articulation = midi_cc(18)
 
-let revSize = 1.5 + midi_cc(19) * 5.0
-let revWet  = midi_cc(16) * 0.6
+# K7 controls reverb size AND wet together (one knob, more space)
+let revAmt     = midi_cc(19)
+let panComplex = midi_cc(16)
 
 # ===== BODHRÁN — Irish frame drum (kept from previous version) =====
 let bodSlow = [1.0, 0,   0,   0,   0,   0,   0.7, 0,   0,   0,   0,   0]
@@ -83,6 +96,100 @@ play bodhran:
   let raw = boom + tap
   let driven = drive(raw, 1 + bodDrive * 4)
   let s = driven * bodhranVol * 0.4
+  [s, s]
+
+# ===== HAND PAN — 4-level velocity ladder via K8 =====
+# Same technique as bodhrán: ONE expressive timbre + per-step velocity
+# arrays + paradigm crossfade between levels. The hand pan is the
+# right shape for this because (like the bodhrán) it's a single-
+# timbre instrument where velocity is the primary expressive
+# parameter — soft hits are quiet rings, loud hits are full booms.
+#
+# A note pattern array picks WHICH tongue per step (D Kurd notes).
+# Velocity arrays per level pick HOW HARD each step is struck.
+# Level 1 = sparse meditative; Level 4 = busy cascade.
+def panTone(trig, fund):
+  # PLUCK-enveloped additive (replaces DHO so the sound has finite
+  # decay like the bodhrán's discharge — no ring memory means clean
+  # mute when velocity drops to zero). Same compound clang mode
+  # partial ratio (1 : 2 : 3) so the timbre stays hand-pan-like;
+  # only the envelope shape changed.
+  let env1 = pluck(trig, 4.0)
+  let env2 = pluck(trig, 1.5)
+  let env3 = pluck(trig, 0.5)
+  let d1   = 1 + 0.0010 * sin(t * 0.71)
+  let d2   = 1 + 0.0008 * sin(t * 1.13 + 1.7)
+  let d3   = 1 + 0.0012 * sin(t * 1.39 + 2.4)
+  let p1   = sin(TAU * phasor(fund * d1))         * env1
+  let p2   = sin(TAU * phasor(fund * 1.998 * d2)) * env2 * 0.55
+  let p3   = sin(TAU * phasor(fund * 3.0 * d3))   * env3 * 0.40
+  p1 + p2 + p3
+
+# 16-step note pattern in D Kurd (D, A, Bb, C, D, E, F, G — Hang scale).
+# Same melodic shape every cycle; velocity arrays decide which steps
+# actually sound and how strongly.
+let panNotes = [146.83, 220.00, 293.66, 220.00, 261.63, 220.00, 293.66, 220.00,
+                146.83, 220.00, 233.08, 220.00, 261.63, 220.00, 293.66, 220.00]
+                # D3,    A3,    D4,    A3,    C4,    A3,    D4,    A3,
+                # D3,    A3,    Bb3,   A3,    C4,    A3,    D4,    A3
+
+# 3 levels — each rhythmically distinct.
+# L1 = 4 hits per cycle on the strong beats — clearly rhythmic but sparse
+# L2 = the "do do do doo doo" beautiful cascade you loved
+# L3 = same as L2 + octave sparkle (added in the play block)
+let panVelL1 = [1.0, 0,   0,   0,   0.7, 0,   0,   0,
+                1.0, 0,   0,   0,   0.7, 0,   0,   0  ]
+let panVelL2 = [1.0, 0.3, 0.6, 0.3, 0.4, 0.3, 0.5, 0.3,
+                0.7, 0.3, 0.4, 0.3, 0.5, 0.3, 0.6, 0.3]
+let panVelL3 = [1.0, 0.3, 0.6, 0.3, 0.4, 0.3, 0.5, 0.3,
+                0.7, 0.3, 0.4, 0.3, 0.5, 0.3, 0.6, 0.3]
+
+# Sparkle layer velocities — ONLY active in L3 zone. Hits the
+# octave-UP version of the current note on the strong-beat steps.
+let panSparkleVel = [0.6, 0,   0.5, 0,   0,   0,   0.4, 0,
+                     0.5, 0,   0,   0,   0.4, 0,   0.5, 0  ]
+
+play handpan:
+  # COPY OF THE BODHRÁN PATTERN, exact structure:
+  # - 3 velocity arrays
+  # - triangular 3-zone crossfade (slope 2)
+  # - ONE shared velocity = weighted sum
+  # - velTrig = trig * vel
+  # - ONE voice fed velTrig
+  # The voice (panTone) now uses pluck envelopes (not DHO), so when
+  # vel drops to 0 the envelope dies in ~4 seconds and the sound
+  # actually stops — no ring memory, no bleed across zones.
+  let stepRate = 4.0
+  let stepPh   = phasor(stepRate / 16)
+  let idx      = int(stepPh * 16)
+  let trig     = impulse(stepRate)
+  let activeNote = panNotes[idx]
+
+  let pwA = max(0, 1 - panComplex * 2)
+  let pwB = (if panComplex < 0.5 then panComplex * 2
+             else 1 - (panComplex - 0.5) * 2)
+  let pwC = max(0, (panComplex - 0.5) * 2)
+  let vel = panVelL1[idx] * pwA + panVelL2[idx] * pwB + panVelL3[idx] * pwC
+
+  let velTrig = trig * vel
+
+  # Sample-and-hold the fund on each hit (otherwise the sine slides
+  # through panNotes during the envelope decay).
+  $heldFund = 146.83
+  $heldFund = if velTrig > 0.001 then activeNote else $heldFund
+  let voice = panTone(velTrig, $heldFund)
+
+  # SPARKLE LAYER — only active in L3 zone (gated by pwC weight).
+  # Octave-up version of the current note plays the sparkle pattern
+  # ON TOP of the main voice. This is the "extra" that makes L3
+  # audibly different from L2 (which has identical velocity).
+  let sparkleVelRaw = panSparkleVel[idx] * pwC
+  let sparkleTrig = trig * sparkleVelRaw
+  $sparkleHeld = 293.66
+  $sparkleHeld = if sparkleTrig > 0.001 then activeNote * 2 else $sparkleHeld
+  let sparkleVoice = panTone(sparkleTrig, $sparkleHeld)
+
+  let s = (voice + sparkleVoice * 0.6) * panVol * 0.4
   [s, s]
 
 # ===== IRISH LOW WHISTLE — hardcoded D MIXOLYDIAN, punchy attack =====
@@ -181,7 +288,9 @@ play whistle:
     total * env * whistleVol)
 
 # ===== MASTER =====
-let dry  = bodhran + whistle
+let dry  = bodhran + handpan + whistle
 let mono = (dry[0] + dry[1]) * 0.5
-let wet  = mono |> reverb(revSize, 0.5)
-([dry[0], dry[1]] + [wet, wet] * revWet) * 0.6
+# K7 controls reverb size + wet together — single knob morphs from
+# intimate room (size 1.5, wet 0.0) to stone hall (size 6.5, wet 0.6)
+let wet  = mono |> reverb(1.5 + revAmt * 5.0, 0.5)
+([dry[0], dry[1]] + [wet, wet] * revAmt * 0.6) * 0.6
