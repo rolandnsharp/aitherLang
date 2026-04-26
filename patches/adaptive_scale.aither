@@ -1,0 +1,84 @@
+# adaptive_scale — a pad whose 8-note scale evolves with what you play.
+#
+# State is an array of 8 frequencies, mutated periodically. Each
+# mutation picks one slot and pulls it toward a "target" — either the
+# current MIDI pitch (if a key is held) or a small random walk around
+# the slot's existing value (so the scale drifts even without input).
+#
+# Knobs:
+#   K1 (CC 74) — MUTATION RATE   0   = static scale
+#                                 1   = a mutation every ~0.4s
+#   K2 (CC 71) — STICKINESS       0   = pure random walk
+#                                 1   = lock to current MIDI pitch
+#   K3 (CC 76) — VOICE GAIN       0..1 each scale note
+#   K4 (CC 77) — REVERB wet
+#
+# How to drive it:
+#   - Set K1 ≈ 0.3, K2 ≈ 0.7, hold a single key for a minute. Each
+#     mutation pulls one of the 8 slots to within a small ratio of
+#     your held pitch. After a minute the scale has drifted toward
+#     your input — the patch "learned" you.
+#   - K2 = 0: scale drifts on its own random walk. After 5 minutes
+#     the chord sounds different than it started. Pure generative.
+#   - K1 = 0: scale freezes wherever it currently is. Use this to
+#     "lock in" a sound that worked.
+#
+# This is the smallest demo of `$state` holding STRUCTURED state
+# (an array, not just a scalar). It's the toehold into axis 3 from
+# philosophicalSpeculations.md — a knob whose effect compounds over
+# minutes, not samples.
+
+let mutRate   = midi_cc(74) * 2.5         # 0..2.5 mutations/sec
+let stickiness = midi_cc(71)              # 0..1
+let voiceGain = 0.05 + midi_cc(76) * 0.2
+let revWet    = midi_cc(77) * 0.5
+
+# The array. 8 frequencies, initialised on first sample to a major
+# pentatonic over an octave — a comfortable starting chord. Subsequent
+# samples leave it alone unless a mutation fires.
+let scale = array_make(8)
+
+# One-shot init. State `$inited` starts at 0, set to 1 after first
+# tick. The init seeds the array from a static lookup table.
+let seedFreqs = [110.0, 138.59, 164.81, 220.0, 277.18, 329.63, 440.0, 554.37]
+$inited = 0.0
+let _initStep = sum(8, n =>
+  if $inited > 0.5 then 0.0
+  else array_set(scale, n - 1, seedFreqs[n - 1]))
+$inited = 1.0
+
+# Mutation trigger. Fires at mutRate Hz; each fire picks a slot and
+# updates it. `impulse(rate)` returns 1 on the rising edge of an
+# internal phasor crossing.
+let mutTrig = impulse(mutRate)
+
+# Pick which slot to mutate (cycles through). Every fire bumps the
+# cursor by 1 mod 8, so after 8 firings the whole scale has been
+# touched at least once.
+$mutCursor = 0.0
+$mutCursor = if mutTrig > 0.5 then ($mutCursor + 1) mod 8 else $mutCursor
+
+# Compute new freq for the targeted slot. Two mixed sources:
+#   - input pitch: midi_freq() if a key is held, else 0
+#   - current value: read from the array, slightly perturbed
+# stickiness blends them: 1 = full input pull, 0 = full random walk.
+let curFreq = array_get(scale, $mutCursor)
+let inputF  = if midi_gate() > 0.5 then midi_freq() else curFreq
+let walkF   = curFreq * (1 + (noise() * 0.1))
+let newF    = inputF * stickiness + walkF * (1 - stickiness)
+
+# On mutation trigger, write newF into the targeted slot.
+let _setStep = if mutTrig > 0.5 then array_set(scale, $mutCursor, newF) else 0.0
+
+# Render. The pad sums 8 voices, one per scale slot. Each is a warm
+# additive partial bank with a soft per-voice tremolo so the chord
+# breathes. Voices retune continuously (no envelope) — when a slot's
+# frequency is rewritten, that voice glides via the running phasor.
+def voice(freq):
+  additive(freq, warm_shape, 6) * (1 + sin(TAU * phasor(0.7 * freq / 220.0)) * 0.05) * voiceGain
+
+let pad = sum(8, n => voice(array_get(scale, n - 1)))
+
+let dry  = pad
+let wet  = dry |> reverb(3.5, 0.4)
+[dry + wet * revWet, dry + wet * revWet]

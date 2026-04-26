@@ -35,6 +35,13 @@ type
     perTypeIdx*: int
     offset*: int            # absolute start offset into pool (in slots)
     size*: int              # number of float64 slots
+    # Optional payload written into the first `init.len` slots when the
+    # voice's pool is first allocated. Used by `array_make` to seed the
+    # length and capacity header (slots 0 and 1) without paying a
+    # per-tick init branch. Across hot reload, region migration may
+    # overwrite these — that's the desired behaviour: a same-shape array
+    # carries its data forward; a resized array gets its fresh init.
+    init*: seq[float64]
 
   Scope = ref object
     parent: Scope
@@ -120,7 +127,8 @@ proc offsetPlaceholder(rid: int): string =
 # Register one stateful call site. Returns a placeholder token to embed
 # in the emitted C — substituted with the absolute pool offset after
 # the walk, once per-type bases are known.
-proc registerRegion(c: Ctx; typeName: string; size: int): string =
+proc registerRegionInit(c: Ctx; typeName: string; size: int;
+                        init: seq[float64] = @[]): string =
   if typeName notin c.typeCounter:
     c.typeCounter[typeName] = 0
     c.typeCumSize[typeName] = 0
@@ -133,8 +141,11 @@ proc registerRegion(c: Ctx; typeName: string; size: int): string =
   # `offset` holds the intra-region offset here; `finaliseLayout` rewrites
   # it to an absolute pool slot once region bases are assigned.
   c.regions.add Region(typeName: typeName, perTypeIdx: perTypeIdx,
-                       offset: intraOffset, size: size)
+                       offset: intraOffset, size: size, init: init)
   offsetPlaceholder(rid)
+
+proc registerRegion(c: Ctx; typeName: string; size: int): string =
+  registerRegionInit(c, typeName, size, @[])
 
 proc fresh(c: Ctx; prefix: string): string =
   inc c.tmpCounter
@@ -206,7 +217,19 @@ proc lookup(sc: Scope; name: string): string =
 # libm1, shape primitives, stateful inlined builtins, math helpers, MIDI.
 const BuiltinFns = ["saw", "tri", "sqr", "phasor", "noise", "abs", "pow",
                     "midi_cc", "midi_note", "midi_freq", "midi_gate",
-                    "midi_trig", "midi_voice_freq", "midi_voice_gate"]
+                    "midi_trig", "midi_voice_freq", "midi_voice_gate",
+                    "magnitude", "phase", "freq_shift",
+                    "array_make", "array_get", "array_set", "array_len",
+                    "array_push", "array_pop", "array_resize"]
+
+# Pair-returning builtins. Each takes scalars and emits two C expressions
+# — one for the real component, one for the imaginary. They piggy-back on
+# the stereo machinery (refsStereo / emitStereo) because aither already
+# represents two-valued returns as L/R-style pairs; "stereo" here means
+# "two-component", not literally "speaker channels". Composers index with
+# `out[0]` (real) / `out[1]` (imag), the same way they index a pan output
+# for L/R. Don't add type-system surgery; the value stays flat.
+const PairCalls = ["cmul", "cdiv", "cscale", "rotate", "analytic"]
 
 # True when `name` resolves to a value (scalar local, stereo local, top
 # lets/vars/arrays, play block, stereo let). Values shadow function
@@ -285,7 +308,8 @@ proc isStereoReturn(c: Ctx; n: Node): bool =
     isStereoReturn(c, n.kids[1]) or
       (n.kids[2] != nil and isStereoReturn(c, n.kids[2]))
   of nkCall:
-    n.str in c.userDefs and isStereoDef(c, c.userDefs[n.str])
+    if n.str in PairCalls: true
+    else: n.str in c.userDefs and isStereoDef(c, c.userDefs[n.str])
   of nkLambda: false      # lambdas are scalar-valued in v1
   else: false
 
@@ -678,6 +702,101 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
       return &"fmin(fmax({v}, {lo}), {hi})"
     if name == "int" and n.kids.len == 1:
       return "((double)(long)(" & c.emitExpr(sc, n.kids[0]) & "))"
+    # Pair-returning calls in scalar context: refuse with a hint about
+    # the let-binding pattern. The stereo/pair path captures these in
+    # emitStereo via `let p = cmul(...)`; reaching emitExpr means the
+    # user wrote them somewhere (a binop, a non-pair call arg, etc.)
+    # where we have no slot for two return values.
+    if name in PairCalls:
+      raise newException(ValueError,
+        name & " returns a pair (real, imag) — bind with `let p = " &
+        name & "(...)` then use `p[0]` / `p[1]`, or pass to a pair-aware " &
+        "consumer like `magnitude` / `phase` " & errLoc(n))
+    # Scalar reductions of a pair: take real and imag as two scalar args.
+    if name == "magnitude" and n.kids.len == 2:
+      let re = c.emitExpr(sc, n.kids[0])
+      let im = c.emitExpr(sc, n.kids[1])
+      return &"sqrt(({re}) * ({re}) + ({im}) * ({im}))"
+    if name == "phase" and n.kids.len == 2:
+      let re = c.emitExpr(sc, n.kids[0])
+      let im = c.emitExpr(sc, n.kids[1])
+      return &"atan2(({im}), ({re}))"
+    if name in ["magnitude", "phase"]:
+      raise newException(ValueError,
+        name & "(re, im) takes exactly 2 scalars " & errLoc(n))
+    # freq_shift(signal, hz) — analytic + rotation, scalar real-part-only
+    # output. Stateful native (32-slot Hilbert pair + 1 phase slot).
+    if name == "freq_shift" and n.kids.len == 2:
+      let sig = c.emitExpr(sc, n.kids[0])
+      let hz = c.emitExpr(sc, n.kids[1])
+      let off = c.registerRegion("freq_shift", 33)
+      return &"(s->idx = {off}, n_freq_shift((DspState*)s, ({sig}), ({hz})))"
+    if name == "freq_shift":
+      raise newException(ValueError,
+        "freq_shift(signal, hz) takes exactly 2 args " & errLoc(n))
+    # Mutable arrays. Per-call-site region (length, capacity, data...).
+    # Handle = pool offset of the region's metadata head, returned as
+    # double for plumbing through aither's normal scalar path. Bounds
+    # checks are runtime; out-of-bounds reads return 0 (no crash).
+    if name == "array_make":
+      if n.kids.len != 1 or n.kids[0].kind != nkNum:
+        raise newException(ValueError,
+          "array_make takes a numeric literal capacity " & errLoc(n))
+      let cap = int(n.kids[0].num)
+      if cap <= 0 or cap > 4096:
+        raise newException(ValueError,
+          "array_make: capacity must be 1..4096, got " &
+          $cap & " " & errLoc(n))
+      # Header: 2 slots (length, capacity). Data: cap slots, zero-init.
+      let off = c.registerRegionInit("array",
+                                     2 + cap,
+                                     @[float64(cap), float64(cap)])
+      return &"((double){off})"
+    if name == "array_get" and n.kids.len == 2:
+      let h = c.emitExpr(sc, n.kids[0])
+      let i = c.emitExpr(sc, n.kids[1])
+      return "(({ long _h = (long)(" & h & "); long _i = (long)(" & i & "); " &
+             "long _len = (long)s->pool[_h]; " &
+             "(_i >= 0 && _i < _len) ? s->pool[_h + 2 + _i] : 0.0; }))"
+    if name == "array_set" and n.kids.len == 3:
+      let h = c.emitExpr(sc, n.kids[0])
+      let i = c.emitExpr(sc, n.kids[1])
+      let v = c.emitExpr(sc, n.kids[2])
+      return "(({ long _h = (long)(" & h & "); long _i = (long)(" & i & "); " &
+             "double _v = (" & v & "); " &
+             "long _len = (long)s->pool[_h]; " &
+             "if (_i >= 0 && _i < _len) s->pool[_h + 2 + _i] = _v; " &
+             "_v; }))"
+    if name == "array_len" and n.kids.len == 1:
+      let h = c.emitExpr(sc, n.kids[0])
+      return "(s->pool[(long)(" & h & ")])"
+    if name == "array_push" and n.kids.len == 2:
+      let h = c.emitExpr(sc, n.kids[0])
+      let v = c.emitExpr(sc, n.kids[1])
+      return "(({ long _h = (long)(" & h & "); double _v = (" & v & "); " &
+             "long _len = (long)s->pool[_h]; long _cap = (long)s->pool[_h + 1]; " &
+             "if (_len < _cap) { s->pool[_h + 2 + _len] = _v; " &
+             "s->pool[_h] = (double)(_len + 1); _len = _len + 1; } " &
+             "(double)_len; }))"
+    if name == "array_pop" and n.kids.len == 1:
+      let h = c.emitExpr(sc, n.kids[0])
+      return "(({ long _h = (long)(" & h & "); " &
+             "long _len = (long)s->pool[_h]; double _r; " &
+             "if (_len > 0) { _len = _len - 1; s->pool[_h] = (double)_len; " &
+             "_r = s->pool[_h + 2 + _len]; } else { _r = 0.0; } " &
+             "_r; }))"
+    if name == "array_resize" and n.kids.len == 2:
+      let h = c.emitExpr(sc, n.kids[0])
+      let nl = c.emitExpr(sc, n.kids[1])
+      return "(({ long _h = (long)(" & h & "); long _n = (long)(" & nl & "); " &
+             "long _cap = (long)s->pool[_h + 1]; long _old = (long)s->pool[_h]; " &
+             "if (_n < 0) _n = 0; if (_n > _cap) _n = _cap; " &
+             "for (long _k = _old; _k < _n; ++_k) s->pool[_h + 2 + _k] = 0.0; " &
+             "s->pool[_h] = (double)_n; (double)_n; }))"
+    if name in ["array_make", "array_get", "array_set", "array_len",
+                "array_push", "array_pop", "array_resize"]:
+      raise newException(ValueError,
+        name & ": wrong arg count " & errLoc(n))
     # MIDI input primitives — read engine-owned global state.
     # midi_cc/note/trig take a note-or-CC number; midi_freq/gate are 0-arg.
     # midi_trig is stateful (per-voice pool slot for edge detection), so
@@ -907,6 +1026,67 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
     return (&"(({condTmp}) != 0.0 ? ({thn.l}) : ({els.l}))",
             &"(({condTmp}) != 0.0 ? ({thn.r}) : ({els.r}))", true)
   of nkCall:
+    # Pair-returning builtin (cmul / cdiv / cscale / rotate / analytic):
+    # bind the scalar args to fresh temps via `pre`, then return one C
+    # expression per component. analytic is the only stateful entry —
+    # it claims two Hilbert regions and dispatches via native calls.
+    if n.str in PairCalls:
+      proc evalArgs(c: Ctx; sc: Scope; n: Node; pre: var string;
+                    arity: int; tag: string): seq[string] =
+        if n.kids.len != arity:
+          raise newException(ValueError,
+            n.str & " takes " & $arity & " args, got " &
+            $n.kids.len & " " & errLoc(n))
+        result = @[]
+        for i, k in n.kids:
+          let argC = c.emitExpr(sc, k)
+          let tmp = c.fresh(tag & "_" & $i)
+          pre.add &"  double {tmp} = ({argC});\n"
+          result.add tmp
+      case n.str
+      of "cmul":
+        let a = evalArgs(c, sc, n, pre, 4, "cmul")
+        return (&"({a[0]} * {a[2]} - {a[1]} * {a[3]})",
+                &"({a[0]} * {a[3]} + {a[1]} * {a[2]})", true)
+      of "cdiv":
+        let a = evalArgs(c, sc, n, pre, 4, "cdiv")
+        let den = c.fresh("cdiv_den")
+        pre.add &"  double {den} = {a[2]} * {a[2]} + {a[3]} * {a[3]};\n"
+        # Guard /0 by yielding (0, 0) when the divisor pair is the origin.
+        # Matches aither's general "divide by zero is zero" convention.
+        return (&"({den} == 0.0 ? 0.0 : ({a[0]} * {a[2]} + {a[1]} * {a[3]}) / {den})",
+                &"({den} == 0.0 ? 0.0 : ({a[1]} * {a[2]} - {a[0]} * {a[3]}) / {den})", true)
+      of "cscale":
+        let a = evalArgs(c, sc, n, pre, 3, "cscale")
+        return (&"({a[0]} * {a[1]})", &"({a[0]} * {a[2]})", true)
+      of "rotate":
+        let a = evalArgs(c, sc, n, pre, 3, "rotate")
+        let cs = c.fresh("rot_c")
+        let sn = c.fresh("rot_s")
+        pre.add &"  double {cs} = cos({a[2]});\n"
+        pre.add &"  double {sn} = sin({a[2]});\n"
+        return (&"({a[0]} * {cs} - {a[1]} * {sn})",
+                &"({a[0]} * {sn} + {a[1]} * {cs})", true)
+      of "analytic":
+        if n.kids.len != 1:
+          raise newException(ValueError,
+            "analytic takes 1 arg " & errLoc(n))
+        let sig = c.emitExpr(sc, n.kids[0])
+        let sigT = c.fresh("an_sig")
+        pre.add &"  double {sigT} = ({sig});\n"
+        let offA = c.registerRegion("hilbert_a", 16)
+        let offB = c.registerRegion("hilbert_b", 16)
+        let reT = c.fresh("an_re")
+        let imT = c.fresh("an_im")
+        # Negate branchB output: that cascade implements -H[m] under
+        # this design's polyphase convention, and `analytic(signal)`
+        # is documented to return (signal, +H[signal]).
+        pre.add &"  s->idx = {offA};\n"
+        pre.add &"  double {reT} = n_hilbert_a((DspState*)s, {sigT});\n"
+        pre.add &"  s->idx = {offB};\n"
+        pre.add &"  double {imT} = -n_hilbert_b((DspState*)s, {sigT});\n"
+        return (reT, imT, true)
+      else: discard       # exhaustive case below
     # Stereo-returning user def (e.g. haas, pan): inline once, capture
     # the two output channels into fresh temps via the `pre` preamble.
     if n.str in c.userDefs and isStereoDef(c, c.userDefs[n.str]):
@@ -1105,6 +1285,7 @@ proc refsStereo(c: Ctx; sc: Scope; n: Node): bool =
       if isStereoBase: return false
     return c.refsStereo(sc, i)   # ignore base; its stereo-ness is consumed
   of nkCall:
+    if n.str in PairCalls: return true
     if n.str in c.userDefs and isStereoDef(c, c.userDefs[n.str]):
       return true
     for k in n.kids:
@@ -1190,6 +1371,9 @@ proc emit*(c: Ctx; program: Node): string =
   pre.add "extern double n_tremolo(DspState*,double,double,double);\n"
   pre.add "extern double n_slew(DspState*,double,double);\n"
   pre.add "extern double n_wave(DspState*,double,double*,int);\n"
+  pre.add "extern double n_hilbert_a(DspState*,double);\n"
+  pre.add "extern double n_hilbert_b(DspState*,double);\n"
+  pre.add "extern double n_freq_shift(DspState*,double,double);\n"
   pre.add "extern double shape_saw(double);\n"
   pre.add "extern double shape_tri(double);\n"
   pre.add "extern double shape_sqr(double);\n"
@@ -1381,9 +1565,13 @@ proc emit*(c: Ctx; program: Node): string =
             let rhs = c.emitExpr(inner, st.kids[0])
             body.add &"    {target} = ({rhs});\n"
           else:
-            # Non-final expression statements are ignored (would be a
-            # no-op in aither too — last expr is the play's value).
-            discard
+            # Non-final expression statements run for their side effects
+            # (the value is dropped). This matters for stateful builtins
+            # where the user expects mutation: `array_set(arr, i, v)`,
+            # `array_push(arr, v)`. Without `(void)(...)` they'd silently
+            # vanish and the array would never update.
+            let v = c.emitExpr(inner, st)
+            body.add &"    (void)({v});\n"
       body.add "  }\n"
     else:
       if i == finalIdx:
@@ -1391,7 +1579,12 @@ proc emit*(c: Ctx; program: Node): string =
         let v = c.emitStereo(topSc, s, pre)
         body.add pre
         body.add &"  *outL = ({v.l}); *outR = ({v.r});\n"
-      # Non-final bare expressions: ignore (could warn).
+      else:
+        # Non-final bare expression at top level: run for side effects.
+        # `array_set`, `array_push`, and similar mutators are useful
+        # statements; without this they'd compile to nothing.
+        let v = c.emitExpr(topSc, s)
+        body.add &"  (void)({v});\n"
   body.add "}\n"
 
   pre & c.arrayDecls & body

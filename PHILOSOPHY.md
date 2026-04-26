@@ -300,3 +300,41 @@ they're all the same operation: a function of state,
 evaluated in a loop, producing samples.
 
 One interface. Five paradigms. Infinite expression.
+
+## Complex numbers as operations, not types
+
+Two-dimensional numbers — what mathematicians call complex
+numbers — are the natural language of the frequency domain.
+Without them, frequency shifting, pole-zero filter design,
+phase-coherent effects, and the entire spectral side of audio
+all require multi-step real-arithmetic workarounds.
+
+We add the operations without adding the type.
+
+A "complex number" in aither is just two scalars in a state
+vector. What we add is the algebra: `rotate`, `magnitude`,
+`phase`, `cmul`, `analytic`, `freq_shift`. Each one operates
+on pairs of floats and returns pairs of floats. There is no
+new type, no value coercion, no commitment to which of the
+several inequivalent mathematical structures of ℂ we mean
+(analytic, rigid, algebraic — they're not the same thing,
+and choosing one is a position we don't need to take).
+
+This is the same discipline as everything else in the
+language. A signal is a number. A state is a vector of
+numbers. Meaning lives in the operations, not in the types.
+Two cells become a "complex number" precisely when an
+operation reads them as one. They become a stereo pair when
+a different operation reads them differently. They become
+a (pitch, gate) tuple when MIDI reads them. The cells don't
+care; the operations do.
+
+The frequency domain becomes available without the language
+having to know it exists.
+
+The same move applies elsewhere. Three cells aren't a
+"3D vector" — they're three numbers an operation might choose
+to interpret spatially. An array of partial amplitudes isn't
+an "additive synth" — it's an array of numbers an operation
+chooses to sum into a sample. Refusing to name the types
+keeps the operations honest about what they actually do.

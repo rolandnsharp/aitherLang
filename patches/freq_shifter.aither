@@ -1,0 +1,38 @@
+# freq_shifter — single-sideband frequency shift across a held drone.
+#
+# Frequency shifting (not pitch shifting) is a coherent inharmonic
+# transform: every partial moves by the same Hz offset, not the same
+# ratio. So a 220 Hz fundamental + 440 + 660 + 880 (integer harmonics)
+# becomes 320 + 540 + 760 + 980 when shifted up 100 Hz — no longer
+# integer multiples of any fundamental. The series stops "sounding like
+# a pitch" and starts "sounding like a metallic resonance" mid-sweep.
+#
+# K1 sweeps shift Hz from -200 to +200, with a small flat zone at the
+# centre for "no shift". K2 picks the timbre's brightness.
+# K3 fades a wet/dry mix so you can hear the unshifted drone alongside.
+#
+# This is the headline aither-only sound design move — no real-arithmetic
+# synth can do this in one step. Every other paradigm fakes it with
+# ring-mod (which produces both sidebands) or pitch-shift (which scales
+# the spectrum, not translates it).
+
+let shiftHz   = (midi_cc(74) - 0.5) * 400.0
+let bright    = 0.5 + midi_cc(71) * 1.5
+let wet       = 0.3 + midi_cc(76) * 0.7
+
+# A simple held drone: 8-partial additive saw. Triad-shaped (root, fifth,
+# octave) so the spectrum is rich enough that the shift effect is obvious.
+let f1 = 165.0                      # E3
+let f2 = 247.5                      # B3 (perfect fifth above)
+let f3 = 330.0                      # E4
+
+def voice(freq):
+  additive(freq, warm_shape, 8) * 0.3
+
+play drone:
+  let dry = (voice(f1) + voice(f2) * 0.7 + voice(f3) * 0.5) * bright
+  # The single line of language design that motivated all this work:
+  let shifted = freq_shift(dry, shiftHz)
+  dry * (1 - wet) + shifted * wet
+
+drone |> drive(0.9)

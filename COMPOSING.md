@@ -494,6 +494,148 @@ DHO does NOT replace `additive` for hundred-partial drones —
 many sines. DHO is for *expressive single voices* where one knob
 should walk continuously between named timbres.
 
+## Pair operations — operations from complex algebra
+
+aither has no complex-number TYPE, but it has the OPERATIONS that
+make complex algebra useful: rotate, multiply, magnitude, phase,
+Hilbert transform, frequency shift. They take and return ordinary
+floats — the "pair" is just two scalars, no special type. The
+pair-returning functions reuse aither's existing `[L, R]` plumbing,
+so a result is destructured the same way you index a stereo pan
+output: `out[0]` for the real part, `out[1]` for the imaginary.
+
+Scalar-in/scalar-out:
+
+| call                       | does                              |
+|----------------------------|-----------------------------------|
+| `magnitude(re, im)`        | `sqrt(re² + im²)`                 |
+| `phase(re, im)`            | `atan2(im, re)`                   |
+| `freq_shift(signal, hz)`   | shift signal up by `hz` (negative shifts down) |
+
+Pair-in/pair-out (return a 2-element value; bind with `let p = …`,
+then use `p[0]`, `p[1]`):
+
+| call                           | does                                          |
+|--------------------------------|-----------------------------------------------|
+| `cmul(a_re, a_im, b_re, b_im)` | complex multiplication: `(ac − bd, ad + bc)`  |
+| `cdiv(a_re, a_im, b_re, b_im)` | complex division                              |
+| `cscale(s, re, im)`            | scalar × pair                                 |
+| `rotate(re, im, omega)`        | rotate by `omega` radians                     |
+| `analytic(signal)`             | `(signal, hilbert(signal))` — Hilbert pair    |
+
+`+` and `*` are NOT overloaded for complex. `(re, im) * (re', im')`
+does componentwise multiplication (Hadamard product, NOT `cmul`).
+Reach for the named functions when you mean the algebra.
+
+### `freq_shift` — the headline move
+
+A frequency shifter slides every spectral component by the same Hz
+offset (not by the same ratio). A 220 Hz fundamental + 440 + 660
+becomes 320 + 540 + 760 with a +100 Hz shift — partials that used
+to be integer multiples are no longer harmonically related, so the
+result reads as inharmonic but coherent. No additive or FM recipe
+can do this because they all act on ratios.
+
+```
+let warm = additive(220, warm_shape, 8)
+freq_shift(warm, midi_cc(74) * 200 - 100)
+```
+
+`patches/freq_shifter.aither` is the live demo: a held drone with K1
+sweeping shift Hz across ±200, walking smoothly from harmonic →
+inharmonic → enharmonic territory.
+
+### Mandelbrot iteration as a sound source
+
+`cmul + add` is enough to write a Mandelbrot voice in three lines:
+
+```
+$zr = 0.0
+$zi = 0.0
+let zsq = cmul($zr, $zi, $zr, $zi)
+$zr = zsq[0] + cReal
+$zi = zsq[1] + cImag
+$zr      # the audio
+```
+
+`patches/mandelbrot_voice.aither` adds a periodic reset and a
+magnitude clamp, but the engine is one line of complex arithmetic.
+Sweep `(cReal, cImag)` and the timbre walks across the Mandelbrot
+plane: inside the cardioid → silent (fixed point); just past the
+boundary → chaotic but bounded → the aether-shimmer zone; far
+outside → escape and silence.
+
+### Cost notes
+
+- Pair ops are 4 mults + 2 adds at most (`cmul`, `rotate`). Trivial.
+- `analytic` and `freq_shift` carry a 32-slot Hilbert pair (4-stage
+  IIR allpass per branch). ~30 multiply-adds per sample. Fine for
+  one or two voices; don't put one inside a `sum(N, …)` over many
+  partials.
+
+## State that holds an array
+
+`$state` cells hold scalar `float64` by default — fast, flat, fixed
+shape. For the cases where a voice needs *structured* state — a
+running history, a mutable scale, an evolving wavetable — `$state`
+can also hold an array handle.
+
+The seven operations:
+
+| call                              | does                                                                                |
+|-----------------------------------|-------------------------------------------------------------------------------------|
+| `array_make(N)`                   | reserve a per-call-site array (length=N, capacity=N, all zeros). Returns a handle.  |
+| `array_get(arr, i)`               | read; out-of-bounds returns 0 (no crash)                                            |
+| `array_set(arr, i, v)`            | write; out-of-bounds is a no-op                                                     |
+| `array_len(arr)`                  | current length                                                                      |
+| `array_push(arr, v)` / `pop(arr)` | grow / shrink length within capacity                                                |
+| `array_resize(arr, n)`            | truncate or pad with zeros                                                          |
+
+`array_make(N)` is per-call-site: the same call site returns the
+same handle every tick, the array's contents persist. So bind once
+at the top of the patch and read the handle as a regular `double`:
+
+```
+let scale = array_make(8)
+$inited = 0
+let _seed = sum(8, n =>
+  if $inited > 0.5 then 0.0 else array_set(scale, n - 1, 110 * pow(2, (n - 1) / 12)))
+$inited = 1
+```
+
+Then read from downstream:
+
+```
+sum(8, n => additive(array_get(scale, n - 1), warm_shape, 6))
+```
+
+### When an array beats a scalar `$state`
+
+When the patch needs to remember more than ~3-4 values (a pitch
+history, an evolving scale, a per-step velocity table), an array
+is one allocation instead of a forest of `$slot_0`, `$slot_1`, …
+cells. Plus the index can be computed at runtime — useful for
+"every bar mutate one of N entries" patterns where the entry isn't
+known until the trigger fires.
+
+`patches/adaptive_scale.aither` keeps an 8-element chord in an
+array; every K1 seconds, one slot is rewritten toward the held MIDI
+pitch (with K2 controlling pull-strength). Hold a key for a minute
+and the chord migrates toward your input — the patch "learns" you.
+
+### Don'ts
+
+- Capacity is fixed at codegen time. `array_make(N)` requires `N` to
+  be a numeric literal; you can't size by a runtime value.
+- Not the same thing as the constant arrays you pass to `wave()`
+  (`let notes = [220, 247.5, …]`). Those are immutable, hoisted to
+  static const data, and indexed for compile-time scale lookup. The
+  `array_*` family is mutable, lives in the voice pool, and is the
+  right tool when you want runtime mutation.
+- Don't put `array_make` inside a function called from many sites:
+  each call site allocates its own region. Allocate once at top
+  level, pass the handle around.
+
 ## Timbre choice: which paradigm for which sound
 
 Aither's contract is `f(state) → sample`. Synthesis paradigms
@@ -790,3 +932,4 @@ Self-feedback is more naturally written inline with `$state`:
 
 Always read `stdlib.aither` before inventing a function —
 it is short and probably already has what you need.
+

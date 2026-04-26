@@ -68,6 +68,9 @@ proc registerNatives(s: TccState) =
   discard s.addSymbol("n_tremolo",   cast[pointer](nTremolo))
   discard s.addSymbol("n_slew",      cast[pointer](nSlew))
   discard s.addSymbol("n_wave",      cast[pointer](nWave))
+  discard s.addSymbol("n_hilbert_a", cast[pointer](nHilbertA))
+  discard s.addSymbol("n_hilbert_b", cast[pointer](nHilbertB))
+  discard s.addSymbol("n_freq_shift", cast[pointer](nFreqShift))
   discard s.addSymbol("shape_saw",   cast[pointer](shapeSaw))
   discard s.addSymbol("shape_tri",   cast[pointer](shapeTri))
   discard s.addSymbol("shape_sqr",   cast[pointer](shapeSqr))
@@ -149,6 +152,13 @@ proc prepare*(program: Node; sr: float64; patchPath: string = ""): Prepared =
   let newState = alloc0(size)
   cast[ptr VoiceHeader](newState).sr = sr
   cast[ptr VoiceHeader](newState).dt = 1.0 / sr
+  # Apply per-region init payloads. Used by array_make to seed length and
+  # capacity slots so the first tick can read a valid header without
+  # paying an init branch on every access.
+  let pool = cast[ptr UncheckedArray[float64]](newState)
+  for r in regions:
+    for k, v in r.init:
+      pool[r.offset + k] = v
   Prepared(lib: lib, tickFn: fn, state: newState, stateSize: size,
            varNames: varNames, partNames: partNames, regions: regions)
 

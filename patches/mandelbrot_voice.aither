@@ -1,0 +1,81 @@
+# mandelbrot_voice — the entire audio engine is one Mandelbrot
+# iteration per sample.
+#
+#   Z := Z² + C    (in the complex plane)
+#   audio = Re(Z)
+#
+# Knobs K1, K2 pick C in the complex plane:
+#   K1 (CC 74) — C.real    in [-2, 0.5]
+#   K2 (CC 71) — C.imag    in [-1.5, 1.5]
+#   K3 (CC 76) — base hz   reset rate (10..30 Hz, controls "voice pitch")
+#   K4 (CC 77) — gain
+#
+# Behaviour as you sweep:
+#   - C inside the Mandelbrot set → bounded orbit → pitched timbre
+#     (cardioid centre near (-0.5, 0) is the "musical" sweet spot).
+#   - C just outside the boundary → chaotic but bounded → the aether-
+#     shimmer zone where the iteration produces a cloud of partials
+#     no additive recipe can reach.
+#   - C far outside → orbit escapes to infinity within a few iterations.
+#     We clamp Z to ±4 so we never produce NaN, but the audio collapses
+#     to a brief click.
+#
+# Z is reset to (0, 0) every `1/base_hz` seconds so the trajectory
+# stays bounded in time. Without periodic reset, a slightly chaotic
+# orbit would drift in long-period accumulated error.
+#
+# This is the smallest possible demonstration that aither's pair
+# operations are ergonomic: the entire audio engine is `cmul + add`
+# with a guard, and the timbre is whatever the dynamical system
+# produces. No additive synth can write this in fewer lines because
+# none of them HAVE complex multiplication.
+
+# K1 default at 0 lands C just past the cardioid boundary on the
+# period-doubling cascade (c.real ≈ -0.78), where the iteration is
+# audible immediately. K2 default puts a small auto-drift so the
+# offline audit always has motion. Push K2 to ±1 for stable C.
+let cRealKnob = -0.78 + midi_cc(74) * 1.3
+let cImagKnob = (midi_cc(71) - 0.5) * 1.0
+
+# Slow auto-drift on C so the patch breathes even when the knobs are
+# still. Each sweep takes ~30 s; the path is a tiny circle in C-space
+# centred on the manual-knob position. Switch off by holding K2 or K1
+# at the extremes — the drift radius is small (0.05) so it doesn't
+# overwrite the knob choice.
+let driftPhase = TAU * phasor(1.0 / 30.0)
+let cReal   = cRealKnob + sin(driftPhase) * 0.05
+let cImag   = cImagKnob + cos(driftPhase) * 0.05
+let baseHz  = 10.0 + midi_cc(76) * 20.0
+let gain    = 0.05 + midi_cc(77) * 0.4
+
+# Reset every 1/baseHz seconds. The reset trigger is a phasor crossing
+# zero (i.e., the impulse() primitive). Z becomes (0, 0) on each tick
+# of the reset clock, then the iteration takes over until the next reset.
+let resetTrig = impulse(baseHz)
+
+# Z lives in two state cells. They evolve only on samples between resets.
+$zr = 0.0
+$zi = 0.0
+
+# Each sample: Z := Z² + C with a magnitude clamp.
+# `cmul(zr, zi, zr, zi)` is Z². Add C. Clamp magnitude to 4 so the
+# orbit can't blow up to NaN — anything that escaped is dead audio
+# anyway, the clamp just keeps the pool clean.
+let zSquared = cmul($zr, $zi, $zr, $zi)
+let nextR = if resetTrig > 0.5 then 0.0 else zSquared[0] + cReal
+let nextI = if resetTrig > 0.5 then 0.0 else zSquared[1] + cImag
+
+# Magnitude guard. A tone whose Z has crossed |Z|=2 is in the escaping
+# region; mute it (output 0) until the next reset. This is the standard
+# Mandelbrot "is C in the set?" test, applied per-sample.
+let mag = magnitude(nextR, nextI)
+let alive = if mag < 4.0 then 1.0 else 0.0
+
+$zr = nextR * alive
+$zi = nextI * alive
+
+# Re(Z) is the sample. The iteration produces a chaotic but periodic
+# (within a reset window) signal whose spectral content is set by C.
+# Fold and DC-block to keep the level musical.
+let raw = $zr * gain
+raw |> drive(0.7)

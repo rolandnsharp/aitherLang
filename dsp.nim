@@ -234,3 +234,66 @@ proc nSlew*(s: var DspState; signal, time: float64): float64 {.cdecl, exportc: "
   let a = if time > 0.0: min(1.0, (1.0 / s.sr) / time) else: 1.0
   s.pool[i] += (signal - s.pool[i]) * a
   s.pool[i]
+
+# ------------------------------------------------------------------ Hilbert
+# Two cascaded 4-stage IIR allpass networks (Niemitalo's "improved"
+# coefficient set). Their outputs differ by ≈ 90° across the audio band
+# with matched group delay, so feeding `signal` to both gives an
+# (analytic-real, analytic-imag) pair without the half-sample mismatch
+# you'd get from sending signal directly through one branch.
+#
+# Each stage is a 2nd-order allpass with coefficient c (already a²):
+#   y[n] = c*(x[n] + y[n-2]) - x[n-2]
+# State per stage = (x[n-1], x[n-2], y[n-1], y[n-2]) = 4 slots.
+# Shape: 4 stages × 4 slots = 16 slots per branch.
+const HilbertCoefsA = [0.6923878, 0.9360654322959,
+                       0.9882295226860, 0.9987488452737]
+const HilbertCoefsB = [0.4021921162426, 0.8561710882487,
+                       0.9722909545651, 0.9952884791278]
+
+proc hilbertCascade(s: var DspState; base: int; signal: float64;
+                    coefs: array[4, float64]): float64 {.inline.} =
+  var x = signal
+  for k in 0 ..< 4:
+    let off = base + k * 4
+    let xN2 = s.pool[off + 0]
+    let xN1 = s.pool[off + 1]
+    let yN2 = s.pool[off + 2]
+    let yN1 = s.pool[off + 3]
+    let y = coefs[k] * (x + yN2) - xN2
+    s.pool[off + 0] = xN1
+    s.pool[off + 1] = x
+    s.pool[off + 2] = yN1
+    s.pool[off + 3] = y
+    x = y
+  x
+
+proc nHilbertA*(s: var DspState; signal: float64): float64
+    {.cdecl, exportc: "n_hilbert_a".} =
+  hilbertCascade(s, s.claim(16), signal, HilbertCoefsA)
+
+proc nHilbertB*(s: var DspState; signal: float64): float64
+    {.cdecl, exportc: "n_hilbert_b".} =
+  hilbertCascade(s, s.claim(16), signal, HilbertCoefsB)
+
+# Single-sideband frequency shifter. analytic(signal) rotated at hz Hz,
+# real-part-only. Owns a 32-slot Hilbert pair plus a 1-slot phase
+# accumulator. Positive hz shifts up, negative hz shifts down — both
+# leave the original spectrum coherent (no mirror image), unlike a
+# ring modulator. The lower bound where the Hilbert phase response
+# starts to deviate is ≈ 30 Hz; above that the shift is clean.
+proc nFreqShift*(s: var DspState; signal, hz: float64): float64
+    {.cdecl, exportc: "n_freq_shift".} =
+  let baseAB = s.claim(32)
+  let realA = hilbertCascade(s, baseAB,        signal, HilbertCoefsA)
+  let imagB = hilbertCascade(s, baseAB + 16,   signal, HilbertCoefsB)
+  let phaseSlot = s.claim(1)
+  s.pool[phaseSlot] = (s.pool[phaseSlot] + hz / s.sr) mod 1.0
+  if s.pool[phaseSlot] < 0.0: s.pool[phaseSlot] += 1.0
+  let phase = s.pool[phaseSlot] * TAU
+  # SSB upshift form: y = m·cos(α) - H[m]·sin(α). The branchB cascade
+  # of this allpass design produces -H[m] (standard Hilbert sign with
+  # opposite quadrature), so the leading sign here is + rather than -.
+  # Net effect: hz > 0 shifts the spectrum up, hz < 0 shifts down —
+  # the user-intuitive direction.
+  realA * cos(phase) + imagB * sin(phase)
