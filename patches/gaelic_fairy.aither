@@ -1,0 +1,187 @@
+# gaelic_fairy — Irish low whistle showcase with bodhrán backing.
+# Stripped from the multi-instrument version to focus expression on
+# the whistle. Cello and harp removed — only bodhrán + whistle.
+#
+# Whistle is hardcoded to D MIXOLYDIAN — the iconic Irish trad scale
+# (D, E, F#, G, A, B, C-natural) with the flat 7 that gives Celtic
+# tunes their distinctive sound. Every key the player presses snaps
+# to a Mixolydian degree, so any combination is in the right key.
+#
+# ============================================================ SLIDERS
+#   S1 (CC 82) — BODHRÁN VOL    Irish frame drum, auto-rhythm
+#   S4 (CC 17) — WHISTLE VOL    Irish low whistle (keys)
+#
+# ============================================================ BODHRÁN (K1-K2)
+#   K1 (CC 74) — RHYTHM PATTERN  3-zone crossfade:
+#                                  K1=0    : slow heartbeat (pulse only)
+#                                  K1=0.5  : 6/8 jig
+#                                  K1=1    : driving 4/4 reel
+#   K2 (CC 71) — DRIVE           clean wood thump → fat saturated boom
+#
+# ============================================================ WHISTLE (K3-K6)
+#   K3 (CC 76) — BREATH          chiff amount + continuous breath noise.
+#                                  K3=0    : pure tone (no breath)
+#                                  K3=1    : breathy / airy / wooden
+#   K4 (CC 77) — VIBRATO         0% (straight) → 1.4% (expressive),
+#                                  irregular sin-of-sin so it's never
+#                                  perfectly cyclic (real player wobble)
+#   K5 (CC 93) — TONE            3-zone paradigm crossfade:
+#                                  K5=0    : MELLOW (warm, fewer partials)
+#                                  K5=0.5  : NORMAL (full whistle tone)
+#                                  K5=1    : STRIDENT (bright, cuts through)
+#   K6 (CC 18) — ARTICULATION    attack sharpness for fast vs slow
+#                                  playing. K6=0 is slow-air style
+#                                  (50ms attack); K6=1 is jig/reel
+#                                  style (10ms attack with crisp tongue)
+#
+# ============================================================ MASTER (K7-K8)
+#   K7 (CC 19) — REVERB SIZE     small room → stone hall
+#   K8 (CC 16) — REVERB WET      dry → drowned
+
+let bodhranVol = midi_cc(82)
+let whistleVol = midi_cc(17)
+
+let bodPattern = midi_cc(74)
+let bodDrive   = midi_cc(71)
+
+let breath       = midi_cc(76)
+let vibrato      = midi_cc(77)
+let tone         = midi_cc(93)
+let articulation = midi_cc(18)
+
+let revSize = 1.5 + midi_cc(19) * 5.0
+let revWet  = midi_cc(16) * 0.6
+
+# ===== BODHRÁN — Irish frame drum (kept from previous version) =====
+let bodSlow = [1.0, 0,   0,   0,   0,   0,   0.7, 0,   0,   0,   0,   0]
+let bodJig  = [1.0, 0,   0.4, 0.5, 0,   0.4, 0.7, 0,   0.4, 0.5, 0,   0.4]
+let bodReel = [1.0, 0.4, 0.6, 0.4, 0.7, 0.4, 0.5, 0.4, 0.7, 0.4, 0.6, 0.4]
+
+play bodhran:
+  let stepRate = 6.0
+  let stepPh   = phasor(stepRate / 12)
+  let idx      = int(stepPh * 12)
+  let trig     = impulse(stepRate)
+
+  let vSlow = bodSlow[idx]
+  let vJig  = bodJig[idx]
+  let vReel = bodReel[idx]
+  let pwA = max(0, 1 - bodPattern * 2)
+  let pwB = (if bodPattern < 0.5 then bodPattern * 2 else 1 - (bodPattern - 0.5) * 2)
+  let pwC = max(0, (bodPattern - 0.5) * 2)
+  let vel = vSlow * pwA + vJig * pwB + vReel * pwC
+
+  let velTrig = trig * vel
+
+  let pSweep = 50 + discharge(velTrig, 35) * 50
+  let boomEnv = discharge(velTrig, 18)
+  let boom = sin(TAU * phasor(pSweep)) * boomEnv * 0.7
+
+  let tapEnv = discharge(velTrig, 80) * 0.5
+  let tap = (noise() |> hpf(2000, 0.5)) * tapEnv
+
+  let raw = boom + tap
+  let driven = drive(raw, 1 + bodDrive * 4)
+  let s = driven * bodhranVol * 0.4
+  [s, s]
+
+# ===== IRISH LOW WHISTLE — hardcoded D MIXOLYDIAN, punchy attack =====
+# D Mixolydian = D E F# G A B C — D Major with flat 7. The "Celtic"
+# scale that distinguishes Irish trad from generic major-key folk.
+# Every white-or-black key snaps to a Mixolydian tone.
+#
+# Three tone paradigms (mellow / normal / strident) crossfaded by K5
+# give the whistle a real character range — not just a brightness EQ.
+play whistle:
+  midi_keyboard((freq, gate) =>
+    # D MIXOLYDIAN scale-lock
+    let n   = 12 * log2(freq / 440) + 69
+    let oct = floor(n / 12)
+    let pc  = n - oct * 12
+    let q   = (if pc <= 1      then 0
+               else if pc <= 3    then 2
+               else if pc <= 5    then 4
+               else if pc <= 6.5  then 6
+               else if pc <= 8    then 7
+               else if pc <= 10   then 9
+               else if pc <= 11.5 then 11
+               else                    12)
+    let qFreq = 440 * pow(2, (oct * 12 + q - 69) / 12)
+
+    # PUNCHY envelope — K6 controls attack/release time. At K6=1 the
+    # attack is 10ms and release 100ms, perfect for jigs and reels.
+    # At K6=0 the attack is 50ms and release 250ms for slow airs.
+    let attackTime  = 0.05 - articulation * 0.04
+    let releaseTime = 0.25 - articulation * 0.15
+    let env = swell(gate, attackTime, releaseTime)
+
+    # Tongue articulation — sharp chiff at every note-on. Crucial for
+    # the rapid-fire feel of Irish trad ornamentation. Sharper with
+    # higher K6 (faster decay), more present with higher K3 breath.
+    let strike   = if gate > 0.5 and prev(gate) < 0.5 then 1.0 else 0.0
+    let chiffDec = 0.06 - articulation * 0.04
+    let chiffEnv = pluck(strike, chiffDec)
+    let chiff    = (noise() |> hpf(2000, 0.4)) * chiffEnv * (0.18 + breath * 0.25)
+
+    # Irregular vibrato — sin-of-sin so the rate itself wobbles
+    let vib = sin(TAU * t * 5.0 + sin(TAU * t * 0.6) * 0.5) * vibrato * 0.014
+    let f   = qFreq * (1 + vib)
+
+    # K5 TONE — three paradigms crossfaded, each a different partial
+    # amplitude shape. Same fundamental frequency, three sound worlds.
+    # MELLOW: 3 partials, weak upper harmonics — wooden, dark
+    let voiceA = sum(3, n =>
+      let amp = (if n == 1 then 1.00
+                 else if n == 2 then 0.04
+                 else                0.18)
+      let drift = 1 + 0.0014 * sin(t * n / 17 + n * 0.5)
+      let pf = n * f * drift
+      if pf >= 22000 then 0
+      else amp * sin(TAU * phasor(pf)))
+
+    # NORMAL: 5 partials, classic whistle spectrum (strong odds)
+    let voiceB = sum(5, n =>
+      let amp = (if n == 1 then 1.00
+                 else if n == 2 then 0.10
+                 else if n == 3 then 0.50
+                 else if n == 4 then 0.08
+                 else                0.30)
+      let drift = 1 + 0.0014 * sin(t * n / 13 + n * 0.5)
+      let pf = n * f * drift
+      if pf >= 22000 then 0
+      else amp * sin(TAU * phasor(pf)))
+
+    # STRIDENT: 6 partials, prominent upper harmonics for cutting
+    # through (the "high register" sound of a strongly-blown whistle)
+    let voiceC = sum(6, n =>
+      let amp = (if n == 1 then 1.00
+                 else if n == 2 then 0.15
+                 else if n == 3 then 0.65
+                 else if n == 4 then 0.18
+                 else if n == 5 then 0.45
+                 else                0.22)
+      let drift = 1 + 0.0014 * sin(t * n / 11 + n * 0.5)
+      let pf = n * f * drift
+      if pf >= 22000 then 0
+      else amp * sin(TAU * phasor(pf)))
+
+    let twA = max(0, 1 - tone * 2)
+    let twB = (if tone < 0.5 then tone * 2 else 1 - (tone - 0.5) * 2)
+    let twC = max(0, (tone - 0.5) * 2)
+    let voice = voiceA * twA + voiceB * twB + voiceC * twC
+
+    # Tube body resonance — DHO bandpass at the low whistle's
+    # natural tube frequency (~600 Hz). Adds the wooden ring.
+    let body = dho(voice * 4000.0, 600, 0.12) * 0.16
+
+    # Continuous breath noise (K3 controls amount)
+    let breathN = (noise() |> hpf(2500, 0.3)) * 0.05 * breath
+
+    let total = voice * 0.24 + body + breathN + chiff
+    total * env * whistleVol)
+
+# ===== MASTER =====
+let dry  = bodhran + whistle
+let mono = (dry[0] + dry[1]) * 0.5
+let wet  = mono |> reverb(revSize, 0.5)
+([dry[0], dry[1]] + [wet, wet] * revWet) * 0.6
