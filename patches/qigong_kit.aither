@@ -1,0 +1,254 @@
+# qigong_kit — full sound healing kit for qigong / meditation work.
+#
+# Three looping healing instruments (tanpura, crystal bowls, heartbeat),
+# eight pads of gongs + giant tuning forks, Native American flute on
+# the keys. Everything in D minor pentatonic so any combination works.
+#
+# Uses several aither-native moves:
+#   - Per-partial slow drift (cello/Tesla recipe — keeps spectra alive)
+#   - Signal-native rhythm via incommensurate LFOs (no scheduler)
+#   - Compound clang mode on tuning forks (pure tone + slight detune beat)
+#   - freq_shift complex-algebra knob on the bowls (coherent inharmonicity)
+#   - midi_trig(N) → struck DHO for sample-accurate pad responses
+#
+# ============================================================ SLIDERS
+#   S1 (CC 82) — TANPURA VOL    foundational drone (always on, plucked)
+#   S2 (CC 83) — BOWLS VOL      crystal bowl chorus
+#   S3 (CC 85) — HEARTBEAT VOL  slow grounding pulse
+#   S4 (CC 17) — FLUTE PRESENCE both volume and breathiness of the flute
+#
+# ============================================================ TANPURA (K1-K3)
+#   K1 (CC 74) — STRING DETUNE   per-partial drift depth — at 0 the
+#                                 strings are mathematically pure;
+#                                 push it for the iconic shimmery
+#                                 jawari-thread overtone wash
+#   K2 (CC 71) — PLUCK RATE      0.2..0.8 Hz — the rolling re-pluck
+#                                 cycle of the four-string tanpura
+#   K3 (CC 76) — BRIGHTNESS      partial falloff exponent —
+#                                 dark + meditative ↔ bright + alert
+#
+# ============================================================ CRYSTAL BOWLS (K4-K6)
+#   K4 (CC 77) — BOWL MIX        crossfade three bowl pitches:
+#                                  K4=0 D5, K4=0.5 F5, K4=1 A5
+#   K5 (CC 93) — SHIMMER         tremolo depth (0..0.5) — bowls
+#                                 breathe in and out of presence
+#   K6 (CC 18) — SPECTRAL HALO   freq_shift the bowl mix ±200 Hz.
+#                                 Complex-algebra magic — coherently
+#                                 detunes every partial by Hz, not
+#                                 ratio. Walks pure tone into
+#                                 metallic/inharmonic territory.
+#
+# ============================================================ HEARTBEAT (K7)
+#   K7 (CC 19) — BPM             50..80 beats per minute
+#
+# ============================================================ MASTER (K8)
+#   K8 (CC 16) — REVERB SIZE     intimate room → temple cathedral
+
+let tanVol     = midi_cc(82)
+let bowlVol    = midi_cc(83)
+let heartVol   = midi_cc(85)
+let fluteBreath = midi_cc(17)
+
+let tanDetune  = midi_cc(74)
+let tanRateK   = midi_cc(71)
+let tanBright  = midi_cc(76)
+
+let bowlMix    = midi_cc(77)
+let bowlShimmer = midi_cc(93)
+let bowlHalo   = (midi_cc(18) - 0.5) * 400
+
+let heartBPM   = 50 + midi_cc(19) * 30
+let revSize    = 2.0 + midi_cc(16) * 6
+
+# ===== TANPURA — three sustained drone strings with rolling pluck =====
+# Per-partial drift gives the characteristic "shimmery wash" of a
+# real tanpura's jawari (the cotton thread under the bridge that
+# emphasises upper partials and creates the alive, breathing quality).
+def tanString(stringFreq, pluckPhaseOffset, driftSeed):
+  let pluckRate = 0.2 + tanRateK * 0.6
+  let trig = impulse(pluckRate)
+  let env  = 0.55 + pluck(trig, 2.5) * 0.45
+  let bright = 0.6 + tanBright * 1.4
+  let voice = sum(4, n =>
+    let drift = 1 + tanDetune * 0.0015 * sin(t * n / (11 + driftSeed) + n * 0.4 + driftSeed)
+    let amp   = 1.0 / pow(n, bright)
+    let pf    = n * stringFreq * drift
+    if pf >= 22000 then 0
+    else amp * sin(TAU * phasor(pf)))
+  voice * env * 0.04
+
+play tanpura:
+  # Three strings: D2 (sa low), A2 (pa), D3 (sa). Each with its own
+  # incommensurate drift seed so the wash is rich and never repeats.
+  let s1 = tanString(73.42,  0.0, 0.0)
+  let s2 = tanString(110.0,  0.5, 1.7)
+  let s3 = tanString(146.83, 0.25, 3.1)
+  let mix = (s1 + s2 + s3) * tanVol
+  [mix, mix]
+
+# ===== CRYSTAL BOWLS — three sustained bowls with shimmer =====
+# Each bowl is a high-Q DHO re-struck slowly, ringing for 6+ seconds.
+# K4 crossfades between the three pitches; K5 adds a slow tremolo;
+# K6 freq_shifts the mix into coherent inharmonicity.
+def crystalBowl(fund, strikePhase):
+  # CONTINUOUS singing-bowl mode — narrow-Q DHOs driven by white
+  # noise. This is what a real bowl does when bowed (mallet running
+  # around the rim) rather than struck. No restrike pulses → no
+  # gaps → no perceived choppiness. The high-Q resonators pick a
+  # single pitch out of the noise and ring it indefinitely.
+  let exc = noise() * 50000.0
+  let f1 = dho(exc,        fund,        0.0001)
+  let f2 = dho(exc * 0.4,  fund * 2.01, 0.0004) * 0.5
+  f1 + f2
+
+play bowls:
+  let bowl1 = crystalBowl(587.33, 0.0)   # D5
+  let bowl2 = crystalBowl(698.46, 0.7)   # F5
+  let bowl3 = crystalBowl(880.00, 1.3)   # A5
+
+  # K4 triangular crossfade across three bowls
+  let wA = max(0, 1 - bowlMix * 2)
+  let wB = (if bowlMix < 0.5 then bowlMix * 2 else 1 - (bowlMix - 0.5) * 2)
+  let wC = max(0, (bowlMix - 0.5) * 2)
+  let bowlBlend = bowl1 * wA + bowl2 * wB + bowl3 * wC
+
+  # K5 SHIMMER — slow incommensurate tremolo
+  let shimLFO = sin(TAU * t * 0.27) * sin(TAU * t * 0.41) * bowlShimmer
+  # K6 DETUNE WOBBLE — slow pitch-bend on the whole bowl chorus
+  # (replaces freq_shift here — same complex-magic territory at a
+  # fraction of the CPU). Knob sweeps the wobble depth.
+  let wobLFO = sin(TAU * t * 0.18) * bowlHalo * 0.0001
+  let shimmered = bowlBlend * (1 + shimLFO + wobLFO)
+  let mix = shimmered * bowlVol * 0.4
+  [mix, mix]
+
+# ===== HEARTBEAT — slow grounding pulse =====
+# Single low sub-thump per beat, K7 controls BPM. Two-stage envelope
+# for the lub character (quick attack, exponential decay).
+play heartbeat:
+  let beatRate = heartBPM / 60.0
+  let trig = impulse(beatRate)
+  let env  = discharge(trig, 14)
+  let pSweep = 38 + discharge(trig, 35) * 70
+  let thump = sin(TAU * phasor(pSweep)) * env
+  let s = thump * heartVol * 0.4
+  [s, s]
+
+# ===== NATIVE AMERICAN FLUTE on the keys =====
+# Wooden / bamboo character with breathy attack. Scale-locked to
+# D minor pentatonic so every key fits the song. S4 controls both
+# overall presence and breath noise — left = whisper, right = full
+# voice with audible breath.
+play flute:
+  midi_keyboard((freq, gate) =>
+    let n   = 12 * log2(freq / 440) + 69
+    let oct = floor(n / 12)
+    let pc  = n - oct * 12
+    let q   = (if pc <= 1     then 0
+               else if pc <= 3.5  then 2
+               else if pc <= 6    then 5
+               else if pc <= 8    then 7
+               else if pc <= 10.5 then 9
+               else                    12)
+    let qFreq = 440 * pow(2, (oct * 12 + q - 69) / 12)
+
+    # Slow soft attack + irregular vibrato
+    let env    = swell(gate, 0.12, 0.6)
+    let strike = if gate > 0.5 and prev(gate) < 0.5 then 1.0 else 0.0
+    let chiff  = (noise() |> hpf(1500, 0.4)) * pluck(strike, 0.15) * fluteBreath * 0.5
+
+    let vib = sin(TAU * t * 4.0 + sin(TAU * t * 0.5) * 0.6) * 0.006
+    let f   = qFreq * (1 + vib)
+
+    # Native American flute spectrum: strong fundamental + 3rd + 5th.
+    # Trimmed to 4 partials — at 8-voice polyphony every partial
+    # multiplies CPU 8×, so frugality matters here.
+    let voice = sum(4, n =>
+      let amp = (if n == 1 then 1.00
+                 else if n == 2 then 0.10
+                 else if n == 3 then 0.38
+                 else                0.20)
+      let drift = 1 + 0.0015 * sin(t * n / 17 + n * 0.5)
+      let pf    = n * f * drift
+      if pf >= 22000 then 0
+      else amp * sin(TAU * phasor(pf)))
+
+    # Continuous breath noise — louder with S4
+    let breath = (noise() |> hpf(2500, 0.3)) * 0.05 * fluteBreath
+
+    let presence = 0.25 + fluteBreath * 0.75
+    (voice * 0.20 + breath + chiff) * env * presence)
+
+# ===== PADS — high-quality additive wind chimes =====
+# 8 pads tuned to D minor pentatonic across two octaves. Each chime
+# is pure additive synthesis using the FREE-FREE BAR PARTIAL RATIOS:
+#   1.000, 2.756, 5.404, 8.933, 13.344, 18.624
+# (squared zeros of the Bessel function — the iconic wind-chime
+# spectrum that no integer-harmonic stack can replicate).
+#
+# Each partial:
+#   - Has its own pluck envelope with decay time scaled by partial
+#     index (lower partials sustain longer — same as physical bars)
+#   - Has its own slow incommensurate drift (per-partial wobble keeps
+#     the spectrum alive across the long ring)
+# Plus a brief metallic chirp at strike (additive, phi-spaced) for
+# the clapper-on-bar contact sound.
+#
+# Pad → note layout:
+#   Pad 1 (note 36) — SWEEP   cascade: high A5 → low D4 in 280ms
+#                              (one finger drag across all 8 chimes)
+#   Pad 2 (note 37) — F4 (349.23)    Pad 5 (note 40) — C5 (523.25)
+#   Pad 3 (note 38) — G4 (392.00)    Pad 6 (note 41) — D5 (587.33)
+#   Pad 4 (note 39) — A4 (440.00)    Pad 7 (note 42) — F5 (698.46)
+#                                    Pad 8 (note 43) — A5 (880.00)
+def windChime(trig, fund):
+  # Pure additive, 4 partials at free-free bar ratios. Softened from
+  # earlier version: steeper amplitude falloff (1/n^1.1 instead of
+  # 1/n^0.7) so upper partials are quieter and mellower; metallic
+  # chirp removed (was the harsh element on attack); longer decay on
+  # higher partials so they fade in smoothly instead of pinging.
+  let voice = sum(4, n =>
+    let r = (if n == 1 then 1.000
+             else if n == 2 then 2.756
+             else if n == 3 then 5.404
+             else                8.933)
+    let pf = fund * r
+    let decayTime = 10.0 / pow(1.4, n - 1)
+    let pEnv = pluck(trig, decayTime)
+    let drift = 1 + 0.0008 * sin(t * n / 9 + n * 0.4)
+    let amp = 1.0 / pow(n, 1.1)
+    if pf >= 22000 then 0
+    else amp * pEnv * sin(TAU * phasor(pf * drift)))
+  voice * 0.22
+
+play pads:
+  # Pad 1: SWEEP — 4-stage cascade from A5 down to D4 over 240ms.
+  # Trimmed from 8 stages to 4 to halve the CPU cost; the cascade
+  # still reads as a "sweep" because the chimes' long decays overlap.
+  let pad1 = midi_trig(36)
+  let sw1 = windChime(delay(pad1, 0.000, 0.4), 880.00)   # A5
+  let sw2 = windChime(delay(pad1, 0.080, 0.4), 587.33)   # D5
+  let sw3 = windChime(delay(pad1, 0.160, 0.4), 440.00)   # A4
+  let sw4 = windChime(delay(pad1, 0.240, 0.4), 293.66)   # D4
+  let sweep = sw1 + sw2 + sw3 + sw4
+
+  # Pads 2-8: individual chimes (no sweep)
+  let c2 = windChime(midi_trig(37), 349.23)   # F4
+  let c3 = windChime(midi_trig(38), 392.00)   # G4
+  let c4 = windChime(midi_trig(39), 440.00)   # A4
+  let c5 = windChime(midi_trig(40), 523.25)   # C5
+  let c6 = windChime(midi_trig(41), 587.33)   # D5
+  let c7 = windChime(midi_trig(42), 698.46)   # F5
+  let c8 = windChime(midi_trig(43), 880.00)   # A5
+
+  let mix = (sweep * 0.55 + c2 + c3 + c4 + c5 + c6 + c7 + c8) * 0.32
+  [mix, mix]
+
+# ===== MASTER =====
+# Long temple reverb — K8 controls the size from intimate room to
+# vast cathedral. The bowls and forks are essentially solo
+# instruments and need space to breathe.
+let dry  = tanpura + bowls + heartbeat + flute + pads
+let mono = (dry[0] + dry[1]) * 0.5
+let wet  = mono |> reverb(revSize, 0.5)
+([mono, mono] + [wet, wet] * 0.5) * 0.55
