@@ -1,146 +1,196 @@
-# qigong_kit — full sound healing kit for qigong / meditation work.
+# qigong_kit (v2) — completely different from v1. Three pro-quality
+# looping instruments: ocean ambient, Tibetan bell choir, shamanic
+# throat drone. Long Native American drone flute on the keys.
 #
-# Three looping healing instruments (tanpura, crystal bowls, heartbeat),
-# eight pads of gongs + giant tuning forks, Native American flute on
-# the keys. Everything in D minor pentatonic so any combination works.
-#
-# Uses several aither-native moves:
-#   - Per-partial slow drift (cello/Tesla recipe — keeps spectra alive)
-#   - Signal-native rhythm via incommensurate LFOs (no scheduler)
-#   - Compound clang mode on tuning forks (pure tone + slight detune beat)
-#   - freq_shift complex-algebra knob on the bowls (coherent inharmonicity)
-#   - midi_trig(N) → struck DHO for sample-accurate pad responses
+# v1 was tanpura + crystal bowls + heartbeat + chimes. This patch
+# explores entirely different sonic territory: noise-based ambient,
+# additive bell-partial choir, vowel-formant drone with binaural
+# stereo. Different paradigms, different mood.
 #
 # ============================================================ SLIDERS
-#   S1 (CC 82) — TANPURA VOL    foundational drone (always on, plucked)
-#   S2 (CC 83) — BOWLS VOL      crystal bowl chorus
-#   S3 (CC 85) — HEARTBEAT VOL  slow grounding pulse
-#   S4 (CC 17) — FLUTE PRESENCE both volume and breathiness of the flute
+#   S1 (CC 82) — OCEAN VOL       atmospheric wave wash
+#   S2 (CC 83) — BELLS VOL       Tibetan bell choir
+#   S3 (CC 85) — DRONE VOL       shamanic throat drone
+#   S4 (CC 17) — FLUTE VOL       Native American drone flute (keys)
 #
-# ============================================================ TANPURA (K1-K3)
-#   K1 (CC 74) — STRING DETUNE   per-partial drift depth — at 0 the
-#                                 strings are mathematically pure;
-#                                 push it for the iconic shimmery
-#                                 jawari-thread overtone wash
-#   K2 (CC 71) — PLUCK RATE      0.2..0.8 Hz — the rolling re-pluck
-#                                 cycle of the four-string tanpura
-#   K3 (CC 76) — BRIGHTNESS      partial falloff exponent —
-#                                 dark + meditative ↔ bright + alert
+# ============================================================ OCEAN (K1-K3)
+#   K1 (CC 74) — STORM SCENE     3-zone crossfade:
+#                                  K1=0  : calm beach (gentle low surf)
+#                                  K1=0.5: rolling waves (full midrange)
+#                                  K1=1  : stormy ocean (loud, wind-rich)
+#   K2 (CC 71) — SWELL RATE      0.05 → 0.6 Hz (slow tide → quick chop)
+#   K3 (CC 76) — HORIZON HALO    freq_shift on the ocean wash (±150 Hz).
+#                                 Complex-algebra magic: shifts every
+#                                 frequency component by the same Hz,
+#                                 producing coherent metallic/inharmonic
+#                                 shimmer that no normal filter can.
 #
-# ============================================================ CRYSTAL BOWLS (K4-K6)
-#   K4 (CC 77) — BOWL MIX        crossfade three bowl pitches:
-#                                  K4=0 D5, K4=0.5 F5, K4=1 A5
-#   K5 (CC 93) — SHIMMER         tremolo depth (0..0.5) — bowls
-#                                 breathe in and out of presence
-#   K6 (CC 18) — SPECTRAL HALO   freq_shift the bowl mix ±200 Hz.
-#                                 Complex-algebra magic — coherently
-#                                 detunes every partial by Hz, not
-#                                 ratio. Walks pure tone into
-#                                 metallic/inharmonic territory.
+# ============================================================ BELLS (K4-K6)
+#   K4 (CC 77) — BELL DENSITY    crossfade 1 bell → 3 bells → 5 bells
+#                                 (more bells = denser cluster)
+#   K5 (CC 93) — STRIKE PERIOD   1 → 12 seconds between strikes
+#   K6 (CC 18) — RING SUSTAIN    short bell-tap → infinite shimmering
+#                                 ring (controls the partial damp values
+#                                 — left = quick, right = forever)
 #
-# ============================================================ HEARTBEAT (K7)
-#   K7 (CC 19) — BPM             50..80 beats per minute
-#
-# ============================================================ MASTER (K8)
-#   K8 (CC 16) — REVERB SIZE     intimate room → temple cathedral
+# ============================================================ DRONE (K7-K8)
+#   K7 (CC 19) — VOWEL MORPH     formant sweep AH → OH → OO. The
+#                                 throat-singer's vowel that shapes
+#                                 which overtones project loudest.
+#   K8 (CC 16) — BINAURAL WIDTH  L/R stereo detune (0 → 12 Hz). At
+#                                 6-10 Hz creates a binaural beat —
+#                                 the trance-induction stereo effect
+#                                 that's psychoacoustically activating.
 
-let tanVol     = midi_cc(82)
-let bowlVol    = midi_cc(83)
-let heartVol   = midi_cc(85)
-let fluteBreath = midi_cc(17)
+let oceanVol = midi_cc(82)
+let bellsVol = midi_cc(83)
+let droneVol = midi_cc(85)
+let fluteVol = midi_cc(17)
 
-let tanDetune  = midi_cc(74)
-let tanRateK   = midi_cc(71)
-let tanBright  = midi_cc(76)
+let stormScene = midi_cc(74)
+let swellRate  = 0.05 + midi_cc(71) * 0.55
+let horizonHz  = (midi_cc(76) - 0.5) * 300
 
-let bowlMix    = midi_cc(77)
-let bowlShimmer = midi_cc(93)
-let bowlHalo   = (midi_cc(18) - 0.5) * 400
+let bellDensity = midi_cc(77)
+let strikePeriod = 1.0 + midi_cc(93) * 11.0
+let ringSustain = midi_cc(18)
 
-let heartBPM   = 50 + midi_cc(19) * 30
-let revSize    = 2.0 + midi_cc(16) * 6
+let vowelMorph = midi_cc(19)
+let binauralHz = midi_cc(16) * 12.0
 
-# ===== TANPURA — three sustained drone strings with rolling pluck =====
-# Per-partial drift gives the characteristic "shimmery wash" of a
-# real tanpura's jawari (the cotton thread under the bridge that
-# emphasises upper partials and creates the alive, breathing quality).
-def tanString(stringFreq, pluckPhaseOffset, driftSeed):
-  let pluckRate = 0.2 + tanRateK * 0.6
-  let trig = impulse(pluckRate)
-  let env  = 0.55 + pluck(trig, 2.5) * 0.45
-  let bright = 0.6 + tanBright * 1.4
-  let voice = sum(4, n =>
-    let drift = 1 + tanDetune * 0.0015 * sin(t * n / (11 + driftSeed) + n * 0.4 + driftSeed)
-    let amp   = 1.0 / pow(n, bright)
-    let pf    = n * stringFreq * drift
-    if pf >= 22000 then 0
-    else amp * sin(TAU * phasor(pf)))
-  voice * env * 0.04
+# ===== OCEAN AMBIENT — noise-based wave wash =====
+# Three layers of filtered noise corresponding to three "scenes":
+#   A: calm beach   — low rumble + occasional gentle surf
+#   B: rolling waves — full midrange wash with regular swell
+#   C: stormy ocean  — bright wind + loud surf + crashes
+# K1 crossfades between them with triangular weights.
+# K2 controls the LFO rate that modulates the amplitude (the wave
+# rolling rhythm). K3 freq_shifts the entire mix.
+play ocean:
+  # The wave LFO — slow swell amplitude, two incommensurate rates
+  # combined so no two waves are exactly alike.
+  let lfoA = (sin(TAU * t * swellRate) + 1) * 0.5
+  let lfoB = (sin(TAU * t * swellRate * 1.37) + 1) * 0.5
+  let waveAmp = 0.3 + lfoA * lfoB * 1.4
 
-play tanpura:
-  # Three strings: D2 (sa low), A2 (pa), D3 (sa). Each with its own
-  # incommensurate drift seed so the wash is rich and never repeats.
-  let s1 = tanString(73.42,  0.0, 0.0)
-  let s2 = tanString(110.0,  0.5, 1.7)
-  let s3 = tanString(146.83, 0.25, 3.1)
-  let mix = (s1 + s2 + s3) * tanVol
-  [mix, mix]
+  # Three scene layers — same noise() seed, different filter shaping.
+  let calm   = (noise() |> lpf(400, 0.6))           * 0.7   # low rumble
+  let rolling = (noise() |> bpf(800, 0.5))           * 0.5   # midrange surf
+  let stormy = ((noise() |> hpf(1500, 0.4)) * 0.4
+              + (noise() |> bpf(2500, 0.3)) * 0.3)
 
-# ===== CRYSTAL BOWLS — three sustained bowls with shimmer =====
-# Each bowl is a high-Q DHO re-struck slowly, ringing for 6+ seconds.
-# K4 crossfades between the three pitches; K5 adds a slow tremolo;
-# K6 freq_shifts the mix into coherent inharmonicity.
-def crystalBowl(fund, strikePhase):
-  # CONTINUOUS singing-bowl mode — narrow-Q DHOs driven by white
-  # noise. This is what a real bowl does when bowed (mallet running
-  # around the rim) rather than struck. No restrike pulses → no
-  # gaps → no perceived choppiness. The high-Q resonators pick a
-  # single pitch out of the noise and ring it indefinitely.
-  let exc = noise() * 50000.0
-  let f1 = dho(exc,        fund,        0.0001)
-  let f2 = dho(exc * 0.4,  fund * 2.01, 0.0004) * 0.5
-  f1 + f2
+  # Triangular crossfade
+  let wA = max(0, 1 - stormScene * 2)
+  let wB = (if stormScene < 0.5 then stormScene * 2 else 1 - (stormScene - 0.5) * 2)
+  let wC = max(0, (stormScene - 0.5) * 2)
+  let scene = calm * wA + rolling * wB + stormy * wC
 
-play bowls:
-  let bowl1 = crystalBowl(587.33, 0.0)   # D5
-  let bowl2 = crystalBowl(698.46, 0.7)   # F5
-  let bowl3 = crystalBowl(880.00, 1.3)   # A5
-
-  # K4 triangular crossfade across three bowls
-  let wA = max(0, 1 - bowlMix * 2)
-  let wB = (if bowlMix < 0.5 then bowlMix * 2 else 1 - (bowlMix - 0.5) * 2)
-  let wC = max(0, (bowlMix - 0.5) * 2)
-  let bowlBlend = bowl1 * wA + bowl2 * wB + bowl3 * wC
-
-  # K5 SHIMMER — slow incommensurate tremolo
-  let shimLFO = sin(TAU * t * 0.27) * sin(TAU * t * 0.41) * bowlShimmer
-  # K6 DETUNE WOBBLE — slow pitch-bend on the whole bowl chorus
-  # (replaces freq_shift here — same complex-magic territory at a
-  # fraction of the CPU). Knob sweeps the wobble depth.
-  let wobLFO = sin(TAU * t * 0.18) * bowlHalo * 0.0001
-  let shimmered = bowlBlend * (1 + shimLFO + wobLFO)
-  let mix = shimmered * bowlVol * 0.4
-  [mix, mix]
-
-# ===== HEARTBEAT — slow grounding pulse =====
-# Single low sub-thump per beat, K7 controls BPM. Two-stage envelope
-# for the lub character (quick attack, exponential decay).
-play heartbeat:
-  let beatRate = heartBPM / 60.0
-  let trig = impulse(beatRate)
-  let env  = discharge(trig, 14)
-  let pSweep = 38 + discharge(trig, 35) * 70
-  let thump = sin(TAU * phasor(pSweep)) * env
-  let s = thump * heartVol * 0.4
+  # Apply wave swell + freq_shift halo
+  let wash = scene * waveAmp
+  let shifted = freq_shift(wash, horizonHz)
+  let s = shifted * oceanVol * 0.5
   [s, s]
 
-# ===== NATIVE AMERICAN FLUTE on the keys =====
-# Wooden / bamboo character with breathy attack. Scale-locked to
-# D minor pentatonic so every key fits the song. S4 controls both
-# overall presence and breath noise — left = whisper, right = full
-# voice with audible breath.
+# ===== TIBETAN BELL CHOIR — 5 sustained bells, density-controlled =====
+# Each bell is additive with the characteristic 2 : 3 : 4.2 : 5.4 : 6.8
+# Tibetan bell partial ratios. Restrikes are slow (1-12s controlled by
+# K5) and stagger-phased so the bells overlap into a continuous shimmer.
+# K6 controls how long each strike rings out.
+def tibetanBell(fund, phaseOff):
+  let trig = impulse(1.0 / strikePeriod + phaseOff * 0.001)
+  let decay = 4.0 + ringSustain * 12.0
+  let voice = sum(5, n =>
+    let r = (if n == 1 then 1.00
+             else if n == 2 then 1.99    # near-octave (bell partials)
+             else if n == 3 then 2.97
+             else if n == 4 then 4.21
+             else                5.41)
+    let pf = fund * r
+    let pEnv = pluck(trig, decay / pow(1.4, n - 1))
+    let drift = 1 + 0.0008 * sin(t * n / 11 + n * 0.4)
+    let amp = 1.0 / pow(n, 0.95)
+    if pf >= 22000 then 0
+    else amp * pEnv * sin(TAU * phasor(pf * drift)))
+  voice * 0.15
+
+play bells:
+  # 5 bells in D minor pentatonic (D5, F5, G5, A5, C6).
+  let b1 = tibetanBell(587.33, 0.0)
+  let b2 = tibetanBell(698.46, 0.7)
+  let b3 = tibetanBell(783.99, 1.3)
+  let b4 = tibetanBell(880.00, 2.1)
+  let b5 = tibetanBell(1046.50, 2.9)
+
+  # K4 DENSITY — crossfade between 1 / 3 / 5 bells. Triangular zones.
+  let w1 = max(0, 1 - bellDensity * 2)        # only b1
+  let w3 = (if bellDensity < 0.5 then bellDensity * 2
+            else 1 - (bellDensity - 0.5) * 2)  # b1, b2, b3
+  let w5 = max(0, (bellDensity - 0.5) * 2)    # all 5
+
+  let mix = (b1 * (w1 + w3 * 0.6 + w5 * 0.4)
+           + b2 * (w3 * 0.5 + w5 * 0.4)
+           + b3 * (w3 * 0.4 + w5 * 0.4)
+           + b4 *  w5 * 0.4
+           + b5 *  w5 * 0.3)
+
+  let s = mix * bellsVol
+  [s, s]
+
+# ===== SHAMANIC THROAT DRONE — vowel-morph drone with binaural width =====
+# Deep low D drone with strong overtone emphasis (the throat-singing
+# trick: the upper formant filter selects which harmonic projects).
+# K7 morphs the formant filter through AH → OH → OO vowel positions.
+# K8 detunes left vs right channels by 0-12 Hz — at 6-10 Hz this is
+# the classic binaural beat that induces a meditative trance state.
+play drone:
+  let droneFund = 73.42
+
+  # Two slightly detuned drones for stereo binaural beating
+  let lFreq = droneFund - binauralHz * 0.5
+  let rFreq = droneFund + binauralHz * 0.5
+
+  # Each drone is an 8-partial additive stack with per-partial drift
+  let voiceL = sum(8, n =>
+    let drift = 1 + 0.0012 * sin(t * n / 11 + n * 0.4)
+    let pf = n * lFreq * drift
+    let amp = 1.0 / pow(n, 0.7)
+    if pf >= 22000 then 0
+    else amp * sin(TAU * phasor(pf)))
+  let voiceR = sum(8, n =>
+    let drift = 1 + 0.0012 * sin(t * n / 13 + n * 0.7)
+    let pf = n * rFreq * drift
+    let amp = 1.0 / pow(n, 0.7)
+    if pf >= 22000 then 0
+    else amp * sin(TAU * phasor(pf)))
+
+  # K7 VOWEL MORPH — formant lowpass sweep emphasizes the overtones
+  # at vowel-specific frequencies. AH ≈ 1100 Hz, OH ≈ 700 Hz, OO ≈ 400 Hz.
+  let formantHz = 1100 - vowelMorph * 700
+  let l = voiceL |> bpf(formantHz, 0.4)
+  let r = voiceR |> bpf(formantHz, 0.4)
+
+  let s = droneVol * 0.06
+  [l * s, r * s]
+
+# ===== NATIVE AMERICAN DRONE FLUTE on keys =====
+# Two pipes: melody pipe (per-key polyphonic) + drone pipe
+# (always at the tonic D2, sustains as long as any key is held).
+# Both pipes scale-locked to D minor pentatonic. Long swell envelope
+# for the slow attack characteristic of cedar/wood drone flutes.
 play flute:
-  midi_keyboard((freq, gate) =>
+  # Drone pipe — continuous low D, gated by "any key held"
+  let breath = midi_gate()
+  let breathEnv = swell(breath, 0.4, 1.4)
+  let dronePipe = sum(4, n =>
+    let amp = (if n == 1 then 1.00
+               else if n == 2 then 0.10
+               else if n == 3 then 0.38
+               else                0.06)
+    let drift = 1 + 0.0018 * sin(t * n / 19 + n * 0.6)
+    amp * sin(TAU * phasor(n * 73.42 * drift))) * breathEnv * 0.16
+
+  # Melody pipe via polyphony
+  let melody = midi_keyboard((freq, gate) =>
     let n   = 12 * log2(freq / 440) + 69
     let oct = floor(n / 12)
     let pc  = n - oct * 12
@@ -152,103 +202,26 @@ play flute:
                else                    12)
     let qFreq = 440 * pow(2, (oct * 12 + q - 69) / 12)
 
-    # Slow soft attack + irregular vibrato
-    let env    = swell(gate, 0.12, 0.6)
-    let strike = if gate > 0.5 and prev(gate) < 0.5 then 1.0 else 0.0
-    let chiff  = (noise() |> hpf(1500, 0.4)) * pluck(strike, 0.15) * fluteBreath * 0.5
-
-    let vib = sin(TAU * t * 4.0 + sin(TAU * t * 0.5) * 0.6) * 0.006
+    let env = swell(gate, 0.20, 1.0)        # long, slow attack
+    let vib = sin(TAU * t * 4.5 + sin(TAU * t * 0.6) * 0.5) * 0.005
     let f   = qFreq * (1 + vib)
 
-    # Native American flute spectrum: strong fundamental + 3rd + 5th.
-    # Trimmed to 4 partials — at 8-voice polyphony every partial
-    # multiplies CPU 8×, so frugality matters here.
     let voice = sum(4, n =>
       let amp = (if n == 1 then 1.00
-                 else if n == 2 then 0.10
-                 else if n == 3 then 0.38
-                 else                0.20)
+                 else if n == 2 then 0.08
+                 else if n == 3 then 0.42
+                 else                0.18)
       let drift = 1 + 0.0015 * sin(t * n / 17 + n * 0.5)
       let pf    = n * f * drift
       if pf >= 22000 then 0
       else amp * sin(TAU * phasor(pf)))
+    voice * env * 0.18)
 
-    # Continuous breath noise — louder with S4
-    let breath = (noise() |> hpf(2500, 0.3)) * 0.05 * fluteBreath
-
-    let presence = 0.25 + fluteBreath * 0.75
-    (voice * 0.20 + breath + chiff) * env * presence)
-
-# ===== PADS — high-quality additive wind chimes =====
-# 8 pads tuned to D minor pentatonic across two octaves. Each chime
-# is pure additive synthesis using the FREE-FREE BAR PARTIAL RATIOS:
-#   1.000, 2.756, 5.404, 8.933, 13.344, 18.624
-# (squared zeros of the Bessel function — the iconic wind-chime
-# spectrum that no integer-harmonic stack can replicate).
-#
-# Each partial:
-#   - Has its own pluck envelope with decay time scaled by partial
-#     index (lower partials sustain longer — same as physical bars)
-#   - Has its own slow incommensurate drift (per-partial wobble keeps
-#     the spectrum alive across the long ring)
-# Plus a brief metallic chirp at strike (additive, phi-spaced) for
-# the clapper-on-bar contact sound.
-#
-# Pad → note layout:
-#   Pad 1 (note 36) — SWEEP   cascade: high A5 → low D4 in 280ms
-#                              (one finger drag across all 8 chimes)
-#   Pad 2 (note 37) — F4 (349.23)    Pad 5 (note 40) — C5 (523.25)
-#   Pad 3 (note 38) — G4 (392.00)    Pad 6 (note 41) — D5 (587.33)
-#   Pad 4 (note 39) — A4 (440.00)    Pad 7 (note 42) — F5 (698.46)
-#                                    Pad 8 (note 43) — A5 (880.00)
-def windChime(trig, fund):
-  # Pure additive, 4 partials at free-free bar ratios. Softened from
-  # earlier version: steeper amplitude falloff (1/n^1.1 instead of
-  # 1/n^0.7) so upper partials are quieter and mellower; metallic
-  # chirp removed (was the harsh element on attack); longer decay on
-  # higher partials so they fade in smoothly instead of pinging.
-  let voice = sum(4, n =>
-    let r = (if n == 1 then 1.000
-             else if n == 2 then 2.756
-             else if n == 3 then 5.404
-             else                8.933)
-    let pf = fund * r
-    let decayTime = 10.0 / pow(1.4, n - 1)
-    let pEnv = pluck(trig, decayTime)
-    let drift = 1 + 0.0008 * sin(t * n / 9 + n * 0.4)
-    let amp = 1.0 / pow(n, 1.1)
-    if pf >= 22000 then 0
-    else amp * pEnv * sin(TAU * phasor(pf * drift)))
-  voice * 0.22
-
-play pads:
-  # Pad 1: SWEEP — 4-stage cascade from A5 down to D4 over 240ms.
-  # Trimmed from 8 stages to 4 to halve the CPU cost; the cascade
-  # still reads as a "sweep" because the chimes' long decays overlap.
-  let pad1 = midi_trig(36)
-  let sw1 = windChime(delay(pad1, 0.000, 0.4), 880.00)   # A5
-  let sw2 = windChime(delay(pad1, 0.080, 0.4), 587.33)   # D5
-  let sw3 = windChime(delay(pad1, 0.160, 0.4), 440.00)   # A4
-  let sw4 = windChime(delay(pad1, 0.240, 0.4), 293.66)   # D4
-  let sweep = sw1 + sw2 + sw3 + sw4
-
-  # Pads 2-8: individual chimes (no sweep)
-  let c2 = windChime(midi_trig(37), 349.23)   # F4
-  let c3 = windChime(midi_trig(38), 392.00)   # G4
-  let c4 = windChime(midi_trig(39), 440.00)   # A4
-  let c5 = windChime(midi_trig(40), 523.25)   # C5
-  let c6 = windChime(midi_trig(41), 587.33)   # D5
-  let c7 = windChime(midi_trig(42), 698.46)   # F5
-  let c8 = windChime(midi_trig(43), 880.00)   # A5
-
-  let mix = (sweep * 0.55 + c2 + c3 + c4 + c5 + c6 + c7 + c8) * 0.32
-  [mix, mix]
+  # Stereo broadcast — dronePipe (scalar) adds to each channel of melody.
+  (melody + dronePipe) * fluteVol
 
 # ===== MASTER =====
-# Long temple reverb — K8 controls the size from intimate room to
-# vast cathedral. The bowls and forks are essentially solo
-# instruments and need space to breathe.
-let dry  = tanpura + bowls + heartbeat + flute + pads
+let dry  = ocean + bells + drone + flute
 let mono = (dry[0] + dry[1]) * 0.5
-let wet  = mono |> reverb(revSize, 0.5)
-([mono, mono] + [wet, wet] * 0.5) * 0.55
+let wet  = mono |> reverb(4.0, 0.5)
+([dry[0], dry[1]] + [wet, wet] * 0.4) * 0.55
