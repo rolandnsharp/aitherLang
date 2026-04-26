@@ -1,0 +1,112 @@
+# dho_metamorphosis — 90-second autonomous demo. ONE primitive walks
+# through every synthesis paradigm without changing primitive. No
+# MIDI. No keys. Just send and listen.
+#
+# Three DHOs (A protagonist, B companion, C second formant). Their
+# parameters morph slowly through paradigm regions. The transitions
+# are smooth automations of (force, freq, damp), so the listener
+# experiences paradigm-transcendence as a musical event, not as a
+# tour of a feature list.
+#
+# Timeline:
+#   0:00 – 0:20  A is a sustained sine (noise→narrow resonator);
+#                B is a sub-audio LFO modulating A's identity
+#   0:20 – 0:40  B becomes a formant filter on A (damp 0.0001 → 0.05,
+#                freq 0.3 Hz → 1100 Hz). The drone gains a vowel —
+#                same B, different parameters.
+#   0:40 – 1:00  A's damp climbs (0.001 → 0.05); force shifts from
+#                noise to impulse pattern. The drone-vowel becomes
+#                a bell-vowel. C joins as second formant.
+#   1:00 – 1:20  A's damp climbs further (→ 0.5); freq slides
+#                220 → ~30 Hz. Bells become plucks, plucks become
+#                woody thunks.
+#   1:20 – 1:30  A's freq drops sub-audio (→ 2 Hz), damp = 1.0,
+#                force = step. A is now an ENVELOPE shaping its
+#                former companion. The roles swap.
+#   1:30 – 1:30  Critical → over-damped. Fade to silence.
+#
+# The three engineered ambiguities (paradigm boundaries dissolving):
+#   ~0:38  damp_A still small; force_A starts carrying impulses.
+#          Tone with grain, or stream of overlapping bells? Both.
+#   ~1:15  freq_A drops below 25 Hz, audible as low ripple.
+#          Still a tone, or already an envelope?
+#   ~1:25  A's output IS B's force; B's amplitude IS A's slow ripple.
+#          Oscillator and modulator are no longer fixed identities.
+
+let pos = t - start_t
+
+# Damping arc on A. Starts at 0.00001 — low enough that the single
+# kickoff impulse rings cleanly through the whole 30 s of phase 1
+# without needing refresh strikes (which caused phase-cancellation
+# dropouts when their phase didn't align with the running oscillation).
+let damp_A = (0.00001
+           + ease((pos - 30) / 15) * 0.005
+           + ease((pos - 45) / 20) * 0.045
+           + ease((pos - 60) / 20) * 0.45
+           + ease((pos - 80) / 8)  * 1.0)
+
+# Frequency arc on A — slides from 220 Hz down to 5 Hz at the end
+# (envelope territory). FLOOR at 5 Hz: omega → 0 makes both k and c
+# vanish, and the DHO becomes an unconstrained integrator on force —
+# state diverges, NaN. 5 Hz keeps a real restoring force everywhere.
+let freq_A = 220 - ease((pos - 70) / 15) * 215
+
+# Force on A — two sources active at different times:
+#   imps:   impulse pattern from pos 35 → percussive strikes (bells)
+#   step:   sub-audio DC step at end → envelope role
+# (The one-shot kickoff impulse fires inside the play block via a
+# per-voice $state flag — see below.)
+let f_imps  = ((impulse(2.0) + impulse(2.7) * 0.6) * 100000000.0
+               * ease((pos - 35) / 5) * (1 - ease((pos - 75) / 10)))
+let f_step  = if pos > 80 then 80.0 else 0.0
+
+# B — companion. Starts as a sub-audio LFO (free-running), becomes a
+# formant resonator on A's output between pos 20 and 30.
+let damp_B = 0.0001 + ease((pos - 20) / 10) * 0.05
+let freq_B = 0.3 + ease((pos - 20) / 10) * 1099.7
+
+# C — second formant for the vowel illusion (joins after pos 25).
+let damp_C = 0.06
+let freq_C = 700 + sin(TAU * pos * 0.05) * 80
+
+# Lifetime envelope — fades the whole composition over the last 5 s.
+let lifetime = 1 - ease((pos - 85) / 5)
+
+play metamorphosis:
+  # One-shot kickoff: fires on the very first sample of this voice.
+  # Per-voice $state guarantees it lands regardless of global t.
+  $kicked = 0.0
+  let kick_now = if $kicked < 0.5 then 1.0 else 0.0
+  $kicked = 1.0
+  let f_kick = kick_now * 100000000.0
+  let force_A = f_kick + f_imps + f_step
+
+  # A — protagonist DHO. Reads (force_A, freq_A, damp_A) which all
+  # walk slowly through paradigm space.
+  let A = dho(force_A, freq_A, damp_A)
+
+  # B's force: free oscillation early, A's output mid, then fade to
+  # zero past pos 78 so B can settle gracefully while A becomes a
+  # sub-audio envelope. (Driving a high-Q resonator with a slow ramp
+  # accumulates state and produces NaNs in the integrator.)
+  let force_B = (if pos < 20 then 0.001
+                 else A * 5000.0
+                      * ease((pos - 20) / 10)
+                      * (1 - ease((pos - 78) / 5)))
+  let B = dho(force_B, freq_B, damp_B)
+
+  # C — second formant, fades in around pos 25, fades out by 88.
+  let force_C = (A * 3000.0
+                 * ease((pos - 25) / 10)
+                 * (1 - ease((pos - 80) / 8)))
+  let C = dho(force_C, freq_C, damp_C)
+
+  let mix = (A * 0.4 + B * 0.3 + C * 0.3) * lifetime
+  [mix, mix]
+
+# Master mix with reverb — glues the bell strikes into a hall, so the
+# percussive phase reads as bells in a space rather than dry chops.
+let dry  = metamorphosis
+let mono = (dry[0] + dry[1]) * 0.5
+let wet  = mono |> reverb(3.5, 0.5)
+(dry + [wet, wet] * 0.4) * 0.6

@@ -1,0 +1,85 @@
+# acid_lead — sustained polyphonic keyboard instrument. Hold a key
+# and the tone sustains. Hold a chord and the chord sustains. NO
+# sequencer — the keyboard is the melody source.
+#
+# Two SLIDERS for the keys' character, independent of acid_state's
+# knobs:
+#
+# ============================================================ SLIDERS
+#   S1 (CC 82) — KEY PARADIGM   crossfades three sustained voices:
+#                                A — warm supersaw pad (3 detuned saws)
+#                                B — Tesla organ (FM swarm, gothic)
+#                                C — glass bell pad (phi-spaced sines)
+#                                same notes, three sustained timbres.
+#
+#   S2 (CC 83) — KEY MOTION     adds slow rhythmic motion that no
+#                                normal pad has: 0 = static, 1 =
+#                                wide tremolo + filter-sweep + slow
+#                                detune wobble, all at incommensurate
+#                                rates so the pad never repeats.
+#
+#   K7 (CC 19) — DRIVE
+#   K8 (CC 16) — REVERB
+
+let keyParadigm = midi_cc(82)
+let keyMotion   = midi_cc(83)
+let driveAmt    = 1.0 + midi_cc(19) * 1.5
+let revWet      = midi_cc(16) * 0.5
+
+play lead:
+  midi_keyboard((freq, gate) =>
+    # Sustained envelope — slow attack, slow release. Holds the note
+    # while gate is high; tail decays gently on release.
+    let env = swell(gate, 0.06, 1.2)
+
+    # === Three SUSTAINED paradigms ===
+
+    # A — Warm supersaw pad: 3 detuned saws stacked
+    let saw1 = additive(freq * 0.994, saw_shape, 7)
+    let saw2 = additive(freq,         saw_shape, 7)
+    let saw3 = additive(freq * 1.006, saw_shape, 7)
+    let voiceA = (saw1 + saw2 + saw3) * 0.33
+
+    # B — Tesla organ: FM partials with incommensurate per-partial drift
+    let voiceB = sum(12, n =>
+      let cf   = n * freq
+      let modf = cf * 3.06 * (1 + 0.006 * sin(t * n / 11 + n * 0.3))
+      let mv   = sin(TAU * phasor(modf)) * 1.17
+      if cf >= 22000 then 0
+      else (1.0 / pow(n, 0.55)) * sin(TAU * phasor(cf) + mv))
+
+    # C — Glass bell pad: phi-spaced partials, sustained
+    let voiceC = sum(8, n =>
+      let r  = pow(1.618, n - 1)
+      let pf = freq * r
+      if pf >= 22000 then 0
+      else (1.0 / pow(n, 0.5)) * sin(TAU * phasor(pf)))
+
+    # S1 paradigm crossfade
+    let wA = max(0, 1 - keyParadigm * 2)
+    let wB = (if keyParadigm < 0.5
+              then keyParadigm * 2
+              else 1 - (keyParadigm - 0.5) * 2)
+    let wC = max(0, (keyParadigm - 0.5) * 2)
+    let voice = voiceA * wA + voiceB * wB + voiceC * wC
+
+    voice * env * 0.06)
+
+# === S2 KEY MOTION: applied to the whole lead voice. Three
+# incommensurate modulations layered together so the pad never
+# repeats. At S2=0 nothing happens; at S2=1 it's actively breathing.
+let motA = (sin(TAU * t * 0.13) * 0.5 + 0.5)   # slow tremolo (~7.7s period)
+let motB = (sin(TAU * t * 0.31) * 0.5 + 0.5)   # mid tremolo (~3.2s period)
+let trem = 1 - keyMotion * 0.7 * (1 - motA * motB)
+
+let dry  = lead
+let monoRaw = (dry[0] + dry[1]) * 0.5
+let mono = monoRaw * trem
+
+# Filter-sweep that opens with motion knob
+let cutoff = 800 + keyMotion * 4000 * (motA * 0.5 + 0.5)
+let swept  = lpf(mono, cutoff, 0.4)
+
+let driven = drive(swept, driveAmt)
+let wet    = driven |> reverb(2.5, 0.4)
+([driven, driven] + [wet, wet] * revWet) * 0.55
