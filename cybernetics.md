@@ -22,6 +22,479 @@ control" (the host's exact phrase) in exchange for genuine
 *organisation* — sounds that have a life the patcher couldn't have
 specified directly.
 
+## Linear vs nonlinear — the series's organising distinction
+
+Episode 1 of "New Uses for Old Circuits" — the opening episode of
+the series — sets the conceptual axis the rest of the videos
+operate on. The host's stated goal for the series is two-fold:
+
+1. **To understand which modules respond *linearly* and which
+   respond *nonlinearly*.** A linear module's response to a sum
+   of inputs equals the sum of its responses to each input
+   separately. A nonlinear module breaks this property — its
+   response to A+B is *not* the sum of its responses to A and B.
+2. **To use nonlinear dynamics and chaos in the synthesizer to
+   model real-world systems** — economic systems, weather
+   patterns, financial markets — *and* to push artistic
+   exploration into territory that isn't readily obvious.
+
+The series is animated by an implicit critique of "AI slop" (the
+host's exact term) — the YouTube content treadmill, the
+algorithm-driven content production, the LLM-generated
+ubiquity-of-mediocrity. The cybernetic-synthesis tradition is
+positioned as an alternative practice: deliberate, slow, motivated
+by ideas, focused on what each video actually *says*. This is
+worth holding onto as a stance, not just a vocabulary. Aither
+shares this stance whether it wants to or not — every patch is a
+small artisanal artefact that doesn't optimise for engagement
+metrics, has no recommendation engine pushing it, and earns its
+keep by being interesting on the merits.
+
+### The Buchla / Surge difference
+
+The episode also lays out the design-philosophy split that defines
+the modular-synthesizer landscape, and that aither inherits from
+on the Surge side rather than the Buchla side:
+
+- **Buchla** — complex, high-level, *musically focused*
+  instruments. The 259 complex oscillator, the 296 spectral
+  programmer, the MARF — each is a layered, opinionated
+  instrument that does a specific musical thing well, with a
+  curated set of controls. Each module is a *finished
+  composition surface*.
+- **Surge** — *low-level*, reprogrammable circuits with many
+  inputs and outputs. The slope generator, the smooth generator,
+  the universal slope generator. Each module is a *primitive*
+  that can be wired into many roles. The modules are
+  *underspecified by intent* — the patcher decides what they're
+  for.
+
+The Surge thesis the host names explicitly: **"on the Surge,
+audio and control are a very fluid concept."** A slope generator
+is an envelope generator at sub-audio rates and a low-pass filter
+at audio rates and a triggered LFO somewhere in between. It is
+*one primitive at multiple timescales*. The patcher's choice of
+input rate decides what role the module plays.
+
+This is the design philosophy aither inherits at the language
+level. The `f(state) → sample` contract refuses the
+audio-rate-vs-control-rate distinction that node-based DSP
+languages enforce. A `phasor(0.05)` is an LFO; a `phasor(440)` is
+an audio oscillator. Same primitive, different timescale, no
+type-system separation between them. The same `lp1(sig, cut)` is
+an envelope follower at low cut and an audio filter at high cut.
+The "fluidity of audio and control" is the same thesis in two
+different mediums: in the Surge it's about banana-jack patching,
+in aither it's about scalar arithmetic in a single tight loop.
+
+### The slope generator as low-pass gate — the worked example
+
+The episode demonstrates the fluidity claim with a concrete
+technique: using a slope generator as a Buchla-style **low-pass
+gate** (LPG). LPGs were Don Buchla's signature module — they
+amplitude-control a signal *and* filter it as they close,
+because the same circuit (a vactrol) handles both.
+
+The Surge equivalent is built from a slope generator processing
+an audio signal. The trick:
+
+- A slope generator is just a one-pole filter with separately-
+  controllable rise and fall time constants.
+- When the rise/fall are very fast, the slope generator passes
+  the signal through unchanged.
+- When the rise/fall are very slow, the slope generator can't
+  follow the signal's transitions — the output goes silent.
+- Modulating the rise/fall time with a slow envelope produces
+  a sound that *fades in/out AND filters as it does so*. A square
+  wave fed through this becomes a triangle as the gate closes,
+  then silence. The harmonic content collapses with the
+  amplitude. That's the LPG sound.
+
+In aither, the analogue is `lp1` with a time-varying cutoff:
+
+```
+play lpg:
+  let env = pluck(impulse(2), 1.5)        # an envelope, 0..1
+  let cut = 50 + env * 4000               # cutoff sweeps with envelope
+  let sig = (if phasor(220) < 0.5 then 1 else -1)
+                                           # square wave
+  let gated = lp1(sig, cut)               # filter and amplitude in one
+  let s = gated * env * 0.3
+  [s, s]
+```
+
+That's an LPG in five lines. The `lp1` does both the filtering
+and the amplitude collapse — at low cutoff the signal can't pass
+through, so the output goes quiet AND loses its harmonics
+together. The `* env` outer multiplication is mostly redundant
+because the filter already does most of the amplitude work; we
+keep it just to guarantee absolute silence at envelope=0 (because
+`lp1` with a tiny but nonzero cut still leaks a small DC).
+
+### The asymmetric variant — what aither doesn't have
+
+The dual slope generator's *asymmetric* mode (different rise vs
+fall time constants) is something aither doesn't have as a
+single primitive. It's expressible:
+
+```
+$y = 0.0
+let target = sig
+let rate = if target > $y then rise_rate else fall_rate
+$y = $y + (target - $y) * rate
+```
+
+That's an asymmetric one-pole that responds faster on the way up
+than on the way down (or vice versa). Useful for envelope
+followers that should react fast to attacks but smooth out
+releases — the standard "peak detector" shape. The host's claim
+in the episode that "I can't think of any audio rate filter as
+powerful as it may be that gives you that much granular control
+over how you're filtering your signal" is correct as far as I
+know — most filter designs assume time-invariance, and an
+asymmetric filter is by construction time-varying.
+
+Worth flagging as a possible aither primitive: `lp1_asym(sig,
+rise, fall)` — a single asymmetric one-pole, codegen as the
+two-line conditional above. Useful for envelope followers, peak
+detectors, attack-aware compressors, and the LPG asymmetric mode
+the host demonstrates.
+
+### Why this episode matters for the rest of the doc
+
+The linear/nonlinear distinction is what later episodes build on.
+Every cybernetic-feedback patch (al-Mukabala, al-Jabar, neural
+synthesis) is a *nonlinear* feedback loop — the regulators
+themselves are linear (slope generators, envelope followers, CV
+processors), but the system behaves nonlinearly because the loop
+contains nonlinear elements (wave folders, comparators, peak
+detectors). Without the linear regulators the system couldn't be
+*tamed*; without the nonlinear elements it couldn't *generate*
+the chaos that needs taming. The two work in dialectical pair.
+
+The Surge / Buchla split also tells you which kind of language
+aither is. Aither's primitive set (phasor, sin, cos, lp1, hp1,
+dho, drive, wavefold, pluck, discharge, midi_*) is a Surge-style
+*low-level toolbox*, not a Buchla-style *complete-instrument
+collection*. There's no "tanpura voice" primitive, no "kick drum"
+primitive, no "Indian classical scale" primitive — those are
+patches, built from primitives. The library of complete sounds
+in `sounds/` is the Buchla side, but it's *built on top of* the
+Surge-style primitive set. Both philosophies are present, in
+their right places.
+
+### What "linear" and "nonlinear" actually mean — formal definitions and aither's primitive set
+
+A later episode (episode 4 of the series) does the careful
+deep-dive on what linearity actually means, with enough
+operational concreteness that you can decide for any aither
+primitive whether it qualifies. The formal definition has two
+parts:
+
+A system `f` is **linear** iff it satisfies both:
+
+1. **Homogeneity** — scaling the input scales the output by the
+   same factor. Mathematically: `f(α·x) = α·f(x)` for any scalar α.
+   Operationally: turning the input volume up 50% is the same as
+   turning the output volume up 50%. The system doesn't care
+   *where* in the chain the gain change happens.
+2. **Superposition** — the response to a sum of inputs equals the
+   sum of the responses to each input alone. Mathematically:
+   `f(x + y) = f(x) + f(y)`. Operationally: filtering two notes
+   played together gives the same result as filtering each note
+   separately and mixing the results.
+
+If both hold, the system is linear. If either fails, it's
+nonlinear.
+
+The episode demonstrates this with concrete A/B tests. The
+results matter for aither because they tell us what to expect
+when we put primitives in feedback loops — which is the whole
+basis of the cybernetic-synthesis practice.
+
+### Aither's primitive set, sorted
+
+Going through aither's primitives by this test:
+
+**Strictly linear** (homogeneity + superposition both hold):
+- Arithmetic: `+`, `-`, scalar `*`, `/`. Linear by definition.
+- `lp1(sig, cut)`, `hp1(sig, cut)` — first-order filters with
+  fixed coefficients. Linear in `sig` (not in `cut`, but `cut`
+  is a parameter, not an input signal).
+- `lpf`, `hpf`, `bpf`, `notch` — biquad filters with fixed
+  coefficients. Linear in `sig`.
+- `delay(sig, time)` — linear in `sig`.
+- `phasor(rate)` — has its own state, but the *rate→phase*
+  mapping is linear (scale rate by 2, phase advances twice as
+  fast).
+- `sin`, `cos` — these are nonlinear functions in general, but
+  used as *fixed shape functions* on a phase argument (i.e.
+  `sin(TAU * phasor(rate))`) the *signal flow* through them is
+  linear at fixed `rate`. They become nonlinear when used as
+  modulators (e.g. FM).
+- `cmul`, `rotate` — bilinear in their two pair arguments. Linear
+  in each separately.
+- `freq_shift`, `analytic` — linear in `sig` (the Hilbert
+  transform is a linear operator).
+- `phasor_pair` — same as `phasor`, linear in rate.
+
+**Strictly nonlinear** (one or both properties fail):
+- `drive(sig, amount)` — uses `tanh`-style saturation. Strongly
+  nonlinear. Doubling input doesn't double output once the
+  signal is in the saturation regime.
+- `wavefold(sig, amount)` — gain-dependent folding. Episode 4's
+  canonical demonstration of nonlinearity. Doubling input changes
+  the *shape*, not just the amplitude.
+- `pluck(trig, decay)`, `discharge(trig, rate)` — exponential
+  envelopes are nonlinear in trig height (a harder hit doesn't
+  just produce a louder envelope of the same shape; the shape
+  changes too because the discharge rate is a fixed time
+  constant).
+- `noise()` — by definition. No deterministic input-output
+  relationship at all.
+- `if-then-else` — discontinuous. Trivially nonlinear.
+- `int(sig)`, `clamp(sig, lo, hi)`, `max`, `min`, `abs` — all
+  nonlinear (clipping, rounding, absolute value).
+- `pow(sig, exponent)` for non-unit exponents — the exponent is
+  the whole point of nonlinearity here.
+
+**Operating-regime-dependent** (linear in one regime, nonlinear
+in another):
+- `dho(state, drive, freq, damp)` — linear at small drives.
+  Past a certain drive amplitude the resonator can clip or
+  exhibit subharmonic generation (depending on damping). The
+  same primitive is two systems at different operating points.
+- `lpf(sig, cut, res)` with high `res` — feedback resonance can
+  saturate the filter's internal stages, introducing nonlinear
+  distortion. At low `res`, linear.
+- `pole(state, drive)` (proposed) — the whole proposal IS
+  regime-switching by design. Monopole regime when state is
+  isolated; multipole regime when state is shared.
+
+### The deepest insight — feedback turns linear systems nonlinear
+
+The episode's most important moment is the resonant-EQ
+demonstration. A resonant EQ is supposed to be linear (it's
+literally an equalizer; you put it in a mix bus expecting it not
+to add character beyond its filter response). But once the EQ
+has internal feedback (which is what makes the resonance
+*resonant*), the same module behaves nonlinearly when driven
+hard. The host's exact framing: *"It's only when nonlinearities
+through the use of feedback begin to create nonlinearities in
+the system itself."*
+
+This generalises. **Feedback makes linear systems nonlinear.**
+Even if every primitive in your patch is strictly linear, putting
+them in a feedback loop creates a nonlinear system. This isn't
+optional — it's structural. The reason: the linear-system
+definitions assume an *input-output* relationship, but a
+feedback loop's "input" is a function of its own previous output,
+so the relationship `f(x)` becomes self-referential. Even with
+linear `f`, the *closed-loop* relationship is fundamentally
+different.
+
+Concretely in aither: if you write
+
+```
+$y = 0.0
+$y = $y * 0.95 + sin(TAU * phasor(440)) * 0.1
+```
+
+every operation in that line is linear. But the closed-loop
+behaviour (a leaky integrator excited by a sine) can produce
+resonance, ringing, instability — depending on parameters. Push
+the feedback past 1.0 and you get unbounded growth. Add a
+nonlinear clipper (`tanh($y)` instead of `$y * 0.95`) and you
+have a nonlinear feedback system that finds bounded chaotic
+attractors. **The choice of where to insert nonlinearity is what
+makes the difference between a feedback echo and a self-
+organising chaotic system.**
+
+This is why the cybernetic-synthesis tradition obsesses over
+nonlinearity placement. Putting a wave folder in the feedback
+path of an otherwise-linear delay turns the delay into a chaos
+generator. Putting a peak/rectifier (the simplest possible
+nonlinearity) at the soma of a neuron makes the neuron capable
+of period-doubling and chaos. The al-Mukabala patch puts two
+wave-multiplier sections in series in a feedback loop —
+*deliberately* nonlinear feedback elements in a linear-regulator
+context, so the system has chaos to be regulated.
+
+### Practical guidance for aither composers
+
+The implication for aither patch design:
+
+1. **A patch with only linear primitives in feedback** will be
+   stable but uninteresting (echoes, reverb tails, simple
+   oscillation). Useful for spaces and sustains, not for
+   self-organising motion.
+2. **A patch with linear feedforward and a single nonlinear
+   element** is the cybernetic-synthesis sweet spot. Examples:
+   `tanh($state * 3)`, `wavefold($state)`, `if $state > 0.5
+   then 1 else $state`. The nonlinearity creates the attractor
+   landscape; the linear feedback navigates it.
+3. **A patch with nonlinear elements outside feedback** has
+   character but no organisation. A `wavefold` on a clean
+   oscillator just changes the timbre. A `wavefold` in the
+   feedback loop of a delay creates evolving territory.
+4. **Feedback amount is the bifurcation parameter.** As the
+   feedback gain increases, a stable feedback loop with a
+   nonlinearity transitions through periodic orbit →
+   period-doubling → chaos → instability. Same shape as the
+   logistic map, same shape as the Tudor neural network, same
+   shape as every other cybernetic-feedback patch in the doc.
+   A single "feedback amount" knob is therefore the canonical
+   live-performance control for any cybernetic patch.
+
+The categorization above could become a small table in
+COMPOSING.md (or a dedicated `LINEARITY.md`) — composers
+designing patches would benefit from being able to look up
+"is this primitive linear or not" before deciding where in the
+signal flow to use it. A primitive's linearity status is a
+*structural property* that determines what role it can play in
+a feedback loop, not just a sonic flavor.
+
+## The feedback path itself as a composition surface
+
+Another episode in the series uses a **ring modulator** as the
+centerpiece nonlinearity rather than a wave folder, and walks
+through the design-space of *things you can put in the feedback
+path* once you have one. The takeaway isn't a specific patch —
+it's a way of thinking about the patch you're already building.
+
+The skeleton:
+
+1. Pick a nonlinear core (the ring modulator: output =
+   `sig_a * sig_b`).
+2. Send the core's output back to one of its own inputs through
+   a *processing chain*.
+3. Vary the chain. Each variation is a different patch.
+
+The processing chain is where the artistry lives. The episode
+demonstrates several:
+
+- **Phase shifts** via a multi-output filter — the variable-Q
+  filter has lowpass, bandpass, and highpass outputs that are
+  *each 90° phase-shifted from each other*. Sending different
+  taps back to the input produces *different cancellation
+  patterns*. Same chain otherwise; different timbre depending
+  on which phase output you pick.
+- **Resonance** in the filter — boosts a narrow frequency band
+  into the feedback path, *injecting new spectral content* the
+  ring modulator can sideband against. The resonance itself is
+  the spectral generator.
+- **Audio-rate compression** via a smooth generator used as a
+  VCA driven by the loop's own envelope. This is the audio-rate
+  version of the al-Muqabala observer — *the same cybernetic
+  regulator, running fast enough to act as a compressor instead
+  of as a slow envelope shaper*. The host names this explicitly:
+  "the difference between control voltages and audio signals is
+  a question purely of the frequency range."
+- **Wave folders** in the feedback path for chaos.
+- **Cascading low-pass** to *slow down* a chaotic audio signal so
+  it can be reused as a control voltage modulating the carrier's
+  pitch. Closes a *second* feedback loop at a different rate
+  than the first.
+
+### Why this matters as a design vocabulary
+
+This is the moment in the series where "feedback" stops being a
+single-knob concept and becomes a *path with multiple stages*.
+Each stage in the path can be linear or nonlinear, fast or slow,
+phase-aligned or phase-shifted. The composer's job is to *design
+the path*, not just to dial the feedback gain.
+
+In aither terms, this is the difference between:
+
+```
+$state = $state * 0.95 + sig * 0.1
+```
+
+(a single-stage feedback with a leak coefficient — fine, simple,
+limited)
+
+and:
+
+```
+$state = $state * 0.95 + sig * 0.1
+let processed = $state |> lpf(800, 3) |> wavefold |> drive(2)
+$state = processed                          # the rich version
+```
+
+The single-stage version has one knob (the leak coefficient).
+The rich version has many (filter cutoff, resonance, fold
+amount, drive amount). Each knob is a different point in the
+feedback path. The patch's character comes from the *interaction
+of stages*, not just the loop gain.
+
+### Phase as a feedback-design dimension — a missing primitive
+
+The phase-shift technique exposes something aither doesn't have:
+**a multi-output filter primitive**. The variable-Q in the
+episode produces `lp`, `bp`, `hp`, and `notch` *simultaneously
+from a single filter computation*. This is a state-variable
+filter (SVF) — the canonical Buchla/Surge filter topology where
+the four outputs are different taps of the same internal state.
+
+Aither's `lpf`, `bpf`, `hpf`, `notch` are independent primitives.
+If you want all four simultaneously, you call all four — three
+times the computation, three independent state regions, no
+guarantee of phase coherence between the outputs. The episode's
+trick (use lp for one feedback character, bp for another, hp for
+another) becomes ergonomically awkward.
+
+Worth flagging as a possible aither primitive:
+
+```
+let svf = state_variable(sig, cut, res)
+                                            # returns 4-tuple
+let result = svf[0] |> ...                  # use lp, or
+let result = svf[1] |> ...                  # use bp, or
+let result = svf[2] |> ...                  # use hp, or
+let result = svf[3] |> ...                  # use notch
+```
+
+Same compute cost as a single biquad. Four phase-coherent outputs
+available simultaneously. Lets composers exploit the
+phase-relationship-as-design-dimension trick the episode shows
+without the awkwardness of running three filters in parallel.
+
+This is small codegen — single primitive, returns a 4-element
+"pair-like" structure, fits naturally with the existing
+pair-returning machinery for `cmul`, `analytic`, etc. Probably
+the next obvious primitive to add after `pole(state, drive)`,
+because it unlocks a documented technique from the cybernetic-
+synthesis tradition that's currently inaccessible at the
+language level.
+
+### The general principle
+
+The deepest takeaway from this episode: **feedback path stages
+compose, and each stage can be selected from the linear/nonlinear
+catalog independently.** The same skeleton (ring-mod core,
+feedback path with stages) becomes a different patch every time
+you swap a stage. This is the cybernetic-synthesis equivalent of
+*combinatorial design* — the patch's expressivity scales with
+the *number of choices in the path*, not just with the number of
+modules.
+
+Aither inherits this directly through the `|>` pipe operator and
+the function-composition style. A feedback expression like:
+
+```
+$state = $state |> lp1(200) |> wavefold |> drive(2) |> hpf(80, 3)
+```
+
+reads as a feedback path with four stages. Each stage is a
+different choice from the primitive catalog. Reordering them
+produces structurally different patches. This is a design
+dimension we haven't documented but is available today — every
+multi-stage feedback expression is implicitly using it.
+
+A pattern in COMPOSING.md naming this — "feedback path design as
+combinatorial composition" — would help composers reach for it
+deliberately rather than stumbling into it.
+
 ## The worldview behind the practice
 
 The channel (*Les Sons Humains* / "Los Sons Humane" by ear) opens
@@ -113,6 +586,502 @@ is reminding us that the *point* of all that precision is to
 produce systems whose behaviour is then taken in *un*-analytically.
 Build the rules with care; let the system surprise you with what
 those rules produce.
+
+## Building blocks — the neuron as a patch and the integrator-as-regulator
+
+Before the al-Muqabala / al-Jabar / Tudor patches build dense
+networks, there's a simpler bridge episode that introduces the
+two primitives the rest of the tradition assumes: **the neuron
+made literal as a patch**, and **the integrator reframed as the
+regulator that closes the loop**. Worth holding separately because
+it gives the operational vocabulary the rest of the doc uses
+without explanation.
+
+### The neuron as a literal patch
+
+The neuron is built from three modules, mapped to the perceptron
+model directly:
+
+- **Dendrites** — multiple input signals. In the episode: a
+  slow function from a transient generator, a low-frequency
+  square wave from a PCO, and a higher-rate audio PCO. The
+  inputs are intentionally heterogeneous — the neuron is doing
+  cross-rate fusion, not just summing things at one rate.
+- **Soma** — a mixer (CV processor) that sums the weighted
+  inputs. The "weights" are the mixer's input gains. The output
+  is the weighted sum.
+- **Axon** — a nonlinearity applied to the soma output. The
+  episode uses a peak module; the host notes that *any*
+  nonlinearity works — comparator, wave shaper, the bottom
+  section of a wave multiplier, an exponential follower. The
+  choice of nonlinearity changes the sound character but not
+  the structural role.
+
+The neuron's output drives a **resonant filter pinged at
+audio rate**, and the filter's bandpass output is the actual
+audible signal. **The neuron does the composing; the filter
+does the sound production.** This is a common architectural
+move in cybernetic synthesis: separate the *event-rate*
+decisions (when to ping, with what energy, against what
+weighted sum) from the *audio-rate* signal (the resonant
+filter ringing in response). The neuron is a sparse-event
+generator; the filter is a continuous-signal synthesizer.
+
+In aither, the analogue is direct:
+
+```
+play neuron:
+  let dend1 = sin(TAU * phasor(0.3))         # slow function
+  let dend2 = if phasor(2) < 0.5 then 1 else -1  # square LFO
+  let dend3 = sin(TAU * phasor(60))          # audio-rate input
+
+  let w1 = midi_cc(74) * 2 - 1               # weights as knobs
+  let w2 = midi_cc(71) * 2 - 1
+  let w3 = midi_cc(76) * 2 - 1
+
+  let soma = dend1 * w1 + dend2 * w2 + dend3 * w3
+  let axon = if soma > 0.3 then 1 else 0     # peak / threshold
+
+  let pingedFilter = axon |> bpf(440, 30)
+  let s = pingedFilter * 0.3
+  [s, s]
+```
+
+The 1-line `pingedFilter = axon |> bpf(440, 30)` is the
+ping-the-filter pattern. High-Q bandpass filters in aither
+ring with a characteristic decay when struck by a transient,
+identical to the VCFQ in the patch. The neuron decides *when*
+to ping and *with what envelope*; the filter decides the
+*pitch and resonance* of the audible result.
+
+Three signed-weight knobs already give the patch a real
+performance surface. Adding more dendrites is just adding
+more terms to the sum. This is the aither version of the
+synth-as-perceptron move, with no codegen changes — every
+ingredient already exists.
+
+### The integrator as the cybernetic regulator (the calculus lens)
+
+The episode's other foundational reframing is to look at
+envelope followers as **integrators**, in the calculus sense.
+A slope generator with rise pinned at minimum and a tunable
+fall is just a one-pole low-pass filter; viewed as integration,
+it's computing the *area under the signal* over the
+integration window. The fall time is the window length.
+
+Why this matters: pairing this with episode 9's "derivative
+as high-pass filter" gives you the full calculus toolkit on
+audio signals.
+
+- **Integration** — `lp1(abs(sig), slow_cut)` produces a
+  smoothed version of the signal's *amount of activity* over
+  a time window. This is the al-Muqabala observer.
+- **Differentiation** — `sig - lp1(sig, slow_cut)` produces
+  a high-pass version that fires when the signal's *rate of
+  change* spikes. This is the al-Jabar regulator's input.
+
+These two operations are *complementary regulators* — one
+fires on average level, one fires on rate of change — and
+the al-Mukabala / al-Jabar patches use them at the same
+abstraction layer for different cybernetic objectives.
+Naming them as "integrator" and "differentiator" rather than
+as "envelope follower" and "high-pass filter" makes the
+mathematical structure clearer and the design space more
+explorable. Composers thinking in the calculus frame will
+naturally reach for second-order operations (acceleration =
+derivative of velocity) that the envelope-follower frame
+doesn't suggest.
+
+### Hebbian learning via feedback-modulating-weights
+
+The episode's deepest move — almost in passing — is to take
+the integrator output and route it back as a **VCA on one of
+the dendrites**. The host's exact framing:
+
+> "This is basically like taking one of the dendrites, one of
+> the inputs of the neuron, and adjusting the weight through
+> this sort of feedback loop."
+
+What this is, in machine-learning terms, is **a homeostatic
+Hebbian learning rule**. As that particular input contributes
+more to the neuron firing densely, the integrator picks up the
+density and pulls back the input's weight. As that input
+contributes less, the integrator detects the slack and lets
+the weight drift back up. The system *self-organises its
+weights to produce a steady output level* — without any
+explicit error signal, without gradient descent, without a
+labelled target.
+
+This is significant for two reasons:
+
+1. **It's a learning rule expressed entirely in the
+   cybernetic-synthesis vocabulary.** The system "learns" the
+   right weighting of its inputs through observation and
+   feedback, the same way the al-Muqabala patch "regulates"
+   the chaotic feedback loop. Tudor's networks were doing
+   this without naming it as learning. The vocabulary makes
+   it visible.
+
+2. **It connects directly to resonance-ocaml.** Resonance's
+   own RESEARCH.md tried Hebbian learning and reports
+   "Hebbian too weak for text — 3.2 BPC ceiling after 1000
+   passes." But the Hebbian rule resonance tested is the
+   *classical* one (correlation-based weight updates).
+   Cybernetic Hebbian rules — homeostatic feedback that
+   adjusts weights based on *output statistics* rather than
+   input-output correlations — are a different class of
+   algorithm. The fact that they make musically interesting
+   sounds in the synth tradition suggests they might also
+   make different patterns of representation in the ML
+   tradition. Worth experimenting with in resonance: replace
+   the gradient descent on `W_mix` with cybernetic
+   homeostatic regulation and see what the network learns.
+
+In aither terms, the homeostatic-Hebbian neuron is:
+
+```
+play homeostatic_neuron:
+  let dend1 = sin(TAU * phasor(0.3))
+  let dend2 = if phasor(2) < 0.5 then 1 else -1
+  let dend3 = sin(TAU * phasor(60))
+
+  $w1_inhibit = 0                            # learned suppression
+  let w1_eff = max(0, midi_cc(74) - $w1_inhibit)
+                                              # effective weight
+  let soma = dend1 * w1_eff + dend2 * 0.5 + dend3 * 0.3
+  let axon = if soma > 0.3 then 1 else 0
+
+  $density = lp1(abs(axon), 5.0)             # integrator: output activity
+  $w1_inhibit = $density * 2                 # feedback: suppress active inputs
+
+  let pingedFilter = axon |> bpf(440, 30)
+  let s = pingedFilter * 0.3
+  [s, s]
+```
+
+When dendrite-1 contributes to making the axon fire densely,
+`$density` rises, which raises `$w1_inhibit`, which lowers
+`w1_eff` — the weight is being pulled back. When dendrite-1
+goes quiet, `$density` falls, the inhibition fades, the
+weight recovers. The system finds an equilibrium where the
+output activity stays in a useful range *automatically*.
+
+This is *the cybernetic alternative to gradient descent*. It
+needs no error signal; it learns from the system's own
+behaviour. It might be too weak for tasks like text
+prediction (resonance saw a 3.2 BPC ceiling), but it might
+be the right substrate for tasks where the goal is
+*homeostasis* (audio that stays in a useful loudness range
+without compressors, sequence models that maintain steady
+output entropy without temperature scheduling, generative
+systems that self-tune their density).
+
+This is genuine cross-pollination territory. The tradition
+has had this for fifty years; ML hasn't really tried it as
+seriously as it tried gradient descent. Resonance is a
+natural place to try it because the architecture already has
+the right shape (oscillators with tunable parameters, feedback
+between layers).
+
+### The closing thesis the episode states
+
+The host's closing for this episode is the same closing
+all the cybernetic-synthesis episodes give, but worth
+preserving in plain language because it's the philosophical
+spine:
+
+> "These are just the sounds patched back into themselves
+> and organizing themselves into different structures and
+> then sort of sketching out a terrain that they can operate
+> in. ... You can see it as a generative patch, but it's not
+> generative in the sense that there's some outside random
+> function driving everything."
+
+**Cybernetic generation is not noise.** It is structured
+self-organisation arising from feedback through nonlinearity.
+The same equation produces different attractors at different
+parameter settings, but the equation is deterministic, the
+attractors are predictable, and the musician's job is to
+walk the parameter space *meaningfully*. This is what
+distinguishes cybernetic music from algorithmic music — the
+algorithm is doing real organisational work, not coin-tossing
+disguised as expressivity.
+
+Aither inherits this stance directly. The `f(state) → sample`
+contract is deterministic. The state evolves locally according
+to rules. Patches that exploit feedback-and-nonlinearity
+(the cybernetic primitives) produce music that is generative
+in the structural sense — self-organising, parameter-walkable,
+attractor-based — without ever invoking randomness as the
+source of variety. **Variety comes from the dynamics, not
+from rolls of dice.**
+
+## Random ≠ chaotic — the Hordijk distinction
+
+A separate episode in the series builds on Rob Hordijk's work
+(designer of the Blippoo Box, the Twin Peak filter, the Wrangler
+circuit) and introduces a sharp conceptual distinction the rest of
+the cybernetic-synthesis tradition assumes but doesn't always
+articulate:
+
+> **A random voltage source is a LINEAR system. A chaotic feedback
+> system is NONLINEAR. They are not the same thing, and they
+> produce structurally different music.**
+
+The host states the difference precisely. A random voltage
+generator (a sample-and-hold clocked by some external rate, fed
+from a noise source) behaves *predictably under parameter changes*:
+slow the clock, you get slower randomness; change the noise source,
+you get a different distribution. The randomness is unpredictable
+*within* a given setting, but the *response to controls* is
+linear. Critically, the random voltage generator sits **outside**
+the rest of the patch — it's a thing that *influences* other
+things, not a thing that *is part of* the system's dynamics.
+
+A cybernetic patch with feedback through nonlinearities is the
+opposite. Parameter changes produce *unpredictable* results
+(shifting one knob can move the system from periodic orbit to
+chaos to silence). And there is no single "source of motion" —
+the motion arises from all the circuits influencing each other.
+The host's phrase: **"an anarchic system of distributed things all
+finding some organisation in some pattern, in communication with
+each other."**
+
+This distinction matters because it tells you which kinds of
+"interesting" you're going to hear. Random voltages produce
+*surprise within constraints* — the patch sounds "alive" because
+you can't predict the next note, but the *texture* and the
+*overall behaviour* are stable. Cybernetic chaos produces
+*organisational drift* — the patch finds an attractor, lives
+there for a while, then a small parameter change pushes it
+somewhere structurally different. That's a richer kind of
+liveness because the patch itself has a *trajectory*, not just
+moment-to-moment surprise.
+
+### The Hordijk aesthetic — chaos as lightness, not darkness
+
+The episode also flags an aesthetic stance worth holding onto.
+Most synthesizer chaos / nonlinearity work tends toward dark,
+moody soundscapes — feedback as menace, distortion as weight,
+chaos as oppression. Hordijk's instruments and patches go the
+other way: they produce **light, unexpected, funny sounds**.
+Sounds that make you laugh. Bouncing, popping, gurgling,
+chirping. The Blippoo Box is named for this character.
+
+This is a real artistic-design choice and worth importing
+deliberately. Cybernetic systems are equally capable of either
+register — the underlying math doesn't care whether you make
+gurgles or drones. Choosing lightness as the target is a
+*compositional commitment*, not a technical one. It also serves
+the broader thesis of *Les Sons Humains* — the channel's name
+already commits to humane, lively music rather than the
+science-fiction-machinery aesthetic that synth chaos usually gets
+deployed for.
+
+For aither: most of our chaos-adjacent patches lean dark
+(`gaelic_ladder`'s aitherVoice, `complex_pad`, `mandelbrot_voice`).
+The deliberate move toward Hordijk-light territory would be its
+own design experiment — patches whose chaotic elements produce
+*surprise and humour* rather than *menace and depth*. We don't
+have a patch in this register yet. Worth flagging as an open
+direction.
+
+### The self-clocked sample-and-hold technique
+
+The episode's concrete contribution is a single-cell chaos
+primitive that's structurally different from anything we've
+documented so far. Standard sample-and-hold takes a noise source
+and an external clock. Hordijk's move:
+
+- Use a sine oscillator as the "clock" — every time the sine
+  completes a cycle, the SH samples.
+- Use a SECOND sine oscillator as the input being sampled.
+- **Feed the SH output back into the first oscillator's pitch
+  control.**
+
+Now the carrier's pitch determines its own clock rate, which
+determines when it samples the modulator, which determines
+its own next pitch. Classic single-cell feedback chaos with
+a discretising element (the SH) in the loop. The frequency
+ratio between carrier and modulator becomes the bifurcation
+parameter — sweep it slowly and the system walks through
+periodic orbits, period-doubling, and chaos, similar to the
+logistic map but with an audible sonic character that's
+specifically *Hordijk* (light, bubbling, unexpected).
+
+### The aither version
+
+Aither doesn't have a `sample_and_hold` primitive as such, but
+the pattern is one we've been using all along — the
+"sample-and-hold the fund on hit" idiom from the velocity-array
+patches:
+
+```
+$held = 220.0
+$held = if trig > 0.001 then activeNote else $held
+```
+
+That's a sample-and-hold cell. To build the Hordijk
+self-clocked version we need a way to detect the carrier's
+cycle completion. With `phasor_pair` we now have an exact
+phase representation; cycle completion is `phase wrapped from
+near-1 to near-0`. Sketch:
+
+```
+play hordijk_chaos:
+  let modRate = 30.0 + midi_cc(74) * 800   # K1 sweeps the frequency ratio
+  $modPhase = 0.0
+  $modPhase = (s->t * modRate) - floor(s->t * modRate)
+                                              # the modulator's phase
+
+  $carrierFreq = 220.0                       # the driven pitch
+  let p = phasor_pair($carrierFreq)
+  $prevPhase = 0.0
+  let trig = if $prevPhase > 0.9 and atan2(p[1], p[0]) < 1.0
+             then 1 else 0                    # cycle wrap detector
+  $prevPhase = atan2(p[1], p[0]) / (2.0 * PI) + 0.5
+
+  $sampled = 0.0
+  $sampled = if trig > 0.5
+             then sin(TAU * $modPhase) * 200 + 220   # sample modulator
+             else $sampled
+  $carrierFreq = $sampled                     # feed back to pitch
+
+  let s = p[0] * 0.3
+  [s, s]
+```
+
+(The exact cycle-wrap detection is a bit awkward in this
+sketch — `phasor_pair` doesn't expose its internal phase
+directly, only the cos/sin pair. A cleaner version would use
+`phasor()` directly and read its wrap. But the structure is
+the point: self-clocked SH where the carrier's own cycle
+samples the modulator and modulates the carrier's own pitch.)
+
+The Hordijk technique is the **simplest possible chaos**
+patch — one carrier, one modulator, one SH, one feedback
+loop — and it produces a wide range of organisational
+behaviours from one parameter sweep. This makes it ideal as
+a "first chaos primitive" pattern in COMPOSING.md, alongside
+the logistic-map pattern. Both produce the period-doubling-to-
+chaos cascade; the logistic map does it from a pure number
+(a state cell), the Hordijk patch does it through audible
+oscillators with a discretising element. The first is more
+mathematically clean; the second is more sonically interesting
+because the chaos is *in the audio domain* rather than driving
+audio from outside.
+
+### Playing by ear — the Todd Barton sweet-spot ethos
+
+The episode closes on a thread that's worth pulling out separately
+because it intersects directly with aither's live-coding
+philosophy. The host names Todd Barton (the legendary Buchla
+educator) and credits Hordijk's patches with being **"ones that
+invite you to play with them — to play with the knobs and find
+the sweet spot."** The host's exact framing:
+
+> "It's the reason I call this channel *Les Sons Humains* —
+> not programming from the top and creating some sort of
+> sketching out some idea that will then create sounds, but
+> rather playing with them, playing around with things, playing
+> with knobs, patching things into different things, and using
+> your ear to drive things, and really just exploring the
+> sounds that come out and listening to them and enjoying them.
+> This patch is an endlessly interesting source of sounds — you
+> can sit here and play with this patch for many hours and never
+> get bored, and come back the next day and do the same thing."
+
+Two distinct claims here, both important:
+
+1. **The patcher is not specifying the sound — they are
+   exploring the sound the system is offering.** The role is
+   *navigator*, not *composer-from-above*. This is the "system
+   is the composer" thesis applied at the level of individual
+   knobs, not just at the level of feedback dynamics. Even
+   inside a single chaotic patch, the patcher's job is to find
+   the parameter regions where the system is doing something
+   *interesting* — not to specify what interesting is in
+   advance.
+
+2. **A good patch is a "sweet spot landscape" — a parameter
+   space full of distinct musical zones, with the journey
+   between zones being as much of the compositional content as
+   the zones themselves.** Hordijk's instruments are designed
+   to make this navigation rewarding. The patches the host
+   demonstrates have the same property: they reward *minutes
+   of exploration*, not single-knob settings.
+
+This connects directly to two existing aither memories:
+
+- **`feedback_paradigm_crossfade_for_live.md`** — design knobs
+  that radically change SOUND while keeping NOTES/RHYTHM stable.
+  Same thesis as Hordijk's "sweet spot landscape" — the knob is
+  the navigation device, the system underneath is the territory.
+- **`feedback_two_radical_knobs_beat_eight_subtle.md`** —
+  for live patches, 2-3 huge cross-paradigm knobs > 8 small
+  parameter tweaks. Same thesis again — the knobs need to *go
+  somewhere* (multiple distinct sweet spots reachable on each
+  axis), not just *modulate slightly*.
+
+Aither's live-coding model is structurally aligned with this
+ethos. A patch that's "boring to play" is one with a flat
+parameter landscape — every knob position sounds vaguely the
+same. A patch that's "alive" is one where the parameter space
+has *terrain* — distinct regions, sharp transitions, surprising
+combinations. Building toward the latter is design work, not
+luck. The Hordijk instruments demonstrate that the design *can*
+be done; the goal for aither patches is to do it deliberately.
+
+The technique-level move: aim for patches where **you can sit
+and play for an hour and not get bored, and come back tomorrow
+and do the same thing.** That's a quality bar most patches don't
+meet, and it's a useful thing to test for. If your patch
+exhausts itself in five minutes, the design space isn't rich
+enough — go back and add a control surface that has
+genuinely-distinct sweet spots, not just a continuous gradient.
+
+This is also the implicit case for the velocity-array-crossfade
+technique from COMPOSING.md. Three velocity arrays crossfaded by
+one knob create three distinct sweet spots (the heartbeat, the
+jig, the reel for the bodhrán) with smooth navigation between
+them. The patch rewards minutes of slow knob exploration —
+exactly the Hordijk-Barton property. The pattern was discovered
+empirically in aither but it's the same shape Hordijk has been
+designing into hardware for forty years.
+
+### Anarchic distributed organisation — the political register
+
+The host's "anarchic system of distributed things finding
+organisation in communication with each other" is a politically
+charged framing, and it's worth taking seriously. The
+cybernetic-synthesis tradition isn't just about avoiding the
+dead-algorithm trap — it's also about avoiding the
+single-conductor model of music-making, where a composer
+specifies and the system executes. The cybernetic patch is a
+*horizontal* system: every circuit is at the same level of
+agency, every feedback is bidirectional, the "composer" is a
+distributed function of the whole patch's dynamics rather than a
+hierarchical authority.
+
+This aligns with the manifesto-episode framing of cybernetic
+music as the dialectic between dead-algorithmic and
+live-anthropogenic systems — anarchic distributed organisation
+is what *liveness* looks like at the patch-internal level. It
+is also what the Tesla shared-field design from
+`bachPolyphase.md` proposes at the language level — voices
+coupled through a shared state cell with no master, no clock
+authority, no central conductor. Aither's `f(state) → sample`
+contract with mutable shared state is the engine for *exactly
+this kind of anarchic distributed coupling*.
+
+It's not accidental that the political vocabulary of
+horizontality and distributed agency keeps showing up in this
+tradition. The cybernetic-synthesis practitioners weren't just
+making sounds — they were modelling a different relationship
+between human and machine, and (by extension) between humans in
+a music-making practice. Aither inherits this stance whether it
+wants to or not — every shared-state coupling is a small model
+of anarchic distributed organisation, in code.
 
 ## The two operative concepts
 
