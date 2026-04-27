@@ -1,0 +1,95 @@
+# phasor_pair_demo — the Steinmetz primitive in action.
+#
+# Every voice in this patch OPENS with `phasor_pair(rate)` rather than
+# `sin(TAU * phasor(rate))`. The producer is a true rotating two-component
+# value; downstream operations (cmul, rotate, freq_shift, magnitude,
+# squaring via cmul of analytic signal) all consume pairs directly.
+#
+# Compare these voices to "the same thing in scalar DSP" — each one would
+# normally require multiple stages (oscillator + Hilbert transform +
+# rotation + projection back to real). With phasor_pair, the producer is
+# already the rotation; the rest of the chain is one operation per move.
+#
+# Self-contained, no MIDI required. Knobs for live exploration.
+#
+# ============================================================ KNOBS
+#   K1 (CC 74) — VOICE MIX        crossfade: pure → heterodyne → halo → fractal
+#   K2 (CC 71) — DRIVE FREQUENCY  shifts the secondary phasor in voice 2
+#                                  (50 Hz → 200 Hz heterodyne sweep)
+#   K3 (CC 76) — SHIMMER OFFSET   freq_shift offset on voice 3 (0 → 100 Hz)
+#   K7 (CC 19) — REVERB           wet mix
+#
+# Volume is fixed at low level — this is a demo, not a performance patch.
+
+let voiceMix    = midi_cc(74)
+let driveFreq   = midi_cc(71)
+let shimmerAmt  = midi_cc(76)
+let revAmt      = midi_cc(19)
+
+# ===== VOICE 1 — PURE PHASOR =====
+# The simplest possible use of phasor_pair: take the real component as
+# the audio signal. This is exactly equivalent to cos(TAU * phasor(220))
+# but spelled in the producer-pair idiom. The cosine is the projection
+# of the rotation onto the real axis.
+play pure:
+  let p = phasor_pair(220)
+  let s = p[0] * 0.15
+  let w1 = max(0, 1 - voiceMix * 4)
+  [s * w1, s * w1]
+
+# ===== VOICE 2 — HETERODYNE VIA cmul =====
+# cmul(phasor_pair_a, phasor_pair_b) is a TRUE single-sideband mixer:
+# the result rotates at (rate_a + rate_b), with the lower sideband
+# suppressed by construction (because the analytic-signal nature of
+# both phasor pairs cancels it). This is what radio engineers call
+# upper-sideband modulation. In scalar DSP it requires explicit
+# Hilbert filters; here it falls out of two lines.
+#
+# Sweep K2 to slide the modulator from 50 Hz to 200 Hz — the resulting
+# carrier rises from 270 Hz to 420 Hz, smoothly, no aliasing artifacts.
+play heterodyne:
+  let carrier = phasor_pair(220)
+  let modf = 50 + driveFreq * 150
+  let modu = phasor_pair(modf)
+  let mixed = cmul(carrier[0], carrier[1], modu[0], modu[1])
+  let s = mixed[0] * 0.15
+  let w2 = max(0, 1 - abs(voiceMix - 0.333) * 4)
+  [s * w2, s * w2]
+
+# ===== VOICE 3 — FREQ_SHIFT HALO =====
+# Build a sustained drone from phasor_pair, then freq_shift it by an
+# adjustable Hz offset. Every harmonic shifts by exactly the same Hz
+# (not the same proportion), producing the inharmonic shimmer that
+# characterises freq_shift on a held tone.
+#
+# The phasor_pair here is monochromatic so the result is a clean
+# sum-frequency tone — but the SAME pattern works on any pair-valued
+# signal (e.g. analytic(complex_drone)).
+play halo:
+  let p = phasor_pair(220)
+  let drone = p[0] * 0.5
+  let shifted = freq_shift(drone, shimmerAmt * 100)
+  let s = shifted * 0.15
+  let w3 = max(0, 1 - abs(voiceMix - 0.667) * 4)
+  [s * w3, s * w3]
+
+# ===== VOICE 4 — PHASE-FRACTAL OCTAVE =====
+# Squaring a phasor_pair via cmul(p, p) doubles its phase angle —
+# mathematically (not via pitch detection) producing an octave-up
+# version of the source. The doubling is exact and phase-coherent;
+# add it back to the original and you get a perfectly-locked octave
+# stack with NO drift, because both layers come from the same phase
+# accumulator.
+play fractal:
+  let p = phasor_pair(220)
+  let p2 = cmul(p[0], p[1], p[0], p[1])      # rotation at 440 Hz
+  let p4 = cmul(p2[0], p2[1], p2[0], p2[1])  # rotation at 880 Hz
+  let s = (p[0] * 0.5 + p2[0] * 0.3 + p4[0] * 0.15) * 0.15
+  let w4 = max(0, 1 - abs(voiceMix - 1.000) * 4)
+  [s * w4, s * w4]
+
+# ===== MASTER =====
+let dry = pure + heterodyne + halo + fractal
+let mono = (dry[0] + dry[1]) * 0.5
+let wet = mono |> reverb(3.0, 0.5)
+([dry[0], dry[1]] + [wet, wet] * revAmt * 0.4) * 0.7

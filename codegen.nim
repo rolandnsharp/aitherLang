@@ -229,7 +229,8 @@ const BuiltinFns = ["saw", "tri", "sqr", "phasor", "noise", "abs", "pow",
 # "two-component", not literally "speaker channels". Composers index with
 # `out[0]` (real) / `out[1]` (imag), the same way they index a pan output
 # for L/R. Don't add type-system surgery; the value stays flat.
-const PairCalls = ["cmul", "cdiv", "cscale", "rotate", "analytic"]
+const PairCalls = ["cmul", "cdiv", "cscale", "rotate", "analytic",
+                   "phasor_pair"]
 
 # True when `name` resolves to a value (scalar local, stereo local, top
 # lets/vars/arrays, play block, stereo let). Values shadow function
@@ -326,7 +327,7 @@ proc isPureForStereo(c: Ctx; n: Node): bool =
     # both channels would claim twice the pool slots and desync L/R
     # state. Treat sum() as stateful for stereo-inlining purposes.
     if n.str == "sum": return false
-    if n.str in ["phasor", "noise", "midi_trig"]: return false
+    if n.str in ["phasor", "phasor_pair", "noise", "midi_trig"]: return false
     if NativeArities.hasKey(n.str): return false
     if n.str in c.userDefs:
       if not isPureForStereo(c, c.userDefs[n.str].kids[0]): return false
@@ -1086,6 +1087,22 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
         pre.add &"  s->idx = {offB};\n"
         pre.add &"  double {imT} = -n_hilbert_b((DspState*)s, {sigT});\n"
         return (reT, imT, true)
+      of "phasor_pair":
+        # Steinmetz's phasor: a true rotating two-component value at
+        # the given rate. (cos, sin) advanced once per call. One pool
+        # slot for the phase accumulator; the cos/sin fall out cheaply
+        # so the cost is one trig pair per sample, identical to
+        # sin(TAU*phasor(r)) + cos(TAU*phasor(r)) but with shared phase.
+        if n.kids.len != 1:
+          raise newException(ValueError,
+            "phasor_pair takes 1 arg " & errLoc(n))
+        let freq = c.emitExpr(sc, n.kids[0])
+        let off = c.registerRegion("phasor_pair", 1)
+        let phT = c.fresh("ppair_ph")
+        pre.add &"  s->pool[{off}] = fmod(s->pool[{off}] + ({freq}) / s->sr, 1.0);\n"
+        pre.add &"  if (s->pool[{off}] < 0.0) s->pool[{off}] += 1.0;\n"
+        pre.add &"  double {phT} = s->pool[{off}] * (2.0 * 3.14159265358979323846);\n"
+        return (&"cos({phT})", &"sin({phT})", true)
       else: discard       # exhaustive case below
     # Stereo-returning user def (e.g. haas, pan): inline once, capture
     # the two output channels into fresh temps via the `pre` preamble.

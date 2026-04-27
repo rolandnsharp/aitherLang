@@ -522,10 +522,83 @@ then use `p[0]`, `p[1]`):
 | `cscale(s, re, im)`            | scalar × pair                                 |
 | `rotate(re, im, omega)`        | rotate by `omega` radians                     |
 | `analytic(signal)`             | `(signal, hilbert(signal))` — Hilbert pair    |
+| `phasor_pair(rate)`            | `(cos, sin)` rotating at `rate` Hz            |
 
 `+` and `*` are NOT overloaded for complex. `(re, im) * (re', im')`
 does componentwise multiplication (Hadamard product, NOT `cmul`).
 Reach for the named functions when you mean the algebra.
+
+### Pair producers — start with `phasor_pair`, not `sin(TAU * phasor(…))`
+
+When the next step in your signal chain is a pair operation (`cmul`,
+`rotate`, `freq_shift`, or feeding `cmul(p, p)` for octave doubling),
+**produce the rotation directly with `phasor_pair(rate)`** rather than
+building a scalar sine and then converting to analytic. Two reasons:
+
+1. **One trig pair instead of two.** `phasor_pair(rate)` advances one
+   phase accumulator and emits `(cos(TAU*ph), sin(TAU*ph))` from it.
+   Writing `sin(TAU * phasor(rate))` and then needing the cosine
+   later costs you a second `phasor` call (with its own state slot)
+   plus another sine.
+2. **Intent reads correctly.** A line that opens with
+   `let drone = phasor_pair(220)` says "I have a rotating thing at
+   220 Hz." A line that opens with `let drone = sin(TAU * phasor(220))`
+   says "I have a sine wave at 220 Hz" — and then the reader has to
+   do extra work when the next operation treats it as a pair.
+
+The historical `phasor(rate)` (returning a 0..1 ramp) stays. It's
+still right when the consumer is a `sin`/`cos` shape, an
+`if phasor < width` pulse, an `int(phasor * N)` step counter, or
+anything else that needs the angle-as-scalar. Use `phasor_pair`
+**when the rotation itself is what you want**.
+
+### `phasor_pair` × `cmul` is a single-sideband mixer
+
+`cmul(phasor_pair(220), phasor_pair(50))` produces a clean tone at
+**270 Hz only** — the sum frequency. There is no 170 Hz lower
+sideband, no DC, nothing else of significance. The lower sideband is
+suppressed by construction because both inputs are analytic-signal
+rotations, not scalar sines, and the algebra cancels the unwanted
+component.
+
+```
+let carrier = phasor_pair(220)
+let modulator = phasor_pair(midi_cc(74) * 200)   # K1 sweeps modulator
+let mixed = cmul(carrier[0], carrier[1], modulator[0], modulator[1])
+mixed[0] * 0.3
+```
+
+Sweep K1 from 0 to 1 and the audible tone slides cleanly from 220 Hz
+up to 420 Hz, with no aliasing artifacts and no companion frequencies.
+This is what radio engineers call upper-sideband modulation. In scalar
+DSP it requires explicit Hilbert filters and careful sideband
+cancellation. Here it falls out of the producer-pair × producer-pair
+composition.
+
+### Phase-coherent octave stack via `cmul(p, p)`
+
+Squaring a `phasor_pair` doubles its phase angle by construction —
+`(cos θ + i sin θ)² = cos 2θ + i sin 2θ`. That is, mathematically and
+not via pitch detection, an octave up. Cube it for a perfect fifth +
+octave, take the fourth power for two octaves up. All layers come from
+the same phase accumulator, so they NEVER drift out of phase relative
+to each other.
+
+```
+let p  = phasor_pair(220)
+let p2 = cmul(p[0],  p[1],  p[0],  p[1])     # 440 Hz, phase-locked
+let p4 = cmul(p2[0], p2[1], p2[0], p2[1])    # 880 Hz, phase-locked
+(p[0] + p2[0] * 0.5 + p4[0] * 0.25) * 0.3
+```
+
+This is harmonic stacking that no oscillator-bank approach can match —
+two independent 220/440 oscillators always drift slightly out of
+phase as their accumulators accumulate floating-point error
+differently. The squared-pair stack derives every octave from one
+phase, so the relative phase relationships are exact for the lifetime
+of the voice. The patch `phasor_pair_demo.aither` plays this side-by-
+side with the heterodyne and the freq_shift halo so the difference is
+audible.
 
 ### `freq_shift` — the headline move
 
