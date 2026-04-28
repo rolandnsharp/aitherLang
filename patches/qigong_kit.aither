@@ -1,184 +1,278 @@
-# qigong_kit (v2) — completely different from v1. Three pro-quality
-# looping instruments: ocean ambient, Tibetan bell choir, shamanic
-# throat drone. Long Native American drone flute on the keys.
+# qigong_kit (v3) — three new healing instruments. Every knob is
+# designed to dramatically change the sound within a quarter turn.
+# v2's drone slider got dropped because its knobs were too subtle;
+# v3 overcompensates by making EACH knob a hand-grenade.
 #
-# v1 was tanpura + crystal bowls + heartbeat + chimes. This patch
-# explores entirely different sonic territory: noise-based ambient,
-# additive bell-partial choir, vowel-formant drone with binaural
-# stereo. Different paradigms, different mood.
+# Lessons applied:
+#   - Rhythm is oscillation. Auto-arpeggio = phasor stepping through
+#     a chord tone array; rate knob morphs sustained chord ↔ rapid arp.
+#   - Paradigm crossfade across 3 zones is the proven high-impact
+#     knob shape — used for chord morph, song shape, pattern morph.
+#   - freq_shift / pair operations give the complex-algebra magic
+#     that no other synth can do in one knob.
+#   - Per-partial drift keeps the long sustains alive.
 #
 # ============================================================ SLIDERS
-#   S1 (CC 82) — OCEAN VOL       atmospheric wave wash
-#   S2 (CC 83) — BELLS VOL       Tibetan bell choir
-#   S3 (CC 85) — DRONE VOL       shamanic throat drone
-#   S4 (CC 17) — FLUTE VOL       Native American drone flute (keys)
+#   S1 (CC 82) — HARP VOL          crystal harp chord
+#   S2 (CC 83) — WHALES VOL        deep sea whale chorus
+#   S3 (CC 85) — KALIMBA VOL       auto-arpeggiating kalimba
+#   S4 (CC 17) — FLUTE VOL         Native American drone flute (keys)
 #
-# ============================================================ OCEAN (K1-K3)
-#   K1 (CC 74) — STORM SCENE     3-zone crossfade:
-#                                  K1=0  : calm beach (gentle low surf)
-#                                  K1=0.5: rolling waves (full midrange)
-#                                  K1=1  : stormy ocean (loud, wind-rich)
-#   K2 (CC 71) — SWELL RATE      0.05 → 0.6 Hz (slow tide → quick chop)
-#   K3 (CC 76) — HORIZON HALO    freq_shift on the ocean wash (±150 Hz).
-#                                 Complex-algebra magic: shifts every
-#                                 frequency component by the same Hz,
-#                                 producing coherent metallic/inharmonic
-#                                 shimmer that no normal filter can.
+# ============================================================ CRYSTAL HARP (K1-K3)
+#   K1 (CC 74) — CHORD MORPH       3-zone crossfade through 3 chords:
+#                                   K1=0    : Dm7   (D, F, A, C)
+#                                   K1=0.5  : Dm add9  (D, F, A, E5)
+#                                   K1=1    : phi-stretch (D, F·φ, A·φ², C·φ³)
+#                                            — moves from minor harmony
+#                                            into xenharmonic alien chord.
+#   K2 (CC 71) — ARP RATE          0 = sustained chord; 8 Hz = rapid
+#                                   arpeggio. Signal-native: a phasor
+#                                   gates each note in turn; gate width
+#                                   shrinks as rate rises so the chord
+#                                   becomes a melody.
+#   K3 (CC 76) — SHIMMER TWIST     freq_shift on the harp ±400 Hz.
+#                                   Walks the chord from harmonic to
+#                                   coherently-inharmonic shimmer.
 #
-# ============================================================ BELLS (K4-K6)
-#   K4 (CC 77) — BELL DENSITY    crossfade 1 bell → 3 bells → 5 bells
-#                                 (more bells = denser cluster)
-#   K5 (CC 93) — STRIKE PERIOD   1 → 12 seconds between strikes
-#   K6 (CC 18) — RING SUSTAIN    short bell-tap → infinite shimmering
-#                                 ring (controls the partial damp values
-#                                 — left = quick, right = forever)
+# ============================================================ WHALE CHORUS (K4-K5)
+#   K4 (CC 77) — POD SIZE          crossfade 1 → 2 → 3 whale voices
+#                                   sweeping at incommensurate rates.
+#   K5 (CC 93) — SONG SHAPE        3-zone paradigm crossfade of the
+#                                   pitch-sweep curve:
+#                                   K5=0    : slow descending mournful
+#                                   K5=0.5  : oscillating up-and-down
+#                                   K5=1    : chaotic skips & bends
+#   (submarine cutoff + delay hardcoded at moderate depth — no slider)
 #
-# ============================================================ DRONE (K7-K8)
-#   K7 (CC 19) — VOWEL MORPH     formant sweep AH → OH → OO. The
-#                                 throat-singer's vowel that shapes
-#                                 which overtones project loudest.
-#   K8 (CC 16) — BINAURAL WIDTH  L/R stereo detune (0 → 12 Hz). At
-#                                 6-10 Hz creates a binaural beat —
-#                                 the trance-induction stereo effect
-#                                 that's psychoacoustically activating.
+# ============================================================ KALIMBA (K6-K8)
+#   K6 (CC 18) — TIMBRE MORPH      3-zone instrument-family crossfade:
+#                                   K6=0    : MBIRA (1, 6.27, 17.5
+#                                              partials — iconic ploink)
+#                                   K6=0.5  : CELESTA (clean integer
+#                                              harmonics, soft pluck)
+#                                   K6=1    : BELL (Tibetan bell
+#                                              partials, ringing decay)
+#                                   Same notes, three different
+#                                   instrument families.
+#   K7 (CC 19) — PATTERN MORPH     3-zone note-sequence crossfade:
+#                                   K7=0    : descending cascade
+#                                   K7=0.5  : ascending question
+#                                   K7=1    : polyrhythmic walk
+#   K8 (CC 16) — TEMPO             0.3 Hz (slow meditative) →
+#                                   6 Hz (rapid arpeggio).
 
-let oceanVol = midi_cc(82)
-let bellsVol = midi_cc(83)
-let droneVol = midi_cc(85)
-let fluteVol = midi_cc(17)
+let harpVol    = midi_cc(82)
+let whalesVol  = midi_cc(83)
+let kalimbaVol = midi_cc(85)
+let fluteVol   = midi_cc(17)
 
-let stormScene = midi_cc(74)
-let swellRate  = 0.05 + midi_cc(71) * 0.55
-let horizonHz  = (midi_cc(76) - 0.5) * 300
+let chordMorph  = midi_cc(74)
+let arpRate     = midi_cc(71) * 8.0
+let harpTwist   = (midi_cc(76) - 0.5) * 800
 
-let bellDensity = midi_cc(77)
-let strikePeriod = 1.0 + midi_cc(93) * 11.0
-let ringSustain = midi_cc(18)
+let podSize     = midi_cc(77)
+let songShape   = midi_cc(93)
 
-let vowelMorph = midi_cc(19)
-let binauralHz = midi_cc(16) * 12.0
+let kalTimbre    = midi_cc(18)
+let patternMorph = midi_cc(19)
+let kalRate      = 0.3 + midi_cc(16) * 5.7
 
-# ===== OCEAN AMBIENT — noise-based wave wash =====
-# Three layers of filtered noise corresponding to three "scenes":
-#   A: calm beach   — low rumble + occasional gentle surf
-#   B: rolling waves — full midrange wash with regular swell
-#   C: stormy ocean  — bright wind + loud surf + crashes
-# K1 crossfades between them with triangular weights.
-# K2 controls the LFO rate that modulates the amplitude (the wave
-# rolling rhythm). K3 freq_shifts the entire mix.
-play ocean:
-  # The wave LFO — slow swell amplitude, two incommensurate rates
-  # combined so no two waves are exactly alike.
-  let lfoA = (sin(TAU * t * swellRate) + 1) * 0.5
-  let lfoB = (sin(TAU * t * swellRate * 1.37) + 1) * 0.5
-  let waveAmp = 0.3 + lfoA * lfoB * 1.4
+# ===== CRYSTAL HARP — sustained additive chord with auto-arp =====
+# Four chord-tone voices, each with per-partial slow drift. The
+# arpeggiator gates each tone in turn at K2's rate; at rate=0 the
+# gates are fully open and the chord sustains. K1 morphs the chord
+# tones across three musical worlds (Dm7 / Dm add9 / phi-stretched).
+def harpVoice(freq, gateAmp):
+  let voice = sum(5, n =>
+    let drift = 1 + 0.0010 * sin(t * n / 11 + n * 0.4)
+    let pf = n * freq * drift
+    let amp = 1.0 / pow(n, 1.0)
+    if pf >= 22000 then 0
+    else amp * sin(TAU * phasor(pf)))
+  voice * gateAmp * 0.04
 
-  # Three scene layers — same noise() seed, different filter shaping.
-  let calm   = (noise() |> lpf(400, 0.6))           * 0.7   # low rumble
-  let rolling = (noise() |> bpf(800, 0.5))           * 0.5   # midrange surf
-  let stormy = ((noise() |> hpf(1500, 0.4)) * 0.4
-              + (noise() |> bpf(2500, 0.3)) * 0.3)
+play harp:
+  # Three chord shapes — same root D, different colors
+  # Dm7 = D F A C
+  # Dm add9 = D F A E (replace C with E for tension)
+  # phi-stretched = D F·φ A·φ² C·φ³ (D minor stretched into xenharmonic)
+  let phi  = 1.618
+  let f1A = 146.83             # D3
+  let f2A = 174.61             # F3
+  let f3A = 220.00             # A3
+  let f4A = 261.63             # C4
+  let f1B = 146.83             # D3
+  let f2B = 174.61             # F3
+  let f3B = 220.00             # A3
+  let f4B = 329.63             # E4
+  let f1C = 146.83             # D3
+  let f2C = 174.61 * phi       # F3 · φ
+  let f3C = 220.00 * phi * phi # A3 · φ²
+  let f4C = 261.63 * phi * phi * phi  # C4 · φ³
 
-  # Triangular crossfade
-  let wA = max(0, 1 - stormScene * 2)
-  let wB = (if stormScene < 0.5 then stormScene * 2 else 1 - (stormScene - 0.5) * 2)
-  let wC = max(0, (stormScene - 0.5) * 2)
-  let scene = calm * wA + rolling * wB + stormy * wC
+  # K1 chord crossfade
+  let cwA = max(0, 1 - chordMorph * 2)
+  let cwB = (if chordMorph < 0.5 then chordMorph * 2 else 1 - (chordMorph - 0.5) * 2)
+  let cwC = max(0, (chordMorph - 0.5) * 2)
+  let f1 = f1A * cwA + f1B * cwB + f1C * cwC
+  let f2 = f2A * cwA + f2B * cwB + f2C * cwC
+  let f3 = f3A * cwA + f3B * cwB + f3C * cwC
+  let f4 = f4A * cwA + f4B * cwB + f4C * cwC
 
-  # Apply wave swell + freq_shift halo
-  let wash = scene * waveAmp
-  let shifted = freq_shift(wash, horizonHz)
-  let s = shifted * oceanVol * 0.5
+  # K2 ARPEGGIO — phasor gates each voice in turn. As rate rises, the
+  # gate-open window shrinks so each note plays only a fraction of the
+  # cycle. At rate=0, dutyOpen = 1 and all four sustain. At rate=8 Hz,
+  # dutyOpen ≈ 0.25 and each note plays for one quarter of each cycle.
+  let arpPhase = phasor(arpRate + 0.001)
+  let dutyOpen = clamp(1 - arpRate * 0.12, 0.27, 1.0)
+  let g1 = if (arpPhase + 0.00) mod 1 < dutyOpen then 1.0 else 0.0
+  let g2 = if (arpPhase + 0.25) mod 1 < dutyOpen then 1.0 else 0.0
+  let g3 = if (arpPhase + 0.50) mod 1 < dutyOpen then 1.0 else 0.0
+  let g4 = if (arpPhase + 0.75) mod 1 < dutyOpen then 1.0 else 0.0
+
+  # Smooth the gates so the arp doesn't click
+  let s1 = slew(g1, 0.008)
+  let s2 = slew(g2, 0.008)
+  let s3 = slew(g3, 0.008)
+  let s4 = slew(g4, 0.008)
+
+  let h1 = harpVoice(f1, s1)
+  let h2 = harpVoice(f2, s2)
+  let h3 = harpVoice(f3, s3)
+  let h4 = harpVoice(f4, s4)
+  let raw = (h1 + h2 + h3 + h4)
+
+  # K3 freq_shift twist
+  let shifted = freq_shift(raw, harpTwist)
+
+  let s = shifted * harpVol
   [s, s]
 
-# ===== TIBETAN BELL CHOIR — 5 sustained bells, density-controlled =====
-# Each bell is additive with the characteristic 2 : 3 : 4.2 : 5.4 : 6.8
-# Tibetan bell partial ratios. Restrikes are slow (1-12s controlled by
-# K5) and stagger-phased so the bells overlap into a continuous shimmer.
-# K6 controls how long each strike rings out.
-def tibetanBell(fund, phaseOff):
-  let trig = impulse(1.0 / strikePeriod + phaseOff * 0.001)
-  let decay = 4.0 + ringSustain * 12.0
+# ===== WHALE CHORUS — slow swept low voices =====
+# Each whale is a low fundamental whose pitch is modulated by a slow
+# LFO. The LFO SHAPE morphs with K5: slow descending sweep, oscillating
+# back and forth, or chaotic. K4 controls how many whales are active.
+# K6 is the "submarine depth" — closes the lowpass and adds delay
+# feedback together for a deep submerged feel.
+def whaleVoice(baseFreq, sweepRate, sweepDepth, shape):
+  # Three sweep shape "paradigms" computed in parallel, K5 crossfades
+  let shapeA = sin(TAU * t * sweepRate * 0.3) * (-1)         # slow descending bias
+  let shapeB = sin(TAU * t * sweepRate)                      # oscillating
+  let shapeC = (sin(TAU * t * sweepRate * 1.7)
+              * sin(TAU * t * sweepRate * 2.3))              # chaotic product
+  let swA = max(0, 1 - shape * 2)
+  let swB = (if shape < 0.5 then shape * 2 else 1 - (shape - 0.5) * 2)
+  let swC = max(0, (shape - 0.5) * 2)
+  let sweepLFO = shapeA * swA + shapeB * swB + shapeC * swC
+  let f = baseFreq * pow(2, sweepLFO * sweepDepth * 0.4)
+  # Continuous additive — 4 partials with drift
+  sum(4, n =>
+    let drift = 1 + 0.0012 * sin(t * n / 13 + n * 0.5)
+    let pf = n * f * drift
+    let amp = 1.0 / pow(n, 0.9)
+    if pf >= 22000 then 0
+    else amp * sin(TAU * phasor(pf)))
+
+play whales:
+  let w1 = whaleVoice(55, 0.05, 0.6, songShape)   # A1 base
+  let w2 = whaleVoice(73, 0.07, 0.7, songShape)   # D2 base
+  let w3 = whaleVoice(98, 0.09, 0.5, songShape)   # G2 base
+
+  # K4 POD SIZE — crossfade 1, 2, 3 voices
+  let pwA = max(0, 1 - podSize * 2)
+  let pwB = (if podSize < 0.5 then podSize * 2 else 1 - (podSize - 0.5) * 2)
+  let pwC = max(0, (podSize - 0.5) * 2)
+  let raw = (w1 * (pwA + pwB * 0.6 + pwC * 0.4)
+           + w2 *       (pwB * 0.5 + pwC * 0.4)
+           + w3 *                    pwC * 0.4)
+
+  # Submarine effect hardcoded at moderate depth (was K6, now reassigned
+  # to kalimba). Mid-cutoff lowpass + light delay feedback gives the
+  # whales an underwater feel without an explicit knob.
+  let filtered = raw * 0.06 |> lpf(2200, 0.5)
+  let echoed   = fbdelay(filtered, 0.45, 0.6, 0.4)
+  let s = (filtered + echoed * 0.25) * whalesVol
+  [s, s]
+
+# ===== KALIMBA — auto-arpeggiating thumb piano with timbre morph =====
+# Three knobs: K6 morphs the INSTRUMENT (mbira / celesta / bell),
+# K7 morphs the PATTERN (descending / ascending / walk), K8 sets the
+# TEMPO (0.3 → 6 Hz). Three orthogonal expressive axes.
+def mbiraTone(trig, fund):
+  # Iconic mbira/kalimba — 1, 6.27, 17.5 inharmonic ploink
+  let p1 = pluck(trig, 1.5)
+  let p2 = pluck(trig, 0.5)
+  let p3 = pluck(trig, 0.15)
+  (p1 * sin(TAU * phasor(fund))
+ + p2 * sin(TAU * phasor(fund * 6.27)) * 0.40
+ + p3 * sin(TAU * phasor(fund * 17.5)) * 0.18) * 0.25
+
+def celestaTone(trig, fund):
+  # Celesta — clean integer harmonics with gentle exp decay,
+  # softer than mbira, more pitched.
+  let env = pluck(trig, 2.5)
+  let voice = sum(5, n =>
+    let amp = 1.0 / pow(n, 1.4)
+    let drift = 1 + 0.0008 * sin(t * n / 13 + n * 0.4)
+    let pf = n * fund * drift
+    if pf >= 22000 then 0
+    else amp * sin(TAU * phasor(pf)))
+  voice * env * 0.3
+
+def bellTone(trig, fund):
+  # Tibetan bell partials (1, 1.99, 2.97, 4.21, 5.41) with per-partial
+  # decay — long ringing struck-bell character.
   let voice = sum(5, n =>
     let r = (if n == 1 then 1.00
-             else if n == 2 then 1.99    # near-octave (bell partials)
+             else if n == 2 then 1.99
              else if n == 3 then 2.97
              else if n == 4 then 4.21
              else                5.41)
     let pf = fund * r
-    let pEnv = pluck(trig, decay / pow(1.4, n - 1))
-    let drift = 1 + 0.0008 * sin(t * n / 11 + n * 0.4)
+    let pEnv = pluck(trig, 3.0 / pow(1.4, n - 1))
     let amp = 1.0 / pow(n, 0.95)
     if pf >= 22000 then 0
-    else amp * pEnv * sin(TAU * phasor(pf * drift)))
-  voice * 0.15
+    else amp * pEnv * sin(TAU * phasor(pf)))
+  voice * 0.20
 
-play bells:
-  # 5 bells in D minor pentatonic (D5, F5, G5, A5, C6).
-  let b1 = tibetanBell(587.33, 0.0)
-  let b2 = tibetanBell(698.46, 0.7)
-  let b3 = tibetanBell(783.99, 1.3)
-  let b4 = tibetanBell(880.00, 2.1)
-  let b5 = tibetanBell(1046.50, 2.9)
+# 8-step note arrays (D minor pent across two octaves)
+let kalDesc = [440.0, 392.0, 349.23, 293.66, 261.63, 220.0, 196.0, 174.61]
+let kalAsc  = [174.61, 196.0, 220.0, 261.63, 293.66, 349.23, 392.0, 440.0]
+let kalWalk = [220.0, 349.23, 196.0, 440.0, 261.63, 174.61, 293.66, 392.0]
 
-  # K4 DENSITY — crossfade between 1 / 3 / 5 bells. Triangular zones.
-  let w1 = max(0, 1 - bellDensity * 2)        # only b1
-  let w3 = (if bellDensity < 0.5 then bellDensity * 2
-            else 1 - (bellDensity - 0.5) * 2)  # b1, b2, b3
-  let w5 = max(0, (bellDensity - 0.5) * 2)    # all 5
+play kalimba:
+  # K8 TEMPO — controls the step rate
+  let kalPh = phasor(kalRate / 8)
+  let idx   = int(kalPh * 8)
+  let trig  = impulse(kalRate)
 
-  let mix = (b1 * (w1 + w3 * 0.6 + w5 * 0.4)
-           + b2 * (w3 * 0.5 + w5 * 0.4)
-           + b3 * (w3 * 0.4 + w5 * 0.4)
-           + b4 *  w5 * 0.4
-           + b5 *  w5 * 0.3)
+  # K7 PATTERN MORPH — 3-zone freq crossfade
+  let fDesc = kalDesc[idx]
+  let fAsc  = kalAsc[idx]
+  let fWalk = kalWalk[idx]
+  let pwA = max(0, 1 - patternMorph * 2)
+  let pwB = (if patternMorph < 0.5 then patternMorph * 2
+             else 1 - (patternMorph - 0.5) * 2)
+  let pwC = max(0, (patternMorph - 0.5) * 2)
+  let activeFreq = fDesc * pwA + fAsc * pwB + fWalk * pwC
 
-  let s = mix * bellsVol
+  # K6 TIMBRE MORPH — 3-zone instrument-family crossfade
+  let mTone = mbiraTone(trig, activeFreq)
+  let cTone = celestaTone(trig, activeFreq)
+  let bTone = bellTone(trig, activeFreq)
+  let twA = max(0, 1 - kalTimbre * 2)
+  let twB = (if kalTimbre < 0.5 then kalTimbre * 2 else 1 - (kalTimbre - 0.5) * 2)
+  let twC = max(0, (kalTimbre - 0.5) * 2)
+  let blend = mTone * twA + cTone * twB + bTone * twC
+
+  let s = blend * kalimbaVol * 0.7
   [s, s]
 
-# ===== SHAMANIC THROAT DRONE — vowel-morph drone with binaural width =====
-# Deep low D drone with strong overtone emphasis (the throat-singing
-# trick: the upper formant filter selects which harmonic projects).
-# K7 morphs the formant filter through AH → OH → OO vowel positions.
-# K8 detunes left vs right channels by 0-12 Hz — at 6-10 Hz this is
-# the classic binaural beat that induces a meditative trance state.
-play drone:
-  let droneFund = 73.42
-
-  # Two slightly detuned drones for stereo binaural beating
-  let lFreq = droneFund - binauralHz * 0.5
-  let rFreq = droneFund + binauralHz * 0.5
-
-  # Each drone is an 8-partial additive stack with per-partial drift
-  let voiceL = sum(8, n =>
-    let drift = 1 + 0.0012 * sin(t * n / 11 + n * 0.4)
-    let pf = n * lFreq * drift
-    let amp = 1.0 / pow(n, 0.7)
-    if pf >= 22000 then 0
-    else amp * sin(TAU * phasor(pf)))
-  let voiceR = sum(8, n =>
-    let drift = 1 + 0.0012 * sin(t * n / 13 + n * 0.7)
-    let pf = n * rFreq * drift
-    let amp = 1.0 / pow(n, 0.7)
-    if pf >= 22000 then 0
-    else amp * sin(TAU * phasor(pf)))
-
-  # K7 VOWEL MORPH — formant lowpass sweep emphasizes the overtones
-  # at vowel-specific frequencies. AH ≈ 1100 Hz, OH ≈ 700 Hz, OO ≈ 400 Hz.
-  let formantHz = 1100 - vowelMorph * 700
-  let l = voiceL |> bpf(formantHz, 0.4)
-  let r = voiceR |> bpf(formantHz, 0.4)
-
-  let s = droneVol * 0.06
-  [l * s, r * s]
-
-# ===== NATIVE AMERICAN DRONE FLUTE on keys =====
-# Two pipes: melody pipe (per-key polyphonic) + drone pipe
-# (always at the tonic D2, sustains as long as any key is held).
-# Both pipes scale-locked to D minor pentatonic. Long swell envelope
-# for the slow attack characteristic of cedar/wood drone flutes.
+# ===== NATIVE AMERICAN DRONE FLUTE on the keys =====
+# Two-pipe layout. Drone pipe sustains at low D2 whenever any key is
+# held (gated by midi_gate). Melody pipe is polyphonic via
+# midi_keyboard, scale-locked to D minor pentatonic.
 play flute:
-  # Drone pipe — continuous low D, gated by "any key held"
   let breath = midi_gate()
   let breathEnv = swell(breath, 0.4, 1.4)
   let dronePipe = sum(4, n =>
@@ -189,7 +283,6 @@ play flute:
     let drift = 1 + 0.0018 * sin(t * n / 19 + n * 0.6)
     amp * sin(TAU * phasor(n * 73.42 * drift))) * breathEnv * 0.16
 
-  # Melody pipe via polyphony
   let melody = midi_keyboard((freq, gate) =>
     let n   = 12 * log2(freq / 440) + 69
     let oct = floor(n / 12)
@@ -201,11 +294,9 @@ play flute:
                else if pc <= 10.5 then 9
                else                    12)
     let qFreq = 440 * pow(2, (oct * 12 + q - 69) / 12)
-
-    let env = swell(gate, 0.20, 1.0)        # long, slow attack
+    let env = swell(gate, 0.20, 1.0)
     let vib = sin(TAU * t * 4.5 + sin(TAU * t * 0.6) * 0.5) * 0.005
     let f   = qFreq * (1 + vib)
-
     let voice = sum(4, n =>
       let amp = (if n == 1 then 1.00
                  else if n == 2 then 0.08
@@ -217,11 +308,10 @@ play flute:
       else amp * sin(TAU * phasor(pf)))
     voice * env * 0.18)
 
-  # Stereo broadcast — dronePipe (scalar) adds to each channel of melody.
   (melody + dronePipe) * fluteVol
 
 # ===== MASTER =====
-let dry  = ocean + bells + drone + flute
+let dry  = harp + whales + kalimba + flute
 let mono = (dry[0] + dry[1]) * 0.5
 let wet  = mono |> reverb(4.0, 0.5)
 ([dry[0], dry[1]] + [wet, wet] * 0.4) * 0.55
