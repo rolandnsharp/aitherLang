@@ -1,0 +1,39 @@
+# aether_pair_v2_test1_pair — Test 1, analytic-signal pair-mode.
+#
+# Single-receiver patch (rings at 277.18 Hz). Strikes via impulse(2).
+# The dielectric / magnetic pair come from analytic(strike) and are
+# read at rotationAngle = pi/2 (pure magnetic tap).
+
+$aetherDie = 0.0
+$aetherMag = 0.0
+
+let driveAmp      = 10000000.0
+let burstAmp      = 1000000.0
+let aetherWrite   = 0.1
+let aetherDecay   = 0.95
+let coupling      = 1.0
+let damping       = 0.001
+let magScale      = 1.0
+let rotationAngle = 1.5707963267948966   # pi/2 → pure magnetic
+let strikeRate    = 2.0
+
+play test1:
+  let trig    = impulse(strikeRate)
+  let burst   = pluck(trig, 0.03)
+  let strike  = trig * driveAmp + noise() * burst * burstAmp
+
+  let strikePair = analytic(strike)
+  let dieDrive   = strikePair[0]
+  let magDrive   = strikePair[1]
+
+  $aetherDie = $aetherDie * aetherDecay + dieDrive * aetherWrite
+  $aetherMag = $aetherMag * aetherDecay + magDrive * aetherWrite * magScale
+
+  let pair  = rotate($aetherDie, $aetherMag, rotationAngle)
+  let aRead = pair[0] * coupling
+
+  let v2 = dho(aRead, 277.18, damping)
+  let s = v2 * 0.15
+  [s, s]
+
+test1

@@ -300,49 +300,75 @@ work better. Needs experimental verification of which (dielectric,
 magnetic) decomposition produces the most musically useful
 behaviour.
 
-**Status (2026-04-29):** *partial validation* with the derivative
-convention. Three pre-committed falsifiable tests run on
-`patches/aether_pair_sympathy.aither` plus six supporting test
-patches:
+**Status (2026-04-29):** *substrate validated; convention question
+mostly settled; rotation-as-spectral-knob aspiration demoted.* Two
+rounds of pre-committed falsifiable tests, on
+`patches/aether_pair_sympathy.aither` (derivative convention) and
+`patches/aether_pair_v2_sympathy.aither` (analytic-signal
+convention) plus supporting test patches. Combined results:
 
-- *Test 1 (phase-coherent sympathetic resonance):* both pair and
-  scalar produce peaked phase histograms (σ = 0.130 π and 0.157 π
-  respectively). The test's prediction that scalar would give a
-  uniform distribution is empirically wrong — periodic strikes give
-  deterministic phase regardless of architecture. The pair version
-  rotates the mean angle by π/2 (controllable phase rotation) but
-  doesn't show the binary peaked-vs-uniform behaviour the test was
-  designed to detect.
-- *Test 2 (rotational morph as continuous live knob):* centroid
-  variation 1.91× (just under 2× criterion); pair stddev 5.2× larger
-  than scalar but variation is not smooth — concentrated near
-  rotation π/2 where the dielectric is nullified. RMS does modulate
-  smoothly across rotation by ~30 dB.
-- *Test 3 (in-phase reinforces, out-of-phase cancels):* PASSES
-  cleanly. 209 dB RMS difference between in-phase and out-of-phase
-  configurations, far exceeding the 6 dB criterion. Scalar control
-  is theta-invariant. *Selective listening between multiple writers*
-  is verified as a pair-only capability.
+| | Test 1 σ | Test 2 centroid range | Test 3 |
+|---|---|---|---|
+| Scalar baseline | 0.157π | 1.15× | invariant |
+| Derivative-pair | 0.130π | 1.91× (spiky) | 209 dB span |
+| Analytic-pair | 0.203π | 1.13× (smooth-but-flat) | 209 dB span |
 
-The diagnostic finding: the derivative-as-magnetic convention puts
-most audio-bandwidth energy in the dielectric (per-sample finite
-difference attenuates ~29 dB at 277 Hz), so rotation acts as a
-magnetic-attenuator with high-frequency emphasis rather than a
-continuous spectral character morph. Steinmetz's framing — equal-
-magnitude dielectric and magnetic components in 90° phase quadrature
-— is more naturally realised by the **analytic-signal pair**
-(`re = signal`, `im = Hilbert(signal)`), which the language already
-provides via the `analytic` primitive. The natural next experiment
-is to swap the convention and re-run the same three tests; same
-primitives, no engine work.
+The deeper finding is structural: the analytic-pair is the
+"physically correct" Steinmetz quadrature (equal-magnitude
+components 90° apart in phase), but rotation in this plane
+corresponds to *temporal phase shift* of the underlying signal —
+which a stateful high-Q resonator is invariant to. Derivative-pair
+produced audible centroid variation (1.91×) only because its
+spectral asymmetry made rotation act as a magnetic-attenuator; that
+was a side-effect of bad spectral matching, not music-theoretic
+content the lineage demands.
 
-The pair-valued substrate works structurally (Test 3 confirms it).
-What's not yet validated — and what the analytic-signal convention
-may unlock — is the music-theoretic payoff: rotation as a
-continuous timbre / character knob.
+**The pair-valued substrate is validated, but along different axes
+than originally aspirational:**
 
-See `pole.md`'s "Pair-valued aether: partial result" section for
-full audit numbers, the per-test verdicts, and the diagnosis.
+1. **Reinforce/cancel via angle.** Test 3 passes cleanly under both
+   conventions — voices writing at different pair-angles into the
+   medium reinforce or cancel based on relative angle, with the
+   angle being a continuous knob. 209 dB span at the limits.
+2. **Selective listening between writers.** When voice 1 writes
+   purely into the dielectric component and voice 2 writes a
+   rotated pair, voice 3 reading at a matching rotation hears voice
+   2 selectively, ignoring voice 1. This is a routing capability
+   the scalar substrate cannot express.
+3. **Rotation as a continuous spectral character morph — does
+   not work.** Neither convention delivers smooth, audible
+   spectral variation under rotation. The derivative convention's
+   variation was a spectral-asymmetry artefact; the analytic
+   convention's rotation collapses to phase shifts the receiver
+   doesn't hear.
+
+The analytic-signal convention is the **structurally cleaner**
+choice (no convention-introduced spectral asymmetry, both
+components in true 90° quadrature, mathematically aligned with
+Steinmetz's framing). The derivative convention is the
+**incidentally-musically-livelier** choice (its spectral asymmetry
+makes rotation an audible — if spiky — amplitude knob). Neither
+unlocks "rotation as continuous timbre control"; that goal is
+demoted from aspiration to "not what the pair representation
+naturally provides."
+
+A third candidate convention, **integral-pair** (`mag` = leaky
+integral of strike), was named but not tested. It would put low-
+pass-like asymmetry into the magnetic component, opposite to
+derivative's high-pass; might produce audible variation, but the
+goal is structurally suspect per the diagnosis. Defer until a
+specific musical use case demands it.
+
+What's *not* yet tested: whether the pair-valued substrate's 2D
+state space helps the cybernetic_muqabala patch's attractor-jumping
+problem (the analog cybernetic-synthesis tradition's hallmark). The
+loop-state question is independent of the rotation-knob question
+and is the natural next experiment regardless of which convention
+is chosen.
+
+See `pole.md`'s "Pair-valued aether: partial result" and "analytic-
+signal convention" sections for full audit numbers, per-test
+verdicts, and the structural diagnosis.
 
 ### Gap 4: One aether vs many
 
@@ -432,12 +458,18 @@ combination. Test whether this gives the cybernetic_muqabala
 patch the state-bearing loop partner it was missing. If yes, the
 pair-valued convention becomes the canonical aether shape going
 forward and the scalar version is documented as the simpler
-fallback. *Status 2026-04-29:* partial — Test 3 (reinforce/cancel)
-passes; Tests 1 and 2 reveal that the derivative convention puts
-most audio-bandwidth energy in the dielectric, limiting rotation's
-musical reach. Natural next experiment: re-run the same three
-tests with the analytic-signal pair convention. See Gap 3 above
-for details.
+fallback. *Status 2026-04-29 (after two rounds of tests):* substrate
+validated under both derivative-pair and analytic-signal-pair
+conventions. Test 3 (reinforce/cancel) passes overwhelmingly under
+both. Selective listening between writers verified as a pair-only
+capability. Test 2 (rotation as continuous spectral knob) fails
+under both: derivative's audible variation was a spectral-asymmetry
+artefact; analytic's rotation collapses to phase shifts the
+high-Q resonator filters out. The "rotation as continuous timbre
+control" aspiration is structurally unsupportable. Natural next
+experiment: option B — test pair-valued substrate's 2D state
+on cybernetic_muqabala for attractor-jumping. See Gap 3 above for
+the full table and diagnosis.
 
 The principle the manifesto names — *aither should already be
 complete; new primitives only land when they really earn their
@@ -575,12 +607,14 @@ closing the gap is:
 1. **Default participation** — small, just docs, do now
 2. **Internal dynamics** — small, one-line code change, test on
    sympathy patch
-3. **Pair-valued (dielectric, magnetic) aether** — partial as of
-   2026-04-29 with the derivative-as-magnetic convention. Test 3
-   (reinforce/cancel) passes; Tests 1 and 2 reveal a convention
-   weakness, not a substrate failure. Natural next experiment:
-   the analytic-signal pair convention, same primitives, same
-   tests
+3. **Pair-valued (dielectric, magnetic) aether** — substrate
+   validated as of 2026-04-29 under both derivative-pair and
+   analytic-signal conventions. Test 3 passes; selective listening
+   between writers confirmed as a pair-only capability. The
+   "rotation as continuous spectral knob" aspiration is
+   structurally unsupportable (phase rotation isn't audible
+   through high-Q resonators) and demoted. Natural next experiment:
+   pair-valued substrate on cybernetic_muqabala for attractor-jumping
 4. **Multi-aether** — parked until a use case appears
 5. **Interference operations** — parked until cybernetic
    experiments need event-triggers from medium state

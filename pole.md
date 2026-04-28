@@ -1344,6 +1344,243 @@ substrate composition works, that Test 3's reinforce/cancel is real,
 and that the derivative convention has a specific audible weakness
 the analytic-signal convention may avoid.
 
+## Pair-valued aether: analytic-signal convention is structurally cleaner but rotation collapses (2026-04-29)
+
+Direct follow-on to the derivative-pair partial finding above. The
+diagnosis there pointed at the convention: derivative gave the
+magnetic component a high-pass-like gain so most audio-bandwidth
+energy stayed in the dielectric, and rotation acted as a magnetic-
+attenuator with incidental high-frequency emphasis rather than a
+continuous spectral character morph. The natural next experiment was
+the **analytic-signal pair**: `re = signal`, `im = Hilbert(signal)`,
+both components with identical magnitude spectra at every frequency
+and 90° phase quadrature — the textbook-correct realisation of what
+Steinmetz's framing actually describes.
+
+Patches: `patches/aether_pair_v2_sympathy.aither` (canonical) plus
+four supporting test patches (`aether_pair_v2_test{1_pair,2_pair,
+3_inphase,3_outofphase}.aither`). Scalar controls were reused from
+the derivative-pair run. **Result is partial — but with a different
+shape than derivative-pair's partial.**
+
+### What the patch does
+
+Same three-voice A / C# / E topology and same write/read pattern as
+`aether_pair_sympathy.aither`, with the (dielectric, magnetic) pair
+sourced from `analytic(strike)` instead of `(strike, strike-prev)`:
+
+```
+let strikePair = analytic(strike)
+let dieDrive   = strikePair[0]   # real part = original strike
+let magDrive   = strikePair[1]   # imaginary part = Hilbert(strike)
+
+$aetherDie = $aetherDie * 0.95 + dieDrive * 0.1
+$aetherMag = $aetherMag * 0.95 + magDrive * 0.1
+```
+
+At `rotationAngle = 0` the dielectric tap matches the scalar version's
+spectrum bit-for-bit. Falsification (`v2v3Couple = 0`) was implicit in
+the substrate test (we know the substrate works from the derivative
+run — replacing `(strike, strike-prev)` with `analytic(strike)`
+doesn't change the substrate's coupling mechanics, only the magnetic
+component's spectral content).
+
+### The three tests
+
+#### Test 1 — phase-coherent sympathetic resonance (PASSES literal)
+
+50-second render at `impulse(2)`, 99 strikes, voice 2 at 277.18 Hz.
+
+```
+patches/aether_pair_v2_test1_pair.aither (rotation = π/2):
+  N strikes = 99   mean angle = 0.503 π   σ = 0.203 π
+```
+
+Comparison to the derivative-pair and scalar baselines:
+
+```
+analytic-pair:    σ = 0.203 π    mean angle = 0.503 π
+derivative-pair:  σ = 0.130 π    mean angle = 0.730 π
+scalar control:   σ = 0.157 π    mean angle = 0.198 π
+```
+
+All three pass the literal `σ < π/4` threshold. The analytic-pair's
+mean angle sits at exactly `π/2` — the Hilbert quadrature signature.
+Its σ is wider than derivative-pair (less peaked) but still well
+under the threshold.
+
+The Test 1 design issue from the derivative run remains: with
+periodic strikes, all three architectures produce peaked phase
+histograms because the impulse response is deterministic from
+strike onset. Jittered strikes were considered (per briefing
+permission) but reasoning suggests they would also fail to
+differentiate — the residual ringing's phase decorrelates equally
+across all architectures. Test 1 is preserved as a comparison point;
+it does not differentiate conventions.
+
+#### Test 2 — rotational morph as continuous live knob (FAIL — flatter than baseline)
+
+30-second render with rotation phasor at `1/30` Hz (one full turn
+across the audit), 1.0-second analysis windows.
+
+```
+analytic-pair:    centroid σ = 10.0 Hz   range 1.13×   RMS σ = 1.76 dB
+derivative-pair:  centroid σ = 51.1 Hz   range 1.91×   RMS σ = 7.12 dB
+scalar control:   centroid σ =  9.9 Hz   range 1.15×   RMS σ = 7.59 dB
+```
+
+The analytic-pair's centroid stddev is 5× SMALLER than derivative-
+pair's, essentially identical to scalar (10.0 Hz vs 9.9 Hz). The
+literal 2× criterion fails (1.13×) and fails *harder* than
+derivative-pair did. RMS modulation across rotation is only ~6 dB
+peak-to-peak, vs ~30 dB for derivative-pair.
+
+The diagnosis is clean and structural: the analytic pair represents
+two components with **identical magnitude spectra** in 90° phase
+quadrature. Rotation in this plane —
+`re·cos(θ) − im·sin(θ)` — is a true phase shift on the underlying
+signal, with no amplitude or magnitude-spectrum change. A high-Q
+resonator (the receiver voice at damping 0.001) is invariant to
+phase shifts: its impulse response selects frequency content and
+is insensitive to absolute input phase. So rotation produces no
+audible change.
+
+This means derivative-pair's centroid-variation (1.91×) was an
+**artefact** of the convention's spectral asymmetry, not a music-
+theoretic feature. Switching to the more "physically correct"
+analytic convention removes the asymmetry — and removes the audible
+variation along with it.
+
+#### Test 3 — in-phase reinforces, out-of-phase cancels (PASSES — same as derivative)
+
+```
+patches/aether_pair_v2_test3_inphase.aither   (theta=0):    RMS = -31.0 dB
+patches/aether_pair_v2_test3_outofphase.aither (theta=π):   RMS = -240.0 dB
+```
+
+209 dB span between configurations, identical to derivative-pair.
+Reinforce/cancel is convention-independent — it's signed additive
+arithmetic, which any pair representation supports identically.
+
+### Selective listening — convention-independent, real
+
+Independently verified: with voice 1 writing pure dielectric (no
+magnetic) and voice 2 writing the analytic-pair rotated by `θ = π/2`
+(strike content goes into the magnetic component), voice 3 reading
+at `φ = π/2` (rotated read, picks up `−mag`) hears voice 2 only and
+ignores voice 1. Reading at `φ = 0` reverses the situation: voice 1
+dominates, voice 2 nearly absent. 6 dB difference between the two
+read angles.
+
+This is a routing capability the scalar substrate cannot express —
+voices reading the same medium can selectively receive content from
+*specific* other voices based on the angular alignment of their
+write-angle and read-angle. It works under both derivative and
+analytic conventions because it doesn't depend on rotation having a
+spectral effect; it depends on rotation having an *amplitude* effect
+on each component-tap.
+
+Selective listening is the strongest pair-only capability validated
+to date. It deserves named recognition as a new compositional move
+rather than being buried in Test 3's caveats.
+
+### What the analytic-pair result reveals
+
+Tests 2 and 3 together produce a sharper picture than either
+convention alone gave us:
+
+1. **Pair-valued substrate works.** Both conventions confirm Test 3
+   (reinforce/cancel) and selective listening. The structural
+   extension is sound.
+2. **Rotation is not a continuous spectral character knob.** Neither
+   convention delivers the music-theoretic payoff originally claimed
+   for the rotation primitive. Derivative gave audible-but-spiky
+   amplitude variation as a side-effect of bad spectral matching;
+   analytic gives smooth-but-tiny variation that the high-Q
+   resonator filters out. The "rotation as live knob" framing was
+   an aspiration based on an incorrect mental model — phase
+   rotation in pair-space is inaudible through stateful resonators.
+3. **The pair's audible payoff is angle-based gating, not
+   continuous morph.** What works is "in-phase = reinforce, out-of-
+   phase = cancel" along with continuous angles between, plus
+   selective listening — both of which use the rotation primitive
+   as an *amplitude* control (cosine-of-angle weighting) rather
+   than as a phase rotator.
+
+### Diagnosis of the deeper structural issue
+
+The original framing — "rotation as a continuous live knob that
+shifts the medium's character" — assumed phase rotation in pair
+space would produce audible spectral variation. It doesn't. Phase
+rotation in pair-space corresponds to *temporal* phase shift in the
+underlying signal, and a stateful resonator's bandpass is insensitive
+to temporal phase shifts. To get audible variation through rotation,
+the two pair components would need different *magnitude* spectra
+at the receiver's frequency — which is exactly the spectral
+asymmetry the lineage doesn't actually demand.
+
+In other words: Steinmetz's "fixed quadrature" describes the
+analytic-pair (smooth, equal-magnitude). The aspiration of "rotation
+as audible continuous knob" demands derivative-pair-like spectral
+asymmetry. These two goals are in tension; you can have one but not
+the other.
+
+### What lands as a result of this experiment
+
+- `patches/aether_pair_v2_sympathy.aither` — the canonical analytic-
+  signal sympathy patch.
+- Four supporting test patches.
+- This pole.md section.
+- `aether.md` Gap 3 updated to record the convention-comparison
+  result and to demote the "rotation as continuous knob" goal in
+  favour of the validated capabilities (reinforce/cancel, selective
+  listening).
+- *No new primitive.* `analytic` exists already; the experiment
+  uses it as-is. The integral-pair convention (mag = integral of
+  strike) is named as a third candidate but explicitly NOT tested
+  in this commit.
+
+What does *not* land:
+
+- Promotion of either convention to canonical. The substrate is
+  validated; rotation as a music-theoretic knob is not.
+- A sympathy recipe in COMPOSING.md based on rotation. The
+  reinforce/cancel and selective-listening moves *could* lead to
+  recipes, but they need a music-design pass to find compelling
+  compositional shapes; that's downstream of this experiment.
+- Any feedback into the scalar `aether_sympathy.aither` baseline.
+
+### Where this leaves the trajectory
+
+The natural next experiment branches:
+
+1. **Option B (cybernetic_muqabala with pair-valued aether) — still
+   worth running.** The pair representation gives the cybernetic
+   loop a 2D phase-space coordinate (the magnetic component IS
+   state, available as a leaky-integrator-with-phase-relationship-
+   to-dielectric). Whether this 2D state unlocks the multi-stable
+   attractor-jumping problem is testable independently of whether
+   rotation produces audible spectral variation. Use either
+   convention; the structural extension is what matters here, not
+   the rotation knob.
+2. **Integral-pair convention as a deferred alternative.** If the
+   "rotation as audible knob" goal is judged worth pursuing, the
+   integral convention (mag = leaky integral of strike) puts a
+   low-pass-like asymmetry into the magnetic component — opposite
+   to derivative's high-pass. Same primitives, no engine work.
+   But the goal itself is structurally suspect (per the diagnosis
+   above), so this branch should only be tried if a specific
+   musical use case demands it.
+3. **Document the validated capabilities for COMPOSING.md.**
+   Reinforce/cancel and selective listening are real new
+   compositional moves that the scalar substrate cannot express.
+   They deserve documentation alongside sympathy.
+
+The user decides. The substrate works; the convention question is
+mostly settled (analytic is the cleaner one); rotation-as-knob is
+demoted from aspiration to "use it for amplitude control, not
+character morph."
+
 ## Connection to other docs
 
 - `bachPolyphase.md` — the monopole/multipole framing. `pole` is the

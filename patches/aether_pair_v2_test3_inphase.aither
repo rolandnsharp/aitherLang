@@ -1,0 +1,45 @@
+# aether_pair_v2_test3_inphase — Test 3, analytic-pair, in-phase
+# (theta=0). Voice 1 writes its strike with pair-angle 0 — the
+# strike's analytic pair goes into the medium directly. Voice 2
+# writes the same with theta=0 (rotation is identity), so the
+# dielectric and magnetic components reinforce. Voice 3 reads the
+# dielectric tap.
+
+$aetherDie = 0.0
+$aetherMag = 0.0
+
+let driveAmp      = 10000000.0
+let burstAmp      = 1000000.0
+let aetherWrite   = 0.1
+let aetherDecay   = 0.95
+let coupling      = 1.0
+let damping       = 0.001
+let strikeRate    = 2.0
+let theta         = 0.0   # IN-PHASE
+
+play test3:
+  let trig    = impulse(strikeRate)
+  let burst   = pluck(trig, 0.03)
+  let strike1 = trig * driveAmp + noise() * burst * burstAmp
+  let strike2 = trig * driveAmp + noise() * burst * burstAmp
+
+  # Voice 1: writes (re1, im1) — natural analytic pair, no rotation
+  let pair1 = analytic(strike1)
+  let v1_die = pair1[0]
+  let v1_mag = pair1[1]
+
+  # Voice 2: writes (re2, im2) rotated by theta
+  let pair2_raw = analytic(strike2)
+  let pair2 = rotate(pair2_raw[0], pair2_raw[1], theta)
+  let v2_die = pair2[0]
+  let v2_mag = pair2[1]
+
+  $aetherDie = $aetherDie * aetherDecay + (v1_die + v2_die) * aetherWrite
+  $aetherMag = $aetherMag * aetherDecay + (v1_mag + v2_mag) * aetherWrite
+
+  let aRead = $aetherDie * coupling
+  let v3 = dho(aRead, 277.18, damping)
+  let s = v3 * 0.15
+  [s, s]
+
+test3
