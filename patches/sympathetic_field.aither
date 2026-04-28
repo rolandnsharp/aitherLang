@@ -1,0 +1,163 @@
+# sympathetic_field — DOCUMENTED NEGATIVE RESULT for the broadband-
+# resonance-field topology proposed at the end of sympathetic_chord.
+# aither (which itself was a negative result for the scalar-field
+# topology). This is the second negative finding in the chain.
+#
+# DESIGN UNDER TEST (variant A — broadband coupling)
+#   3 poles (A C# E)  driven by impulse + sum of bank outputs
+#   3 bank-DHOs (A C# E) driven by sum of pole outputs
+#   The bank IS a 3-mode resonator, so the field can carry energy
+#   at all chord frequencies simultaneously — fixing the spectral-
+#   narrowness problem that killed the scalar-field design.
+#   The bootstrap mechanism in question: does the impulse transient
+#   on v1 spread enough broadband energy through (v1+v2+v3) into
+#   the bank's C# / E modes to start v2 and v3 ringing?
+#
+# DIAGNOSTIC
+#   master = coupled - monopole, where monopole = isolated v1 hit
+#   by the same impulse with no field. So the audit spectrum reads
+#   "what the field contributed". If sympathetic resonance works,
+#   the 277 Hz and 330 Hz peaks appear at -30 dB or louder relative
+#   to the 220 Hz residue. Empirically they don't.
+#
+# AUDIT VERDICT — three variants tested, all NEGATIVE.
+#
+# Variant A (this file's default): broadband coupling, impulse → v1.
+#   coupling = 1e9, bankDamp = 0.0001, damp = 0.001:
+#     220 Hz   0.0 dB     (residue = 220 Hz mode-splitting of v1)
+#     218 Hz  -1.6 dB     (mode-split sideband)
+#     222 Hz  -7.8 dB     (mode-split sideband)
+#     276 Hz -37.2 dB     (C# — barely above noise floor)
+#     330 Hz  not in top 8 (E — below ~-50 dB)
+#   The bank's 220 Hz mode rings strongly because v1's output drives
+#   it directly; the bank's C# and E modes are excited only by the
+#   broadband transient of the impulse on v1, which is ~17x lower in
+#   amplitude at 277 Hz than at 220 Hz. They never accumulate enough
+#   energy to drive v2/v3 audibly.
+#
+# Variant B (tuned coupling, see commented-out lines below). impulse
+# → v1, each pole reads ONLY its own freq's bank mode.
+#   coupling = 1e8, bankDamp = 0.0001:
+#     220 Hz    0.0 dB
+#     222 Hz  -38.8 dB    (mode-split: less, since v1 only feedbacks
+#     218 Hz  -38.8 dB     through bankAout, not bankAout+Cs+E)
+#     278 Hz  -54.1 dB    (C# visible — but ~25 dB below audible)
+#     330 Hz  -54.9 dB    (E   visible — same)
+#   Variant B is "cleaner" in the sense that it shows all three chord
+#   peaks in the top 8 at similar levels (the topology IS doing
+#   sympathy in shape) — but at 25 dB below audibility.
+#
+# Variant C (broadband seed): impulse → bank, poles read tuned bank.
+#   coupling = 10000, bankDamp = 0.0001:
+#     220 Hz    0.0 dB
+#     330 Hz  -16.5 dB    (E  — clearly audible!)
+#     277 Hz  -20.5 dB    (C# — clearly audible!)
+#   Looks like genuine sympathy — until you set fieldGain = 0.0 and
+#   the spectrum is BIT-IDENTICAL. Pole-to-bank coupling contributes
+#   nothing; the chord comes entirely from the impulse exciting all
+#   three bank modes (which then drive each pole independently). This
+#   is exactly the "drive all poles broadband" trick the prompt warned
+#   about: the shared field buys nothing, just three independent
+#   strikes routed through three independent filters.
+#
+# ROOT CAUSE — bootstrap problem, again
+#   The scalar-field experiment failed because the field was spectrally
+#   narrow (only 220 Hz survived). The broadband field IS spectrally
+#   wide, but there's still no mechanism to convert v1's narrow-band
+#   220 Hz output into 277 / 330 Hz drive. Each bank mode independently
+#   filters its input to its own resonance frequency, so the bank's C#
+#   mode only sees the (small) 277 Hz spectral content of v1's output,
+#   which itself is concentrated at 220 Hz. No cross-mode mixing.
+#
+#   Loop gain at the v1 frequency (where same-frequency mode-splitting
+#   happens) reaches unity at coupling ≈ 7e7. Loop gain at the C#
+#   frequency (where sympathy would require non-zero excitation)
+#   reaches unity at similar coupling, BUT the integration constant
+#   of the C# loop is ~25-50 dB below the 220 Hz loop, so the 220 Hz
+#   loop runs away into mode-splitting long before the C# loop
+#   accumulates audible amplitude.
+#
+# WHAT WOULD ACTUALLY WORK (per pole.md's third option, now elevated
+# to next candidate)
+#   Non-DHO state representation. The fundamental issue is that DHO
+#   poles are narrow-band filters with O(1/omega^2) gain at resonance
+#   and O(1/omega^4) elsewhere. To get cross-frequency coupling, the
+#   pole's contribution to the field needs to NOT be band-passed
+#   through the pole's own resonance. A pole carrying state in
+#   normalised position units (already integrated, no force-to-position
+#   gain), or a pole whose feedback into the field bypasses its own
+#   resonance (e.g., differentiated output, or a parallel "drive
+#   signal" tap), would let v1's energy reach the bank's C# mode at
+#   meaningful amplitude.
+#
+#   This is structural change again — `pole` would carry two state
+#   shapes, one for the band-pass output (the audible voice) and one
+#   for the field contribution (broadband, not band-passed). Or the
+#   field becomes a non-resonator that broadbands by construction.
+#
+# RECOMMENDATION
+#   Do NOT promote the broadband-field design to a primitive either.
+#   Both option-1 (scalar field) and option-2 (DHO-bank field) fail
+#   the bootstrap test. The remaining candidate from pole.md is the
+#   non-DHO state representation. Whether that's still recognisable as
+#   "pole" or becomes a different primitive is an open question.
+#
+# This patch is preserved as evidence of the second negative result.
+
+# --- bank state ---------------------------------------------------
+$bankAout  = 0.0
+$bankCsout = 0.0
+$bankEout  = 0.0
+
+# --- parameters ---------------------------------------------------
+let driveAmp  = 10000000.0    # 1e7 impulse force on v1
+let coupling  = 1000000000.0  # 1e9 — deep into the active regime,
+                              # just below visible runaway. Sweep
+                              # 1e6..1e10; 220-cluster grows faster
+                              # than 277/330 across the whole range.
+let damping   = 0.001         # pole damping; low → audible ring
+let bankDamp  = 0.0001        # field-bank damping; very low =
+                              # field rings essentially forever, so
+                              # cross-mode coupling has the longest
+                              # possible window to build up.
+let fieldGain = 1.0           # pole-output → bank-input gain
+
+play coupled:
+  let trig = impulse(2)        # 2 impulses/sec, self-running
+
+  # READ phase — bank outputs from the previous sample (1-sample delay)
+  let fA  = $bankAout
+  let fCs = $bankCsout
+  let fE  = $bankEout
+  let f   = fA + fCs + fE      # broadband field signal (variant A)
+
+  # 3 poles. v1 hit by impulse + field; v2/v3 only by the field.
+  # variant B (tuned coupling) — swap these three lines:
+  #   let v1 = dho(trig * driveAmp + fA  * coupling, 220.0,  damping)
+  #   let v2 = dho(                  fCs * coupling, 277.18, damping)
+  #   let v3 = dho(                  fE  * coupling, 329.63, damping)
+  # variant C (broadband seed) — swap to:
+  #   let v1 = dho(fA  * coupling, 220.0,  damping)
+  #   let v2 = dho(fCs * coupling, 277.18, damping)
+  #   let v3 = dho(fE  * coupling, 329.63, damping)
+  #   let bankInput = trig * driveAmp + (v1 + v2 + v3) * fieldGain
+  let v1 = dho(trig * driveAmp + f * coupling, 220.0,  damping)
+  let v2 = dho(                  f * coupling, 277.18, damping)
+  let v3 = dho(                  f * coupling, 329.63, damping)
+
+  # Bank — driven by sum of pole outputs only (variant A and B).
+  let bankInput = (v1 + v2 + v3) * fieldGain
+  $bankAout  = dho(bankInput, 220.0,  bankDamp)
+  $bankCsout = dho(bankInput, 277.18, bankDamp)
+  $bankEout  = dho(bankInput, 329.63, bankDamp)
+
+  # Monopole control — same impulse, no field
+  let mv1 = dho(trig * driveAmp, 220.0, damping)
+
+  # Diagnostic: difference exposes what the field contributed
+  let coupledTotal  = (v1 + v2 + v3) * 0.15
+  let monopoleTotal = mv1 * 0.15
+  let s = coupledTotal - monopoleTotal
+  [s, s]
+
+coupled

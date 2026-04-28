@@ -324,6 +324,159 @@ sympathy before investing in a primitive.
 The patch `sympathetic_chord.aither` is preserved as the
 documented evidence.
 
+## Negative finding from broadband-field experiment (2026-04-29)
+
+Following the option-1 negative finding above, this session tested
+the option-2 broadband-resonance-field topology proposed in
+`bachPolyphase.md` and recommended at the end of the previous
+session as the next experiment. Patch:
+`patches/sympathetic_field.aither` (preserved as evidence). Run
+`./aither audit patches/sympathetic_field.aither 4.0` to reproduce.
+
+**The result is negative again.** The broadband field DOES carry
+energy at all chord frequencies simultaneously — that's the design
+goal, and it works — but the bootstrap problem isn't solved by it.
+
+### What the audit shows
+
+Three variants tested with three poles tuned A / C# / E
+(220, 277.18, 329.63 Hz) and a 3-DHO bank tuned to the same
+frequencies. Each pole has its own DHO state; each bank-mode has
+its own DHO state. Coupling is the field-to-pole gain; bankDamp is
+the bank's per-sample damping. All numbers below are from the
+diagnostic difference signal `coupled - monopole` (subtracting an
+isolated v1 hit by the same impulse, so the spectrum reads "what
+the field contributed").
+
+**Variant A** — broadband coupling: each pole reads the SUM of all
+bank outputs. Impulse goes into v1. Coupling=1e9, bankDamp=0.0001:
+- 220 Hz: 0.0 dB (residue from v1 mode-splitting against bankAout)
+- 218 Hz: −1.6 dB (mode-split sideband)
+- 222 Hz: −7.8 dB (mode-split sideband)
+- 276 Hz: **−37.2 dB** (C# — well below the −30 dB audibility
+  threshold the prior session set; spectral-coloration territory)
+- 330 Hz: not in top 8 (E — below ~−50 dB)
+
+The 220 Hz mode-splitting cluster grows much faster with coupling
+than the off-frequency sympathetic peaks. Sweeping coupling from
+1e5 to 3e10 shows the C# peak rising from below noise to ~−37 dB
+at best, while same-frequency mode-splitting reaches 0 dB and
+broadens dramatically. No NaN was hit even at coupling=3e10.
+
+**Variant B** — tuned coupling: each pole reads ONLY its own freq's
+bank output (v2 reads `$bankCsout` not the sum). Impulse → v1.
+Coupling=1e8, bankDamp=0.0001:
+- 220 Hz: 0.0 dB
+- 222 Hz: −38.8 dB / 218 Hz: −38.8 dB (less mode-splitting than A,
+  because v1 only feedbacks via bankAout, not the sum)
+- 278 Hz: −54.1 dB (C# — visible)
+- 330 Hz: −54.9 dB (E   — visible)
+
+Variant B is the "cleaner" demonstration of the topology: all three
+chord peaks appear in the top 8 at roughly equal levels, showing
+the design is doing sympathy in shape — but at ~25 dB below
+audibility. Pushing coupling higher produces the same mode-split
+runaway as variant A.
+
+**Variant C** — broadband seed: impulse goes into the BANK directly,
+each pole reads its own freq mode (tuned coupling). Coupling=10000,
+bankDamp=0.0001:
+- 220 Hz: 0.0 dB
+- 330 Hz: **−16.5 dB** (E — clearly audible)
+- 277 Hz: **−20.5 dB** (C# — clearly audible)
+
+This LOOKS like genuine sympathetic resonance — clean A C# E chord,
+peaks well above audible. But setting `fieldGain = 0.0` (so the
+poles do not contribute back into the bank) yields a
+**bit-identical** spectrum. The chord comes entirely from the
+impulse exciting all three bank modes through the bank's own
+filter shape; pole-to-bank feedback contributes literally nothing.
+This is exactly the prompt's "drive all poles broadband" trick:
+the shared field buys nothing, just three independent strikes
+through three independent filters.
+
+### Why it doesn't work
+
+The bootstrap problem returns in a new form. The scalar-field
+experiment failed because the field was spectrally narrow — once
+v1 settled, the field carried only 220 Hz and v2's 277 Hz band-pass
+rejected it. The broadband field IS spectrally wide, so this part
+is fixed. But there's still no mechanism to convert v1's narrow-band
+220 Hz output into 277 Hz drive for v2.
+
+The DHO bank's modes are independent — three parallel band-pass
+filters with no cross-mode coupling. The bank's C# mode only sees
+the (small) 277 Hz spectral content of `(v1+v2+v3)`, which is
+dominated by v1's 220 Hz output. The 277 Hz content of v1 is
+suppressed by ~17x relative to its 220 Hz peak (DHO transfer
+function 1/((omega²−omega_f²)² + (2·damp·omega·omega_f)²) for
+omega=2π·220, omega_f=2π·277, damp=0.001). v2 thus sees a 277 Hz
+drive that's 25-30 dB weaker than v1's drive at 220 Hz, which
+means even at unity loop gain at 277 Hz (coupling ≈ 1.8e8) the
+sympathetic ring saturates ~30 dB below the same-frequency mode-
+splitting at 220 Hz.
+
+In short: replacing the scalar field with a multi-mode resonator
+fixes the spectral-narrowness problem but exposes the **inter-mode
+coupling problem**. Independent DHOs in the bank do not share
+energy across modes. v1's 220 Hz energy stays in the bank's 220 Hz
+mode; v2's 277 Hz mode never gets a strong drive.
+
+### What would actually work
+
+Of the three options the previous session listed, the remaining
+candidate is now **non-DHO state representation**.
+
+The fundamental issue with both option-1 and option-2 is that DHO
+poles act as narrow-band filters when they contribute back to the
+field — v1's contribution to the field is its band-passed output,
+which is dominated by 220 Hz. To get cross-frequency coupling, the
+pole's contribution to the field must NOT be band-passed.
+
+Concrete shapes worth trying:
+- A pole whose feedback to the field is the DRIVE signal it sees,
+  not its band-passed output. v1's drive contains the impulse
+  (broadband by construction), so it would seed all bank modes
+  immediately at full impulse amplitude. Architecturally this means
+  `pole` exposes two outputs: the audible band-passed signal, and a
+  "field contribution" tap that's broadband.
+- A pole with state in normalised (cos, sin) phasor pair form
+  (`phasor_pair`-like). The pair carries phase information; the
+  field contribution is the pair itself, not a position projection.
+  Cross-mode coupling becomes a phase-rotation/projection question
+  rather than a band-pass filter question.
+- Bank with off-diagonal terms: instead of three independent DHOs
+  in the bank, use a 3×3 coupled-resonator matrix where 220 Hz
+  energy can leak into the 277 Hz mode through deliberate coupling
+  in the field itself. This is structural redesign of the FIELD, not
+  the poles, and arguably the most physically faithful to real
+  acoustic instruments.
+
+The first option is the cheapest to test next as a user-space
+patch. The third is the most interesting if it works (it would
+make the field itself the source of cross-frequency coupling
+rather than relying on accidental spectral leakage).
+
+### Recommendation
+
+**Do not promote the broadband-field design to a primitive either.**
+Both options from pole.md and bachPolyphase.md (option-1 scalar
+field, option-2 multi-mode resonator field) fail the bootstrap
+test. The interesting cases (sympathetic resonance from a single
+strike, non-harmonic modal-bank coupling) remain inaccessible
+through field-mediated coupling between standard DHOs.
+
+If someone wants to revive this design, do the **drive-tap pole**
+variant first as a user-space patch (the pole's contribution to
+the field is its drive input rather than its position output). If
+that produces audible sympathy at off-frequency modes, the
+primitive design changes shape — it's no longer "pole(state, drive,
+freq, damp) → sample" but "pole(...) → (sample, fieldContribution)".
+
+The patches `sympathetic_chord.aither` (option-1) and
+`sympathetic_field.aither` (option-2) are preserved as documented
+evidence. Both audit results are reproducible.
+
 ## Connection to other docs
 
 - `bachPolyphase.md` — the monopole/multipole framing. `pole` is the
