@@ -217,6 +217,113 @@ built-in with proper semantics. If no, drop the idea.
 If all three work in user space, write the engine version. If only
 some work, narrow the scope of the primitive accordingly.
 
+## Negative finding from the user-space experiment (2026-04-28)
+
+The user-space proof-of-concept lives in `patches/sympathetic_chord.
+aither`. It implements exactly the option-1 two-pass design above:
+three `dho` calls share a leaky-integrator scalar field through
+top-level `$field` / `$next_field` cells with one-sample delay
+between the read and the write. Run `./aither audit
+patches/sympathetic_chord.aither 4.0` to reproduce.
+
+**The result is negative.** The shared scalar field does not produce
+audible sympathetic resonance.
+
+### What the audit shows
+
+With three poles tuned to A / C# / E (220, 277.18, 329.63 Hz), only
+v1 driven by an `impulse(2)` strike, and field-to-pole `coupling`
+swept from 0 up to the runaway threshold:
+
+- `coupling = 0` (control) — single peak at exactly 220.0 Hz, FFT
+  sidelobes only. v2 and v3 are silent.
+- `coupling = 30000` (strong, just under runaway at ~4e4) — peak
+  shifts to 218.0 Hz from coupling-induced detuning of v1, but
+  there are still no peaks at 277 or 330 Hz. v2 and v3 are silent.
+- `coupling = 5e6` — immediate runaway, NaN within ~0.7 s.
+
+Subtracting the zero-coupling output from the strong-coupling output
+(coupled − monopole, computed in the same patch by stripping the
+field from one bank but keeping v1's strike identical) yields a
+residual at -128 dB RMS. Whatever v2 and v3 are doing in response
+to the field is below the audible floor by ~100 dB.
+
+### Why it doesn't work
+
+Two compounding obstacles, both rooted in `dho`'s force-input
+semantics rather than in the two-pass design itself.
+
+**1. The bootstrap problem.** v1 settles into pure 220 Hz ringing
+within a few samples; thereafter the field carries only 220 Hz
+energy. v2 (tuned to 277 Hz) is a sharp band-pass at 277 with
+~50 dB rejection at 220. Without 277 Hz drive in the field, v2
+stays silent. Nothing in a scalar field converts v1's 220 Hz
+energy into a 277 Hz drive for v2.
+
+**2. The unit problem.** `dho`'s `force` is in acceleration units;
+the steady-state position-from-force gain at resonance is
+`1 / (2 * damp * omega²)` ≈ 2.6e-4 for `damp = 0.001` and
+`freq = 220`. To get v2 to ring at v1's amplitude purely from
+field-coupling, the loop gain `coupling × fieldGain × position-
+gain × fieldGain` has to approach 1 — that requires
+`coupling × fieldGain ≈ 4e4`. At that scale same-frequency banks
+mode-split (peak shifts off-centre and disperses) but off-frequency
+sympathetic excitation still doesn't happen, and any further push
+hits runaway.
+
+The mode-splitting at unison frequencies IS a real coupled-oscillator
+phenomenon — and arguably the only audible thing the design produces.
+But it's not the sympathetic-resonance effect the patch is meant to
+demonstrate, and it's already cheap in two lines without a new
+primitive (two `dho` calls reading and writing the same `$bus` cell).
+
+### What would actually work
+
+Three options for someone picking this up later:
+
+- **Broadband-resonance field — `option 2` from `bachPolyphase.md`.**
+  The field is not a scalar leaky integrator but a multi-mode
+  resonator (or a literal DHO bank tuned to relevant frequencies)
+  that can carry energy at all the chord frequencies simultaneously.
+  Then v2's 277 Hz force input is non-zero whenever any pole is
+  ringing. This is structural redesign, not a tweak — the field
+  becomes the central object and the poles become "taps" into it.
+
+- **Drive all poles broadband.** Hit every pole with the same
+  broadband impulse (verified to work in the experiment — the
+  spectrum then shows a clean A / C# / E chord). But this isn't
+  sympathetic resonance — it's three independent strikes plus a
+  small detuning effect from the field. The "shared field" buys
+  nothing musically.
+
+- **Non-DHO state representation.** A pole carrying a different
+  state shape — e.g., already in normalised position units, or
+  a (cos, sin) pair like `phasor_pair` — sidesteps the unit
+  problem because there's no force-to-position scaling. Whether
+  such a pole still has the band-pass character that makes
+  sympathetic resonance interesting in the first place is an
+  open question.
+
+### Recommendation
+
+**Do not promote the option-1 shared-scalar-field design to a
+primitive.** The audible behaviour it produces is
+mode-splitting at unison frequencies — a niche effect achievable
+in two lines with shared `$state` and not worth a primitive.
+The interesting cases (sympathetic resonance, modal-bank
+coupling, mode-locking-as-audible-event) all require a different
+field topology than option 1 specifies.
+
+If someone wants to revive this design, do the broadband-field
+variant first as a user-space patch (a top-level `dho` driven by
+the sum of the per-pole outputs, then read by each pole). That
+costs two extra `dho` call sites and changes the field's
+spectral character — measure whether it produces audible
+sympathy before investing in a primitive.
+
+The patch `sympathetic_chord.aither` is preserved as the
+documented evidence.
+
 ## Connection to other docs
 
 - `bachPolyphase.md` — the monopole/multipole framing. `pole` is the

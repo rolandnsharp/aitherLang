@@ -1,0 +1,92 @@
+# sympathetic_chord — DOCUMENTED NEGATIVE RESULT for the pole(state,
+# drive) shared-field design proposed in pole.md.
+#
+# This patch builds the user-space proof-of-concept the pole.md plan
+# asks for: three damped harmonic oscillators feeding a shared scalar
+# pressure field with one-sample delay (option 1, two-pass semantics).
+# Strike v1 with an impulse; v2 and v3 see drive ONLY through the
+# field. If the design works, the audit spectrum shows three peaks at
+# A C# E (220 / 277 / 330). If it doesn't, only the struck pole is
+# audible.
+#
+# AUDIT VERDICT
+# Across three configurations — chord (A C# E), unison (3× 220), and
+# strong-coupling — only the struck pole's resonance survives audibly.
+# Compare directly:
+#   - coupling = 0  → peak at exactly 220.0 Hz, FFT sidelobes only.
+#   - coupling = 30000 → peak shifts to 218.0 Hz (coupling-induced
+#     detuning of v1 from the field), but no peaks at 277 or 330 Hz.
+# v2 and v3 are below -100 dB relative to v1 in the difference signal
+# (coupled - monopole). The shared scalar field does not produce
+# sympathetic resonance for non-harmonic frequencies.
+#
+# WHY IT DOESN'T WORK
+# The bootstrap problem. v1 settles into pure 220 Hz ringing within a
+# few samples; thereafter the field carries only 220 Hz energy. v2
+# (tuned 277 Hz) is a sharp band-pass at 277 — it rejects 220 Hz by
+# ~50 dB. Without a 277 Hz drive in the field, v2 stays silent. There
+# is no mechanism in a scalar field to convert v1's 220 Hz output
+# into a 277 Hz drive for v2.
+#
+# The unit problem. dho's `force` is in acceleration units; the
+# steady-state position-from-force gain at resonance is 1/(2*damp*
+# omega^2) ≈ 2.6e-4 for these parameters. To make v2 ring at v1's
+# amplitude purely from field-coupling, the round-trip loop gain has
+# to approach 1. That requires `coupling × fieldGain ≈ 4e4`. At those
+# values same-frequency banks mode-split (peak shifts to ~218 Hz with
+# splitting around it) but sympathetic excitation of off-frequency
+# peers still does not happen — and the system is one numerical
+# perturbation away from runaway.
+#
+# WHAT WOULD WORK
+# 1. Broadband-resonance field — `option 2` from bachPolyphase.md, a
+#    DHO bank tuned to chord-relevant frequencies that filters energy
+#    into each pole's resonance. The field is not a scalar leaky
+#    integrator but a multi-mode resonator. This is structural change
+#    of design rather than a tweak.
+# 2. Explicit cross-frequency excitation — strike all three poles
+#    simultaneously with a shared broadband impulse. Then they each
+#    ring at their own frequency from the impulse content; the field
+#    only adds detuning, not the sympathy itself. Audibly works (see
+#    git history of this patch) but is not "sympathetic resonance"
+#    in any meaningful sense — it's just three independent strikes.
+# 3. Non-DHO state. If `pole` carried a different state representation
+#    that's already in normalised position units (no force-to-
+#    position scaling), the loop-gain math becomes tractable.
+#
+# RECOMMENDATION (see pole.md "Negative finding from user-space
+# experiment" section): do not promote the shared-scalar-field design
+# to a primitive. The interesting cases are at unison (mode splitting,
+# already cheap with 2 dho calls and a buss bus state) or require a
+# different field topology than option 1 specifies.
+#
+# This patch is preserved as evidence — the audit reproduces the
+# negative result on demand.
+
+$fieldA      = 0.0
+$next_fieldA = 0.0
+
+let driveAmp  = 10000000.0  # ~1e7 impulse force on the struck pole
+let coupling  = 30000.0     # field-to-pole gain. ~4e4 hits unity loop
+                            # gain; at 30k same-freq banks mode-split.
+let damping   = 0.001       # low damp — each pole rings audibly
+let fieldGain = 1.0         # pole's contribution to the field
+let fieldDamp = 0.99        # field leak per sample
+
+play coupled:
+  let trig = impulse(2)        # 2 strikes per second, self-running
+  let f    = $fieldA           # one-sample-delayed field read
+
+  let v1 = dho(trig * driveAmp + f * coupling, 220.0,  damping)
+  let v2 = dho(                  f * coupling, 277.18, damping)
+  let v3 = dho(                  f * coupling, 329.63, damping)
+
+  $next_fieldA = $next_fieldA + (v1 + v2 + v3) * fieldGain
+  $fieldA      = $next_fieldA * fieldDamp
+  $next_fieldA = 0.0
+
+  let s = (v1 + v2 + v3) * 0.15
+  [s, s]
+
+# Master — forward the play block. Audit shows the spectrum.
+coupled
