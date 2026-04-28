@@ -1,0 +1,67 @@
+# complex_pad — polyphonic keyboard pad whose two headline knobs are
+# both complex-algebra moves. Hold a chord, sweep K1 for spectral
+# shift, sweep K2 for phase-locked octave shimmer + intermod
+# sidebands.
+#
+# Both knobs do things no real-arithmetic synth can do in one step,
+# but you never see a complex number in the patch — the algebra
+# lives inside `freq_shift`, `analytic`, and `cmul`.
+#
+# ============================================================ KNOBS
+#   K1 (CC 74) — SPECTRAL SHIFT    ±300 Hz frequency shift on the
+#                                   summed voices. Shifts every
+#                                   partial by the same Hz offset
+#                                   (not ratio), walking from
+#                                   harmonic → inharmonic territory.
+#
+#   K2 (CC 71) — SPECTRAL SQUARE   blend in cmul(analytic, analytic).
+#                                   For a pure sine at f, this is a
+#                                   sine at 2f (complex squaring
+#                                   doubles the phase angle). For
+#                                   chords it produces intermod
+#                                   sidebands at sums of pairs of
+#                                   frequencies — phase-locked
+#                                   shimmer that no detuner or
+#                                   pitch shifter can imitate.
+#
+#   K7 (CC 19) — DRIVE             clean → fat saturation
+#   K8 (CC 16) — REVERB            small → cathedral
+
+let shiftHz   = (midi_cc(74) - 0.5) * 600
+let squareAmt = midi_cc(71)
+let driveAmt  = 1.0 + midi_cc(19) * 1.5
+let revWet    = midi_cc(16) * 0.5
+
+play pad:
+  midi_keyboard((freq, gate) =>
+    let env  = swell(gate, 0.06, 1.0)
+    let saw  = additive(freq,         vowel_ah, 8)
+    let saw2 = additive(freq * 1.005, vowel_ah, 6) * 0.6
+    let voice = (saw + saw2) * env * 0.08
+    voice)
+
+# K1 — spectral shift via the SSB frequency shifter (complex math
+# under the hood: Hilbert → analytic signal → rotate by 2π·hz·t → real).
+let dry     = pad
+let mono    = (dry[0] + dry[1]) * 0.5
+let shifted = freq_shift(mono, shiftHz)
+
+# K2 — spectral square. Build the analytic signal of the post-shift
+# pad, then complex-multiply it by itself. cmul((re, im), (re, im))
+# = (re² − im², 2·re·im), which for an analytic signal is exactly
+# the frequency-doubled, phase-locked version (and intermod
+# sidebands for chord input). Take the real part.
+let pair    = analytic(shifted)
+let sq      = cmul(pair[0], pair[1], pair[0], pair[1])
+let squared = sq[0]
+
+# Crossfade dry vs squared. Clamp the squared term — chord magnitudes
+# can spike higher than unit, and we want a controlled blend rather
+# than a runaway harmonic blast.
+let sqSafe  = clamp(squared, -1.5, 1.5)
+let blended = shifted * (1 - squareAmt * 0.5) + sqSafe * squareAmt * 0.5
+
+# Master FX
+let driven = drive(blended, driveAmt)
+let wet    = driven |> reverb(2.5, 0.4)
+([driven, driven] + [wet, wet] * revWet) * 0.55
