@@ -921,6 +921,213 @@ What does *not* land in this commit:
   aether, internal dynamics) — those are future experiments
   motivated by this positive, not part of it.
 
+## Aether enables cybernetic stabilisation but not full al-Mukabala dynamics (2026-04-29)
+
+The natural follow-on to the sympathy positive: the same
+substrate, applied to a cybernetic-feedback patch, should produce
+the chaotic-but-regulated motion the analog cybernetic-synthesis
+tradition (al-Mukabala / al-Jabar / Tudor) is about. Patch:
+`patches/aether_muqabala.aither`. **Result is partial.** The
+aether unlocks ONE form of cybernetic behaviour but not the form
+the analog tradition is most famous for.
+
+This is a more nuanced result than the sympathy positive.
+Documenting it carefully because the gap between what works and
+what doesn't is itself useful information about what kind of
+substrate the cybernetic-synthesis tradition needs.
+
+### What the patch does
+
+The structural moves match the briefing template:
+
+- A continuous broadband noise floor, LFO-modulated in amplitude,
+  writes into `$aether`.
+- The carrier reads `$aether` as additive bias into a wavefolder
+  AND reads the envelope of `$aether` (`$obs = lp1(abs($aether)
+  , 5)`) as FM. Both paths are state-dependent.
+- The wavefolder's bite point is also state-dependent
+  (`foldAmount + $obs * foldModDepth`).
+- The carrier's nonlinear output (folded then drive-saturated)
+  writes BACK into `$aether`. This is the closed loop, and it
+  lives in the aether.
+- The regulator pulls back the noise floor's amplitude when
+  `$obs` gets high.
+
+The original `al_muqabala.aither` had the same four roles
+(driver / heart / observer / regulator) but no aether — the loop
+ran through one state cell `$loop`, hand-wired. That patch
+sounded like a fixed-pitch fire alarm at any knob position. The
+aether version produces five qualitatively distinct sounds
+across parameter space (more on that below).
+
+### Falsification — the cybernetic loop is doing real work
+
+`carrierToAether = 0.0` breaks the carrier-to-aether feedback
+while preserving the carrier's READS from the aether (so the
+patch still produces sound). Comparing 30-window temporal
+audits at default parameters:
+
+```
+Loop ON  (carrierToAether = 0.8, default):
+  RMS         μ = -21.65 dB    σ = 0.79 dB     ← audible breathing
+  centroid    μ = 15457 Hz     σ = 1251 Hz     ← spectral motion
+  fundamental μ = 114 Hz       σ = 625 Hz      ← jumpy autocorr
+  dominant Pk μ = 254 Hz       σ = 0.2 Hz      ← LOCKED ATTRACTOR
+
+Loop OFF (carrierToAether = 0.0, falsification):
+  RMS         μ = -19.45 dB    σ = 0.02 dB     ← no breathing
+  centroid    μ =  6867 Hz     σ = 396 Hz      ← LFO-driven only
+  fundamental μ = 0 Hz         σ = 0 Hz        ← no detected periodicity
+  dominant Pk μ = 366 Hz       σ = 260 Hz      ← WANDERS with LFO
+```
+
+The differences are unambiguous and point in opposite directions:
+WITH the loop, the carrier LOCKS at 254 Hz and the system breathes
+spectrally on top of that lock. WITHOUT, there is no detected
+fundamental and the dominant peak wanders ±260 Hz with the LFO.
+The loop's role is **stabilisation** — it finds an attractor and
+holds the system in it. This is a real cybernetic behaviour, just
+not the one most associated with the tradition.
+
+### What's NOT happening — the rich al-Mukabala motion
+
+The analog cybernetic-synthesis tradition produces "events":
+moments where the system finds a NEW attractor and lingers, then
+breaks out, then finds another. The patch's parameter space has
+five distinct attractors (locked at 254 Hz, locked at 156 Hz,
+locked at 22 kHz, marginal-breathing, saturated-noise) — but at
+each setting the system stays in ONE attractor for the duration
+of the audit. There is no within-knob-position attractor-jumping.
+
+Pushing the loop gain higher (`carrierToAether ≥ 1.5`, weak
+regulator) puts the system into a "wandering peak" regime where
+the dominant peak σ ≈ 8 kHz across windows. Looks cybernetic on
+paper. But the falsification check FAILS in that regime — with
+`carrierToAether = 0`, peak σ is still ≈ 8 kHz. The wandering is
+mostly noise + nonlinearity, not loop-driven. The genuinely
+loop-driven regime is the locked one; the wandering regime is
+just stochastic harmonic shuffling.
+
+### Diagnosis — why "rich motion" doesn't emerge
+
+The al-Mukabala tradition's events come from MULTI-STABLE memory
+in the loop. The analog wave-multipliers used in the original
+patches have nonlinear transfer functions with smooth bumps and
+analog memory (capacitor charge, slow integration of bias
+networks). A loop containing wave-multipliers can settle in
+multiple operating points and need a kick to leave each one. The
+"events" are the kicks delivered by the slow LFO and regulator.
+
+This aither patch's nonlinearities are stateless:
+
+- `fold(x, amount)`: zigzag — stateless
+- `drive(x, amount)`: smooth saturator `x/(1+|x|)` — stateless
+
+The only stateful elements are `$aether` (a leaky integrator)
+and `$obs` (an envelope follower on `$aether`). Both have
+simple, predictable, monostable dynamics. The loop's only memory
+is "current aether value" — a single number — which can settle
+to one equilibrium but cannot represent multiple competing
+attractors.
+
+So: aether-as-medium is necessary (the original al_muqabala
+without aether produced nothing interesting), but aether-as-
+medium is not sufficient — the **carrier-side nonlinearity also
+needs state**. The aether is one piece of cybernetic-synthesis
+infrastructure; another piece (stateful nonlinearity in the
+loop) is missing.
+
+### What this contrast means for the substrate
+
+The two adjacent results paint a clean picture:
+
+1. **Broadband sympathy** (`aether_sympathy.aither`) — open-loop
+   coupling between resonators. The aether is NEUTRAL; the
+   resonators have their OWN state (each `dho` is a stateful
+   second-order resonator). Result: clean positive. The aether
+   carries broadband drive between stateful elements.
+2. **Cybernetic synthesis** (this experiment) — closed-loop
+   feedback through nonlinearity. The aether is again neutral;
+   the carrier-side processing is STATELESS (just `fold` then
+   `drive`). Result: partial — stabilises but doesn't produce
+   chaos.
+
+The pattern: the aether transmits whatever drive is written to
+it. Where the *other* elements have state, the aether enables
+their interaction. Where the other elements are stateless, the
+aether's neutrality means the loop has nowhere to store
+attractors.
+
+This sharpens the framing the sympathy result vindicated. The
+aether is a coupling MEDIUM, not an active processing element. It
+needs partners with state. Sympathy works because the dho voices
+have state. Cybernetic motion fails because the carrier-side
+nonlinearities don't.
+
+### Approximate cost-ordered ways forward
+
+Whichever of these gets tried, **the right move is structural —
+the patch needs more state than the current architecture
+provides.** None of these are about adding aither primitives;
+they're about composing the existing primitives differently.
+
+1. **Comparator-triggered kick** (cybernetics.md episode-8
+   extension). When `$obs` crosses a threshold, fire a discrete
+   slope into the regulator. Discrete events that pop the system
+   between attractors. Adds essentially no structural
+   complexity.
+2. **Stateful loop nonlinearity** — replace the `fold |> drive`
+   chain with a compander (slow attack/release) or a Schmitt
+   trigger built from `if`. State in the loop's gain, not just
+   in its medium.
+3. **Relaxation oscillator carrier** — replace the sin-phasor
+   carrier with an integrator-then-comparator. Period set by an
+   integrator that's itself driven by the aether. The
+   wave-multiplier analogue.
+4. **Multiple coupled aether cells** — each can settle in a
+   different attractor; their cross-coupling drives jumps. This
+   is the "multiple coupled aethers" extension from the sympathy
+   write-up, applied here to a single domain rather than to
+   different physical media.
+5. **Time-delay feedback** — a delay line in the loop. Time-delay
+   feedback in nonlinear systems is a textbook chaos generator
+   (Mackey-Glass equation, Ikeda map). Aither would need a delay
+   primitive or a clever buffer-based simulation.
+
+Direction (1) is the cheapest test of whether the missing
+ingredient is "discrete events" or "multi-stable memory."
+Direction (2) is the cheapest test of whether the missing
+ingredient is the latter.
+
+### What lands as a result of this experiment
+
+- `patches/aether_muqabala.aither` — the partial-positive patch
+  with full audit numbers, falsification methodology, parameter
+  sweep regime structure, and the diagnosis in the header.
+- `tests/temporal_audit.nim` — windowed-RMS / centroid / peak
+  analysis tool used to characterise the patch (cybernetic
+  patches need time-domain stats; the default audit's single FFT
+  flattens those).
+- `tests/sweep_muqabala.nim` — parameter-sweep characterisation
+  tool used to map regime structure.
+- This pole.md section.
+- *No new primitive.* Same principle as the sympathy positive —
+  the result lives at the convention layer, not the language
+  layer.
+
+What does NOT land:
+
+- A "cybernetic-synthesis recipe" in COMPOSING.md — the patch is
+  partial; documenting it as a recipe would overclaim. Wait until
+  one of the structural directions above unblocks the rich-motion
+  case.
+- An aither-version-of-al-Jabar or aither-version-of-Tudor patch
+  — those are downstream of getting the al-Mukabala kernel right.
+  Until the partial gap is closed, more elaborate cybernetic
+  patches will hit the same wall.
+- Any feedback into the al_muqabala.aither original — preserved
+  as the pre-aether-discovery baseline.
+
 ## Connection to other docs
 
 - `bachPolyphase.md` — the monopole/multipole framing. `pole` is the
