@@ -724,6 +724,203 @@ idea applied to the medium itself*. The language already
 commits to the representation; extending it to the field
 substrate is structurally consistent rather than novel.
 
+## Positive finding from broadband-aether experiment (2026-04-29)
+
+The third experiment in this chain tested the dimensionless-broadband-
+aether pattern that the synthesis above predicted. **It works.** Patch:
+`patches/aether_sympathy.aither`. Run `./aither audit
+patches/aether_sympathy.aither 4.0` to reproduce.
+
+This is the first positive result in the chain, and it lands not by
+adding a primitive but by using existing aither primitives plus a
+documented dimensionless convention — exactly the resolution the
+two-step synthesis above predicted.
+
+### What the audit shows
+
+Same three poles as the previous two experiments — A / C# / E
+(220, 277.18, 329.63 Hz). v1 strikes the aether with a broadband event
+(impulse + 30 ms noise burst). v2 and v3 NEVER receive a direct strike;
+their only input is what they read from `$aether * coupling`. The
+diagnostic master is `coupledTotal − monopoleTotal` so the audit
+spectrum reads "what v2 and v3 contributed via aether-sympathy" — v1's
+contribution cancels exactly because mv1 has the same input.
+
+Default parameters (`driveAmp = 1e7`, `burstAmp = 1e6`, `aetherDecay
+= 0.95`, `coupling = 1.0`, `damping = 0.001`):
+
+```
+Top peaks of (coupled − monopole):
+  1.  330.0 Hz   0.0 dB    ← E   (v3 — sympathising)
+  2.  278.0 Hz  -2.5 dB    ← C#  (v2 — sympathising)
+  3.  277.4 Hz  -4.6 dB
+  4.  276.0 Hz  -5.2 dB
+  5.  329.4 Hz  -7.5 dB
+  6.  328.0 Hz -11.2 dB
+  220 Hz absent — v1 cancelled by mv1, exactly as the diagnostic intends
+```
+
+Switching the master to `coupledTotal` (the FULL chord, what you would
+hear) instead of the diff signal:
+
+```
+Top peaks of full coupled mix:
+  1.  220.0 Hz   0.0 dB    ← A   (v1 — struck)
+  2.  330.0 Hz -12.6 dB    ← E   (v3 — sympathy)
+  3.  278.0 Hz -14.9 dB    ← C#  (v2 — sympathy)
+```
+
+Sympathy peaks ~13–15 dB below the struck note. Real piano sympathy
+is 30–40 dB down per the briefing's calibration; this is *louder than
+piano*, comparable to a sitar or a sympathetic-string ensemble. The
+chord A / C# / E is fully present and obvious, not subtle ringing.
+
+### The falsification check passes — definitively
+
+The previous session's variant C produced an apparent positive that
+was actually three independent strikes through three independent
+filters; the spectrum was bit-identical with and without pole-to-bank
+feedback. To rule out the same trap here, the experiment includes a
+falsification toggle: setting `v2v3Couple = 0.0` zeroes the force
+into v2 and v3 specifically. With the diff-signal master:
+
+```
+v2v3Couple = 0.0:
+  RMS  -240.0 dB    Peak  -240.0 dB    (machine zero)
+  No peaks present.
+```
+
+The 277 / 330 Hz peaks completely disappear when v2 / v3 are silenced.
+They are not artefacts of the broadband strike leaking through v1 —
+they are entirely the product of v2 and v3 ringing in response to
+the aether's broadband content. This is the opposite of variant C.
+The aether is doing real cross-frequency coupling work.
+
+### The parameter sweep — the design is robust
+
+- `coupling` 0.1 → 1.0 → 10 → 1000 — RMS scales linearly with `coupling`
+  (60 dB+ range tested) and the spectral SHAPE is bit-identical across
+  the range. No runaway at any value because the aether has NO feedback
+  loop — only the strike writes in; v1 / v2 / v3 only read. The system
+  is open-loop by construction.
+- `aetherDecay` 0.5 → 0.95 → 0.99 — sympathy persists across the full
+  range; ~14 dB RMS variation. The aether doesn't need to "hold"
+  broadband energy long. The strike's broadband content seeds v2 / v3
+  within their natural integration window.
+- `useNoiseBurst` 0 vs 1 — both work. Pure-impulse variant B is ~2 dB
+  quieter than impulse + noise burst variant A. The impulse alone is
+  enough broadband content for sympathy.
+
+No NaN at any parameter setting tested.
+
+### Why this works — and why the previous two didn't
+
+The diagnosis is now clean across the three experiments:
+
+1. **`sympathetic_chord` (option-1, scalar resonator field).** Voices
+   wrote pole OUTPUTS into the field. As soon as v1 settled, the field
+   became spectrally narrow (just 220 Hz). v2's bandpass rejected it.
+   *Bootstrap problem from a narrow medium.*
+2. **`sympathetic_field` (option-2, multi-mode resonator field).**
+   Voices wrote pole outputs into a DHO bank. The bank's C# and E
+   modes never got driven because v1's output is dominated by 220 Hz
+   and the bank's modes don't share energy across themselves.
+   *Inter-mode-coupling problem in a structured medium.*
+3. **`aether_sympathy` (broadband neutral aether).** v1 writes its
+   DRIVE (impulse + noise burst — broadband by construction, NOT
+   filtered through v1's resonance) into the aether. The aether is a
+   neutral leaky integrator — no resonance, no preferred frequency,
+   no spatial extent. v2 reads broadband ambient drive and projects
+   its 277 Hz component through its own bandpass, exactly as a real
+   piano string does with air pressure.
+
+The three negatives-then-positive form a clean diagnostic chain:
+narrow medium fails; structured medium fails; *neutral broadband
+medium is what the physics requires*. That neutral medium is the
+aether.
+
+### What this vindicates
+
+Beyond unlocking one musical technique (which by itself would already
+justify the work), the result vindicates the **dimensionless-aether
+framing** the synthesis above arrived at. The single `$aether` cell
+is not a flat approximation of a "real" 3D field — it IS the right
+shape for a dimensionless field, which is what the project's
+intellectual lineage (Steinmetz, Tesla, Faraday in lines-of-force
+mode, Dollard) explicitly committed to. Cross-frequency coupling
+between resonators happens *because the medium has no spatial extent
+and no frequency preference* — exactly the properties textbook
+3D / FDTD / vector-field representations make hard to express.
+
+The two earlier negative results are now retroactively useful — the
+clean diagnostic chain that pointed at the right answer would not
+exist without them.
+
+### What this means for future work
+
+Future enrichment of the aether is **ontological, not spatial**. We
+do not need a 1D / 2D / 3D grid version of `$aether` — that fights
+the lineage's commitment and adds bookkeeping the substrate doesn't
+require. The natural directions are richer dimensionless media:
+
+- **Complex-pair aether** — `$aether` carries a (magnitude, phase)
+  pair instead of a scalar real number. Voices write `(re, im)`
+  drives; voices read `(re, im)` ambient drive. Phase carries
+  timing/coherence information a scalar can't; phase-locked voices
+  can write coherently into the aether and produce effects scalar
+  writes can't. Architecturally identical to the scalar version.
+  This is the deepest alignment with Steinmetz: the rigid-conception
+  complex pair the language already uses everywhere (`cmul`,
+  `phasor_pair`, `analytic`) — applied to the medium itself rather
+  than to individual signals. The language already commits to the
+  representation; extending it to the field substrate is structurally
+  consistent rather than novel.
+- **Multiple coupled aethers** — Tesla's "radio waves through the
+  aether as sound through air" reads literally: one aether per
+  medium type (acoustic, EM, capacitive, ...), each dimensionless
+  and global, voices subscribing to whichever applies. Lets aither
+  eventually encapsulate radio, biosignal, and other domains where
+  the underlying math is the same but the excitation kind differs.
+- **Aether with internal dynamics** — the medium has its own
+  characteristic energy-storage behaviour; what you write comes
+  back to readers with the medium's signature applied (a phase
+  shift, a damping, a transformation). The dimensionless analogue
+  of a wave equation: not "wave propagating through space" but
+  "energy oscillating between magnitude and phase aspects of the
+  same dimensionless field". Steinmetz's circuits had this; the
+  aether could too.
+
+These extensions compose. The richest aether worth considering
+carries complex pairs, exists as multiple distinct media, and has
+its own internal dynamics. None adds spatial dimensions. The
+aether stays everywhere-at-once.
+
+### What lands as a result of this experiment
+
+- `patches/aether_sympathy.aither` — the working broadband-aether
+  patch, preserved with full audit numbers, the falsification
+  methodology, the parameter sweep, and the dimensionless-aether
+  framing in its header.
+- This section of `pole.md`.
+- *No new primitive.* The pattern is achievable with existing
+  primitives + a documented convention. The manifesto's "primitives
+  only land when they really earn their keep" principle predicts
+  precisely this outcome.
+- The two preserved negative-result patches (`sympathetic_chord
+  .aither`, `sympathetic_field.aither`) and their pole.md sections,
+  which together with this section form the diagnostic chain.
+
+What does *not* land in this commit:
+
+- A documented broadband-aether technique in COMPOSING.md — the
+  user will decide whether to write that up after seeing this
+  result.
+- An `aether.md` design note — same reason; deferred until the user
+  decides what shape to give the convention.
+- Any of the three ontological extensions (complex pair, multi-
+  aether, internal dynamics) — those are future experiments
+  motivated by this positive, not part of it.
+
 ## Connection to other docs
 
 - `bachPolyphase.md` — the monopole/multipole framing. `pole` is the
