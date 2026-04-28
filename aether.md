@@ -300,6 +300,50 @@ work better. Needs experimental verification of which (dielectric,
 magnetic) decomposition produces the most musically useful
 behaviour.
 
+**Status (2026-04-29):** *partial validation* with the derivative
+convention. Three pre-committed falsifiable tests run on
+`patches/aether_pair_sympathy.aither` plus six supporting test
+patches:
+
+- *Test 1 (phase-coherent sympathetic resonance):* both pair and
+  scalar produce peaked phase histograms (σ = 0.130 π and 0.157 π
+  respectively). The test's prediction that scalar would give a
+  uniform distribution is empirically wrong — periodic strikes give
+  deterministic phase regardless of architecture. The pair version
+  rotates the mean angle by π/2 (controllable phase rotation) but
+  doesn't show the binary peaked-vs-uniform behaviour the test was
+  designed to detect.
+- *Test 2 (rotational morph as continuous live knob):* centroid
+  variation 1.91× (just under 2× criterion); pair stddev 5.2× larger
+  than scalar but variation is not smooth — concentrated near
+  rotation π/2 where the dielectric is nullified. RMS does modulate
+  smoothly across rotation by ~30 dB.
+- *Test 3 (in-phase reinforces, out-of-phase cancels):* PASSES
+  cleanly. 209 dB RMS difference between in-phase and out-of-phase
+  configurations, far exceeding the 6 dB criterion. Scalar control
+  is theta-invariant. *Selective listening between multiple writers*
+  is verified as a pair-only capability.
+
+The diagnostic finding: the derivative-as-magnetic convention puts
+most audio-bandwidth energy in the dielectric (per-sample finite
+difference attenuates ~29 dB at 277 Hz), so rotation acts as a
+magnetic-attenuator with high-frequency emphasis rather than a
+continuous spectral character morph. Steinmetz's framing — equal-
+magnitude dielectric and magnetic components in 90° phase quadrature
+— is more naturally realised by the **analytic-signal pair**
+(`re = signal`, `im = Hilbert(signal)`), which the language already
+provides via the `analytic` primitive. The natural next experiment
+is to swap the convention and re-run the same three tests; same
+primitives, no engine work.
+
+The pair-valued substrate works structurally (Test 3 confirms it).
+What's not yet validated — and what the analytic-signal convention
+may unlock — is the music-theoretic payoff: rotation as a
+continuous timbre / character knob.
+
+See `pole.md`'s "Pair-valued aether: partial result" section for
+full audit numbers, the per-test verdicts, and the diagnosis.
+
 ### Gap 4: One aether vs many
 
 **Currently:** there is one `$aether` cell shared by all voices
@@ -388,7 +432,12 @@ combination. Test whether this gives the cybernetic_muqabala
 patch the state-bearing loop partner it was missing. If yes, the
 pair-valued convention becomes the canonical aether shape going
 forward and the scalar version is documented as the simpler
-fallback.
+fallback. *Status 2026-04-29:* partial — Test 3 (reinforce/cancel)
+passes; Tests 1 and 2 reveal that the derivative convention puts
+most audio-bandwidth energy in the dielectric, limiting rotation's
+musical reach. Natural next experiment: re-run the same three
+tests with the analytic-signal pair convention. See Gap 3 above
+for details.
 
 The principle the manifesto names — *aither should already be
 complete; new primitives only land when they really earn their
@@ -468,13 +517,14 @@ Common pitfalls:
 ## Connection to other docs
 
 - `pole.md` — the design exploration that arrived at the aether.
-  Three experiments (`sympathetic_chord` negative, `sympathetic_
+  Five experiments (`sympathetic_chord` negative, `sympathetic_
   field` negative, `aether_sympathy` positive, `aether_muqabala`
-  partial) form the diagnostic chain. The synthesis sections
-  ("pole was the wrong abstraction," "the aether is dimensionless,"
-  "broadband-aether positive finding," "aether enables stabilisation
-  but not full al-Mukabala dynamics") are the working record of
-  how this convention was arrived at.
+  partial, `aether_pair_sympathy` partial) form the diagnostic
+  chain. The synthesis sections ("pole was the wrong abstraction,"
+  "the aether is dimensionless," "broadband-aether positive
+  finding," "aether enables stabilisation but not full al-Mukabala
+  dynamics," "pair-valued aether: partial result") are the working
+  record of how this convention was arrived at.
 - `bachPolyphase.md` — the Tesla longitudinal section frames the
   aether as the substrate the project's intellectual lineage
   always assumed; the dimensionless-field clarification is the
@@ -525,9 +575,12 @@ closing the gap is:
 1. **Default participation** — small, just docs, do now
 2. **Internal dynamics** — small, one-line code change, test on
    sympathy patch
-3. **Pair-valued (dielectric, magnetic) aether** — moderate,
-   user-space pattern, test on cybernetic_muqabala to see if it
-   unlocks attractor-jumping
+3. **Pair-valued (dielectric, magnetic) aether** — partial as of
+   2026-04-29 with the derivative-as-magnetic convention. Test 3
+   (reinforce/cancel) passes; Tests 1 and 2 reveal a convention
+   weakness, not a substrate failure. Natural next experiment:
+   the analytic-signal pair convention, same primitives, same
+   tests
 4. **Multi-aether** — parked until a use case appears
 5. **Interference operations** — parked until cybernetic
    experiments need event-triggers from medium state

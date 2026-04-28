@@ -1,0 +1,51 @@
+# aether_pair_test3_inphase — Test 3, pair-mode, in-phase (theta=0).
+#
+# Voice 1: writes its strike with pair-angle 0 — strike goes purely
+# to the dielectric component.
+# Voice 2: writes its strike with pair-angle theta — strike is treated
+# as a pair (strike, 0) and rotated by theta. At theta=0 the rotation
+# is identity, so voice 2 also writes purely to dielectric.
+# Voice 3: silent, reads the aether's dielectric tap, rings at C#.
+#
+# Both source voices struck synchronously via impulse(2). Bit-identical
+# noise (because each noise() call site starts from the same default
+# pool seed) means strike1 = strike2, so reinforcement at theta=0
+# means dielectric receives 2*strike per strike event.
+
+$aetherDie = 0.0
+$aetherMag = 0.0
+
+let driveAmp      = 10000000.0
+let burstAmp      = 1000000.0
+let aetherWrite   = 0.1
+let aetherDecay   = 0.95
+let coupling      = 1.0
+let damping       = 0.001
+let strikeRate    = 2.0
+let theta         = 0.0   # IN-PHASE
+
+play test3:
+  let trig    = impulse(strikeRate)
+  let burst   = pluck(trig, 0.03)
+  let strike1 = trig * driveAmp + noise() * burst * burstAmp
+  let strike2 = trig * driveAmp + noise() * burst * burstAmp
+
+  # Voice 1 writes pair (strike1, 0) — pair-angle 0
+  let v1_die = strike1
+  let v1_mag = 0.0
+
+  # Voice 2 writes (strike2, 0) rotated by theta
+  let pair2 = rotate(strike2, 0.0, theta)
+  let v2_die = pair2[0]
+  let v2_mag = pair2[1]
+
+  $aetherDie = $aetherDie * aetherDecay + (v1_die + v2_die) * aetherWrite
+  $aetherMag = $aetherMag * aetherDecay + (v1_mag + v2_mag) * aetherWrite
+
+  # Voice 3 — silent reader, picks up dielectric only
+  let aRead = $aetherDie * coupling
+  let v3 = dho(aRead, 277.18, damping)
+  let s = v3 * 0.15
+  [s, s]
+
+test3

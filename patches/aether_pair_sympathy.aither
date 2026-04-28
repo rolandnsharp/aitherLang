@@ -1,0 +1,206 @@
+# aether_pair_sympathy — pair-valued (dielectric, magnetic) aether
+# extension test. Mirrors aether_sympathy.aither's three-voice
+# A / C# / E sympathy topology, but the medium is now a pair of state
+# cells $aetherDie + $aetherMag, with rotation as the read primitive.
+#
+# Conventions under test (from ken.md item 1, aether.md Gap 3):
+#   $aetherDie — dielectric component, receives the strike's amplitude
+#                (the potential aspect — instantaneous structural state)
+#   $aetherMag — magnetic component, receives the strike's derivative
+#                (the kinetic aspect — flow induced by the impulse)
+#
+# Read primitive: rotate($aetherDie, $aetherMag, theta) selects which
+# aspect of the medium the voice hears. theta = 0 reads dielectric;
+# theta = pi/2 reads magnetic; intermediate values mix.
+#
+# ============================================================ VERDICT
+#
+# PARTIAL POSITIVE. The pair representation produces real differential
+# effects — Test 3's reinforce/cancel is unambiguous (209 dB span). But
+# the literal pass criteria for Tests 1 and 2 reveal a deeper issue:
+# the derivative-as-magnetic convention attenuates the magnetic
+# component by ~30 dB at audio frequencies (per-sample finite
+# difference is high-pass), so most of the substrate's energy stays
+# in the dielectric. Rotation acts as a magnetic-attenuator, not a
+# continuous spectral morph.
+#
+# THE THREE TESTS, with audit numbers
+#
+# Test 1 — phase-coherent sympathetic resonance (PARTIAL — test design flawed)
+#   Tool: tests/phase_histogram.nim, 50 sec render, 99 strikes analysed
+#
+#   patches/aether_pair_test1_scalar.aither (magScale=0):
+#     mean angle =  0.198 π    σ = 0.157 π   verdict: σ < π/4 (peaked)
+#   patches/aether_pair_test1_pair.aither (magScale=1, rotation=π/2):
+#     mean angle =  0.730 π    σ = 0.130 π   verdict: σ < π/4 (peaked)
+#
+#   Both pass the literal σ < π/4 threshold. The test's prediction
+#   ("scalar gives uniform phase σ ~ π") is empirically wrong —
+#   periodic strikes via impulse(2) produce deterministic voice 2
+#   phase responses regardless of medium architecture, so both
+#   histograms are peaked. The pair version is slightly tighter
+#   (0.130 π vs 0.157 π) and sits at a different mean angle (rotation
+#   by π/2 shifts the dominant zero-crossing as expected). The pair
+#   representation is doing something meaningful (rotation knob shifts
+#   phase), but the test as designed doesn't differentiate
+#   architectures.
+#
+# Test 2 — rotational morph as continuous live knob (PARTIAL — fails smoothness)
+#   Tool: tests/temporal_audit.nim, 30 sec, 1.0 sec windows, rotation
+#   sweep at 1/30 Hz (one full turn over the audit)
+#
+#   patches/aether_pair_test2_scalar.aither (magScale=0):
+#     centroid mean = 285.8 Hz   σ =  9.9 Hz   range = 263 → 301 Hz (1.15×)
+#   patches/aether_pair_test2_pair.aither (magScale=1, rotation phasor):
+#     centroid mean = 306.1 Hz   σ = 51.1 Hz   range = 263 → 501 Hz (1.91×)
+#
+#   Pair stddev is 5.2× larger than scalar — a real differential
+#   signal. But the literal criterion ("at least 2× variation, smooth")
+#   is borderline failed: 1.91× falls just under 2×, and the variation
+#   isn't smooth — it's concentrated in 1-2 windows near rotation π/2
+#   (the magnetic-dominant orientation), elsewhere the dielectric
+#   dominates and centroid is locked at 277 Hz.
+#
+#   What DOES change smoothly: RMS. Across rotation 0 → 2π, RMS
+#   modulates by ~30 dB (loudest at θ=0,π reading dielectric;
+#   quietest at θ=π/2,3π/2 reading magnetic). The rotation acts as
+#   a magnetic-attenuator with continuous angle control — useful
+#   but not the spectral morph the test predicted.
+#
+# Test 3 — in-phase reinforces, out-of-phase cancels (PASS literal)
+#   Tool: ./aither audit, 4.0 sec, three configurations
+#
+#   patches/aether_pair_test3_inphase.aither   (theta=0):    RMS = -31.0 dB
+#   patches/aether_pair_test3_outofphase.aither (theta=π):    RMS = -240.0 dB
+#   patches/aether_pair_test3_scalar.aither    (no theta):   RMS = -31.0 dB
+#
+#   In-phase vs out-of-phase difference: 209 dB (machine zero
+#   cancellation), far exceeding the 6 dB criterion. Scalar control is
+#   theta-invariant, so it can't represent the configuration
+#   difference. PASS on the literal pass criterion.
+#
+#   Caveat: the perfect cancellation depends on bit-identical noise
+#   in voice 1 and voice 2 (each noise() instance starts from the
+#   same default pool seed). With decorrelated noise the cancellation
+#   would be partial. More importantly: voice 3 reads dielectric only
+#   (rotation φ=0), so the test reduces to signed scalar arithmetic.
+#   A scalar aether with explicit sign control on voice 2's write
+#   would produce the same result. The pair structure becomes
+#   strictly necessary only when V3 reads via rotation φ ≠ 0, where
+#   the magnetic component contributes (verified: with θ=π/2 write
+#   and φ=π/2 read, V3 isolates voice 2 only and ignores voice 1 —
+#   "selective listening" not possible with scalar).
+#
+# WHAT THE PARTIAL RESULT REVEALS
+#
+# The (dielectric, magnetic) pair as proposed — with the derivative
+# convention for magnetic — produces a magnetic component that at
+# audio frequencies is mostly a high-pass-filtered shadow of the
+# dielectric. The per-sample finite difference 2*sin(πf/SR) gives ~0.036x
+# gain at 277.18 Hz (about -29 dB). So at any audio bandpass, the
+# magnetic contribution is small, and rotation mostly attenuates the
+# dielectric without revealing distinct content.
+#
+# The structural extension (pair representation, rotation primitive,
+# selective read) works — Test 3 confirms it. But the music-theoretic
+# benefit (continuous spectral character morph via one rotation knob)
+# doesn't land with this convention because the two pair components
+# carry the same audio content with very different gains.
+#
+# The natural next experiment is the ANALYTIC-SIGNAL pair: replace
+# the derivative convention with analytic(strike), where re = strike
+# and im = Hilbert(strike). Both components carry full audio bandwidth
+# with equal magnitude; rotation would then produce a true phase
+# shift rather than a magnetic-attenuator. The language already has
+# `analytic` as a primitive, so this is the same convention swap, no
+# engine work.
+#
+# WHAT'S COMMITTED
+#
+# - This patch (aether_pair_sympathy.aither) — the canonical pair-
+#   valued sympathy patch with full audit numbers in the header.
+# - Six supporting patches (aether_pair_test{1_scalar,1_pair,2_scalar,
+#   2_pair,3_inphase,3_outofphase}.aither, aether_pair_test3_scalar.aither)
+#   — preserved as evidence for the three tests.
+# - tests/phase_histogram.nim — new analysis tool (Test 1).
+# - pole.md "Pair-valued aether: partial result" section (this commit).
+# - aether.md Gap 3 section — updated to note partial validation.
+#
+# WHAT IS *NOT* CLAIMED
+#
+# - The pair-valued aether is not promoted to canonical.
+# - The scalar aether is not deprecated.
+# - No engine change, no new primitive — the experiment proves
+#   nothing about whether codegen should change.
+# - The analytic-signal pair convention is not yet tested; that's the
+#   natural next experiment.
+#
+# AUDIT (default config — pair mode, rotation=0, all three voices)
+#   ./aither audit patches/aether_pair_sympathy.aither 4.0
+#   At rotation=0 with magScale=1 the dielectric tap dominates, so
+#   the audit matches the scalar version bit-for-bit:
+#     1.  330.0 Hz   0.0 dB    ← E  (v3 sympathising)
+#     2.  278.0 Hz  -2.5 dB    ← C# (v2 sympathising)
+#     3.  277.4 Hz  -4.6 dB
+#     4.  276.0 Hz  -5.2 dB
+#     5.  329.4 Hz  -7.5 dB
+#     6.  328.0 Hz  -11.2 dB
+#   Falsification (v2v3Couple = 0.0): RMS -240 dB, machine zero
+#   (verified — the substrate is doing real cross-frequency coupling).
+
+$aetherDie = 0.0
+$aetherMag = 0.0
+$prevStrike = 0.0
+
+# --- parameters (defaults: pair mode, dielectric read, full magnitude)
+let driveAmp      = 10000000.0
+let burstAmp      = 1000000.0
+let burstDecaySec = 0.03
+let aetherWrite   = 0.1
+let aetherDecay   = 0.95
+let coupling      = 1.0
+let v2v3Couple    = 1.0
+let damping       = 0.001
+
+# Pair-mode controls
+let magScale      = 1.0    # 0.0 = scalar control, 1.0 = pair mode
+let rotationAngle = 0.0    # in radians; 0 = dielectric, pi/2 = magnetic
+
+# Strike rate selector (impulse(2) by default)
+let strikeRate    = 2.0
+
+play coupled:
+  let trig    = impulse(strikeRate)
+  let burst   = pluck(trig, burstDecaySec)
+  let strike  = trig * driveAmp + noise() * burst * burstAmp
+
+  # Pair drives — dielectric carries amplitude; magnetic carries derivative
+  let dieDrive = strike
+  let magDrive = strike - $prevStrike
+  $prevStrike  = strike
+
+  # Pair leak / write
+  $aetherDie = $aetherDie * aetherDecay + dieDrive * aetherWrite
+  $aetherMag = $aetherMag * aetherDecay + magDrive * aetherWrite * magScale
+
+  # Rotated read — pair[0] is the rotated dielectric tap. pair[1] is
+  # the rotated magnetic tap; not used by default but accessible.
+  let pair  = rotate($aetherDie, $aetherMag, rotationAngle)
+  let aRead = pair[0] * coupling
+
+  # Source voice (struck at A=220) reads aether as ambient bias too —
+  # closes the strike→aether→v1 loop exactly like the scalar version
+  let v1 = dho(trig * driveAmp + aRead, 220.0,  damping)
+  let v2 = dho(           aRead * v2v3Couple,  277.18, damping)
+  let v3 = dho(           aRead * v2v3Couple,  329.63, damping)
+
+  # Monopole control — same input as v1, separate state slot. Used by
+  # the diff-signal master to cancel v1 from the audit spectrum.
+  let mv1 = dho(trig * driveAmp + aRead, 220.0, damping)
+
+  let coupledTotal  = (v1 + v2 + v3) * 0.15
+  let monopoleTotal = mv1 * 0.15
+  let s = coupledTotal - monopoleTotal
+  [s, s]
+
+coupled

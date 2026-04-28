@@ -1128,6 +1128,222 @@ What does NOT land:
 - Any feedback into the al_muqabala.aither original — preserved
   as the pre-aether-discovery baseline.
 
+## Pair-valued aether: partial result with derivative-as-magnetic (2026-04-29)
+
+The structural follow-on to the sympathy positive: replace the scalar
+`$aether` with a Steinmetz-form (dielectric, magnetic) pair —
+`$aetherDie` carrying potential storage (the strike's amplitude),
+`$aetherMag` carrying kinetic storage (the strike's derivative). Read
+via `rotate($aetherDie, $aetherMag, theta)` where theta selects which
+aspect of the medium the voice hears. Patches: `patches/aether_pair_
+sympathy.aither` (canonical) plus six supporting test patches for the
+three pre-committed falsifiable tests. **Result is partial.** The
+substrate works as a structural extension and Test 3 passes
+unambiguously. Tests 1 and 2 reveal that the derivative-as-magnetic
+convention puts most of the audio-bandwidth energy in the dielectric
+component, limiting the rotation knob's musical reach.
+
+This is a more nuanced result than the sympathy positive. Documenting
+it carefully because the gap between what works and what doesn't
+points at a specific next experiment.
+
+### What the patch does
+
+`patches/aether_pair_sympathy.aither` mirrors the scalar sympathy
+patch's three-voice A / C# / E topology with the medium replaced by a
+pair of state cells. The natural-pair convention writes both
+components:
+
+```
+$aetherDie = $aetherDie * 0.95 + strike            * 0.1
+$aetherMag = $aetherMag * 0.95 + (strike - prev) * 0.1
+$prev      = strike
+let pair  = rotate($aetherDie, $aetherMag, rotationAngle)
+let aRead = pair[0] * coupling
+```
+
+At `rotationAngle = 0` and `magScale = 1` the dielectric read tap
+matches the scalar version bit-for-bit (dielectric = scalar's
+`$aether`, magnetic is decoupled). Top peaks `330.0 / 278.0 / 277.4
+/ 276.0 / 329.4 / 328.0` Hz at `0 / -2.5 / -4.6 / -5.2 / -7.5 /
+-11.2` dB — bit-identical to the scalar audit. Falsification
+(`v2v3Couple = 0`): RMS at machine zero (-240 dB), confirming the
+substrate is doing real cross-frequency coupling.
+
+### The three tests
+
+#### Test 1 — phase-coherent sympathetic resonance (PARTIAL)
+
+Tool: `tests/phase_histogram.nim`. Strike voice 1 via `impulse(2)` for
+50 seconds (99 strikes), find first positive-going zero crossing in
+voice 2's output after each strike, histogram the phase modulo voice
+2's period.
+
+```
+patches/aether_pair_test1_scalar.aither (magScale = 0):
+  N strikes = 99   mean angle = 0.198 π   σ = 0.157 π
+patches/aether_pair_test1_pair.aither   (magScale = 1, rotation = π/2):
+  N strikes = 99   mean angle = 0.730 π   σ = 0.130 π
+```
+
+Both pass the literal `σ < π/4` threshold. The test's prediction —
+that scalar would give a uniform phase distribution (`σ ~ π`) — is
+empirically wrong. With periodic strikes, voice 2's phase response
+is deterministic regardless of medium architecture. Both histograms
+peak.
+
+The pair version is slightly tighter (0.130 π vs 0.157 π) and sits
+at a different mean angle. The 0.5 π offset between mean angles is
+exactly what `rotate(die, mag, π/2)` predicts: at this rotation, the
+read tap reads the magnetic component, which (per the derivative
+convention) is approximately a 90°-shifted copy of the dielectric.
+The pair representation does provide a controllable phase-rotation
+knob; it just doesn't manifest the binary peaked-vs-uniform behaviour
+the test was designed to detect.
+
+#### Test 2 — rotational morph as a continuous live knob (PARTIAL)
+
+Tool: `tests/temporal_audit.nim`. Render 30 seconds with rotation
+angle sweeping at `phasor(1/30) * TAU` (one full turn), measure
+spectral centroid per 1-second window.
+
+```
+patches/aether_pair_test2_scalar.aither (magScale = 0):
+  centroid mean = 285.8 Hz   σ =  9.9 Hz   range = 263 → 301 Hz   (1.15×)
+patches/aether_pair_test2_pair.aither   (magScale = 1, sweeping):
+  centroid mean = 306.1 Hz   σ = 51.1 Hz   range = 263 → 501 Hz   (1.91×)
+```
+
+The pair version's centroid stddev is 5.2× larger than scalar — a
+real differential signal. But the literal pass criterion ("at least
+2× variation, smooth") is borderline failed: 1.91× falls just under
+2×, and the variation is not smooth. Most windows have centroid
+locked at 277 Hz (the receiver's resonance); the larger centroids
+are concentrated in 1-2 windows when rotation crosses through π/2,
+where the dielectric is nullified and the magnetic-component's
+high-frequency emphasis dominates.
+
+What DOES change smoothly across rotation is RMS: 30 dB modulation
+range across the full turn. The rotation acts as a smooth magnetic-
+attenuator with continuous angle control, not the smooth spectral
+character morph the test predicted. Useful as a "duck-and-bring-back"
+knob, but not as a "shift the medium's character" knob.
+
+#### Test 3 — in-phase reinforces, out-of-phase cancels (PASS literal)
+
+Tool: `./aither audit` on three configurations. Voice 1 writes its
+strike with pair-angle 0 (pure dielectric). Voice 2 writes a strike
+rotated by `theta`. Voice 3 (silent) reads dielectric and rings.
+
+```
+patches/aether_pair_test3_inphase.aither   (theta = 0):    RMS = -31.0 dB
+patches/aether_pair_test3_outofphase.aither (theta = π):   RMS = -240.0 dB
+patches/aether_pair_test3_scalar.aither    (no theta):     RMS = -31.0 dB
+```
+
+In-phase vs out-of-phase difference: 209 dB (machine-zero
+cancellation), far exceeding the 6 dB criterion. Scalar control is
+theta-invariant, so it cannot represent the configuration difference.
+**PASS** on the literal criterion.
+
+Caveats. (1) The perfect cancellation depends on bit-identical noise
+content in voice 1 and voice 2 — both `noise()` instances start from
+the same default pool seed, producing identical xorshift sequences.
+With decorrelated noise the cancellation would be partial, set by a
+random-walk sum. (2) Voice 3 reads dielectric only (rotation φ = 0),
+so the test reduces to signed scalar arithmetic on the dielectric
+component. A scalar aether with explicit sign control on voice 2's
+write would produce the same result. The pair structure becomes
+strictly necessary only when voice 3 reads via rotation φ ≠ 0,
+where the magnetic component contributes — verified separately: at
+θ = π/2 (V2 writes pure magnetic) and φ = π/2 (V3 reads pure
+magnetic), V3 isolates voice 2 and ignores voice 1. *Selective
+listening between writers* is not possible with scalar; it is with
+pair.
+
+### What the partial result reveals
+
+The (dielectric, magnetic) pair as proposed — with the derivative
+convention for magnetic — produces a magnetic component that at
+audio frequencies is mostly a high-pass-filtered shadow of the
+dielectric. The per-sample finite difference has gain `2·sin(πf/SR)`
+≈ `2πf/SR` for `f ≪ SR`; at 277.18 Hz with 48 kHz sampling, that's
+≈ 0.036 (about -29 dB). Most of the audio-bandwidth energy stays in
+the dielectric. Rotation acts as a magnetic-attenuator with an
+incidental high-frequency-emphasis signature, not as a continuous
+spectral character morph.
+
+The structural extension is sound — Test 3 confirms that pair-form
+writes propagate additively, that rotation works as a write/read
+primitive, and that selective-listening between multiple writers is
+possible (something scalar cannot do). What's *not* yet validated
+is the music-theoretic payoff: the pair representation becoming a
+continuous timbre / character knob.
+
+### Diagnosis — why the convention chosen falls short
+
+The test failure mode points cleanly at the convention. Steinmetz's
+classical-field-theory pair carries dielectric and magnetic energy
+storage *with the same magnitude spectrum*; the 90° quadrature is in
+phase, not amplitude. The natural mathematical realisation is the
+analytic signal: `re = signal`, `im = Hilbert(signal)`. Both
+components have identical magnitude spectra; only the phase differs.
+
+The derivative-as-magnetic convention chosen for this experiment is
+*one* mathematical realisation of "potential vs flow" but it bakes
+in a frequency-dependent gain that the lineage's framing does not
+require. At audio frequencies, that gain rolls off the magnetic
+component to where rotation becomes mostly an attenuator.
+
+### What lands as a result of this experiment
+
+- `patches/aether_pair_sympathy.aither` — the canonical pair-valued
+  sympathy patch with full audit numbers and the test verdicts in
+  its header.
+- Six supporting test patches: `aether_pair_test1_{scalar,pair}.
+  aither`, `aether_pair_test2_{scalar,pair}.aither`,
+  `aether_pair_test3_{inphase,outofphase,scalar}.aither`. Preserved
+  as evidence; running each reproduces the audit numbers above.
+- `tests/phase_histogram.nim` — windowed zero-crossing-based phase
+  extraction tool, used for Test 1.
+- This pole.md section.
+- `aether.md` Gap 3 section updated to note partial validation and
+  the natural next experiment.
+- *No new primitive.* All of `cmul`, `rotate`, `analytic`,
+  `phasor_pair` exist already; the experiment uses them as-is. The
+  derivative-as-magnetic convention is documented; the analytic-
+  signal pair is named as the next decomposition to try.
+
+What does *not* land:
+
+- Promotion of the pair-valued aether to canonical. The result
+  doesn't justify replacing the scalar; the pair is one route into
+  richer medium structure but not the only one and not yet
+  empirically dominant.
+- A sympathy recipe in COMPOSING.md based on the pair-valued aether
+  — the derivative convention's audio-bandwidth attenuation makes
+  the rotation knob a magnetic-attenuator rather than a character-
+  morph; not a satisfying compositional handle.
+- Any feedback into aether_sympathy.aither or aether_muqabala.aither.
+  The scalar versions remain the working baselines.
+
+### What's the natural next experiment
+
+The analytic-signal pair: replace `magDrive = strike - $prevStrike`
+with the imaginary part of `analytic(strike)`. Both components
+would carry full audio bandwidth with equal magnitude; rotation
+would then produce a true phase shift on the medium's content,
+which is the music-theoretic effect the pair-valued framing was
+supposed to deliver. Same primitives, same convention layer; just
+a different convention choice for what the magnetic component
+represents.
+
+The decision point — whether to invest in that next experiment —
+belongs to the user. The current result establishes that pair-form
+substrate composition works, that Test 3's reinforce/cancel is real,
+and that the derivative convention has a specific audible weakness
+the analytic-signal convention may avoid.
+
 ## Connection to other docs
 
 - `bachPolyphase.md` — the monopole/multipole framing. `pole` is the

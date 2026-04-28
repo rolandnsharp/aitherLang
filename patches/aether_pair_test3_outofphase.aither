@@ -1,0 +1,38 @@
+# aether_pair_test3_outofphase — Test 3, pair-mode, out-of-phase
+# (theta=pi). Same as in-phase but voice 2's rotation angle pi makes
+# it write (-strike2, 0), cancelling voice 1's dielectric write when
+# strikes are equal.
+
+$aetherDie = 0.0
+$aetherMag = 0.0
+
+let driveAmp      = 10000000.0
+let burstAmp      = 1000000.0
+let aetherWrite   = 0.1
+let aetherDecay   = 0.95
+let coupling      = 1.0
+let damping       = 0.001
+let strikeRate    = 2.0
+let theta         = 3.141592653589793   # OUT-OF-PHASE
+
+play test3:
+  let trig    = impulse(strikeRate)
+  let burst   = pluck(trig, 0.03)
+  let strike1 = trig * driveAmp + noise() * burst * burstAmp
+  let strike2 = trig * driveAmp + noise() * burst * burstAmp
+
+  let v1_die = strike1
+  let v1_mag = 0.0
+  let pair2 = rotate(strike2, 0.0, theta)
+  let v2_die = pair2[0]
+  let v2_mag = pair2[1]
+
+  $aetherDie = $aetherDie * aetherDecay + (v1_die + v2_die) * aetherWrite
+  $aetherMag = $aetherMag * aetherDecay + (v1_mag + v2_mag) * aetherWrite
+
+  let aRead = $aetherDie * coupling
+  let v3 = dho(aRead, 277.18, damping)
+  let s = v3 * 0.15
+  [s, s]
+
+test3
