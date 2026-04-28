@@ -477,6 +477,168 @@ The patches `sympathetic_chord.aither` (option-1) and
 `sympathetic_field.aither` (option-2) are preserved as documented
 evidence. Both audit results are reproducible.
 
+## Synthesis (2026-04-28) — pole was the wrong abstraction; aether is the right one
+
+After both negative findings landed, the honest read is that
+*pole-as-primitive* doesn't earn its keep. The capability we
+wanted (coupled resonators, sympathetic resonance, modal-bank
+behaviour) is real and worth having. The proposal in this doc —
+a regime-switching `pole(state, drive)` primitive whose behaviour
+flips between monopole and multipole based on state topology — is
+not the right shape for that capability.
+
+### What the experiments actually revealed
+
+Three different things had been bundled under the name "pole"
+without us noticing:
+
+1. **A more controllable resonator primitive.** Engineering — a
+   better `dho`. Plausible standalone goal but not what the
+   experiments tested.
+2. **A coupled-oscillator system that produces sympathetic
+   resonance.** The system property the experiments actually
+   targeted. Failed under both proposed field topologies.
+3. **The operationalisation of the Maxwell monopole/multipole
+   philosophical insight.** A claim about a hidden mathematical
+   unity. Beautiful framing; not, by itself, a justification for
+   a primitive.
+
+The experiments tested goal #2 while the design notes argued
+goal #3. Both negative findings (scalar field's spectral
+narrowness; DHO-bank field's inter-mode-coupling problem) are
+diagnoses about *the medium between resonators*, not about the
+resonators themselves. The actual physics of sympathetic
+resonance — strings in a piano sharing air pressure and bridge
+mechanics — requires **narrow-band resonators + a broadband
+medium**. Both proposed field topologies built narrow-band media,
+which is why both failed.
+
+### The realisation
+
+The thing we kept reaching for and missing has a name in the
+classical-field-theory tradition: **the aether**. Not "the
+substrate," not "a bus," not "a shared field that's also a
+resonator" — the aether is the *medium that carries excitation
+between resonators without itself being a resonator*. It
+transmits broadband energy. It has no preferred frequency. It is
+not a thing that rings; it is the thing that lets other things
+ring at each other.
+
+In Maxwell's framing it's the carrier of the EM field. In
+acoustics it's the air pressure between strings. In Steinmetz's
+circuits it's the conductor between coupled inductors. **In
+aither it should be a state cell that voices write their drive
+signals (broadband — impulses, noise bursts, transients) into,
+and read back as ambient drive.** Not their outputs (band-passed
+through their own resonance). Their drives.
+
+### Why this isn't a third way to do resonance
+
+The proliferation worry is real — if we add aether as a third
+resonance primitive alongside isolated `dho` and the
+proposed-then-retracted `pole`, the language gets harder to
+explain, not easier. But the aether reframing dissolves the
+proliferation problem rather than adding to it:
+
+- A standalone `dho` is a resonator participating in an aether
+  that no other resonator reads or writes. The aether is still
+  there; it's just empty. The voice is alone in the room. This
+  is the *empty-aether* configuration.
+- The pole-style coupled bank we tried to build was a resonator
+  participating in an aether that the bank itself defined the
+  structure of. Wrong shape — the aether shouldn't have its own
+  modes. Both option-1 and option-2 are *structured-aether*
+  configurations, and both fail because the aether shouldn't be
+  structured.
+- The actual aether — broadband medium where voices read and
+  write drive signals at all frequencies — is the *full-aether*
+  configuration. This is where coupled-oscillator behaviour
+  falls out naturally.
+
+There's one substrate (aether-mediated coupling) with three
+configurations (empty, structured, full). `dho` is the resonator
+that lives in it. The configuration is what changes; the model
+doesn't. That's *one way to do resonance*, with the apparent
+"three ways" being three positions on a single spectrum.
+
+### What this means for the proposal
+
+`pole(state, drive)` as proposed in this doc is **withdrawn**.
+The capability the proposal aimed at is achievable in current
+aither using a documented pattern, not a new primitive:
+
+```
+$aether = 0.0           # the medium — broadband drive carrier
+
+play voice1:
+  let trig = midi_trig(60)
+  # broadband strike: impulse + brief noise burst
+  let strike = trig * driveAmp + noise() * pluck(trig, 30) * burstAmp
+  $aether = $aether * 0.95 + strike * 0.1   # write drive into aether
+  let v = dho($aether * coupling, 220.0, 0.001)
+  ...
+
+play voice2:
+  let v = dho($aether * coupling, 277.18, 0.001)   # only reads
+  ...
+```
+
+Voice1 writes a broadband drive into `$aether`. Voice2 reads the
+aether and resonates at its own frequency, picking up the 277 Hz
+spectral content of voice1's broadband strike. Cross-frequency
+sympathetic resonance happens *because the aether carries
+broadband drive*, not because voice1's filtered output ever
+reached voice2.
+
+This is testable in a 10-line patch with no engine work. The
+next experiment is exactly that test.
+
+### What earns its keep from this exploration
+
+The two preserved patches and the diagnoses they produced are not
+wasted work — they are *what taught us where the right
+abstraction lives*. Specifically:
+
+- The scalar-field failure taught us that a single-number field
+  is spectrally narrow.
+- The DHO-bank failure taught us that a structured (resonant)
+  field doesn't share energy across modes.
+- Both failures together pointed at *what the medium has to be*:
+  broadband, drive-carrying, neutral. That is the aether.
+
+Without those two negative findings we wouldn't have arrived at
+the clean diagnosis. The doc is preserved for the same reason
+the patches are preserved — *the path to the right answer is
+itself the useful artefact*.
+
+### What replaces this proposal
+
+A new design note (probably `aether.md`, to be written after the
+broadband-aether experiment validates or invalidates the
+pattern) documenting:
+
+- The aether as a named convention in aither (not a primitive).
+- The discipline: write *drive signals* in, read *ambient drive*
+  out, never write *resonator outputs* in.
+- The empty / structured / full configurations as a unified
+  framework for thinking about coupled resonance.
+- The patches `sympathetic_chord.aither` and `sympathetic_field
+  .aither` as documented evidence of what the aether *isn't*,
+  and the next experiment's patch as documented evidence of what
+  it *is*.
+
+If the pattern works, it lands as a section in COMPOSING.md and
+a short reference doc, not as engine work. If it doesn't, the
+diagnosis sharpens further and the next iteration of pole-or-not
+follows from there.
+
+The principle the manifesto names — *aither should already be
+complete; new primitives only land when they really earn their
+keep* — applies fully here. Neither pole nor aether-as-primitive
+earns it. The aether-as-convention does, because it captures the
+substrate the language is named for in a way the language
+already supports.
+
 ## Connection to other docs
 
 - `bachPolyphase.md` — the monopole/multipole framing. `pole` is the

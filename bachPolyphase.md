@@ -298,6 +298,64 @@ The right choice probably depends on what kind of resonant feedback
 behaviour produces musical results. This is an aither engine question
 worth thinking about before the first patch tries to use it.
 
+### Synthesis (2026-04-28) — the field is the aether, not a resonator
+
+After two negative-result experiments testing moves #1 and #2 above
+(see `pole.md` for full diagnostics), the conclusion is sharp:
+**both proposed field topologies are wrong because both made the field
+itself spectrally narrow**.
+
+- Move #1 (shared scalar pressure field) — single number, carries
+  whatever the loudest voice writes. Once one voice settles into a
+  resonance, the field becomes a single sine wave at that frequency.
+  Other voices' band-pass filters reject it.
+- Move #2 (DHO-bank field) — multi-mode but each mode is independent.
+  No cross-mode energy exchange. v1's narrow-band 220 Hz output
+  drives only the bank's 220 Hz mode; v2's 277 Hz mode never sees
+  meaningful drive.
+
+Move #3 (phase-coherent compounding) was never tested but is
+structurally the same kind of field if implemented as proposed.
+
+**The realisation**: the field in classical field theory is not a
+resonator. It is the **aether** — the medium that carries broadband
+excitation between resonators *without itself filtering or
+resonating*. The string in a piano isn't sympathetically excited by
+its neighbour's filtered output; it's excited by air-pressure
+disturbances that carry the broadband transient of the strike.
+
+The right shape for the Tesla "shared field" in aither is therefore:
+
+- A `$state` cell that voices write their **drive signals** into
+  (impulses, noise bursts, broadband transients — the things that
+  excite resonators), NOT their resonator outputs (band-passed
+  through their own resonances).
+- Voices read the cell as ambient drive, summed with their direct
+  drive inputs.
+- The cell has gentle decay (so it doesn't accumulate DC) but no
+  resonance of its own — it's a wire, not a filter.
+
+This is broadband by construction (because the writes are
+broadband), spectrally neutral (because there's no resonator
+shape), and naturally generates the cross-frequency excitation
+that makes sympathetic resonance work.
+
+The pole/multipole framing in this doc and in `pole.md` was
+philosophically attractive but operationally wrong — it kept
+proposing structured fields when what was needed was an
+*unstructured* one. The unification this doc was reaching for
+(monopole / multipole / longitudinal-coupling all being one
+structure) does still hold, but the structure is **the aether
+configuration the resonator participates in** (empty, structured,
+full), not a primitive that switches regimes by state topology.
+
+The three Tesla moves above remain useful as failed-or-untested
+*configurations of the aether*, not as standalone primitives. Move
+#1 is the empty-aether case (one number). Move #2 is the
+structured-aether case (resonant bank). The right move — the
+broadband-aether case — wasn't on the list and is what the next
+experiment tests.
+
 ## Footnote: longitudinal vs transverse waves
 
 Dollard's physical demonstrations (rope/slinky, stone-in-water) emphasise
