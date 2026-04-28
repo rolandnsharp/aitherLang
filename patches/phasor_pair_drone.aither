@@ -1,0 +1,117 @@
+# phasor_pair_drone — self-running musical demo for the SSB heterodyne
+# trick. Auto-plays a bass drone with coherent harmonic stack, a slow
+# breathing modulation, and a 16-step melodic phrase that uses
+# phasor_pair as the producer for every voice. No MIDI required —
+# just turn knobs and listen.
+#
+# What you're hearing:
+#   - BASS DRONE on A2 (110 Hz) with cmul-stacked harmonics so it
+#     feels like one thick organ pipe, not five separate sines.
+#   - SLOW SSB BREATH that drifts the drone's pitch through a slow
+#     transit. At low depth: subtle life. At high depth: the drone
+#     dips towards silence and re-emerges.
+#   - 16-STEP MELODY in A minor pentatonic. Every melodic note is
+#     produced by phasor_pair, so the harmonic stack on the drone
+#     and the notes share the same primitive — they sound like one
+#     instrument breathing in different registers.
+#
+# ============================================================ KNOBS
+#   K1 (CC 74) — SSB DEPTH       0 → ±100 Hz drone modulation. Start
+#                                 ~0.3. At max, drone dips into near-
+#                                 silence on each LFO cycle.
+#   K2 (CC 71) — BREATH RATE     LFO speed for the SSB modulation.
+#                                 Low (~0.2) for slow ambient pulse;
+#                                 high for fast tremolo-into-glide.
+#   K3 (CC 76) — HARMONIC STACK  How much coherent-harmonic content
+#                                 sits on the bass. 0 = pure bass; 1 =
+#                                 full organ-pipe stack.
+#   K4 (CC 77) — MELODY VOL      0 = bass+breath only (pure ambient).
+#                                 Push up for melodic phrase.
+#   K7 (CC 19) — REVERB          Wet mix. The breath-into-silence is
+#                                 dramatic with reverb up — the tail
+#                                 keeps ringing while the dry vanishes.
+#   K8 (CC 16) — MELODY SHIMMER  Octave-stack on the melody (cmul(p,p))
+#                                 — phase-locked octave doubling.
+#
+# Try this sequence:
+#   1. K3=0.7, K1=0.2, K2=0.2, K4=0, K7=0.4 — pure breathing drone
+#   2. Slowly raise K1 to ~0.7 — drone starts to dip into silence
+#   3. K4 up to 0.5 — melodic phrase enters, locked to the drone
+#   4. K8 up — melody picks up its octave shimmer
+#   5. K1 back down to 0.2 — settle into the texture; the melody
+#      and drone become one breathing organism
+
+let ssbDepth      = midi_cc(74)
+let breathRate    = midi_cc(71)
+let harmStack     = midi_cc(76)
+let melVol        = midi_cc(77)
+let revAmt        = midi_cc(19)
+let melShimmer    = midi_cc(16)
+
+# A minor pentatonic, two octaves around A3 (220 Hz).
+# 16 steps. The phrase has rests (zero-velocity steps) for breath.
+let melNotes = [220.00, 261.63, 293.66, 329.63, 440.00, 329.63, 293.66, 261.63,
+                329.63, 440.00, 523.25, 440.00, 329.63, 293.66, 261.63, 220.00]
+                # A3,    C4,    D4,    E4,    A4,    E4,    D4,    C4,
+                # E4,    A4,    C5,    A4,    E4,    D4,    C4,    A3
+let melVels  = [0.9,    0,     0.7,   0,     0.8,   0.6,   0,     0.5,
+                0.7,    0.9,   0.6,   0.7,   0,     0.6,   0.5,   0.4]
+
+# ===== BASS DRONE — A2 with SSB breath + coherent harmonic stack =====
+play drone:
+  # Slow LFO drives the SSB modulator. Rate scales from very slow
+  # (~1 cycle per 30s) to noticeable tremolo (~1 cycle per 2s).
+  let lfoRate = 0.033 + breathRate * 0.5
+  let lfo = sin(TAU * phasor(lfoRate))
+  let modRate = lfo * ssbDepth * 100.0   # ±100 Hz max
+
+  # The carrier is phasor_pair-produced; the modulator is too. cmul of
+  # the two gives single-sideband heterodyne — the audible frequency
+  # walks smoothly with the LFO, no companion sidebands.
+  let carrier = phasor_pair(110.0)
+  let modu = phasor_pair(modRate)
+  let breathed = cmul(carrier[0], carrier[1], modu[0], modu[1])
+
+  # Coherent harmonic stack via repeated cmul. Each layer is exactly
+  # 2x the previous in frequency, with phase preserved exactly.
+  let p2 = cmul(breathed[0], breathed[1], breathed[0], breathed[1])
+  let p3 = cmul(p2[0], p2[1], breathed[0], breathed[1])
+  let p4 = cmul(p2[0], p2[1], p2[0], p2[1])
+
+  let bass = breathed[0]
+  let stack = (p2[0] * 0.5 + p3[0] * 0.3 + p4[0] * 0.18) * harmStack
+  let s = (bass * 0.6 + stack) * 0.15
+  [s, s]
+
+# ===== MELODY — 16-step phasor_pair-produced phrase =====
+# Each note built from phasor_pair (not sin(TAU*phasor)) so the
+# octave-shimmer knob can do exact phase-locked doubling via cmul(p, p).
+# Step rate 2 Hz = 8-second loop. Pluck envelopes give clean attacks.
+# (Pair ops live in the play block directly — they aren't inlinable
+# through user defs in current aither.)
+play melody:
+  let stepRate = 2.0
+  let stepPh   = phasor(stepRate / 16)
+  let idx      = int(stepPh * 16)
+  let trig     = impulse(stepRate)
+
+  let v = melVels[idx]
+  let velTrig = trig * v
+
+  $heldFund = 220.0
+  $heldFund = if velTrig > 0.001 then melNotes[idx] else $heldFund
+
+  let env = pluck(velTrig, 1.5)
+  let p = phasor_pair($heldFund)
+  let p2 = cmul(p[0], p[1], p[0], p[1])    # phase-locked octave
+  let mix = p[0] + p2[0] * melShimmer * 0.6
+  let voice = mix * env
+
+  let s = voice * melVol * 0.18
+  [s, s]
+
+# ===== MASTER =====
+let dry = drone + melody
+let mono = (dry[0] + dry[1]) * 0.5
+let wet = mono |> reverb(4.5, 0.5)
+([dry[0], dry[1]] + [wet, wet] * revAmt * 0.5) * 0.7

@@ -1,0 +1,81 @@
+# zero_crossing_sweep — the demo that makes the case for phasor_pair.
+#
+# A sustained tone whose pitch walks continuously from +SWEEP Hz through
+# zero down to -SWEEP Hz and back, via single-sideband heterodyne. At
+# the moment the modulator rate equals -carrier, the audible frequency
+# is exactly 0 Hz — the tone vanishes. As the sweep continues past zero,
+# the rotation has reversed direction; the audible pitch climbs back up
+# from silence (because humans hear |frequency|), but the sound is now
+# the analytic signal rotating the OTHER way around the unit circle.
+#
+# This continuous transit through zero frequency is mathematically what
+# happens when you rotate a complex pair at a varying rate. No
+# oscillator can do this — oscillators don't have negative frequencies,
+# and pitch shifters introduce grain artifacts at the slow end. Pure
+# phasor_pair × cmul produces a glassy, artifact-free glide that
+# disappears into silence and re-emerges at a new pitch.
+#
+# Two voices side by side so the contrast is audible:
+#  - REFERENCE (left mix): static 440 Hz carrier, the "before"
+#  - SWEEPER (right mix):  same carrier, heterodyne-shifted by a slow LFO
+#
+# ============================================================ KNOBS
+#   K1 (CC 74) — SWEEP DEPTH    ±Hz of the modulator's range (0 → 2000)
+#   K2 (CC 71) — SWEEP RATE     LFO speed (1 cycle per 30s → per 3s)
+#   K3 (CC 76) — REFERENCE VOL  static carrier volume (default loud)
+#   K4 (CC 77) — SWEEPER VOL    moving voice volume (default loud)
+#   K7 (CC 19) — REVERB         wet (the sweeper sounds gorgeous in space)
+#
+# Try this:
+#   1. K1 ~0.3, K2 ~0.2 — slow ±600 Hz sweep, easy to track by ear.
+#   2. Crank K2 up. As the sweep speeds, the zero-crossing becomes a
+#      "scrub" through silence — like a tape head passing the splice.
+#   3. K1 to max, K2 mid. Wide sweep, full transit. The sweeper goes
+#      from a high whistle, slides down through zero, comes back as a
+#      bass note, returns. Reference stays put as a tonal anchor.
+
+let sweepDepth = midi_cc(74)        # 0 → ±2000 Hz
+let sweepRate  = midi_cc(71)        # slow → fast LFO
+let refVol     = midi_cc(76)        # static carrier
+let sweepVol   = midi_cc(77)        # moving voice
+let revAmt     = midi_cc(19)
+
+let CARRIER = 440.0
+
+# ===== REFERENCE — static 440 Hz carrier =====
+# Pure phasor_pair, real component, no further processing. The "before"
+# tone the ear uses as a reference while the sweeper passes through zero.
+play reference:
+  let p = phasor_pair(CARRIER)
+  let s = p[0] * 0.18 * refVol
+  [s, s]
+
+# ===== SWEEPER — heterodyne-shifted via SSB cmul =====
+# Modulator rate is a slow sinusoidal LFO from -depth to +depth Hz.
+# The audible frequency is CARRIER + modRate, which sweeps across zero
+# whenever |modRate| approaches CARRIER. At the zero crossing the
+# tone IS silence (DC); on the other side it re-emerges as a pitched
+# tone whose audible frequency is |CARRIER + modRate|.
+#
+# Because the inputs are both phasor_pairs, the lower sideband is
+# suppressed by construction. There is no "ghost" frequency at
+# CARRIER - modRate to confuse the ear — the sweep is the only thing
+# you hear besides the reference.
+play sweeper:
+  let depth = sweepDepth * 2000.0
+  let rate = 0.033 + sweepRate * 0.30   # 1 cycle per 30s → per ~3s
+  let lfo = sin(TAU * phasor(rate))     # -1 → +1
+  let modRate = lfo * depth             # ±depth Hz, smoothly
+
+  let carrier = phasor_pair(CARRIER)
+  let modu = phasor_pair(modRate)
+  let mixed = cmul(carrier[0], carrier[1], modu[0], modu[1])
+
+  let s = mixed[0] * 0.18 * sweepVol
+  [s, s]
+
+# ===== MASTER =====
+let dry  = reference + sweeper
+let mono = (dry[0] + dry[1]) * 0.5
+let wet  = mono |> reverb(4.0, 0.5)
+([dry[0], dry[1]] + [wet, wet] * revAmt * 0.5) * 0.7
