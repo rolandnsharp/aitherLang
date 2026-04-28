@@ -356,6 +356,54 @@ structured-aether case (resonant bank). The right move — the
 broadband-aether case — wasn't on the list and is what the next
 experiment tests.
 
+### The aether is dimensionless — and that matches the lineage
+
+A clarification worth locking in before the next experiment runs:
+the broadband `$aether` cell we're about to test is **not a flat
+approximation of a "real" 3D field**. It is the right shape for a
+dimensionless aether — which is what Tesla, Steinmetz, Faraday-in-
+the-lines-of-force-mode, and Dollard all explicitly committed to.
+
+Steinmetz's phasors don't have spatial coordinates; they have
+magnitude and phase, and that's sufficient to describe the entire
+AC-power system. Tesla's longitudinal-wave framing is incompatible
+with three-dimensional propagation — "instantaneous action at a
+distance" is the natural behaviour of a field without spatial
+extent. Faraday's lines of force were patterns of magnitude-and-
+direction-of-influence between charges, not vector fields
+evaluated at coordinates. The textbook Cartesian / FDTD / manifold
+representations came later and are *one bookkeeping convention
+among several*.
+
+So the natural extensions of the aether in aither are NOT spatial.
+We're not heading toward a 1D / 2D / 3D grid version of `$aether`.
+Higher-fidelity aethers add **ontological richness** to a
+dimensionless medium:
+
+- **Complex-pair aether** — carries (magnitude, phase) instead of
+  a single real number. Architecturally identical to scalar
+  version; ships when the scalar version validates.
+- **Multiple coupled aethers** — Tesla's "radio waves through
+  the aether as sound through air" reads literally: one aether
+  per medium type (acoustic, EM, capacitive, ...), each
+  dimensionless and global, voices subscribing to whichever
+  applies. Lets aither eventually encapsulate radio, biosignal,
+  and other domains.
+- **Aether with internal dynamics** — the medium has its own
+  characteristic energy-storage behaviour; what you write comes
+  back with the medium's signature applied. The dimensionless
+  analogue of a wave equation.
+
+These extensions compose. None adds spatial dimensions. The
+aether stays everywhere-at-once.
+
+This also clarifies what the third experiment is testing. The
+single-cell `$aether` isn't a "Level 0 to be improved later" — it
+IS the correct minimal model of a dimensionless field. A clean
+positive result vindicates the dimensionless-field framing as the
+substrate for cross-frequency coupling. Future enrichment is
+ontological, not spatial.
+
 ## Footnote: longitudinal vs transverse waves
 
 Dollard's physical demonstrations (rope/slinky, stone-in-water) emphasise

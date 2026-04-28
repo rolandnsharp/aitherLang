@@ -639,6 +639,91 @@ earns it. The aether-as-convention does, because it captures the
 substrate the language is named for in a way the language
 already supports.
 
+### The aether is dimensionless — and that's a feature, not a limitation
+
+A subtle correction to an earlier draft of this synthesis: the
+single `$aether` cell is not a *flat approximation* of a more
+"correct" 3D field. It is **the right shape for a dimensionless
+field** — which is what the project's intellectual lineage
+(Steinmetz, Tesla, Faraday in the lines-of-force mode, Dollard)
+explicitly commits to.
+
+Dimensions are a man-made bookkeeping convention, useful for
+making certain calculations tractable on paper but not
+ontologically primary. Steinmetz's phasors don't have spatial
+coordinates — they have **magnitude and phase**, and that's
+sufficient to describe the entire AC-power system without any
+appeal to (x, y, z). Tesla's longitudinal-wave framing was
+explicitly incompatible with three-dimensional propagation;
+"instantaneous action at a distance" is the natural behaviour of
+a field that doesn't have spatial extent to propagate across.
+Faraday's lines of force were patterns of magnitude-and-direction-
+of-influence between charges, not vector fields evaluated at
+coordinates. The textbook Cartesian / FDTD / manifold
+representations came later and are *one bookkeeping convention
+among several*.
+
+So the natural extensions of the aether in aither are NOT
+spatial. We're not heading toward a 1D / 2D / 3D grid version of
+`$aether`. We're heading toward **richer dimensionless media**:
+
+- **Complex-pair aether** (Steinmetz extension). The aether
+  carries `(magnitude, phase)` — a complex pair — instead of a
+  single real number. Voices write `(re, im)` drives; voices
+  read `(re, im)` ambient drive. This is the same rigid-conception
+  complex algebra the language already uses for `cmul`,
+  `phasor_pair`, and `analytic` — but applied to the field
+  substrate rather than to individual signals. Phase carries
+  timing/coherence information a scalar can't; phase-locked
+  voices can write coherently into the aether and produce
+  effects scalar writes can't. Architecturally identical to the
+  scalar version; ships when the scalar version validates.
+- **Multiple coupled aethers** (Tesla "radio-through-aether
+  like-sound-through-air" extension). One aether carrying
+  acoustic excitation, a different aether carrying
+  electromagnetic excitation, a third for capacitive coupling,
+  etc. Each is dimensionless, each is global, but they're
+  distinct media with distinct read/write semantics. Voices
+  choose which aether(s) to participate in. Lets aither-the-
+  language eventually encapsulate radio, biosignal, and other
+  domains where the underlying math is the same but the
+  excitation kind is different.
+- **Aether with internal dynamics** (impedance extension). The
+  aether isn't passive; it has its own characteristic energy-
+  storage behaviour — what you write comes back to readers with
+  the medium's own signature applied (a phase shift, a damping,
+  a transformation). This is the dimensionless analogue of the
+  wave equation: not "wave propagating through space" but
+  "energy oscillating between magnitude and phase aspects of
+  the same dimensionless field." Steinmetz's circuits had this;
+  the aether could too.
+
+These three extensions compose. The richest aether worth
+considering carries complex pairs, exists as multiple distinct
+media, and has its own internal dynamics. None of them adds
+spatial dimensions. The aether stays everywhere-at-once.
+
+This also clarifies what the third experiment is testing.
+**Level 0 (single scalar `$aether`) is not a calibration probe
+for higher-fidelity levels — it IS the correct minimal model of
+a dimensionless field.** A clean positive result vindicates the
+dimensionless-field framing as the right substrate for cross-
+frequency coupling, which is a substantial vindication of the
+classical-field-theory lineage the project draws from. The
+extensions above (complex pair, multi-aether, internal dynamics)
+are then the natural directions for ontological enrichment of
+the same model — not corrections to a flat approximation but
+**additional properties the medium can be given without ever
+acquiring coordinates**.
+
+The deepest alignment: the rigid-conception complex pair
+the language uses everywhere (cmul, phasor_pair, analytic) IS
+the Steinmetz magnitude-and-phase representation applied to
+single signals. The aether-with-phase extension is *the same
+idea applied to the medium itself*. The language already
+commits to the representation; extending it to the field
+substrate is structurally consistent rather than novel.
+
 ## Connection to other docs
 
 - `bachPolyphase.md` — the monopole/multipole framing. `pole` is the
