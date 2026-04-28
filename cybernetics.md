@@ -1204,10 +1204,20 @@ regulator (the inverse-envelope expression). The 0.95 multiplier on
 the feedback path is the analog-equivalent of the leakage that any
 real circuit has — without it, the loop accumulates DC offsets.
 
-This patch isn't in the repo. Building it as a verified-working aither
-demo would be the obvious follow-on experiment to the cybernetic
-notes — it's smaller than the Tudor 3-neuron network and proves the
-core cybernetic-synthesis idea in the aither idiom before scaling up.
+**Status (2026-04-28).** The sketch above is unverified — `wavefold`
+and `tanh` aren't actually aither primitives; the equivalent calls
+are `fold` and `drive`. A first translation of this skeleton into
+real aither code lives in `patches/al_muqabala.aither`, but it has
+NOT been properly evaluated under live performance. The one fixed-
+parameter audition we managed (no MIDI, hard-coded knob defaults)
+sounded like "a fire alarm, very consistent" — which probably says
+more about evaluating a cybernetic patch at a single fixed point
+than about whether the substrate can host the pattern. The al-
+Muqabala tradition is fundamentally about hand-exploring parameter
+space; without live knobs, we have not actually tested the claim
+that aither can reproduce it. Treat this section's "12-liner that
+proves the cybernetic-synthesis idea" framing as a hypothesis
+awaiting fair evaluation, not a settled result.
 
 ## The logistic map — chaos from a single number
 
