@@ -1,45 +1,47 @@
-# al_muqabala — DOCUMENTED NEGATIVE RESULT for the cybernetic-synthesis
-# tradition translated to aither.
+# al_muqabala — UNVERIFIED SKETCH of the cybernetic-synthesis pattern
+# in aither. The earlier "DOCUMENTED NEGATIVE RESULT" header that
+# previously sat here overclaimed what we actually know — RETRACTED.
 #
-# This patch is a SKETCH that does NOT achieve the chaos behaviour the
-# original New-Uses-for-Old-Circuits episode 8 demonstrates on hardware.
-# It is preserved here because the negative finding is itself useful:
-# it shows a real limitation of aither's primitive set when trying to
-# reproduce analog-modular cybernetic-synthesis patches.
+# WHAT WE HONESTLY KNOW
+# This patch was sketched in one session as a translation of the
+# New-Uses-for-Old-Circuits episode 8 al-Muqabala patch (driver LFO +
+# carrier-into-loop excitation + dual nonlinearity + envelope-follower
+# regulator). At default knob positions (all CCs = 0, hard-coded
+# defaults of K1=0.5 K2=0.3 K3=0.4 K7=0.3) the user heard a "fire
+# alarm, very consistent" sound — a fixed-pitch sweeping tone, not
+# the dynamic chaotic motion the original episode produces.
 #
-# WHAT THIS DOES PRODUCE
-# A breathing AM-style tone with sub-audio motion. Sounds more like a
-# slowly-pulsing siren than chaotic self-organising feedback. The
-# regulator engages, the LFOs sweep, but the "constant motion" the
-# original episode generates does not emerge.
+# WHAT WE DO NOT KNOW
+# How this patch behaves under live performance. The al-Muqabala
+# tradition is fundamentally about *exploring parameter space by hand*
+# — the patcher tunes by ear over many minutes and the patch passes
+# through dozens of distinct attractors as the knobs move. We
+# evaluated this patch with NO MIDI controller plugged in, at fixed
+# default values, with a few audit-only iterations of guessed
+# parameter values. That's not enough evidence to conclude the
+# substrate can or cannot host cybernetic-synthesis patches. The
+# evaluation was undersampled, not the substrate.
 #
-# WHY IT DOESN'T WORK AS DOCUMENTED
-# The original episode achieves chaos through:
-#  - Wave-multiplier sections (specific analog circuits with their own
-#    audio-rate dynamics) — aither's `fold` and `drive` are clean
-#    digital nonlinearities that lack the same emergent character.
-#  - High-Q resonant filter (variable-Q ResEQ) in or near the loop —
-#    aither's `lpf` with high resonance in a feedback loop runs away
-#    to NaN within milliseconds. We had to use first-order `lp1` for
-#    stability, which kills the resonant ringing the chaos depends on.
-#  - Multi-stage analog feedback through dedicated modules — the
-#    cumulative behaviour of chained-but-distinct analog circuits is
-#    not what `fold |> drive |> lp1` produces in series.
+# THE EARLIER NEGATIVE-RESULT FRAMING WAS PREMATURE
+# Specifically retracted claims:
+#  - "fold and drive are clean digital nonlinearities that lack the
+#    emergent character" — based on inadequate parameter exploration
+#  - "lpf with high resonance in a feedback loop runs away within
+#    milliseconds" — true at the few Q values we tried, but the
+#    safe-Q region was not systematically explored
+#  - "fold |> drive |> lp1 in series cannot produce cybernetic chaos"
+#    — based on a fixed-knob audit, not on hand-tuned exploration
+# The substrate has produced every other thing we asked of it on the
+# first try; one undertested patch is not adequate evidence to invert
+# that track record.
 #
-# WHAT WOULD BE NEEDED
-# A stable resonant element in the feedback loop. The proposed
-# `pole(state, drive)` primitive (see pole.md) is the obvious candidate
-# — controlled damping, explicit (pos, vel) state, and the
-# multipole-coupling regime that is exactly what cybernetic-synthesis
-# patches assume. The al-Muqabala 12-liner claim in cybernetics.md
-# was over-confident; revisit after `pole` lands.
-#
-# WHAT THIS PATCH IS USEFUL FOR
-# The structure is the right SHAPE — driver LFO, envelope-follower
-# observer, regulator-pull on the feedback amplitude, carrier-into-
-# loop excitation, dual nonlinearity. It will become a real cybernetic
-# patch as soon as a stable resonator is available. Treat it as a
-# scaffolding waiting for its missing piece.
+# WHAT THIS PATCH IS HONESTLY USEFUL FOR
+# The structure is a reasonable starting sketch. When the user has
+# MIDI plugged in, a live exploration of the four knobs (K1 drive
+# gain, K2 regulator pull, K3 tone, K7 reverb) might reveal regions
+# of interesting motion, narrow regions of NaN runaway, or genuine
+# dead zones. Until that exploration happens, the patch is a sketch
+# awaiting evaluation, NOT a documented negative result.
 #
 # ============================================================ KNOBS
 #   K1 (CC 74) — DRIVE GAIN       how hard the LFO sweeps the carrier
