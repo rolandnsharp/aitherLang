@@ -4,6 +4,16 @@ A working notebook of concrete things worth taking from the
 Ken Wheeler / Theoria Apophasis video series. Updated as we
 watch more.
 
+> **Note (2026-05-03).** This doc was written while the project
+> was actively pursuing an "aether substrate" framing. That framing
+> was eventually abandoned (see `pole.md` postscript) — the patches
+> it referred to as `aether_*.aither` and the canonical `aether.md`
+> spec no longer exist. The original positive finding survives as
+> `patches/sympathy.aither` (renamed `$aether` → `$bus`, no engine
+> change). The intellectual content below is preserved as a thinking
+> journal; substitute "shared state cell" wherever the text says
+> "aether" and the reasoning still applies.
+
 ## What this doc is and isn't
 
 Wheeler is in the same intellectual lineage the project draws from —

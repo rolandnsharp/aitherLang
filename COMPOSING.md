@@ -494,6 +494,51 @@ DHO does NOT replace `additive` for hundred-partial drones —
 many sines. DHO is for *expressive single voices* where one knob
 should walk continuously between named timbres.
 
+## Shared state as an excitation bus
+
+A single file-level state cell is a coupling primitive. Write a
+broadband drive into it; let several voices read from it; each
+voice's own resonance picks out its own component. This is how
+real piano sympathy works (one string's vibration drives the air,
+other strings' bandpasses respond) and there is no special
+machinery needed to build it in aither — a one-line leaky
+integrator carries the bus signal, and each `dho` filters out its
+own frequency.
+
+```
+$bus = 0.0
+
+play coupled:
+  let trig    = impulse(2)
+  let burst   = pluck(trig, 0.03)
+  let strike  = trig * 1e7 + noise() * burst * 1e6
+  $bus        = $bus * 0.95 + strike * 0.1
+
+  let drive = $bus * 1.0
+  let v1 = dho(trig * 1e7 + drive, 220.0,  0.001)   # struck
+  let v2 = dho(            drive,  277.18, 0.001)   # sympathising
+  let v3 = dho(            drive,  329.63, 0.001)   # sympathising
+  (v1 + v2 + v3) * 0.15
+```
+
+The shape: a leaky-integrator bus (`$bus = $bus * decay + drive *
+gain`) acts as a dimensionless coupling medium — no spatial extent,
+no frequency response of its own. The voices subscribe to it. The
+bus's broadband content (an impulse + brief noise burst is enough)
+seeds every voice's bandpass simultaneously. `patches/sympathy.
+aither` is the worked example with falsification check and audit
+results.
+
+This pattern generalises beyond resonators: any time several voices
+should respond to one shared "ambient" signal — a struck-tongue
+drum exciting a body resonator, a sidechain envelope shared across
+a layer, multiple FM operators reading a common modulator — a
+shared `$bus` cell is the right shape.
+
+What you do **not** need: special primitives, "field" types, or
+any engine support. It is ordinary `$state` with a leaky integrator.
+The pattern is what's named, not the cell.
+
 ## Pair operations — operations from complex algebra
 
 aither has no complex-number TYPE, but it has the OPERATIONS that
@@ -635,7 +680,7 @@ $zr      # the audio
 magnitude clamp, but the engine is one line of complex arithmetic.
 Sweep `(cReal, cImag)` and the timbre walks across the Mandelbrot
 plane: inside the cardioid → silent (fixed point); just past the
-boundary → chaotic but bounded → the aether-shimmer zone; far
+boundary → chaotic but bounded → a shimmering metallic zone; far
 outside → escape and silence.
 
 ### Cost notes

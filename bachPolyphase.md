@@ -3,6 +3,13 @@
 A speculation on the deepest unification of music theory and electrical
 engineering, and what it could mean for aither.
 
+> **Note (2026-05-03).** Sections of this doc lean on a "dimensionless
+> aether" substrate framing that the project explored at length and
+> ultimately abandoned (see `pole.md` postscript). Where the text says
+> `$aether`, read "shared state cell" — the substrate was always
+> documentation, not engine code. The polyphony / polyphase intuition
+> is independent of that framing and stands on its own.
+
 This doc is **not a roadmap**. It's a notebook entry from a late-night
 conversation about Eric Dollard's lifelong claim — that the polyphony
 of Bach and the polyphase structure of three-phase electrical power are

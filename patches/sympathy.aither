@@ -1,0 +1,73 @@
+# sympathy — sympathetic resonance via a shared broadband excitation bus.
+#
+# Three voices tuned to A / C# / E. v1 is struck directly with a broadband
+# event (impulse + brief noise burst). v2 and v3 receive NO direct strike;
+# their only input is what they read from `$bus`, a single leaky-integrator
+# state cell that the strike writes into. Each voice is a damped harmonic
+# oscillator (dho) — its bandpass extracts its own frequency from the
+# broadband bus signal, exactly as a real piano string responds to ambient
+# air pressure.
+#
+# This is the pattern: a shared state cell as an excitation bus. There is
+# nothing special about the bus — it's a normal state variable holding a
+# leaky-integrated drive signal. Any voice reading it gets a copy of the
+# broadband content, decayed.
+#
+# DIAGNOSTIC
+#   master = coupled - monopole, where monopole = an isolated copy of v1
+#   with the same input. Subtracting cancels v1, so the audit spectrum
+#   reads what v2 and v3 contributed — the sympathy itself.
+#
+# FALSIFICATION CHECK
+#   Set v2v3Couple = 0.0 — v2 and v3 then receive zero force. If 277/330
+#   peaks vanish from the diff signal, the bus IS doing real work. If they
+#   persist, the strike is leaking through v1 alone and there is no
+#   sympathy. (Verified: peaks drop to numerical zero with v2v3Couple = 0.)
+#
+# AUDIT (default: master = coupled - monopole — diff isolates v2/v3)
+#   ./aither audit patches/sympathy.aither 4.0
+#     1.  330.0 Hz   0.0 dB    ← E (v3, sympathising)
+#     2.  278.0 Hz  -2.5 dB    ← C# (v2, sympathising)
+#     5.  329.4 Hz  -7.5 dB
+#     220 Hz absent (v1 cancelled by monopole)
+#
+# FULL-MIX (swap master to `coupledTotal`)
+#     1.  220.0 Hz   0.0 dB    ← A (v1, struck)
+#     2.  330.0 Hz -12.6 dB    ← E (v3, sympathy)
+#     3.  278.0 Hz -14.9 dB    ← C# (v2, sympathy)
+#   Sympathy peaks ~13-15 dB below the struck note — louder than piano
+#   sympathy (30-40 dB down), comparable to a sympathetic-string ensemble.
+
+$bus = 0.0
+
+let driveAmp      = 10000000.0
+let burstAmp      = 1000000.0
+let useNoiseBurst = 1.0
+let burstDecaySec = 0.03
+let busWrite      = 0.1
+let busDecay      = 0.95
+let coupling      = 1.0
+let v2v3Couple    = 1.0   # set to 0.0 for the falsification check
+let damping       = 0.001
+
+play coupled:
+  let trig    = impulse(2)
+  let burst   = pluck(trig, burstDecaySec)
+  let strike  = trig * driveAmp + noise() * burst * burstAmp * useNoiseBurst
+  $bus        = $bus * busDecay + strike * busWrite
+
+  let bRead = $bus * coupling
+
+  let v1 = dho(trig * driveAmp + bRead,        220.0,  damping)
+  let v2 = dho(           bRead * v2v3Couple,  277.18, damping)
+  let v3 = dho(           bRead * v2v3Couple,  329.63, damping)
+
+  # monopole control — same input as v1, separate state slot
+  let mv1 = dho(trig * driveAmp + bRead, 220.0, damping)
+
+  let coupledTotal  = (v1 + v2 + v3) * 0.15
+  let monopoleTotal = mv1 * 0.15
+  let s = coupledTotal - monopoleTotal
+  [s, s]
+
+coupled

@@ -1219,25 +1219,18 @@ that aither can reproduce it. Treat this section's "12-liner that
 proves the cybernetic-synthesis idea" framing as a hypothesis
 awaiting fair evaluation, not a settled result.
 
-**Update (2026-04-29).** A second aither version,
-`patches/aether_muqabala.aither`, was built after the broadband-
-aether sympathy positive (see `pole.md`). It rebuilds the
-al-Mukabala skeleton on the dimensionless-aether substrate — the
-carrier reads `$aether` as drive and writes its nonlinear output
-back, closing the loop through the aether rather than through one
-hand-wired state cell. Result is **partial-positive**: the loop
-DOES do real work (falsification check passes — peak σ goes from
-260 Hz open-loop to 0.2 Hz with the loop, confirming the loop
-finds an attractor), and the patch has a documented regime
-structure with five qualitatively distinct sounds across the
-parameter space. But the rich attractor-jumping motion the analog
-tradition produces does not emerge, because aither's `fold` and
-`drive` are stateless — the loop has nowhere to store multiple
-attractors. Diagnosis and approximate cost-ordered structural
-directions to try next are in `pole.md` and the patch header.
-This narrows what's missing: aether is a coupling MEDIUM, not an
-active processing element; the cybernetic loop also needs
-state-bearing partners on its carrier side.
+**Update (2026-05-03).** A follow-up cybernetic-substrate experiment
+(`aether_muqabala.aither`) was built and then removed along with the
+rest of the aether substrate work. The diagnosis it produced still
+holds and is worth recording: the cybernetic loop closed through a
+shared state cell *does* find an attractor (falsification passed —
+peak σ collapsed from 260 Hz open-loop to 0.2 Hz with the loop), but
+the rich attractor-jumping motion the analog tradition produces does
+not emerge, because aither's `fold` and `drive` are stateless — the
+loop has nowhere to store multiple attractors. **What's missing for
+al-Mukabala-style motion: state-bearing partners on the carrier
+side, not a richer coupling medium.** See `al_muqabala.aither` for
+the surviving cybernetic patch.
 
 ## The logistic map — chaos from a single number
 
