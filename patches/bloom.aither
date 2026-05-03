@@ -1,0 +1,209 @@
+# bloom — a 32-second 4-section generative loop for the new audio rig
+# (Scarlett Solo + Beyerdynamic DT 700 Pro).
+#
+# Designed to showcase what closed-back studio cans + a clean DAC do
+# that a mono speaker can't:
+#
+#   • sub-bass below 50 Hz (felt + heard, not just heard)
+#   • phase-coherent octave stacks via phasor_pair × cmul — the
+#     "tightness" two independent oscillators can never hit
+#   • per-channel freq_shift creating an inter-aural inharmonic
+#     beat that breathes (left shifts +H, right shifts -H)
+#   • Haas / pan motion for spatial depth on closed-backs
+#   • the $bus sympathetic-resonance pattern (sympathy.aither) with
+#     the chord voices spread across the stereo field
+#   • Mandelbrot-zone shimmer at the collapse climax
+#   • a 4-voice 16-partial FM Tesla organ blooming in a cathedral
+#
+# Four section windows at 1/4 offsets. max(0, cos(...)) is a half-
+# cosine bump that peaks at its centre and is zero for half the loop.
+# At each peak's loopPh, the other three windows are exactly zero, so
+# the layers that key on bloomW + shiftW + collapseW go silent when
+# teslaW peaks — Tesla has the stage to itself for ~8 seconds.
+#
+# Section peaks (every 8 seconds):
+#   loopPh = 0.00 — bloom    (sympathy chord, sub heartbeat, cello)
+#   loopPh = 0.25 — shift    (drone freq_shift sweep, cello, shimmer pan)
+#   loopPh = 0.50 — collapse (mandel chaos zone, Haas widening)
+#   loopPh = 0.75 — tesla    (4-voice 16-partial FM organ in A major)
+#
+#   ./aither send patches/bloom.aither
+#
+# Listen on headphones. The width is the point.
+
+# ---- shared loop time + LFOs ---------------------------------------
+
+let LOOP_SEC = 32.0
+let loopPh   = (t / LOOP_SEC) mod 1                    # 0..1, wraps cleanly
+
+let bloomW    = max(0, cos(TAU * loopPh))
+let shiftW    = max(0, cos(TAU * (loopPh - 0.25)))
+let collapseW = max(0, cos(TAU * (loopPh - 0.50)))
+let teslaW    = max(0, cos(TAU * (loopPh - 0.75)))
+
+let lfo1 = sin(TAU * loopPh)
+let lfo2 = sin(TAU * loopPh * 2 + PI / 3)
+let lfo4 = sin(TAU * loopPh * 4)
+
+# ---- sub anchor — phase-reset on strike ----------------------------
+# 28→44 Hz pulse, one per second. Phase resets on each trigger so the
+# kick always starts at a zero crossing — no random-phase clicks. DHO
+# body strike is force-driven (the integrator handles transients
+# cleanly, no extra ceremony needed).
+
+play sub:
+  let trig  = impulse(1.0)
+  let env   = discharge(trig, 6)
+  let pSwp  = 28 + discharge(trig, 18) * 16
+  $kph = 0.0
+  $kph = if trig > 0.5 then 0.0 else ($kph + pSwp * dt) mod 1.0
+  let body  = sin(TAU * $kph) * env
+  let dho_b = dho(trig * 50000000.0, 55, 0.06) * env * 0.4
+  let m     = (body + dho_b) * 0.30
+  let amp   = bloomW + shiftW * 0.7 + collapseW * 0.3
+  [m * amp, m * amp]
+
+# ---- sympathetic chord — coupled through a $bus cell --------------
+# A / C# / E (A major) coupled through a shared leaky-integrator $bus.
+# v1 (A) is struck on the half-bar; v2 (C#) and v3 (E) sympathise.
+# Stereo spread: v2 hard left, v3 hard right, v1 centred.
+
+$bus = 0.0
+
+play sympathy:
+  let trig   = impulse(0.5)
+  let burst  = pluck(trig, 0.03)
+  let strike = trig * 8000000.0 + noise() * burst * 800000.0
+  $bus       = $bus * 0.96 + strike * 0.08
+
+  let drv = $bus * 0.8
+  let v1  = dho(trig * 8000000.0 + drv, 220.0,  0.0008)
+  let v2  = dho(                   drv, 277.18, 0.0008)
+  let v3  = dho(                   drv, 329.63, 0.0008)
+
+  let amp = 0.06 * (bloomW + shiftW * 0.8)
+  let L   = (v1 * 0.5 + v2) * amp
+  let R   = (v1 * 0.5 + v3) * amp
+  [L, R]
+
+# ---- phase-coherent shimmer ----------------------------------------
+# phasor_pair × cmul derives every octave from one phase accumulator,
+# so the four layers (E3 / E4 / E5 / E6) NEVER drift apart — the
+# kind of "ringing tightness" two independent oscillators can't hit.
+
+play shimmer:
+  let p   = phasor_pair(165.0)
+  let p2  = cmul(p[0],  p[1],  p[0],  p[1])
+  let p4  = cmul(p2[0], p2[1], p2[0], p2[1])
+  let p8  = cmul(p4[0], p4[1], p4[0], p4[1])
+  let stk = p[0] * 0.30 + p2[0] * 0.50 + p4[0] * 0.30 + p8[0] * 0.18
+  let trem = 0.5 + 0.5 * sin(TAU * loopPh * 3)
+  let amp  = 0.08 * (bloomW * 0.4 + shiftW + collapseW * 0.3) * trem
+  stk * amp |> pan(lfo1)
+
+# ---- inharmonic drone — opposing freq_shift L vs R ----------------
+# A held additive pad at A3 (220 Hz). LEFT shifts +shHz, RIGHT shifts
+# -shHz. As the LFO sweeps ±80 Hz, the L and R fundamentals diverge
+# from unison up to a 160 Hz gap and back. Pitched above the sub
+# region so the sweep never collides with the sub's body.
+
+play drone:
+  let warm = additive(220, warm_shape, 14) * 0.4
+  let shHz = lfo1 * 80
+  let L    = freq_shift(warm,  shHz)
+  let R    = freq_shift(warm, -shHz)
+  let amp  = 0.13 * (bloomW * 0.25 + shiftW + collapseW * 0.5)
+  [L * amp, R * amp]
+
+# ---- Mandelbrot shimmer — the collapse climax ---------------------
+# z² + c iterated at audio rate, reset every 1/441 sec to keep
+# partials around 441 Hz. (cReal, cImag) walks slowly via lfo1/lfo2
+# near the boundary where the orbit is chaotic but bounded — the
+# metallic shimmer zone. Haas widens it without smearing transients.
+
+$zr = 0.0
+$zi = 0.0
+
+play mandel:
+  let cR = -0.78 + lfo1 * 0.04
+  let cI = 0.156 + lfo2 * 0.025
+  let resetTrig = impulse(441.0)
+  let zsq = cmul($zr, $zi, $zr, $zi)
+  let nextR = if resetTrig > 0.5 then 0.0 else zsq[0] + cR
+  let nextI = if resetTrig > 0.5 then 0.0 else zsq[1] + cI
+  let mag   = magnitude(nextR, nextI)
+  let alive = if mag < 4.0 then 1.0 else 0.0
+  $zr = nextR * alive
+  $zi = nextI * alive
+  let raw = $zr * 0.35
+  let amp = 0.10 * collapseW
+  raw * amp |> haas(11)
+
+# ---- cello melody — bowed inharmonic over the A-major chord -------
+# Six notes voicing chord tones + F# passing note (A minor pent-ish).
+# inharmonic(stiff_cello, cello_shape, 16) is the polished cello tone
+# from cello_verify.aither. swell(...) * 0.7 + 0.3 is the cello.aither
+# legato bow trick — never fully releases. Slewed pitch glides
+# between notes; 5 Hz vibrato breathes.
+
+let celloNotes = [110.0, 138.59, 164.81, 184.99, 164.81, 138.59]
+let celloRate  = 6.0 / LOOP_SEC
+let celloPitch = wave(1.0 / LOOP_SEC, celloNotes)
+let celloSlew  = slew(celloPitch, 0.25)
+let celloVib   = sin(TAU * phasor(5)) * 0.006
+let celloFreq  = celloSlew * (1 + celloVib)
+
+play cello:
+  let bowTrig = impulse(celloRate)
+  let bowEnv  = swell(bowTrig, 1.2, 2.0) * 0.7 + 0.3
+  let voice   = inharmonic(celloFreq, stiff_cello, cello_shape, 16)
+  let amp     = 0.10 * (bloomW * 0.6 + shiftW + collapseW * 0.15)
+  voice * bowEnv * amp |> haas(13)
+
+# ---- granular sparkle — fast L↔R imaging --------------------------
+# A 4400 Hz struck DHO firing 8 times per loop, panning across the
+# stereo field. Showcases imaging precision and the high-frequency
+# air the new headphones can resolve.
+
+play sparkle:
+  let rate = 8.0 / LOOP_SEC
+  let trig = impulse(rate)
+  let env  = pluck(trig, 0.06)
+  let bell = dho(trig * 200000.0, 4400 + lfo4 * 600, 0.0009) * env
+  let pos  = sin(TAU * loopPh * 8 + PI / 4)
+  let amp  = 0.10 * (bloomW * 0.4 + shiftW * 0.8 + collapseW * 0.6)
+  bell * amp |> pan(pos)
+
+# ---- Tesla organ — 4-voice A-major FM-modulated additive ----------
+# The fm_swarm.aither "epic gothic organ from Tesla" recipe applied
+# to four chord voices simultaneously: A2 / C#3 / E3 / A3, each a
+# 16-partial stack where every partial has its own FM modulator at
+# an incommensurate per-partial drift. ~192 sine evaluations per
+# sample, all with sidebands that never quite align.
+#
+# When teslaW peaks at loopPh = 0.75, all other section weights are
+# exactly zero, so Tesla has the stage to itself for ~8 seconds.
+
+def teslaVoice(f, period):
+  sum(16, n =>
+    let cf   = n * f
+    let modf = cf * 3.06 * (1 + 0.006 * sin(t * n / period + n * 0.3))
+    let mv   = sin(TAU * phasor(modf)) * 1.17
+    if cf + modf * 3 >= 22000 then 0
+    else (1.0 / pow(n, 0.55)) * sin(TAU * phasor(cf) + mv))
+
+play tesla:
+  let v_A2 = teslaVoice(110.00, 11)
+  let v_C3 = teslaVoice(138.59, 13)
+  let v_E3 = teslaVoice(164.81, 17)
+  let v_A3 = teslaVoice(220.00, 19)
+  let amp = 0.022 * teslaW
+  let L = (v_A2 + v_C3 * 0.85 + v_E3 * 0.50 + v_A3 * 0.30) * amp
+  let R = (v_A3 + v_E3 * 0.85 + v_C3 * 0.50 + v_A2 * 0.30) * amp
+  let dry = [L, R]
+  let wet = (L + R) * 0.5 |> reverb(2.8, 0.35)
+  [dry[0] + wet, dry[1] + wet]
+
+# ---- final mix ------------------------------------------------------
+
+(sub + sympathy + shimmer + drone + mandel + cello + sparkle + tesla) * 0.78 |> drive(0.92)
