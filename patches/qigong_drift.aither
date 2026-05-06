@@ -1,0 +1,198 @@
+# qigong_drift — continuous evolving cosmic soundscape for a qigong class.
+#
+# No sections. No loop. No triggers on any audible rhythm. Just five
+# layers breathing at incommensurate prime periods that never realign
+# in any reasonable session — the texture you hear at minute 1 will
+# not be the texture at minute 30 or minute 90.
+#
+# Tonal centre: A in just intonation for the foundation; phi-stretched
+# (xenharmonic) inharmonic content woven through gongs, pad and
+# shimmer for the cosmic dimension. The φ ratio (1.618...) is
+# irrational, so phi-spaced partials never align with integer harmonics
+# and never produce stable beat patterns — that's the alien quality.
+#
+# Layers:
+#   sub          — A0 (27.5 Hz) sustained, lightly wavefolded grounding
+#                  drone, slow amplitude breath
+#   deep_gongs   — three deep phi-partial gongs at A1 / E2 / A2 struck
+#                  at coprime intervals (11, 17, 23 sec). 14 partials
+#                  per gong, long decays. Cathedral reverb tail.
+#   pad          — additive vowel_ah (human, grounding) crossfaded with
+#                  phi-partial inharmonic (alien, cosmic) at the same
+#                  fundamental. Mirror freq_shift L/R for binaural width.
+#   shimmer      — additive warm × phi-partial inharmonic blend in the
+#                  upper register, slow pan
+#   xen_drift    — a sustained pure phi-spaced drone, very subtle,
+#                  fills the field with xenharmonic shimmer between
+#                  gong strikes
+#
+# Periods are coprime primes (11, 14, 17, 19, 23, 29, 47, 53, 61, 71,
+# 89). The piece's parameter combination at any minute is unique.
+#
+#   ./aither send patches/qigong_drift.aither
+#
+# Set it, leave it running, and it will not loop in your lifetime.
+
+# ---- shared time + slow LFOs ---------------------------------------
+
+let breath19 = (sin(TAU * t / 19.0) + 1) * 0.5
+let breath23 = (sin(TAU * t / 23.0) + 1) * 0.5
+let breath29 = (sin(TAU * t / 29.0) + 1) * 0.5
+let breath47 = (sin(TAU * t / 47.0) + 1) * 0.5
+let breath71 = (sin(TAU * t / 71.0) + 1) * 0.5
+
+let lfo53 = sin(TAU * t / 53.0)
+let lfo61 = sin(TAU * t / 61.0)
+let lfo89 = sin(TAU * t / 89.0)
+
+# ---- SUB — A0 wavefolded grounding drone ---------------------------
+
+play sub:
+  let raw = sin(TAU * phasor(27.5))
+  let f1  = fold(raw, 1.2)
+  let breath = 0.55 + 0.45 * sin(TAU * t / 14.0)
+  let m = (raw * 0.55 + f1 * 0.30) * breath * 0.16
+  [m, m]
+
+# ---- DEEP_GONGS — three TRUCK-SIZED phi-partial gongs --------------
+# Three massive gongs tuned to E1 (41.2 Hz), A1 (55 Hz), E2 (82.4 Hz)
+# — a full octave below the previous version. 16 phi-spaced partials
+# per gong. The amp rolloff `1/n` heavily weights the fundamental
+# (deep, body-felt) over the upper partials. Decay rolloff `longDec /
+# n^0.85` makes the high partials sparkle for 2-4 seconds and the
+# fundamentals ring for 14-24 seconds.
+#
+# Per-partial SLOW ATTACK: each partial is slewed at `attack/n^0.4`,
+# so the fundamental swells in over 0.5+ seconds while higher partials
+# attack faster. This is the "metal flexing into the standing wave"
+# character of real massive gongs — they don't pop, they BLOOM.
+#
+# Strike intervals are coprime primes 41, 29, 23 sec — long enough
+# that each gong's tail fully decays before the next strike on the
+# same voice. They never realign within 41×29×23 = 27347 seconds
+# (~7.6 hours).
+#
+# An 8-second cathedral reverb with 0.45 wet gives each strike the
+# resonance of a temple hall. The reverb tail is what makes the
+# difference between a "small gong in a room" and "truck-sized gong
+# in a cathedral."
+
+def massiveGong(trig, baseHz, longDec, attackSec):
+  sum(16, n =>
+    let r   = phi_partials(n)
+    let pf  = baseHz * r
+    let dec = longDec / pow(n, 0.85)
+    let attackThis = attackSec / pow(n, 0.4)
+    let rawEnv = pluck(trig, dec)
+    let env = slew(rawEnv, attackThis)
+    if pf >= 18000 then 0
+    else sin(TAU * phasor(pf)) * (1.0 / pow(n, 1.0)) * env)
+
+play deep_gongs:
+  let trigA = impulse(1.0 / 41.0)
+  let trigB = impulse(1.0 / 29.0)
+  let trigC = impulse(1.0 / 23.0)
+
+  let g1 = massiveGong(trigA, 41.20, 24.0, 0.6)         # E1, truck-deep
+  let g2 = massiveGong(trigB, 55.00, 18.0, 0.5)         # A1
+  let g3 = massiveGong(trigC, 82.41, 14.0, 0.4)         # E2
+
+  let amp = 0.11
+  let L = (g1 * 0.85 + g2 * 1.00 + g3 * 0.55) * amp
+  let R = (g1 * 0.85 + g2 * 0.55 + g3 * 1.00) * amp
+  let monoMix = (L + R) * 0.5
+  let wet = monoMix |> reverb(8.0, 0.45)
+  [L + wet * 0.75, R + wet * 0.75]
+
+# ---- PAD — vowel_ah grounded × phi-partial cosmic blend -----------
+# The pad has two simultaneous voices at A2 (110 Hz):
+#   warm  — additive(110, vowel_ah, 16): 16-partial vocal-formant pad,
+#           the "AH" vowel — human, grounding
+#   alien — inharmonic(110, phi_partials, bell_decay, 14): 14 phi-
+#           spaced partials with bell-decay amplitude — xenharmonic,
+#           cosmic
+# breath23 (0..1, 23-second period) crossfades between them: roughly
+# 60% warm at the trough, ~30% alien at the peak. Mirror freq_shift
+# applies to the blend, so the binaural width breathes through both
+# tonal worlds.
+
+play pad:
+  let warm  = additive(110, vowel_ah, 16) * 0.4
+  let alien = inharmonic(110, phi_partials, bell_decay, 14) * 0.30
+  let cosmicMix = breath23 * 0.7
+  let blended  = warm * (1 - cosmicMix * 0.5) + alien * cosmicMix
+  let shHz = lfo61 * 6.0
+  let L    = freq_shift(blended,  shHz)
+  let R    = freq_shift(blended, -shHz)
+  let amp  = 0.5 + 0.5 * sin(TAU * t / 29.0)
+  [L * 0.09 * amp, R * 0.09 * amp]
+
+# ---- SHIMMER — warm × phi-partial inharmonic blend -----------------
+# Upper-register version of the pad's blend trick. warm at 220 Hz
+# (A3) crossfades with phi-partial inharmonic at 165 Hz (E3) over 47
+# seconds. The fundamental clash (E vs A, perfect fifth) plus the
+# phi spread of the inharmonic side creates a shimmering alien chord
+# that drifts across the stereo field on an 89-second pan cycle.
+
+play shimmer:
+  let warm   = additive(220, warm_shape, 12) * 0.30
+  let cosmic = inharmonic(165, phi_partials, soft_decay, 12) * 0.22
+  let mixWB  = breath47
+  let blended = warm * (1 - mixWB * 0.6) + cosmic * mixWB
+  let panPos  = lfo89
+  let amp     = 0.45 + 0.45 * breath71
+  blended * 0.06 * amp |> pan(panPos)
+
+# ---- XEN_DRIFT — pure phi-spaced sustained drone -------------------
+# A sustained xenharmonic drone — 8 phi-spaced partials starting at
+# A1 (55 Hz), no envelope, just continuous. It sits between the gong
+# strikes filling the silence with cosmic shimmer. Very low amplitude
+# so it never dominates; only obvious when the gongs are quiet.
+# Slow LFO53 modulates a subtle frequency drift on the whole drone
+# (±0.5%) so the alien chord is never quite in tune with itself.
+
+play xen_drift:
+  let detune = 1 + lfo53 * 0.005
+  let drift = inharmonic(55.0 * detune, phi_partials, soft_decay, 8) * 0.20
+  let amp   = 0.35 + 0.35 * breath29
+  let pos   = lfo61 * 0.6
+  drift * 0.05 * amp |> pan(pos)
+
+# ---- BINAURAL — three hard-panned carrier pairs --------------------
+# Pure sine tones with small frequency offsets between the L and R
+# channels. The brain perceives the difference frequency as a "beat"
+# inside the head — a real psychoacoustic effect that only works on
+# headphones (which the DT 700 Pro delivers cleanly). Three carrier
+# pairs at chord tones (A2, E3, A3) with beat frequencies in the
+# theta/alpha range:
+#
+#   carrier 110 Hz, beat 6.0 Hz (theta — meditation)
+#   carrier 165 Hz, beat 4.5 Hz (theta — deep relaxation)
+#   carrier 220 Hz, beat 7.0 Hz (theta-alpha border — calm focus)
+#
+# A slow LFO walks the offsets ±0.5 Hz over 89 seconds so the
+# brainwave entrainment drifts through nearby states rather than
+# locking on one. Amplitude is low — binaural beats work best as a
+# subliminal layer, not a foreground tone.
+
+play binaural:
+  let drift = sin(TAU * t / 89.0) * 0.5
+  let oA = 6.0 + drift
+  let oB = 4.5 + drift
+  let oC = 7.0 + drift
+
+  let lA = sin(TAU * phasor(110.00))
+  let rA = sin(TAU * phasor(110.00 + oA))
+  let lB = sin(TAU * phasor(165.00))
+  let rB = sin(TAU * phasor(165.00 + oB))
+  let lC = sin(TAU * phasor(220.00))
+  let rC = sin(TAU * phasor(220.00 + oC))
+
+  let amp = 0.04
+  let L = (lA * 0.45 + lB * 0.35 + lC * 0.30) * amp
+  let R = (rA * 0.45 + rB * 0.35 + rC * 0.30) * amp
+  [L, R]
+
+# ---- final mix ------------------------------------------------------
+
+(sub + deep_gongs + pad + shimmer + xen_drift + binaural) * 0.78 |> drive(0.95)

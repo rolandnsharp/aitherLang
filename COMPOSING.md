@@ -1225,6 +1225,24 @@ midi_freq and produces silence).
 
 ## Common bugs I have hit
 
+- **Intermittent kick clicks from `env × sin(TAU * phasor(f))`.**
+  An instant-attack envelope multiplied by a continuously-running
+  phasor pops whenever the strike lands at non-zero sine phase.
+  Symptom: 4-5 clean kicks, then one click, then 3 clean, then
+  another click — the offending pattern is beat-locked, hard to
+  hear on small speakers, instantly audible on studio headphones.
+  Fix: reset the phasor on each trigger via `$state`:
+  ```
+  $kph = 0.0
+  $kph = if trig > 0.5 then 0.0 else ($kph + freq * dt) mod 1.0
+  let body = sin(TAU * $kph) * env
+  ```
+  Doesn't apply to `dho(force, freq, damp)` body strikes — the
+  integrator handles transients cleanly. Doesn't apply to broadband
+  sources (`noise`, `additive` with high N) — random per-partial
+  phase masks the click. Default to phase-resetting any single-sine
+  strike voice.
+
 - **`wave(freq, notes)` cycles the whole array at `freq` Hz.**
   For N notes at R notes/sec: `wave(R / N, notes)`.
   Not `wave(R, notes)`. This cost an afternoon.

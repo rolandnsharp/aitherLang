@@ -710,12 +710,12 @@ proc startEngine*() =
     except CatchableError:
       if running: discard
 
-  midiShutdown()
-  discard aither_audio_stop()
-  aither_audio_uninit()
-  server.close()
+  # The OS reaps audio device, MIDI thread, sockets, and all FDs at
+  # process exit. Only the unix socket file at /tmp/aither.sock
+  # outlives the process and needs explicit cleanup.
   try: removeFile(SocketPath) except CatchableError: discard
   echo "bye"
+  quit(0)
 
 # ----------------------------------------------------------------------- client
 
