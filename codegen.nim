@@ -232,6 +232,38 @@ const BuiltinFns = ["saw", "tri", "sqr", "phasor", "noise", "abs", "pow",
 const PairCalls = ["cmul", "cdiv", "cscale", "rotate", "analytic",
                    "phasor_pair"]
 
+# Transparent helpers — process a signal without intentionally creating
+# L/R difference. Stereo input maps to stereo output by re-emitting the
+# call once per channel; each emission registers its own state region(s)
+# so the two channels filter / delay / envelope independently. Mono input
+# maps to mono output with a single state allocation (current behavior).
+#
+# Why an allowlist and not "any stateful call": pan / haas / phasor /
+# noise / dho / freq_shift / etc. either create stereo from mono, are
+# semantically scalar-only, or have call-site identity that doubles
+# pool usage in surprising ways. Listing the helpers whose lift IS
+# semantically transparent keeps the rest of the language unchanged.
+#
+# Mix of natives (lpf/hpf/.../delay/...) and pure-aither defs (drive/
+# fold/gain/pluck/swell/adsr/prev) — codegen treats them uniformly via
+# the call-split path: each channel call recurses through emitExpr,
+# which registers fresh regions for natives and re-inlines stdlib defs
+# (whose own state slots are claimed per call site).
+const TransparentHelpers = ["lpf", "hpf", "bpf", "lp1", "hp1",
+                            "drive", "fold",
+                            "delay", "fbdelay",
+                            "slew", "discharge",
+                            "pluck", "swell", "adsr",
+                            "gain", "prev", "tremolo"]
+
+# Stereo-returning defs that semantically REQUIRE mono input — pan and
+# haas take a mono signal and widen it. Calling them with stereo input
+# would otherwise descend into the body and surface a misleading
+# "unknown identifier: signal" because emitStereo's nkArr branch
+# emits each component via emitExpr (scalar), which can't resolve a
+# stereo-bound param. Diagnose at the call site instead.
+const MonoOnlyInputDefs = ["pan", "haas"]
+
 # True when `name` resolves to a value (scalar local, stereo local, top
 # lets/vars/arrays, play block, stereo let). Values shadow function
 # names, so this short-circuits isFnName below.
@@ -1107,6 +1139,17 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
     # Stereo-returning user def (e.g. haas, pan): inline once, capture
     # the two output channels into fresh temps via the `pre` preamble.
     if n.str in c.userDefs and isStereoDef(c, c.userDefs[n.str]):
+      # pan / haas widen mono→stereo. Stereo input has no defined meaning
+      # for them and would otherwise descend through the inlining and
+      # surface as `unknown identifier: signal` from inside an nkArr
+      # element walk. Fail at the call site with a directly actionable
+      # message instead.
+      if n.str in MonoOnlyInputDefs and n.kids.len > 0 and
+         c.refsStereo(sc, n.kids[0]):
+        raise newException(ValueError,
+          n.str & " takes a mono signal — collapse the input via " &
+          "mono(x) or pick a channel via x[0] / x[1] before piping " &
+          errLoc(n))
       let def = c.userDefs[n.str]
       if n.kids.len != def.params.len:
         raise newException(ValueError,
@@ -1221,12 +1264,26 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
       raise newException(ValueError,
         "internal: nkCall '" & n.str & "' flagged as stereo by refsStereo " &
         "but no arg resolved to stereo " & errLoc(n))
-    # One or more stereo args: try to split per channel. Safe only for
-    # pure callees (libm / arithmetic builtins / pure user defs).
+    # One or more stereo args: try to split per channel. Three classes of
+    # callee can split safely:
+    #   1. Pure arithmetic / shape / libm — duplicating the call has no
+    #      hidden state cost.
+    #   2. Pure user defs — the body is side-effect-free, so inlining
+    #      twice with different params is a no-op state-wise.
+    #   3. Transparent helpers (allowlist) — stateful, but each channel
+    #      gets ITS OWN fresh state region(s). The codegen path that
+    #      registers regions (registerRegion / emitDefInline) runs
+    #      independently for the L and R emissions, so a stereo lpf
+    #      legitimately pays for two filters.
+    # Anything else is a stateful primitive (phasor, noise, dho, …)
+    # whose call-site identity carries semantic weight: silently
+    # duplicating it across channels would either change the sound
+    # (two phasors at slightly different phases) or waste a region.
     let name = n.str
     let canSplit =
       name in Libm1 or name in ["pow", "min", "max", "clamp", "int",
                                  "saw", "tri", "sqr", "abs"] or
+      name in TransparentHelpers or
       (name in c.userDefs and isPureForStereo(c, c.userDefs[name].kids[0]))
     if not canSplit:
       raise newException(ValueError,
@@ -1236,6 +1293,14 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
     # then emit two scalar calls via emitExpr. Synthesised nodes inherit
     # n's line/source so any error raised during the split emission still
     # points at the user's code, not a line-0 ghost.
+    #
+    # Scalar args reuse the temp emitStereo already bound them to in the
+    # `pre` preamble (see argVals[i].l). Without this — i.e., re-using
+    # the original AST node — emitExpr would re-emit the whole subtree
+    # twice (once per channel), and stateful subexpressions like
+    # phasor() would register two extra regions that aren't visible from
+    # the source. With this, a `lpf(stereo, 800 + lfo, 0.5)` runs `lfo`
+    # exactly once and shares the value across both channel calls.
     let innerL = push(sc)
     let innerR = push(sc)
     var callL = Node(kind: nkCall, str: n.str,
@@ -1252,9 +1317,26 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
                             line: n.line, source: n.source)
         callR.kids.add Node(kind: nkIdent, str: tmpR,
                             line: n.line, source: n.source)
-      else:
+      elif k.kind in {nkNum, nkIdent}:
+        # Numeric / ident args have no side effects, AND the downstream
+        # codegen for some helpers (delay/fbdelay) inspects the literal
+        # node directly to size their state region — so we must keep the
+        # original AST node, not replace it with a synthesised tmp ident.
         callL.kids.add k
         callR.kids.add k
+      else:
+        # Compound scalar arg: emitStereo already bound it to a temp via
+        # `pre`. Reference that temp from both channel calls — without
+        # this rebind, emitExpr would re-emit the original subtree twice
+        # and any stateful subexpression (phasor, noise, etc.) would
+        # register two extra regions silently.
+        let tmp = c.fresh("ssa")
+        innerL.names[tmp] = argVals[i].l
+        innerR.names[tmp] = argVals[i].l
+        callL.kids.add Node(kind: nkIdent, str: tmp,
+                            line: n.line, source: n.source)
+        callR.kids.add Node(kind: nkIdent, str: tmp,
+                            line: n.line, source: n.source)
     let lExpr = c.emitExpr(innerL, callL)
     let rExpr = c.emitExpr(innerR, callR)
     return (lExpr, rExpr, true)
