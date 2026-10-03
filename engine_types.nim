@@ -6,9 +6,17 @@
 
 const EnvBins* = 20            # sparkline slots; matches engine.nim's stats ring
 
+# A single voice sample beyond ±8 (+18 dBFS) is never music — it's a
+# patch that has blown up. The output tanh would turn it into a
+# full-scale square wave, so the engine mutes the voice instead.
+const RunawayLimit* = 8.0
+
+proc isRunaway*(l, r: float64): bool {.inline.} =
+  abs(l) > RunawayLimit or abs(r) > RunawayLimit
+
 type
   VoiceState* = enum
-    vsStopped, vsMuted, vsFadingOut, vsFadingIn, vsPlaying
+    vsStopped, vsMuted, vsFadingOut, vsFadingIn, vsPlaying, vsRunaway
 
   PartState* = enum
     psSilent, psFadingOut, psFadingIn, psPlaying

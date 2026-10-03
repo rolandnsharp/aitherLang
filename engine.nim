@@ -50,6 +50,7 @@ type
     stats:      Stats
     recent:     RecentRing  # rolling 0.5s buffer for `spectrum`
     nanLogged:  bool        # one log line per voice per session, then quiet
+    runaway:    bool        # muted by the runaway guard; cleared on resend
 
   # Public data structs (VoiceInfo, StatsSnapshot, etc.) live in
   # engine_types.nim — exported up so callers see them through engine.
@@ -123,8 +124,20 @@ proc audioCallback(output: ptr UncheckedArray[cfloat], frameCount: cuint,
                            " produced NaN/Inf — pool reset"
           slots[v].nanLogged = true
         continue
+      # Runaway defense: finite but far too loud (an unstable filter
+      # chain climbing toward 1e6). Resetting would just let it climb
+      # again in bursts, so mute until the patch is resent.
+      if isRunaway(l, r):
+        slots[v].voice.resetPool()
+        slots[v].muted = true
+        slots[v].runaway = true
+        stderr.writeLine "[aither] voice " & slots[v].name &
+                         " exceeded +18 dBFS — muted until resent"
+        continue
       slots[v].fadeGain = clamp(
         slots[v].fadeGain + slots[v].fadeDelta, 0.0, 1.0)
+      if slots[v].fadeGain >= 1.0 and slots[v].fadeDelta > 0.0:
+        slots[v].fadeDelta = 0.0          # fade-in done: report "playing"
       if slots[v].fadeGain <= 0.0 and slots[v].fadeDelta < 0.0:
         slots[v].active = false
       # Advance per-part gains toward their targets (clamped 0..1). When
@@ -280,6 +293,9 @@ proc loadPatch*(filename: string; fadeIn: float64): string =
   if idx >= 0:
     slots[idx].voice.commit(prepared)
     slots[idx].nanLogged = false           # fresh diagnostics for the new code
+    if slots[idx].runaway:                 # new code gets a fresh chance
+      slots[idx].runaway = false
+      slots[idx].muted = false
     let retrigger = (not slots[idx].active) or
                     slots[idx].fadeGain <= 0.0 or
                     slots[idx].fadeDelta < 0.0       # interrupting a fade-out
@@ -364,6 +380,7 @@ proc setMute*(name: string; muted: bool): string =
   if idx < 0: return "not found: " & name
   acquire(mtx)
   slots[idx].muted = muted
+  if not muted: slots[idx].runaway = false   # user takes responsibility
   release(mtx)
   ""
 
@@ -403,6 +420,7 @@ proc isNumeric(s: string): bool {.inline.} =
 
 proc voiceStateOf(s: Slot): VoiceState =
   if not s.active:           vsStopped
+  elif s.runaway:            vsRunaway
   elif s.muted:              vsMuted
   elif s.fadeDelta < 0.0:    vsFadingOut
   elif s.fadeDelta > 0.0:    vsFadingIn

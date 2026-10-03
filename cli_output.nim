@@ -33,6 +33,7 @@ proc voiceStateWord(s: VoiceState): string =
   of vsFadingOut:  "fading-out"
   of vsFadingIn:   "fading-in"
   of vsPlaying:    "playing"
+  of vsRunaway:    "muted: runaway output, fix and resend"
 
 proc partStateWord(s: PartState): string =
   case s
