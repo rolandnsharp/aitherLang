@@ -374,6 +374,20 @@ proc callArgs(c: Ctx; sc: Scope; kids: openArray[Node]): string =
   for k in kids: parts.add c.emitExpr(sc, k)
   parts.join(", ")
 
+# Call a stateful native at its call site's pool region. The args are
+# evaluated into locals FIRST: an arg can hold another native call
+# (`x |> bpf(..) |> hpf(..)`) that moves s->idx, so s->idx is pointed
+# at this site's region only after they have all run. `call` is the
+# native call with `$1`, `$2`, ... standing for the evaluated args.
+proc nativeAt(c: Ctx; off: string; args: openArray[string]; call: string): string =
+  var pre = ""
+  var names: seq[string] = @[]
+  for a in args:
+    let t = c.fresh("na")
+    pre.add &"double {t} = ({a}); "
+    names.add t
+  "(({ " & pre & "s->idx = " & off & "; " & call % names & "; }))"
+
 # Inline a user def call. Substitute param names with the evaluated C
 # expressions (bound to fresh locals to avoid re-evaluating side effects),
 # emit let/var handling inside a statement expression.
@@ -763,7 +777,7 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
       let sig = c.emitExpr(sc, n.kids[0])
       let hz = c.emitExpr(sc, n.kids[1])
       let off = c.registerRegion("freq_shift", 33)
-      return &"(s->idx = {off}, n_freq_shift((DspState*)s, ({sig}), ({hz})))"
+      return c.nativeAt(off, [sig, hz], "n_freq_shift((DspState*)s, $1, $2)")
     if name == "freq_shift":
       raise newException(ValueError,
         "freq_shift(signal, hz) takes exactly 2 args " & errLoc(n))
@@ -844,8 +858,8 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
       return "n_midi_gate()"
     if name == "midi_trig" and n.kids.len == 1:
       let off = c.registerRegion("midi_trig", 1)
-      return "(s->idx = " & off & ", n_midi_trig((DspState*)s, (int)(" &
-             c.emitExpr(sc, n.kids[0]) & ")))"
+      return c.nativeAt(off, [c.emitExpr(sc, n.kids[0])],
+                        "n_midi_trig((DspState*)s, (int)($1))")
     if name == "midi_voice_freq" and n.kids.len == 1:
       return "n_midi_voice_freq((int)(" & c.emitExpr(sc, n.kids[0]) & "))"
     if name == "midi_voice_gate" and n.kids.len == 1:
@@ -886,11 +900,12 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
           "to one " & errLoc(arr))
       let size = c.nativeSlotSize("wave", n.kids)
       let off = c.registerRegion("wave", size)
-      return &"(s->idx = {off}, n_wave((DspState*)s, {freq}, (double*){sym}, {length}))"
-    # Native dsp calls. Before each call we set s->idx to the call
-    # site's baked region offset so the native's internal claim()
-    # writes into its dedicated region, regardless of surrounding
-    # call structure. The comma expression forces left-to-right eval.
+      return c.nativeAt(off, [freq],
+                        &"n_wave((DspState*)s, $1, (double*){sym}, {length})")
+    # Native dsp calls. Each call site has a baked region offset, and
+    # nativeAt points s->idx at it after evaluating the args, so the
+    # native's internal claim() writes into its dedicated region
+    # regardless of what natives the args themselves call.
     if name in NativeArities:
       let arity = NativeArities[name]
       if arity == -1:
@@ -902,8 +917,13 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
           " " & errLoc(n))
       let size = c.nativeSlotSize(name, n.kids)
       let off = c.registerRegion(name, size)
-      return "(s->idx = " & off & ", n_" & name & "((DspState*)s, " &
-             c.callArgs(sc, n.kids) & "))"
+      var args: seq[string] = @[]
+      var slots: seq[string] = @[]
+      for i, k in n.kids:
+        args.add c.emitExpr(sc, k)
+        slots.add "$" & $(i + 1)
+      return c.nativeAt(off, args,
+                        "n_" & name & "((DspState*)s, " & slots.join(", ") & ")")
     # User def inline
     if name in c.userDefs:
       return c.emitDefInline(sc, c.userDefs[name], n)

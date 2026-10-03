@@ -10,6 +10,30 @@ toward sounds that have never existed before.
 The items below are the loose ends from that session, ordered by how
 much they block forward work.
 
+## Session log: 2026-10-03 pipe chains + runaway guard
+
+Found while writing patches on a Pinebook Pro.
+
+| Issue                                          | Status   |
+|------------------------------------------------|----------|
+| `x \|> bpf(..) \|> hpf(..)` blows up to ~+200 dB | RESOLVED |
+| `f(..) \|> lpf(..)` garbage when `f` has a filter | RESOLVED |
+| unstable patch drives the speakers at full scale | RESOLVED (runaway guard) |
+| `list` shows `fading-in` forever               | RESOLVED |
+| `reverb` won't take stereo                     | open     |
+
+The two pipe bugs were one bug. Each native call compiled to
+`(s->idx = off, n_lpf(s, sig, ...))`: s->idx was set *before* the
+args ran, so a native inside `sig` moved it and the outer filter ran on
+another call site's slots. Codegen now evaluates the args into locals
+first and sets s->idx last (`nativeAt`). `patches/flute.aither` was
+broken by this and works again. Pinned by `tests/pipe_chain.nim`.
+
+The runaway guard mutes any voice whose output passes ±8 (+18 dBFS)
+until it's resent or unmuted, instead of letting the output `tanh`
+turn it into a full-scale square wave. Pinned by
+`tests/runaway_guard.nim`.
+
 ## Session log: 2026-04-25 bug-fix bundle
 
 The 2026-04-25 session resolved every blocking item below plus the

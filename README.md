@@ -94,6 +94,16 @@ make
 One binary, ~970 KB. Linux-only for now (system audio via miniaudio,
 MIDI via ALSA seq).
 
+Needs Nim, a C compiler, libtcc and the ALSA headers. On
+Alpine/postmarketOS:
+
+```
+apk add nim build-base tcc-dev tcc-libs-static alsa-lib-dev
+```
+
+`tcc-libs-static` provides TCC's runtime library (`libtcc1.a`), which
+TCC links into every patch it compiles.
+
 ## Use
 
 ```
