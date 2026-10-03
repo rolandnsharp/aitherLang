@@ -1,0 +1,72 @@
+# bush_doof_dm — bush_doof in D minor pentatonic (kick tuned to D1) to sit with flute_dm.
+# shared signals (sc, kEnv, note derivations) live at file level.
+
+# ---------- shared file-level state ----------
+let pos   = t - start_t
+let fin   = ease(pos / 4)
+let tempo = 140.0 / 60.0
+
+let meta     = phasor(tempo / 64)
+let kickOn   = if meta > 0.9375 then 0 else 1
+
+let kTrig    = impulse(tempo)                    # drives kick + sidechain
+let kEnv     = discharge(kTrig * kickOn, 10)
+let sc       = 1 - kEnv * 0.75                   # sidechain
+
+let scale    = [0, 3, 5, 7, 10]                  # minor pentatonic (semitones)
+let lLfo     = (sin(TAU * pos * 0.083) + sin(TAU * pos * 0.053) + 2) * 0.5 * 5
+let lStep    = scale[int(lLfo) mod 5]
+let lRoot    = 293.66 * pow(2, lStep / 12)
+let bRoot    = 73.42 * pow(2, lStep / 12)
+
+$bNote = 73.42
+let bT    = impulse(tempo * 2)
+$bNote = if bT > 0.5 then bRoot else $bNote
+let bEnv  = discharge(bT, 18)
+
+$lNote = 293.66
+let lT    = impulse(tempo)
+$lNote = if lT > 0.5 then lRoot else $lNote
+let lLfo2 = (sin(TAU * pos * 0.17) + 1) * 0.5
+let lEnv  = discharge(lT, 6)
+let lCut  = 400 + lLfo2 * 2500 + lEnv * 2500
+
+let burst = ease((meta - 0.9375) / 0.0625)
+
+# ---------- parts (each returns [L, R]) ----------
+
+play kick:
+  let p = 36.71 + discharge(kTrig * kickOn, 35) * 170
+  let s = sin(TAU * phasor(p)) * kEnv * 0.9 |> lpf(300, 0.5)
+  [s, s]
+
+play bass:
+  let s = osc(saw, $bNote) |> lpf(150 + bEnv * 1500, 0.85) |> drive(1.2) |> gain(0.42)
+  let m = s * bEnv * sc
+  [m, m]
+
+play lead:
+  let sL = osc(saw, $lNote)          |> lpf(lCut, 0.86) |> drive(1.8) |> gain(0.16)
+  let sR = osc(saw, $lNote * 1.005)  |> lpf(lCut, 0.86) |> drive(1.8) |> gain(0.16)
+  [sL * sc, sR * sc]
+
+play hats:
+  let hP      = phasor(tempo * 4)
+  let hWarped = hP + sin(hP * PI) * 0.08
+  let hE      = exp(-hWarped * 35)
+  let s       = noise() * hE |> hpf(8500, 0.25) |> bitcrush(8) |> gain(0.16)
+  [s, s]
+
+play clap:
+  let cPat = wave(tempo / 4 * 16, [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0])
+  let cE   = discharge(cPat, 22)
+  let s    = noise() * cE |> bpf(1500, 0.25) |> dropout(tempo * 8, 0.85) |> gain(0.22)
+  [s, s]
+
+play riser:
+  let rCut = 200 + burst * 7000
+  let s    = noise() |> bpf(rCut, 0.7) |> gain(burst * 0.22)
+  [s, s]
+
+# ---------- mix ----------
+(kick + bass + lead + hats + clap + riser) * fin * 0.55

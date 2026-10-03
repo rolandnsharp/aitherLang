@@ -1,0 +1,39 @@
+# distant_beat — a slow, soft beat far off behind flute_dm. 72 BPM.
+# Kick tuned to D, a frame drum on 2 and 4, a faint shaker. Everything is
+# low-passed and mostly reverb so it sits in the distance.
+#
+# One pipe per let: chained pipes and piping straight out of a call
+# currently miscompile.
+
+let pos    = t - start_t
+let fadeIn = ease(pos / 8)
+
+# one bar = 4 beats at 72 BPM = 3.33 s
+let bar = phasor(0.3) * 4
+
+# kick on 1 and the "and" of 3
+let k1    = if bar < 0.03 then 1 else 0
+let k2    = if bar >= 2.5 and bar < 2.53 then 1 else 0
+let ktrig = k1 + k2
+let kenv  = discharge(ktrig, 6)
+let kpit  = 36.7 + discharge(ktrig, 20) * 90
+let kick  = sin(TAU * phasor(kpit)) * kenv
+
+# frame drum on 2 and 4
+let s2    = if bar >= 1 and bar < 1.03 then 1 else 0
+let s4    = if bar >= 3 and bar < 3.03 then 1 else 0
+let strig = s2 + s4
+let tom   = sin(TAU * phasor(110 + discharge(strig, 30) * 40)) * discharge(strig, 9)
+let thump = noise() * discharge(strig, 40)
+
+# shaker on 8ths, barely there
+let shk = noise() * discharge(impulse(2.4), 30)
+
+let drums = kick * 0.8 + tom * 0.35 + thump * 0.15 + shk * 0.05
+let far   = drums |> lpf(600, 0.3)
+let wet   = far |> reverb(3.5, 0.6)
+let mix   = far * 0.35 + wet * 0.5
+# block DC / sub-sonic drift so it doesn't eat headroom.
+let clean = mix |> hp1(30)
+
+[clean * fadeIn * 0.16, clean * fadeIn * 0.15]

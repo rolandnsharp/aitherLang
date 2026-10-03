@@ -1,0 +1,55 @@
+# bats — microbats hunting at dusk.
+#
+# Real echolocation sits at 20–110 kHz; these calls are pitched down
+# ~10x into human hearing, the way a bat detector's time-expansion does.
+# Each call is a fast downward FM sweep. A bat cruises at ~10 calls/s
+# ("search phase"), then closes on a moth and the calls shorten and
+# speed up to ~150/s — the "feeding buzz" — before dropping back.
+
+# One call: a downward sweep from `hi` to `lo` Hz over roughly `len` s.
+def call(trig, hi, lo, len):
+  let sweep = discharge(trig, 4 / len)
+  # Decay minus a much faster decay = soft ~1 ms attack, so no click.
+  let amp   = discharge(trig, 7 / len) - discharge(trig, 4000)
+  sin(TAU * phasor(lo + (hi - lo) * sweep)) * amp
+
+# One bat. Every `period` s it hits a moth and buzzes; `offset` staggers
+# the bats so they don't all feed at once.
+def bat(period, offset, hi, lo):
+  let hunting = if sin(TAU * (t + offset) / period) > 0.9 then 1 else 0
+  let buzz = swell(hunting, 0.4, 0.08)
+  let rate = 9 + buzz * 140
+  let len  = 0.025 - buzz * 0.017
+  call(impulse(rate), hi, lo, len) * (0.6 + buzz * 0.4)
+
+# Close FM bat (pipistrelle-ish), swooping left to right.
+play pip:
+  pan(bat(5.0, 0.0, 6000, 2300), sin(TAU * t / 6.3) * 0.8) * 0.25
+
+# Lower, slower bat with a flatter call, circling the other way.
+play big:
+  pan(bat(7.1, 2.3, 3600, 2600), cos(TAU * t / 9.7) * -0.7) * 0.22
+
+# A third bat further off: quieter and duller.
+play far:
+  # Bind first: `bat(...) |> lpf(...)` in one step miscompiles to DC.
+  let b = bat(8.3, 4.1, 5200, 2100)
+  let dull = b |> lpf(3000, 0.5)
+  pan(dull, sin(TAU * t / 13.0 + 1.0) * 0.5) * 0.10
+
+# Night air: low wind and a cricket ticking away somewhere.
+play night:
+  let wind = noise() |> lpf(350, 0.4)
+  let chirp = (if phasor(28) < 0.5 then 1 else 0) * (if phasor(0.7) < 0.25 then 1 else 0)
+  let cricket = sin(TAU * phasor(4400)) * (chirp |> lp1(300))
+  pan(wind * 0.03, 0.0) + pan(cricket * 0.015, 0.6)
+
+# Everything is bound with `let` before piping: piping straight out of a
+# call (`delay(...) |> lpf(...)`) currently miscompiles to DC.
+let bats = pip + big + far
+let late = delay(bats, 0.045, 0.1)
+let echo = late |> lpf(2500, 0.5)
+let dry  = bats + echo * 0.3 + night
+let l = dry[0]
+let r = dry[1]
+[l |> reverb(1.2, 0.15), r |> reverb(1.2, 0.15)]
