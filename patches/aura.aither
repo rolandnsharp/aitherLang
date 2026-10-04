@@ -1,6 +1,6 @@
 # aura — first attempt at an aither-native sound.
 #
-# Combines two regions from SOUND_FRONTIERS.md:
+# Combines two regions from notes/SOUND_FRONTIERS.md:
 #
 #   * Region 1 — partial-index-modulated detuning. Each of 24 partials
 #     drifts at its own LFO rate (n / 7 Hz, with a per-partial phase

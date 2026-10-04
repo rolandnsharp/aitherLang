@@ -765,6 +765,6 @@ all voices including master.
 - [COMPOSING.md](COMPOSING.md) — signal-native composition idioms
 - [PHILOSOPHY.md](PHILOSOPHY.md) — design vision
 - [ARCHITECTURE.md](ARCHITECTURE.md) — implementation overview
-- [SOUND_FRONTIERS.md](SOUND_FRONTIERS.md) — unexplored regions of additive synthesis to chase
+- [notes/](notes/) — research notebooks and parked plans
 - [BUGS_AND_ISSUES.md](BUGS_AND_ISSUES.md) — known issues + session logs
 - [stdlib.aither](stdlib.aither) — the composition layer

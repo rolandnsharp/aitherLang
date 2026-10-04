@@ -77,7 +77,7 @@
 #   loop runs away into mode-splitting long before the C# loop
 #   accumulates audible amplitude.
 #
-# WHAT WOULD ACTUALLY WORK (per pole.md's third option, now elevated
+# WHAT WOULD ACTUALLY WORK (per notes/pole.md's third option, now elevated
 # to next candidate)
 #   Non-DHO state representation. The fundamental issue is that DHO
 #   poles are narrow-band filters with O(1/omega^2) gain at resonance
@@ -98,7 +98,7 @@
 # RECOMMENDATION
 #   Do NOT promote the broadband-field design to a primitive either.
 #   Both option-1 (scalar field) and option-2 (DHO-bank field) fail
-#   the bootstrap test. The remaining candidate from pole.md is the
+#   the bootstrap test. The remaining candidate from notes/pole.md is the
 #   non-DHO state representation. Whether that's still recognisable as
 #   "pole" or becomes a different primitive is an open question.
 #

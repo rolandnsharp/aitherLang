@@ -1,7 +1,7 @@
 # sympathetic_chord — DOCUMENTED NEGATIVE RESULT for the pole(state,
-# drive) shared-field design proposed in pole.md.
+# drive) shared-field design proposed in notes/pole.md.
 #
-# This patch builds the user-space proof-of-concept the pole.md plan
+# This patch builds the user-space proof-of-concept the notes/pole.md plan
 # asks for: three damped harmonic oscillators feeding a shared scalar
 # pressure field with one-sample delay (option 1, two-pass semantics).
 # Strike v1 with an impulse; v2 and v3 see drive ONLY through the
@@ -39,7 +39,7 @@
 # perturbation away from runaway.
 #
 # WHAT WOULD WORK
-# 1. Broadband-resonance field — `option 2` from bachPolyphase.md, a
+# 1. Broadband-resonance field — `option 2` from notes/bachPolyphase.md, a
 #    DHO bank tuned to chord-relevant frequencies that filters energy
 #    into each pole's resonance. The field is not a scalar leaky
 #    integrator but a multi-mode resonator. This is structural change
@@ -54,7 +54,7 @@
 #    that's already in normalised position units (no force-to-
 #    position scaling), the loop-gain math becomes tractable.
 #
-# RECOMMENDATION (see pole.md "Negative finding from user-space
+# RECOMMENDATION (see notes/pole.md "Negative finding from user-space
 # experiment" section): do not promote the shared-scalar-field design
 # to a primitive. The interesting cases are at unison (mode splitting,
 # already cheap with 2 dho calls and a buss bus state) or require a

@@ -342,29 +342,30 @@ high-quality reverb tails simultaneously, use a DAW.
   what to reach for and when
 - [GUIDE.md](GUIDE.md) — hands-on how-to for writing and performing
 - [ARCHITECTURE.md](ARCHITECTURE.md) — implementation overview
-- [SOUND_FRONTIERS.md](SOUND_FRONTIERS.md) — unexplored regions of
-  additive synthesis to chase
 - [BUGS_AND_ISSUES.md](BUGS_AND_ISSUES.md) — known issues + session logs
 - [stdlib.aither](stdlib.aither) — the starter kits, in aither
+- [notes/](notes/) — research notebooks, speculation and parked plans
+  (sound frontiers, cybernetics, polyphase, game audio). Not part of
+  the language; some record ideas that were tried and dropped.
 
 ## Architecture
 
 ```
-parser.nim         ~560 lines   tokenizer + recursive descent → AST
-codegen.nim       ~1350 lines   AST → C source + per-helper-type state layout
-voice.nim          ~260 lines   TCC compile → dlopen'd tick(); hot-reload migration
-dsp.nim            ~205 lines   native DSP primitives (filters, delay, reverb…)
-midi.nim           ~235 lines   ALSA seq input + auto-resubscribe + held-notes
-engine.nim         ~735 lines   audio callback + UNIX socket server + stats
-engine_types.nim    ~50 lines   data structs returned by engine procs
+parser.nim         ~700 lines   tokenizer + recursive descent → AST
+codegen.nim       ~1740 lines   AST → C source + per-helper-type state layout
+voice.nim          ~270 lines   TCC compile → dlopen'd tick(); hot-reload migration
+dsp.nim            ~300 lines   native DSP primitives (filters, delay, reverb…)
+midi.nim           ~330 lines   ALSA seq input + auto-resubscribe + held-notes
+engine.nim         ~750 lines   audio callback + UNIX socket server + stats
+engine_types.nim    ~60 lines   data structs returned by engine procs
 cli_output.nim     ~155 lines   text formatters for list/scope/parts/spectrum/audit
 analysis.nim       ~250 lines   pure FFT + spectral feature extraction
 render.nim          ~65 lines   offline patch render to in-memory buffer
 aither.nim         ~105 lines   CLI dispatch (entry point)
-stdlib.aither      ~225 lines   starter-kit defs (additive, inharmonic, midi_keyboard, …)
+stdlib.aither      ~340 lines   starter-kit defs (additive, inharmonic, midi_keyboard, …)
 ```
 
-About 4250 lines Nim total. A patch is parsed to an AST, transpiled
+About 4800 lines Nim total. A patch is parsed to an AST, transpiled
 to C, handed to TCC which compiles it to machine code in memory, and
 the resulting `tick(state, t)` function pointer is called once per
 sample from the audio callback. Hot reload compiles the new code off
