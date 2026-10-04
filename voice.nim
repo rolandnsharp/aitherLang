@@ -2,7 +2,7 @@
 ## the old bytecode VM. Each voice owns a TCC state (kept alive while
 ## its compiled tick() can run) and a malloc'd VoiceState buffer.
 
-import std/[strutils, tables]
+import std/[strutils, tables, os, osproc, locks]
 import parser, tcc, dsp, codegen, midi
 
 type
@@ -41,10 +41,20 @@ type
     # Used at hot-reload time to copy matching (type, perTypeIdx) regions
     # from the old state into the new one.
     regions*:         seq[Region]
+    # The C behind tickFn, and a counter bumped on every commit, so a
+    # background -O2 build can tell whether it still matches the voice.
+    csrc*:            string
+    gen*:             int
+    optimized*:       bool
 
 # TCC invokes this synchronously during compile/relocate; we stash the
 # most recent message so compileProgram can report it on failure.
 var lastTccError {.threadvar.}: string
+
+# libtcc keeps global state, so only one thread may be inside it at a
+# time: the server thread loading a patch, or the -O2 worker linking one.
+var tccLock: Lock
+initLock(tccLock)
 
 proc errHandler(opaque: pointer; msg: cstring) {.cdecl.} =
   lastTccError = $msg
@@ -82,10 +92,14 @@ proc registerNatives(s: TccState) =
   discard s.addSymbol("n_midi_voice_freq", cast[pointer](nMidiVoiceFreq))
   discard s.addSymbol("n_midi_voice_gate", cast[pointer](nMidiVoiceGate))
 
+const SizeHelper = "\nint voice_state_size(void) { return sizeof(VoiceState); }\n"
+
 proc compileProgram(program: Node; patchPath: string; sr: float64):
-    tuple[lib: TccState; tickFn: TickFn; size: int;
+    tuple[lib: TccState; tickFn: TickFn; size: int; csrc: string;
           varNames, partNames: seq[string]; regions: seq[Region]] =
   let (csrc, varNames, partNames, regions) = generate(program, patchPath, sr)
+  acquire(tccLock)
+  defer: release(tccLock)
   let lib = tccNew()
   if cast[pointer](lib) == nil:
     raise newException(ValueError, "tcc_new failed")
@@ -100,7 +114,7 @@ proc compileProgram(program: Node; patchPath: string; sr: float64):
   registerNatives(lib)
   # Append a size-reporting helper so the engine allocates exactly
   # sizeof(VoiceState) — which varies by patch (extra fields per top-level var).
-  let withSize = csrc & "\nint voice_state_size(void) { return sizeof(VoiceState); }\n"
+  let withSize = csrc & SizeHelper
   if lib.compileString(withSize) < 0:
     lib.delete()
     raise newException(ValueError,
@@ -113,7 +127,49 @@ proc compileProgram(program: Node; patchPath: string; sr: float64):
   if fn == nil or sizeFn == nil:
     lib.delete()
     raise newException(ValueError, "TCC symbol lookup failed")
-  (lib, fn, int(sizeFn()), varNames, partNames, regions)
+  (lib, fn, int(sizeFn()), withSize, varNames, partNames, regions)
+
+proc compileOptimized*(csrc: string; stateSize: int):
+    tuple[lib: TccState; tickFn: TickFn] =
+  ## Build the same C that TCC just loaded with the system C compiler at
+  ## -O2, then link the object in memory with TCC, so natives resolve
+  ## exactly as they do for the fast path. Slow (seconds), so run it off
+  ## the audio and server threads; the result is a drop-in tick() for
+  ## the same state layout (checked via voice_state_size).
+  let dir = getTempDir() / "aither-" & $getCurrentProcessId()
+  createDir(dir)
+  let base = dir / "opt-" & $getThreadId()
+  let cfile = base & ".c"
+  let ofile = base & ".o"
+  writeFile(cfile, csrc)
+  defer:
+    removeFile(cfile)
+    removeFile(ofile)
+  let (output, code) = execCmdEx("cc -O2 -march=native -fno-stack-protector " &
+    "-fno-asynchronous-unwind-tables -c -o " & quoteShell(ofile) & " " &
+    quoteShell(cfile))
+  if code != 0:
+    raise newException(ValueError, "cc failed: " & output)
+  acquire(tccLock)                     # cc ran unlocked; linking needs TCC
+  defer: release(tccLock)
+  lastTccError = ""
+  let lib = tccNew()
+  if cast[pointer](lib) == nil:
+    raise newException(ValueError, "tcc_new failed")
+  lib.setErrorFunc(nil, errHandler)
+  if lib.setOutputType(OutputMemory) != 0 or lib.addLibrary("m") != 0:
+    lib.delete()
+    raise newException(ValueError, "tcc setup failed")
+  registerNatives(lib)
+  if lib.addFile(cstring(ofile)) < 0 or lib.relocate() < 0:
+    lib.delete()
+    raise newException(ValueError, "linking optimized object failed: " & lastTccError)
+  let fn = cast[TickFn](lib.getSymbol("tick"))
+  let sizeFn = cast[SizeFn](lib.getSymbol("voice_state_size"))
+  if fn == nil or sizeFn == nil or int(sizeFn()) != stateSize:
+    lib.delete()
+    raise newException(ValueError, "optimized build doesn't match the loaded layout")
+  (lib, fn)
 
 proc newVoice*(sr: float64): NativeVoice =
   NativeVoice()
@@ -142,12 +198,13 @@ type
     stateSize*: int
     varNames*, partNames*: seq[string]
     regions*: seq[Region]
+    csrc*: string                # the C that was compiled, for compileOptimized
 
 proc prepare*(program: Node; sr: float64; patchPath: string = ""): Prepared =
   ## Compile + allocate the new state buffer. Slow (TCC compile is 5-20 ms
   ## on big patches, state zero-init is another ms for 4 MB). Caller must
   ## hand the result to `commit` to actually swap it in.
-  let (lib, fn, size, varNames, partNames, regions) =
+  let (lib, fn, size, csrc, varNames, partNames, regions) =
     compileProgram(program, patchPath, sr)
   let newState = alloc0(size)
   cast[ptr VoiceHeader](newState).sr = sr
@@ -159,7 +216,7 @@ proc prepare*(program: Node; sr: float64; patchPath: string = ""): Prepared =
   for r in regions:
     for k, v in r.init:
       pool[r.offset + k] = v
-  Prepared(lib: lib, tickFn: fn, state: newState, stateSize: size,
+  Prepared(lib: lib, tickFn: fn, state: newState, stateSize: size, csrc: csrc,
            varNames: varNames, partNames: partNames, regions: regions)
 
 # Defense 1: a region is "poisoned" if any of its slots is NaN, ±Inf,
@@ -256,6 +313,21 @@ proc commit*(v: NativeVoice; p: Prepared) =
   v.tccLib = p.lib
   v.varNames = p.varNames
   v.regions = p.regions
+  v.csrc = p.csrc
+  inc v.gen
+  v.optimized = false
+
+proc upgrade*(v: NativeVoice; gen: int; lib: TccState; fn: TickFn): bool =
+  ## Swap in an -O2 tick() built from generation `gen`'s source. Same C,
+  ## same state layout, so only the function pointer changes: no state
+  ## copy, no glitch. Refused (false) if the voice was reloaded since.
+  ## Must be called under the audio mutex, like commit.
+  if v.gen != gen or v.state == nil: return false
+  v.oldLibs.add v.tccLib
+  v.tccLib = lib
+  v.tickFn = fn
+  v.optimized = true
+  true
 
 proc load*(v: NativeVoice; program: Node; sr: float64;
            patchPath: string = "") =

@@ -37,3 +37,5 @@ proc setErrorFunc*(s: TccState; opaque: pointer; f: ErrorFunc)
   {.importc: "tcc_set_error_func", cdecl.}
 proc addLibrary*(s: TccState; name: cstring): cint
   {.importc: "tcc_add_library", cdecl.}
+proc addFile*(s: TccState; filename: cstring): cint
+  {.importc: "tcc_add_file", cdecl.}

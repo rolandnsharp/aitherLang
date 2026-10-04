@@ -197,6 +197,69 @@ proc sweepInactiveSlots() =
     slots[i] = Slot()
   slotCount = dst
 
+# --------------------------------------------------- background -O2 rebuild
+# TCC gets a patch playing within milliseconds, but its code is slow
+# (an additive patch can run 5x slower than cc -O2). So each load also
+# queues the same C for this worker, which builds it with cc -O2 and
+# swaps the voice's tick() for the fast one: same state, no glitch. A
+# reload while it builds makes the job stale and the result is dropped.
+
+type OptJob = object
+  name:      string
+  voice:     pointer   # identity only: compared under mtx, never followed
+  gen:       int
+  csrc:      string
+  stateSize: int
+
+var
+  optQueue:   Channel[OptJob]
+  optThread:  Thread[void]
+  optEnabled: bool
+
+proc currentSlot(job: OptJob): int =
+  ## The slot still running the job's code, or -1. Caller holds mtx.
+  let i = findSlot(job.name)
+  if i >= 0 and cast[pointer](slots[i].voice) == job.voice and
+     slots[i].voice.gen == job.gen: i
+  else: -1
+
+proc optWorker() {.thread.} =
+  {.cast(gcsafe).}:
+    while true:
+      let job = optQueue.recv()
+      acquire(mtx)
+      let live = currentSlot(job) >= 0
+      release(mtx)
+      if not live: continue                # reloaded while queued
+      try:
+        let (lib, fn) = compileOptimized(job.csrc, job.stateSize)
+        acquire(mtx)
+        let i = currentSlot(job)
+        var ok = false
+        if i >= 0:
+          let v {.cursor.} = slots[i].voice  # no refcount traffic off-thread
+          ok = v.upgrade(job.gen, lib, fn)
+        release(mtx)
+        if ok: stderr.writeLine "[aither] " & job.name & " optimized (cc -O2)"
+      except CatchableError as e:
+        stderr.writeLine "[aither] cc -O2 build of " & job.name &
+                         " failed, staying on TCC: " & e.msg.splitLines()[0]
+
+proc queueOptimize(name: string; v: NativeVoice) =
+  ## Called from the server thread after commit, without mtx: only this
+  ## thread commits, so v.gen / v.csrc can't change underneath us.
+  if not optEnabled: return
+  optQueue.send(OptJob(name: name, voice: cast[pointer](v), gen: v.gen,
+                       csrc: v.csrc, stateSize: v.stateSize))
+
+proc startOptimizer() =
+  if getEnv("AITHER_OPT") == "0" or findExe("cc").len == 0:
+    stderr.writeLine "[aither] cc -O2 rebuilds off (no cc, or AITHER_OPT=0)"
+    return
+  optQueue.open()
+  createThread(optThread, optWorker)
+  optEnabled = true
+
 proc fadeDeltaFor(seconds: float64): float64 =
   let s = if seconds <= 0.0: DefaultFadeMs / 1000.0 else: seconds
   1.0 / (s * float64(SampleRate))
@@ -291,7 +354,8 @@ proc loadPatch*(filename: string; fadeIn: float64): string =
   let idx = findSlot(baseName)
   let now = timeSec + timeFrac
   if idx >= 0:
-    slots[idx].voice.commit(prepared)
+    let committed = slots[idx].voice
+    committed.commit(prepared)
     slots[idx].nanLogged = false           # fresh diagnostics for the new code
     if slots[idx].runaway:                 # new code gets a fresh chance
       slots[idx].runaway = false
@@ -308,6 +372,7 @@ proc loadPatch*(filename: string; fadeIn: float64): string =
       slots[idx].fadeDelta = fadeDeltaFor(fadeIn)
     release(mtx)
     stderr.writeLine "ok (" & (if retrigger: "retrigger " else: "hot-swap ") & baseName & ")"
+    queueOptimize(baseName, committed)
   else:
     if slotCount >= MaxVoices:
       release(mtx)
@@ -322,6 +387,7 @@ proc loadPatch*(filename: string; fadeIn: float64): string =
     inc slotCount
     release(mtx)
     stderr.writeLine "ok (new " & baseName & ")"
+    queueOptimize(baseName, voice)
   # Auto-resubscribe MIDI if the input thread had silently died (issue
   # 4c). Cheap when nothing dropped (returns "" immediately); on actual
   # recovery we log so the operator knows their keyboard is back.
@@ -697,6 +763,7 @@ proc startEngine*() =
     quit "audio start failed", 1
 
   echo "aither \xC2\xB7 ", SampleRate, " Hz \xC2\xB7 ", SocketPath
+  startOptimizer()
 
   # Bring up MIDI input. If no sequencer is available (unusual on Linux
   # but possible in containers / chroots) we just log and carry on —

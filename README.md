@@ -371,5 +371,13 @@ the resulting `tick(state, t)` function pointer is called once per
 sample from the audio callback. Hot reload compiles the new code off
 the audio thread, then swaps pointers under a brief mutex while
 migrating state regions by `(typeName, perTypeIdx, size)` identity.
+
+TCC compiles fast but its code is slow, so each load also hands the
+same C to a background worker that builds it with `cc -O2` (0.5–2 s)
+and swaps the voice's `tick()` for the fast one: same state, so no
+glitch. Heavy additive patches run up to ~5x cheaper once it lands
+(the engine logs `optimized (cc -O2)`). A reload while it builds
+just drops the stale result. Needs a C compiler on the PATH; set
+`AITHER_OPT=0` to turn it off.
 Dependencies: Nim's stdlib, libtcc, ALSA, and the system audio
 library.
