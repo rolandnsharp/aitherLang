@@ -65,10 +65,11 @@ block partsCases:
   doAssert formatParts(PartsQuery(found: true, voiceName: "y", parts: @[])) ==
     "(no parts)"
   let q = PartsQuery(found: true, voiceName: "drums", parts: @[
-    PartInfo(name: "kick", state: psPlaying, gain: 1.0),
+    PartInfo(name: "kick", state: psPlaying, gain: 1.0, rms: 0.5, peak: 1.0),
     PartInfo(name: "snare", state: psSilent, gain: 0.0)])
   let txt = formatParts(q)
-  doAssert txt == "drums\n  kick  [playing]  gain=1.00\n  snare  [silent]  gain=0.00",
+  doAssert txt == "drums\n  kick   [playing]  gain=1.00  rms=-6.0dB peak=0.0dB\n" &
+                  "  snare  [silent]  gain=0.00  rms=-infdB peak=-infdB",
     "parts format: " & txt
 
 # --- 7. formatMidiHeader: empty input → empty string; populated → tagged.

@@ -11,8 +11,8 @@
 ## patch that processes the engine's audio input can be iterated on
 ## offline against the same material every time.
 
-import std/[os, streams]
-import parser, voice, dsp
+import std/[os, streams, math, strutils]
+import parser, voice, dsp, engine_types
 
 const Stdlib = staticRead("stdlib.aither")
 
@@ -20,30 +20,105 @@ type
   RenderError* = object of CatchableError
   Stereo* = tuple[left, right: seq[float64]]
 
-proc renderProgram(prog: Node; seconds: float64; sr: int;
-                   input: Stereo): Stereo =
+  Rendered* = object
+    audio*: Stereo
+    parts*: seq[PartLevel]
+    seconds*: float64            # length of the measured window
+    skipped*: float64            # rendered first but not measured
+
+const LowSplitHz = 200.0
+
+# A render this long (lead-in included) is built with cc -O2 first: the
+# seconds of compiling pay for themselves against TCC's slow code.
+const OptimizeOverSeconds = 4.0
+
+proc optimize(v: NativeVoice) =
+  if getEnv("AITHER_OPT") == "0" or findExe("cc").len == 0: return
+  try:
+    let (lib, fn) = compileOptimized(v.csrc, v.stateSize)
+    discard v.upgrade(v.gen, lib, fn)
+  except CatchableError:
+    discard                       # stay on TCC; same output, just slower
+
+# 4th-order Butterworth lowpass (two biquads) for the below-200 Hz
+# share: steep enough that a 330 Hz tone reads ~2%, a 100 Hz one ~100%.
+type Biquad = object
+  b0, b1, b2, a1, a2, z1, z2: float64
+
+proc lowpass(fc, q: float64; sr: int): Biquad =
+  let w = 2.0 * PI * fc / float64(sr)
+  let alpha = sin(w) / (2.0 * q)
+  let a0 = 1.0 + alpha
+  result.b0 = (1.0 - cos(w)) / 2.0 / a0
+  result.b1 = (1.0 - cos(w)) / a0
+  result.b2 = result.b0
+  result.a1 = -2.0 * cos(w) / a0
+  result.a2 = (1.0 - alpha) / a0
+
+proc step(f: var Biquad; x: float64): float64 {.inline.} =
+  result = f.b0 * x + f.z1
+  f.z1 = f.b1 * x - f.a1 * result + f.z2
+  f.z2 = f.b2 * x - f.a2 * result
+
+proc renderVoice*(v: NativeVoice; seconds: float64; sr: int;
+                  input: Stereo = (@[], @[]); skip = 0.0;
+                  t0 = 0.0; feedInput = true): Rendered =
+  ## Tick a loaded voice from engine time `t0`: `skip` seconds of lead-in
+  ## (run, not kept), then `seconds` kept and measured per part. NaN at
+  ## any sample raises RenderError naming the time it happened. Inside
+  ## the engine pass `feedInput = false`: `input()` then reads the live
+  ## capture, and the render leaves it alone.
+  let nSkip = max(0, int(skip * float64(sr)))
   let n = max(0, int(seconds * float64(sr)))
-  result.left.setLen(n)
-  result.right.setLen(n)
-  let v = newVoice(float64(sr))
-  v.load(prog, float64(sr))
-  for i in 0 ..< n:
+  if float64(nSkip + n) / float64(sr) >= OptimizeOverSeconds: v.optimize()
+  result.seconds = float64(n) / float64(sr)
+  result.skipped = float64(nSkip) / float64(sr)
+  result.audio.left.setLen(n)
+  result.audio.right.setLen(n)
+  let np = v.partNames.len
+  var sumSq, lowSq, peak = newSeq[float64](np)
+  var lp1, lp2 = newSeq[Biquad](np)
+  for p in 0 ..< np:
+    lp1[p] = lowpass(LowSplitHz, 0.5412, sr)
+    lp2[p] = lowpass(LowSplitHz, 1.3066, sr)
+  for i in 0 ..< nSkip + n:
     # Feed the recording one frame at a time; silence past its end.
-    if i < input.left.len:
+    if not feedInput: discard
+    elif i < input.left.len:
       inputL = input.left[i]
       inputR = input.right[i]
     else:
       inputL = 0.0
       inputR = 0.0
-    let s = v.tick(float64(i) / float64(sr))
+    let s = v.tick(t0 + float64(i) / float64(sr))
     if s.l != s.l or s.r != s.r:
-      inputL = 0.0; inputR = 0.0
+      if feedInput:
+        inputL = 0.0; inputR = 0.0
       raise newException(RenderError,
-        "patch produced NaN at sample " & $i & " of " & $n)
-    result.left[i] = s.l
-    result.right[i] = s.r
-  inputL = 0.0
-  inputR = 0.0
+        "patch produced NaN at " & formatFloat(float64(i) / float64(sr), ffDecimal, 3) &
+        "s (sample " & $i & " of " & $(nSkip + n) & ")")
+    if i < nSkip: continue
+    result.audio.left[i - nSkip] = s.l
+    result.audio.right[i - nSkip] = s.r
+    for p in 0 ..< np:
+      let m = (v.partOut[2*p] + v.partOut[2*p + 1]) * 0.5
+      let low = lp2[p].step(lp1[p].step(m))
+      sumSq[p] += m * m
+      lowSq[p] += low * low
+      peak[p] = max(peak[p], max(abs(v.partOut[2*p]), abs(v.partOut[2*p + 1])))
+  if feedInput:
+    inputL = 0.0
+    inputR = 0.0
+  for p in 0 ..< np:
+    result.parts.add PartLevel(name: v.partNames[p], gain: v.partGains[p],
+      rms: (if n > 0: sqrt(sumSq[p] / float64(n)) else: 0.0), peak: peak[p],
+      low: (if sumSq[p] > 0.0: min(1.0, lowSq[p] / sumSq[p]) else: 0.0))
+
+proc renderProgram(prog: Node; seconds: float64; sr: int;
+                   input: Stereo; skip = 0.0): Rendered =
+  let v = newVoice(float64(sr))
+  v.load(prog, float64(sr))
+  renderVoice(v, seconds, sr, input, skip)
 
 proc buildProgram(src, srcTag: string): Node =
   let stdAst = parseProgram(Stdlib)
@@ -58,16 +133,22 @@ proc renderPatchSrc*(src: string; seconds: float64;
   ## empty buffers — handy for "does it parse?"). NaN at any sample
   ## raises RenderError so downstream analysis can't silently ingest
   ## garbage.
-  renderProgram(buildProgram(src, "<inline>"), seconds, sr, input)
+  renderProgram(buildProgram(src, "<inline>"), seconds, sr, input).audio
 
-proc renderPatch*(srcPath: string; seconds: float64;
-                  sr: int = 48000; input: Stereo = (@[], @[])): Stereo =
-  ## Render a patch from disk. Raises IOError if the file doesn't exist;
-  ## ParseError / ValueError propagate from parser / codegen.
+proc renderPatchFull*(srcPath: string; seconds: float64; sr: int = 48000;
+                      input: Stereo = (@[], @[]); skip = 0.0): Rendered =
+  ## Render a patch from disk, with per-part levels. `skip` seconds run
+  ## first and aren't kept, to reach a later section. Raises IOError if
+  ## the file doesn't exist; ParseError / ValueError propagate from
+  ## parser / codegen.
   if not fileExists(srcPath):
     raise newException(IOError, "patch not found: " & srcPath)
   let src = readFile(srcPath)
-  renderProgram(buildProgram(src, srcPath), seconds, sr, input)
+  renderProgram(buildProgram(src, srcPath), seconds, sr, input, skip)
+
+proc renderPatch*(srcPath: string; seconds: float64;
+                  sr: int = 48000; input: Stereo = (@[], @[])): Stereo =
+  renderPatchFull(srcPath, seconds, sr, input).audio
 
 proc monoMix*(left, right: openArray[float64]): seq[float64] =
   ## (L + R) * 0.5 in fresh storage. Spectral analysis usually wants

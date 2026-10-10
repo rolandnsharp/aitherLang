@@ -100,6 +100,14 @@ and `$env` keep their current values. Every reference to
 state wears the `$` so the visual shape of a patch tells you
 which values carry memory.
 
+State is keyed by the `play` or `let` it lives in: adding a
+filter, `prev` or `$x` to one play leaves every other play's
+state where it was, so a physical model elsewhere in the file
+doesn't jump. Within one statement it's matched by order, so
+a new stateful call added *above* others in the same `let`
+still shifts those. A `$var` that went NaN re-inits on the
+next send instead of carrying the NaN forward.
+
 ### Helper functions
 
 `def` declares a reusable function. It takes parameters and
@@ -249,7 +257,7 @@ ffmpeg -i jam.wav -c:a libopus -b:a 192k jam.opus
 
 ### Versioning with git
 
-Aither has no built-in undo. The patch file *is* the source
+Aither keeps no edit history (a send that blows up rolls back to the version before it, but that is one step, not undo). The patch file *is* the source
 of truth, the engine holds runtime state but not history.
 Use git as your time machine.
 
@@ -278,8 +286,28 @@ Two patterns that pay off:
 
 A failed `aither send` (compile error) doesn't lose the previously
 loaded voice — the engine returns `ERR` and keeps running the prior
-version. The risk is "patch compiled fine but produces silence /
-NaN / wrong audio." That's exactly what `git checkout` is for.
+version. A send that compiles but blows up (NaN, or past +9.5 dBFS)
+within 20 s of landing is **rolled back**: the previous version comes
+back with its state as of the swap, within a few ms, and `send`
+reports `ROLLED BACK`. Later blow-ups reset the voice's state; a
+runaway mutes it and fades it back in two seconds later (three tries
+per send). The music doesn't stop for a bad edit.
+
+`send` waits a second (`AITHER_SEND_WAIT`, 0 to skip), then reports
+the voice's real level, quiet parts, guard trips and the master.
+
+To check an edit before it plays, `try` it:
+
+```
+./aither try bass.aither 2        # 2 s as a send would land it now
+./aither try bass.aither 2 --from 30   # ...30 s further on
+```
+
+`try` compiles the patch, carries the live voice's state into it
+exactly as `send` would, and renders it offline from the engine's
+current time, so `$start = t` timers and running physics are where
+they really are. The live sound isn't touched. It prints the spectrum
+and the per-part table, or `WOULD BREAK` and which part did it.
 
 ## Observability
 
@@ -308,7 +336,16 @@ for live diagnosis ("is my detuned saw really at 110 Hz?").
 `audit` is offline (parses + compiles + ticks + analyses
 in-process, ~100 ms turnaround) — handy for verifying a
 patch produces the spectrum you intended before you bother
-playing it.
+playing it. `audit patch 4 --from 60` runs the first 60 s
+unmeasured and measures the next 4. Renders of 4 s or more
+are built with cc -O2 first.
+
+Both `audit` and `try` end with a per-part table: each play
+block's RMS and peak, and how much of its energy is below
+200 Hz. A part far under the loudest is flagged `QUIET`; one
+that is mostly below 200 Hz is flagged too, because laptop
+speakers can't play it however loud it measures. Live,
+`./aither parts <voice>` shows each part's level the same way.
 
 ## Time-based expressions
 

@@ -2,7 +2,7 @@
 ## the old bytecode VM. Each voice owns a TCC state (kept alive while
 ## its compiled tick() can run) and a malloc'd VoiceState buffer.
 
-import std/[strutils, tables, os, osproc, locks]
+import std/[strutils, tables, sets, os, osproc, locks]
 import parser, tcc, dsp, codegen, midi
 
 type
@@ -22,6 +22,9 @@ type
     # per-part gains. Set at load(); the seq is sized once (on first load
     # per voice) so its data address stays stable.
     partGainsPtr*:  pointer
+    # Points at NativeVoice.partOut: tick() writes each part's L/R there,
+    # and the engine meters them.
+    partOutPtr*:    pointer
 
   NativeVoice* = ref object
     state*:     pointer          # malloc'd VoiceState buffer
@@ -37,6 +40,11 @@ type
     partGains*:       seq[float64]
     partFadeDeltas*:  seq[float64]
     partFadeTargets*: seq[float64]
+    # Per-part output (L, R per part, written by tick) and the engine's
+    # meters over it: decaying peak and smoothed mean square.
+    partOut*:         seq[float64]
+    partPeak*:        seq[float64]
+    partRmsSq*:       seq[float64]
     # Per-helper-type layout of this voice's pool (see codegen.Region).
     # Used at hot-reload time to copy matching (type, perTypeIdx) regions
     # from the old state into the new one.
@@ -46,6 +54,21 @@ type
     csrc*:            string
     gen*:             int
     optimized*:       bool
+    # The version that was playing before the last commit: its code and
+    # its state as of the swap. Kept so the engine can roll a hot-swap
+    # back when the new code blows up right after it lands, instead of
+    # going silent. One level only; cleared by a rollback.
+    prev*:            PrevVersion
+
+  PrevVersion* = object
+    state*:     pointer
+    stateSize*: int
+    tickFn*:    TickFn
+    varNames*:  seq[string]
+    regions*:   seq[Region]
+    partNames*: seq[string]
+    csrc*:      string
+    optimized*: bool
 
 # TCC invokes this synchronously during compile/relocate; we stash the
 # most recent message so compileProgram can report it on failure.
@@ -232,6 +255,11 @@ proc isPoisonedRegion(pool: ptr UncheckedArray[float64];
     if v != v or v > 1e6 or v < -1e6: return true
   false
 
+# File-level `$vars` hold timers (`$m1start = t`) and sample counters,
+# which legitimately grow large, so only NaN/Inf counts as poison there.
+proc isBadVar(x: float64): bool {.inline.} =
+  x != x or x - x != 0.0
+
 # Defense 2: zero the stateful-primitive regions of the DSP pool.
 # Called from the audio callback when a tick produces NaN/Inf — the
 # next tick reads from clean filter / delay / reverb state. Regions
@@ -248,6 +276,82 @@ proc resetPool*(v: NativeVoice) =
     if r.typeName in ["var", "pvar"]: continue
     zeroMem(addr pool[r.offset], r.size * sizeof(float64))
 
+proc scrubState*(v: NativeVoice; hard = false) =
+  ## Clear poison out of the user state that `resetPool` leaves alone.
+  ## A def's `$x`/pair region that is NaN or past 1e6 is zeroed, so its
+  ## init runs again next tick (`hard` zeroes every one of them: the
+  ## physics keeps blowing up even from clean filters). A file-level
+  ## `$var` that is NaN/Inf re-inits; healthy ones (timers, counters)
+  ## are kept, so the arrangement doesn't jump. Allocation-free: called
+  ## from the audio callback.
+  if v.state == nil: return
+  let pool = cast[ptr UncheckedArray[float64]](v.state)
+  for r in v.regions:
+    if r.typeName notin ["var", "pvar"]: continue
+    if hard or isPoisonedRegion(pool, r.offset, r.size):
+      zeroMem(addr pool[r.offset], r.size * sizeof(float64))
+  for i in 0 ..< v.varNames.len:
+    if isBadVar(varAddr(v.state, i)[]):
+      varAddr(v.state, i)[] = 0.0
+      initedAddr(v.state, v.varNames.len, i)[] = 0'u8
+
+proc setPartNames(v: NativeVoice; names: seq[string]) =
+  ## Re-map per-part gains and fades onto a new list of part names,
+  ## keeping each surviving part's gain. Linear search, no tables: the
+  ## rollback path calls this from the audio callback.
+  var gains, targets, deltas, peaks, rms = newSeq[float64](names.len)
+  for i, n in names:
+    gains[i] = 1.0
+    targets[i] = 1.0
+    for j, o in v.partNames:
+      if o == n:
+        gains[i] = v.partGains[j]
+        targets[i] = v.partFadeTargets[j]
+        deltas[i] = v.partFadeDeltas[j]
+        peaks[i] = v.partPeak[j]
+        rms[i] = v.partRmsSq[j]
+        break
+  v.partNames = names
+  v.partGains = gains
+  v.partFadeTargets = targets
+  v.partFadeDeltas = deltas
+  v.partPeak = peaks
+  v.partRmsSq = rms
+  v.partOut = newSeq[float64](2 * names.len)
+
+proc pointPartGains(v: NativeVoice) =
+  let hdr = cast[ptr VoiceHeader](v.state)
+  hdr.partGainsPtr = if v.partGains.len > 0: v.partGains[0].addr else: nil
+  hdr.partOutPtr = if v.partOut.len > 0: v.partOut[0].addr else: nil
+
+proc dropPrev(v: NativeVoice) =
+  if v.prev.state != nil: dealloc(v.prev.state)
+  v.prev = PrevVersion()
+
+proc canRollback*(v: NativeVoice): bool {.inline.} = v.prev.state != nil
+
+proc rollback*(v: NativeVoice): bool =
+  ## Put the previous version back: its code, and its state as it was at
+  ## the swap (scrubbed in case it was already sick). The broken state
+  ## is freed. Must be called under the audio mutex, like commit, but
+  ## not from the audio callback (it allocates). Bumps
+  ## `gen`, so a pending -O2 build of the broken code is dropped.
+  if v.prev.state == nil: return false
+  dealloc(v.state)
+  v.state = v.prev.state
+  v.stateSize = v.prev.stateSize
+  v.tickFn = v.prev.tickFn
+  v.varNames = move v.prev.varNames
+  v.regions = move v.prev.regions
+  v.csrc = move v.prev.csrc
+  v.optimized = v.prev.optimized
+  v.setPartNames(move v.prev.partNames)
+  v.pointPartGains()
+  v.prev = PrevVersion()
+  inc v.gen
+  v.scrubState()
+  true
+
 proc commit*(v: NativeVoice; p: Prepared) =
   ## Apply a prepared compile. Must be called under the audio mutex:
   ## touches v.state / v.tickFn which the audio thread reads each sample.
@@ -256,6 +360,8 @@ proc commit*(v: NativeVoice; p: Prepared) =
   if v.state != nil:
     for i, name in v.varNames:
       let old = varAddr(v.state, i)[]
+      if isBadVar(old): continue       # NaN never migrates; it re-inits
+      if initedAddr(v.state, v.varNames.len, i)[] == 0'u8: continue  # reset by scrub
       # copy into the new struct at the new field's offset
       for j, nName in p.varNames:
         if nName == name:
@@ -263,54 +369,65 @@ proc commit*(v: NativeVoice; p: Prepared) =
           initedAddr(p.state, p.varNames.len, j)[] = 1'u8
           break
 
-    # Per-helper-type region migration. For each region in the new
-    # layout, find the old region with the same (typeName, perTypeIdx)
-    # and a matching size, then copy those pool slots across. Mismatched
-    # sizes (e.g. delay with a changed max_time) and unmatched regions
-    # leave the new region zeroed — we just lose that one helper's
-    # history rather than shifting everything else.
+    # Region migration. Each new region takes the slots of the old one
+    # in the same statement with the same type and index there (see
+    # Region.scope), so an edit inside one play or let leaves every
+    # other statement's filters, delays and physics untouched. Regions
+    # of a statement that didn't exist before (a renamed let, say) fall
+    # back to the old (typeName, perTypeIdx) match, but only against old
+    # regions whose statement is gone, so they can't steal live state.
+    # Mismatched sizes and unmatched regions start zeroed — one helper
+    # loses its history rather than everything else shifting. Poisoned
+    # old regions (NaN, >1e6) are never copied.
     let oldPool = cast[ptr UncheckedArray[float64]](v.state)
     let newPool = cast[ptr UncheckedArray[float64]](p.state)
-    for newR in p.regions:
-      for oldR in v.regions:
-        if oldR.typeName == newR.typeName and
-           oldR.perTypeIdx == newR.perTypeIdx and
-           oldR.size == newR.size:
+    var oldScopes, newScopes = initHashSet[string]()
+    for r in v.regions: oldScopes.incl r.scope
+    for r in p.regions: newScopes.incl r.scope
+    var oldByKey = initTable[(string, string, int), int]()
+    for i, r in v.regions: oldByKey[(r.scope, r.typeName, r.scopeIdx)] = i
+    var claimed = newSeq[bool](v.regions.len)
+    var pending: seq[int]
+    for ni, newR in p.regions:
+      let oi = oldByKey.getOrDefault((newR.scope, newR.typeName, newR.scopeIdx), -1)
+      if oi >= 0:
+        claimed[oi] = true
+        let oldR = v.regions[oi]
+        if oldR.size == newR.size and
+           not isPoisonedRegion(oldPool, oldR.offset, oldR.size):
+          copyMem(addr newPool[newR.offset], addr oldPool[oldR.offset],
+                  newR.size * sizeof(float64))
+      elif newR.scope notin oldScopes:
+        pending.add ni
+    for ni in pending:
+      let newR = p.regions[ni]
+      for oi, oldR in v.regions:
+        if not claimed[oi] and oldR.scope notin newScopes and
+           oldR.typeName == newR.typeName and
+           oldR.perTypeIdx == newR.perTypeIdx and oldR.size == newR.size:
+          claimed[oi] = true
           if not isPoisonedRegion(oldPool, oldR.offset, oldR.size):
-            copyMem(addr newPool[newR.offset],
-                    addr oldPool[oldR.offset],
+            copyMem(addr newPool[newR.offset], addr oldPool[oldR.offset],
                     newR.size * sizeof(float64))
-          # else: leave the new region zeroed; the patch gets a clean
-          # slate for that helper while everything else still migrates.
           break
 
+  # Keep the outgoing version for rollback (its state stops changing
+  # here, so it's a snapshot of the moment of the swap).
+  let outgoing = PrevVersion(state: v.state, stateSize: v.stateSize,
+    tickFn: v.tickFn, varNames: v.varNames, regions: v.regions,
+    partNames: v.partNames, csrc: v.csrc, optimized: v.optimized)
+
   # Diff old partNames vs new; preserve gain/fade state by name.
-  var oldGains = initTable[string, float64]()
-  var oldTargets = initTable[string, float64]()
-  var oldDeltas = initTable[string, float64]()
-  for i, n in v.partNames:
-    oldGains[n] = v.partGains[i]
-    oldTargets[n] = v.partFadeTargets[i]
-    oldDeltas[n] = v.partFadeDeltas[i]
-  v.partNames = p.partNames
-  v.partGains.setLen(p.partNames.len)
-  v.partFadeDeltas.setLen(p.partNames.len)
-  v.partFadeTargets.setLen(p.partNames.len)
-  for i, n in p.partNames:
-    v.partGains[i] = oldGains.getOrDefault(n, 1.0)
-    v.partFadeTargets[i] = oldTargets.getOrDefault(n, v.partGains[i])
-    v.partFadeDeltas[i] = oldDeltas.getOrDefault(n, 0.0)
-  if p.partNames.len > 0:
-    cast[ptr VoiceHeader](p.state).partGainsPtr = v.partGains[0].addr
-  else:
-    cast[ptr VoiceHeader](p.state).partGainsPtr = nil
+  v.setPartNames(p.partNames)
 
   # Swap. The audio callback is guaranteed to see a consistent pair
   # (tickFn + matching state) because we hold the mutex.
   if v.state != nil:
-    dealloc(v.state)
+    v.dropPrev()
+    v.prev = outgoing
     v.oldLibs.add v.tccLib   # keep old code alive — small leak per reload
   v.state = p.state
+  v.pointPartGains()
   v.stateSize = p.stateSize
   v.tickFn = p.tickFn
   v.tccLib = p.lib
@@ -331,6 +448,46 @@ proc upgrade*(v: NativeVoice; gen: int; lib: TccState; fn: TickFn): bool =
   v.tickFn = fn
   v.optimized = true
   true
+
+proc snapshotInto*(src: NativeVoice; dst: NativeVoice; buf: pointer) =
+  ## Make `dst` a stand-in for `src` as it is right now, for a preview
+  ## render: same layout and part gains, state copied into `buf` (an
+  ## alloc0'd buffer of src.stateSize). Copies only the regions in use
+  ## and the header/vars tail, not the whole 4 MB pool, to keep the time
+  ## under the audio mutex short. Caller holds the mutex. `dst` gets no
+  ## code: commit a Prepared to it next, which migrates from this state.
+  let sp = cast[ptr UncheckedArray[float64]](src.state)
+  let dp = cast[ptr UncheckedArray[float64]](buf)
+  for r in src.regions:
+    copyMem(addr dp[r.offset], addr sp[r.offset], r.size * sizeof(float64))
+  let tail = DspPoolSize * sizeof(float64)
+  copyMem(cast[pointer](cast[uint](buf) + uint(tail)),
+          cast[pointer](cast[uint](src.state) + uint(tail)),
+          src.stateSize - tail)
+  dst.state = buf
+  dst.stateSize = src.stateSize
+  dst.varNames = src.varNames
+  dst.regions = src.regions
+  dst.partNames = src.partNames
+  dst.partGains = src.partGains
+  dst.partFadeTargets = src.partFadeTargets
+  dst.partFadeDeltas = src.partFadeDeltas
+  dst.partPeak = src.partPeak
+  dst.partRmsSq = src.partRmsSq
+  dst.startT = src.startT
+
+proc dispose*(v: NativeVoice) =
+  ## Free a preview voice: its state, its prev, and its compiled code.
+  ## Only for voices the audio thread never saw.
+  v.dropPrev()
+  if v.state != nil: dealloc(v.state)
+  v.state = nil
+  acquire(tccLock)
+  for lib in v.oldLibs:
+    if cast[pointer](lib) != nil: lib.delete()
+  if cast[pointer](v.tccLib) != nil: v.tccLib.delete()
+  release(tccLock)
+  v.oldLibs = @[]
 
 proc load*(v: NativeVoice; program: Node; sr: float64;
            patchPath: string = "") =

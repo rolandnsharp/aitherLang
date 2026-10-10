@@ -4,6 +4,7 @@
 #define MINIAUDIO_IMPLEMENTATION
 #include "miniaudio.h"
 #include <string.h>
+#include <stdlib.h>
 
 /* `in` is the capture frames for this period (same frame count and
    channel count as `out`), or NULL when the device is playback-only. */
@@ -14,6 +15,7 @@ static aither_callback_t g_callback;
 static void* g_user_data;
 static int g_init;
 static int g_capture;
+static ma_context g_context;
 
 static void data_callback(ma_device* dev, void* out, const void* in,
                            ma_uint32 frames) {
@@ -31,6 +33,24 @@ int aither_audio_init(unsigned int sr, unsigned int ch, unsigned int buf,
                        aither_callback_t cb, void* ud) {
     g_callback = cb;
     g_user_data = ud;
+    /* AITHER_AUDIO=null: no sound card, the callback still runs in real
+       time. For a second engine (tests, a headless box) that must not
+       play through the speakers. */
+    const char* mode = getenv("AITHER_AUDIO");
+    if (mode && strcmp(mode, "null") == 0) {
+        ma_backend nullBackend[] = { ma_backend_null };
+        if (ma_context_init(nullBackend, 1, NULL, &g_context) != MA_SUCCESS) return -1;
+        ma_device_config c = ma_device_config_init(ma_device_type_playback);
+        c.playback.format = ma_format_f32;
+        c.playback.channels = ch;
+        c.sampleRate = sr;
+        c.dataCallback = data_callback;
+        c.periodSizeInFrames = buf;
+        if (ma_device_init(&g_context, &c, &g_device) != MA_SUCCESS) return -1;
+        g_capture = 0;
+        g_init = 1;
+        return 0;
+    }
     ma_device_config cfg = ma_device_config_init(ma_device_type_duplex);
     cfg.playback.format = ma_format_f32;
     cfg.playback.channels = ch;

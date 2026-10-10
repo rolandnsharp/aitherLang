@@ -33,6 +33,12 @@ type
   Region* = object
     typeName*: string
     perTypeIdx*: int
+    # Stable key: the statement the call sits in (`play drums/let k`,
+    # `let bass`, `out`, ...) and its index among same-type calls in that
+    # statement. Migration matches on this first, so a stateful call
+    # added to one play or let can't shift the state of any other.
+    scope*: string
+    scopeIdx*: int
     offset*: int            # absolute start offset into pool (in slots)
     size*: int              # number of float64 slots
     # Optional payload written into the first `init.len` slots when the
@@ -76,6 +82,8 @@ type
     topVarNames*: seq[string]   # top-level vars in definition order
     topVarSet: HashSet[string]
     topLets: HashSet[string]    # top-level let names (scoped to tick())
+    letsDone: HashSet[string]   # top-level lets emitted so far
+    letLines: Table[string, int] # top-level let name -> its line
     playNames*: seq[string]     # play blocks in definition order
     playSet: HashSet[string]
     stereoLets: HashSet[string] # top-level let names whose RHS is stereo
@@ -93,6 +101,8 @@ type
     typeCounter: Table[string, int]     # name -> next perTypeIdx
     typeCumSize: Table[string, int]     # name -> cumulative size so far
     typeOrder: seq[string]              # types in first-seen order
+    scope: string                       # statement being emitted (Region.scope)
+    scopeCounter: Table[string, int]    # scope & type -> next scopeIdx
     # File-level state declared with a pair (`$z = [0, 0]`). Each one is
     # two struct fields, `v_<name>__0` and `v_<name>__1`, listed in
     # topVarNames so they migrate across hot reloads by name like any
@@ -148,9 +158,13 @@ proc registerRegionInit(c: Ctx; typeName: string; size: int;
   c.typeCounter[typeName] = perTypeIdx + 1
   c.typeCumSize[typeName] = intraOffset + size
   let rid = c.regions.len
+  let scopeKey = c.scope & " | " & typeName
+  let scopeIdx = c.scopeCounter.getOrDefault(scopeKey, 0)
+  c.scopeCounter[scopeKey] = scopeIdx + 1
   # `offset` holds the intra-region offset here; `finaliseLayout` rewrites
   # it to an absolute pool slot once region bases are assigned.
   c.regions.add Region(typeName: typeName, perTypeIdx: perTypeIdx,
+                       scope: c.scope, scopeIdx: scopeIdx,
                        offset: intraOffset, size: size, init: init)
   offsetPlaceholder(rid)
 
@@ -222,6 +236,18 @@ proc lookup(sc: Scope; name: string): string =
     if name in s.names: return s.names[name]
     s = s.parent
   ""
+
+# True when the nearest binding of `name` in the scope chain is a plain
+# number: a def param or local let that shadows a file-level pair of
+# the same name (`let s = [l, r]` at the top, `adsr(gate, a, d, s, r)`
+# in stdlib). File-level names are consulted only when no scope binds it.
+proc scalarShadows(sc: Scope; name: string): bool =
+  var s = sc
+  while s != nil:
+    if name in s.stereoNames: return false
+    if name in s.names: return true
+    s = s.parent
+  false
 
 # Builtins callable by name from user code that aren't keywords or ops:
 # libm1, shape primitives, stateful inlined builtins, math helpers, MIDI.
@@ -771,7 +797,13 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
           n.str & " is a pair, but one number is needed here — pick a " &
           "side with " & n.str & "[0] / " & n.str & "[1], or use mono(" &
           n.str & ") " & errLoc(n))
-      elif n.str in c.topLets: "l_" & n.str
+      elif n.str in c.topLets:
+        if n.str notin c.letsDone:
+          raise newException(ValueError,
+            "'" & n.str & "' is used before its `let` on line " &
+            $c.letLines.getOrDefault(n.str) & ": move that let above " &
+            "this line " & errLoc(n))
+        "l_" & n.str
       elif n.str in c.topVarSet: "s->v_" & n.str
       else:
         raise newException(ValueError,
@@ -937,14 +969,12 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
     # Math misc
     if name == "pow" and n.kids.len == 2:
       return "pow(" & c.callArgs(sc, n.kids) & ")"
-    if name == "min" and n.kids.len == 2:
-      let a = c.emitExpr(sc, n.kids[0])
-      let b = c.emitExpr(sc, n.kids[1])
-      return &"fmin({a}, {b})"
-    if name == "max" and n.kids.len == 2:
-      let a = c.emitExpr(sc, n.kids[0])
-      let b = c.emitExpr(sc, n.kids[1])
-      return &"fmax({a}, {b})"
+    # min/max take two or more: max(a, b, c) = fmax(fmax(a, b), c).
+    if name in ["min", "max"] and n.kids.len >= 2:
+      var acc = c.emitExpr(sc, n.kids[0])
+      for k in n.kids[1 .. ^1]:
+        acc = &"f{name}({acc}, {c.emitExpr(sc, k)})"
+      return acc
     if name == "clamp" and n.kids.len == 3:
       let v = c.emitExpr(sc, n.kids[0])
       let lo = c.emitExpr(sc, n.kids[1])
@@ -1571,6 +1601,7 @@ proc refsStereo(c: Ctx; sc: Scope; n: Node): bool =
   if n == nil: return false
   case n.kind
   of nkIdent:
+    if sc != nil and sc.scalarShadows(n.str): return false
     if n.str in c.playSet or n.str in c.stereoLets: return true
     if n.str in c.pairVars: return true
     if sc != nil and sc.lookupStereo(n.str).ok: return true
@@ -1587,9 +1618,10 @@ proc refsStereo(c: Ctx; sc: Scope; n: Node): bool =
     # isn't a constant pick.
     let a = n.kids[0]; let i = n.kids[1]
     if a.kind == nkIdent and i.kind == nkNum and int(i.num) in {0, 1}:
-      let isStereoBase = a.str in c.playSet or a.str in c.stereoLets or
-                         a.str in c.pairVars or
-                         (sc != nil and sc.lookupStereo(a.str).ok)
+      let isStereoBase = (sc == nil or not sc.scalarShadows(a.str)) and
+                         (a.str in c.playSet or a.str in c.stereoLets or
+                          a.str in c.pairVars or
+                          (sc != nil and sc.lookupStereo(a.str).ok))
       if isStereoBase: return false
     return c.refsStereo(sc, i)   # ignore base; its stereo-ness is consumed
   of nkCall:
@@ -1614,6 +1646,14 @@ proc refsStereo(c: Ctx; sc: Scope; n: Node): bool =
     return false
 
 # ---- top-level emission ------------------------------------------------
+
+# The Region.scope name for a statement: what it binds, else its role.
+proc stmtScope(s: Node; isFinal: bool): string =
+  case s.kind
+  of nkLet: "let " & s.str
+  of nkVar, nkAssign, nkIdxAssign: "set " & s.str
+  of nkPlay: "play " & s.str
+  else: (if isFinal: "out" else: "expr")
 
 proc emit*(c: Ctx; program: Node): string =
   # First pass: collect top-level vars (including ones nested in play
@@ -1664,6 +1704,7 @@ proc emit*(c: Ctx; program: Node): string =
           "'" & s.str & "' is the name of a play block — " &
           "choose a different variable name " & errLoc(s))
       c.topLets.incl s.str
+      if s.str notin c.letLines: c.letLines[s.str] = s.line
     of nkPlay:
       let body = s.kids[0]
       if body.kind == nkBlock:
@@ -1722,6 +1763,7 @@ proc emit*(c: Ctx; program: Node): string =
   pre.add "  double sr;\n"
   pre.add "  double t, dt, start_t;\n"
   pre.add "  double* part_gains;\n"
+  pre.add "  double* part_out;\n"
   for vn in c.topVarNames:
     pre.add "  double v_" & vn & ";\n"
   pre.add "  unsigned char inited[" & $max(1, c.topVarNames.len) & "];\n"
@@ -1735,20 +1777,27 @@ proc emit*(c: Ctx; program: Node): string =
   # Lazy-init file-level state, top level and play bodies alike, in
   # declaration order. (Play-body inits used to be skipped, so `$x = 0.1`
   # inside a play started at 0.) A pair inits both of its fields.
-  for st in c.varDecls:
+  # File-level `$x = init` (top level or play body) lazy-inits where it
+  # is declared, so its init can read the lets above it. Only the first
+  # declaration of a name inits; later ones are plain state.
+  proc varInit(c: Ctx; sc: Scope; st: Node): string =
+    var isFirst = false
+    for d in c.varDecls:
+      if d == st: isFirst = true
+    if not isFirst: return ""
     var initPre = ""
     if st.str in c.pairVars:
       let i0 = c.topVarNames.find(pairVarField(st.str, 0))
       let i1 = i0 + 1
-      let v = c.emitStereo(topSc, st.kids[0], initPre)
-      body.add &"  if (!(s->inited[{i0}] & 1)) {{\n" & initPre &
+      let v = c.emitStereo(sc, st.kids[0], initPre)
+      &"  if (!(s->inited[{i0}] & 1)) {{\n" & initPre &
         &"    {pairVarRef(st.str, 0)} = ({v.l});\n" &
         &"    {pairVarRef(st.str, 1)} = ({v.r});\n" &
         &"    s->inited[{i0}] |= 1; s->inited[{i1}] |= 1;\n  }}\n"
     else:
       let i = c.topVarNames.find(st.str)
-      let init = c.scalarValue(topSc, st.kids[0], initPre, "$" & st.str)
-      body.add &"  if (!(s->inited[{i}] & 1)) {{\n" & initPre &
+      let init = c.scalarValue(sc, st.kids[0], initPre, "$" & st.str)
+      &"  if (!(s->inited[{i}] & 1)) {{\n" & initPre &
         &"    s->v_{st.str} = ({init}); s->inited[{i}] |= 1;\n  }}\n"
 
   # Top-level statements: let -> local; var handled above (init) and via
@@ -1770,8 +1819,12 @@ proc emit*(c: Ctx; program: Node): string =
       if s.source.len > 0: s.source else: c.patchPath
     if srcFile.len > 0 and s.line > 0:
       body.add &"#line {s.line} \"{srcFile}\"\n"
+    c.scope = stmtScope(s, i == finalIdx)
+    if i > 0 and program.kids[i - 1].kind == nkLet:
+      c.letsDone.incl program.kids[i - 1].str
     case s.kind
-    of nkDef, nkVar: discard       # def inlined; var already lazy-inited
+    of nkDef: discard              # inlined at call sites
+    of nkVar: body.add c.varInit(topSc, s)
     of nkLet:
       # Numeric array literal -> hoist to a static const, record it.
       if s.kids[0].kind == nkArr and
@@ -1840,12 +1893,16 @@ proc emit*(c: Ctx; program: Node): string =
         if bodyNode.kind == nkBlock: bodyNode.kids else: @[bodyNode]
       let lastIdx = stmts.len - 1
       for si, st in stmts:
+        c.scope = "play " & s.str & "/" & stmtScope(st, si == lastIdx)
         if si == lastIdx and st.kind notin {nkLet, nkVar, nkAssign, nkIdxAssign}:
           var sub = ""
           let v = c.emitStereo(inner, st, sub)
           body.add sub
           body.add &"    p_{s.str}_l = ({v.l}) * s->part_gains[{partIdx}];\n"
           body.add &"    p_{s.str}_r = ({v.r}) * s->part_gains[{partIdx}];\n"
+          # Each part's output for the engine's per-part meters (`parts`).
+          body.add &"    if (s->part_out) {{ s->part_out[{2*partIdx}] = p_{s.str}_l; " &
+                   &"s->part_out[{2*partIdx+1}] = p_{s.str}_r; }}\n"
         else:
           case st.kind
           of nkLet:
@@ -1903,7 +1960,7 @@ proc emit*(c: Ctx; program: Node): string =
                 let nv = inner.lookupNumLit(st.kids[0].str)
                 if nv.ok: inner.numLits[st.str] = nv.val
           of nkVar:
-            discard              # top-level-var init already ran
+            body.add c.varInit(inner, st)
           of nkAssign:
             if st.str in c.pairVars:
               body.add c.assignPair(inner,
@@ -1953,6 +2010,11 @@ proc emit*(c: Ctx; program: Node): string =
         else:
           let v = c.emitExpr(topSc, s)
           body.add &"  (void)({v});\n"
+  # No final expression: a file of play blocks plays all of them, rather
+  # than compiling to silence.
+  if finalIdx < 0 and c.playNames.len > 0:
+    body.add "  *outL = " & c.playNames.mapIt("p_" & it & "_l").join(" + ") & ";\n"
+    body.add "  *outR = " & c.playNames.mapIt("p_" & it & "_r").join(" + ") & ";\n"
   body.add "}\n"
 
   pre & c.arrayDecls & body

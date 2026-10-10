@@ -122,11 +122,11 @@ let z = cscale(2.5, 1, -3)
 block scalarMisuseErrors:
   var msg = ""
   try:
-    discard evalScalar("magnitude(cmul(1, 0, 1, 0))")
+    discard evalScalar("magnitude(1)")
   except CatchableError as e:
     msg = e.msg
   doAssert msg.len > 0,
-    "magnitude(cmul(...)) with one arg should error, got success"
+    "magnitude(1) with one number should error, got success"
   doAssert "magnitude" in msg or "2 scalars" in msg or "pair" in msg.toLowerAscii(),
     "error should mention magnitude/scalars/pair, got: " & msg
 

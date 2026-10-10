@@ -1,7 +1,7 @@
 ## aither engine — audio callback + socket CLI for live coding
 
 import std/[os, net, strutils, math, locks, tables]
-import parser, voice, miniaudio, midi, dsp
+import parser, voice, miniaudio, midi, dsp, render
 import engine_types, cli_output, analysis
 export engine_types
 
@@ -10,10 +10,22 @@ const
   Channels      = 2'u32
   BufferFrames  = 512'u32
   MaxVoices     = 16
-  SocketPath    = "/tmp/aither.sock"
   DefaultFadeMs = 20.0
+  # A voice that blows up this soon after a hot-swap is rolled back to
+  # the version that was playing before it, instead of going silent.
+  RollbackWindow = 20.0
+  # Inside that window the bar is lower than the runaway guard's +18
+  # dBFS: new code climbing past +9.5 dBFS goes back before it's loud.
+  RollbackLimit  = 3.0
+  # Runaway outside that window: mute, scrub the state, and fade back in
+  # this many seconds later, up to RunawayRetries times per send.
+  RunawayRetryGap = 2.0
+  RunawayRetries  = 3
 
 const Stdlib = staticRead("stdlib.aither")
+
+# AITHER_SOCK runs a second engine (or talks to one) beside the default.
+let SocketPath = getEnv("AITHER_SOCK", "/tmp/aither.sock")
 
 const EnvBinSamples = 2400  # 50ms per bin at 48 kHz
 
@@ -51,6 +63,15 @@ type
     recent:     RecentRing  # rolling 0.5s buffer for `spectrum`
     nanLogged:  bool        # one log line per voice per session, then quiet
     runaway:    bool        # muted by the runaway guard; cleared on resend
+    # Guard bookkeeping, all reset by a send. The audio callback only
+    # sets flags and counters; the doctor thread does the rollback.
+    swapAt:       float64   # engine time of the last hot-swap (0 = none)
+    wantRollback: bool      # blew up inside RollbackWindow: swap back
+    rolledBack:   bool      # the last send was rolled back
+    badRun:       int       # consecutive NaN samples
+    nanEvents:    int
+    runawayEvents: int
+    retryAt:      float64   # runaway mute lifts at this engine time
 
   # Public data structs (VoiceInfo, StatsSnapshot, etc.) live in
   # engine_types.nim — exported up so callers see them through engine.
@@ -84,6 +105,10 @@ var
 
 initLock(mtx)
 
+proc fadeDeltaFor(seconds: float64): float64 =
+  let s = if seconds <= 0.0: DefaultFadeMs / 1000.0 else: seconds
+  1.0 / (s * float64(SampleRate))
+
 # --------------------------------------------------------------- audio callback
 
 proc audioCallback(output: ptr UncheckedArray[cfloat],
@@ -112,32 +137,61 @@ proc audioCallback(output: ptr UncheckedArray[cfloat],
     var lMix = 0.0
     var rMix = 0.0
     for v in 0 ..< sc:
-      if not slots[v].active or slots[v].muted: continue
+      # A runaway mute lifts by itself after a gap, with a fade-in, so
+      # one bad moment in a long patch doesn't end the voice.
+      if slots[v].runaway and slots[v].retryAt > 0.0 and t >= slots[v].retryAt:
+        slots[v].runaway = false
+        slots[v].muted = false
+        slots[v].retryAt = 0.0
+        slots[v].fadeGain = 0.0
+        slots[v].fadeDelta = fadeDeltaFor(1.0)
+      if not slots[v].active or slots[v].muted or slots[v].wantRollback:
+        continue
       var l = 0.0
       var r = 0.0
       let s = slots[v].voice.tick(t)
       l = s.l; r = s.r
+      let nan = l != l or r != r or l > 1e6 or r > 1e6 or l < -1e6 or r < -1e6
+      if nan or abs(l) > RollbackLimit or abs(r) > RollbackLimit:
+        # Blew up right after a hot-swap: the new code is the suspect.
+        # Hold the voice silent for the few ms until the doctor thread
+        # puts the previous version back.
+        if slots[v].swapAt > 0.0 and t - slots[v].swapAt < RollbackWindow and
+           slots[v].voice.canRollback:
+          slots[v].wantRollback = true
+          continue
       # NaN/Inf defense: a single bad sample (unstable filter, runaway
       # resonator, sqrt of a negative, etc.) would otherwise propagate
-      # forever through the voice's pool state. Reset the pool, drop
-      # this sample's contribution, and log once per voice so the user
-      # learns about the issue without spamming 48000 lines/sec.
-      if l != l or r != r or l > 1e6 or r > 1e6 or l < -1e6 or r < -1e6:
+      # forever through the voice's pool state. Reset the pool, clear
+      # poisoned `$state`, drop this sample's contribution, and log once
+      # per voice so the user learns about it without 48000 lines/sec.
+      # If it keeps happening for 100 ms, every def `$state` re-inits.
+      if nan:
+        inc slots[v].badRun
         slots[v].voice.resetPool()
+        slots[v].voice.scrubState(hard = slots[v].badRun > int(SampleRate) div 10)
+        if slots[v].badRun == 1: inc slots[v].nanEvents
         if not slots[v].nanLogged:
           stderr.writeLine "[aither] voice " & slots[v].name &
                            " produced NaN/Inf — pool reset"
           slots[v].nanLogged = true
         continue
+      slots[v].badRun = 0
       # Runaway defense: finite but far too loud (an unstable filter
-      # chain climbing toward 1e6). Resetting would just let it climb
-      # again in bursts, so mute until the patch is resent.
+      # chain climbing toward 1e6). Mute, wipe the state, and retry
+      # after a gap; after RunawayRetries it stays muted until resent.
       if isRunaway(l, r):
         slots[v].voice.resetPool()
+        slots[v].voice.scrubState(hard = true)
         slots[v].muted = true
         slots[v].runaway = true
+        inc slots[v].runawayEvents
+        let retry = slots[v].runawayEvents <= RunawayRetries
+        slots[v].retryAt = if retry: t + RunawayRetryGap else: 0.0
         stderr.writeLine "[aither] voice " & slots[v].name &
-                         " exceeded +18 dBFS — muted until resent"
+          " exceeded +18 dBFS — " &
+          (if retry: "muted, retrying in " & $RunawayRetryGap & "s"
+           else: "muted until resent")
         continue
       slots[v].fadeGain = clamp(
         slots[v].fadeGain + slots[v].fadeDelta, 0.0, 1.0)
@@ -160,6 +214,12 @@ proc audioCallback(output: ptr UncheckedArray[cfloat],
             voice.partGains[p] = clamp(newG, 0.0, 1.0)
       let gl = l * slots[v].fadeGain
       let gr = r * slots[v].fadeGain
+      # Per-part meters, after the voice fade like the voice's own.
+      for p in 0 ..< voice.partPeak.len:
+        let a = max(abs(voice.partOut[2*p]), abs(voice.partOut[2*p + 1])) *
+                slots[v].fadeGain
+        voice.partPeak[p] = max(voice.partPeak[p] * PeakDecay, a)
+        voice.partRmsSq[p] = voice.partRmsSq[p] * (1.0 - RmsAlpha) + a * a * RmsAlpha
       update(slots[v].stats, gl, gr)
       # Per-voice rolling buffer for `aither spectrum`. Wraps in place;
       # snapshot reads from idx outward (oldest sample first).
@@ -265,9 +325,32 @@ proc startOptimizer() =
   createThread(optThread, optWorker)
   optEnabled = true
 
-proc fadeDeltaFor(seconds: float64): float64 =
-  let s = if seconds <= 0.0: DefaultFadeMs / 1000.0 else: seconds
-  1.0 / (s * float64(SampleRate))
+# ------------------------------------------------------- rollback doctor
+# The audio callback can't roll a voice back itself (that allocates and
+# frees), so it flags the slot and stays silent on it; this thread
+# notices within ~10 ms and swaps the previous version back in.
+
+var doctorThread: Thread[void]
+
+proc doctor() {.thread.} =
+  {.cast(gcsafe).}:
+    while true:
+      sleep(10)
+      if not tryAcquire(mtx): continue
+      for i in 0 ..< slotCount:
+        if not slots[i].wantRollback: continue
+        let v {.cursor.} = slots[i].voice
+        let after = timeSec + timeFrac - slots[i].swapAt
+        if v.rollback():
+          slots[i].rolledBack = true
+          slots[i].badRun = 0
+          stderr.writeLine "[aither] " & slots[i].name & " blew up " &
+            formatFloat(after, ffDecimal, 1) &
+            "s after the swap — rolled back to the previous version"
+        slots[i].wantRollback = false
+        slots[i].swapAt = 0.0
+      release(mtx)
+
 
 # Scan a codegen error message for `(source:line)` locations and append
 # the text of the referenced source line, so the user sees the offending
@@ -362,6 +445,13 @@ proc loadPatch*(filename: string; fadeIn: float64): string =
     let committed = slots[idx].voice
     committed.commit(prepared)
     slots[idx].nanLogged = false           # fresh diagnostics for the new code
+    slots[idx].swapAt = now
+    slots[idx].wantRollback = false
+    slots[idx].rolledBack = false
+    slots[idx].badRun = 0
+    slots[idx].nanEvents = 0
+    slots[idx].runawayEvents = 0
+    slots[idx].retryAt = 0.0
     if slots[idx].runaway:                 # new code gets a fresh chance
       slots[idx].runaway = false
       slots[idx].muted = false
@@ -400,6 +490,75 @@ proc loadPatch*(filename: string; fadeIn: float64): string =
   if midiStatus.len > 0:
     stderr.writeLine "[aither] MIDI " & midiStatus
   ""
+
+proc tryPatch*(filename: string; seconds, skip: float64): string =
+  ## `try`: compile the patch, migrate the live voice's current state
+  ## into it exactly as a send would, and render it offline from the
+  ## engine's current time. The live voice keeps playing untouched. Runs
+  ## on the server thread (other commands wait for it).
+  if not fileExists(filename): return "ERR file not found: " & filename
+  let userSrc = readFile(filename)
+  let baseName = splitFile(filename).name
+  var prepared: Prepared
+  try:
+    let stdlibAst = parseProgram(Stdlib)
+    let userAst = parseProgram(userSrc)
+    setSource(stdlibAst, "stdlib")
+    setSource(userAst, filename)
+    let program = parser.Node(kind: parser.nkBlock,
+                              kids: stdlibAst.kids & userAst.kids, line: 1)
+    prepared = prepare(program, float64(SampleRate), filename)
+  except ParseError as e:
+    return "ERR parse error: " & e.msg
+  except CatchableError as e:
+    return "ERR compile error: " & annotateErr(e.msg, userSrc, filename)
+  let scratch = newVoice(float64(SampleRate))
+  defer: scratch.dispose()
+  acquire(mtx)
+  let idx = findSlot(baseName)
+  let now = timeSec + timeFrac
+  var buf: pointer = nil
+  if idx >= 0 and slots[idx].voice.state != nil:
+    let live = slots[idx].voice
+    let size = live.stateSize
+    release(mtx)                      # allocate outside the audio lock
+    buf = alloc0(size)
+    acquire(mtx)
+    if slots[idx].voice.state != nil and slots[idx].voice.stateSize == size:
+      slots[idx].voice.snapshotInto(scratch, buf)
+    else:
+      dealloc(buf)
+  release(mtx)
+  let origin =
+    if scratch.state != nil: "live state of " & baseName
+    else: "fresh state (no live voice " & baseName & ")"
+  if scratch.state == nil: scratch.startT = now
+  scratch.commit(prepared)
+  let head = "try: " & baseName & " from " & origin & ", t=" &
+             formatFloat(now + skip, ffDecimal, 1) & "s, " &
+             formatFloat(seconds, ffDecimal, 1) & "s"
+  var r: Rendered
+  try:
+    r = renderVoice(scratch, seconds, int(SampleRate), skip = skip,
+                    t0 = now, feedInput = false)
+  except CatchableError as e:
+    return "ERR " & head & "\n  WOULD BREAK: " & e.msg &
+           "\n  (sent live, this rolls back to the playing version)"
+  var peak = 0.0
+  for i in 0 ..< r.audio.left.len:
+    peak = max(peak, max(abs(r.audio.left[i]), abs(r.audio.right[i])))
+  var lines = @[head]
+  if peak > RollbackLimit:
+    # The spectrum of a blow-up is noise; the part table shows which
+    # play it came from.
+    lines.add "  WOULD BREAK: peak +" & $int(20.0 * log10(peak)) &
+              " dBFS (sent live, anything past +9.5 dBFS rolls back)"
+  else:
+    let mono = monoMix(r.audio.left, r.audio.right)
+    lines.add formatSpectrum(analyze(mono, float64(SampleRate)))
+  let parts = formatPartLevels(r.parts)
+  if parts.len > 0: lines.add parts
+  "OK\n" & lines.join("\n")
 
 proc retriggerVoice(name: string): string =
   let idx = findSlot(name)
@@ -451,7 +610,9 @@ proc setMute*(name: string; muted: bool): string =
   if idx < 0: return "not found: " & name
   acquire(mtx)
   slots[idx].muted = muted
-  if not muted: slots[idx].runaway = false   # user takes responsibility
+  if not muted:                              # user takes responsibility
+    slots[idx].runaway = false
+    slots[idx].retryAt = 0.0
   release(mtx)
   ""
 
@@ -515,7 +676,8 @@ proc snapshotPartsOf(v: NativeVoice): seq[PartInfo] =
     result.add PartInfo(
       name: name,
       state: partStateOf(v.partGains[i], v.partFadeDeltas[i]),
-      gain: v.partGains[i])
+      gain: v.partGains[i],
+      rms: sqrt(v.partRmsSq[i]), peak: v.partPeak[i])
 
 proc voiceInfoList*(): seq[VoiceInfo] =
   ## Snapshot of all voices + their parts. Used by `list`.
@@ -599,6 +761,22 @@ proc voiceMeterAfterSend*(name: string):
   if idx >= 0:
     result.found = true
     result.stats = snapshotStats(slots[idx].stats)
+  release(mtx)
+
+proc checkSnapshot*(name: string): CheckQuery =
+  acquire(mtx)
+  let idx = findSlot(name)
+  if idx >= 0:
+    let s = slots[idx]
+    result.found = true
+    result.voice = VoiceStats(name: name, state: voiceStateOf(s),
+                              gain: s.fadeGain, stats: snapshotStats(s.stats))
+    result.parts = snapshotPartsOf(s.voice)
+    result.rolledBack = s.rolledBack
+    result.nanEvents = s.nanEvents
+    result.runawayEvents = s.runawayEvents
+    result.retrying = s.runaway and s.retryAt > 0.0
+  result.master = snapshotStats(master)
   release(mtx)
 
 proc parseFloatArg(s: string; fallback: float64 = 0.0): float64 =
@@ -725,6 +903,14 @@ proc handleCmd(line: string): string =
     if parts.len < 2: return "ERR usage: retrigger <name>"
     let err = retriggerVoice(parts[1])
     if err.len > 0: "ERR " & err else: "OK"
+  of "check":
+    if parts.len < 2: return "ERR usage: check <voice>"
+    "OK\n" & formatCheck(checkSnapshot(parts[1]))
+  of "try":
+    if parts.len < 2: return "ERR usage: try <file> [seconds] [skip]"
+    let secs = if parts.len >= 3: parseFloatArg(parts[2], 2.0) else: 2.0
+    let skip = if parts.len >= 4: parseFloatArg(parts[3]) else: 0.0
+    tryPatch(parts[1], max(0.05, secs), max(0.0, skip))
   of "parts":
     if parts.len < 2: return "ERR usage: parts <voice>"
     "OK\n" & formatParts(partsSnapshot(parts[1]))
@@ -774,6 +960,7 @@ proc startEngine*() =
   else:
     stderr.writeLine "[aither] no audio input (playback only): input() reads 0"
   startOptimizer()
+  createThread(doctorThread, doctor)
 
   # Bring up MIDI input. If no sequencer is available (unusual on Linux
   # but possible in containers / chroots) we just log and carry on —
@@ -814,17 +1001,19 @@ proc startEngine*() =
 
 # ----------------------------------------------------------------------- client
 
-proc sendCmd*(cmd: string) =
+proc queryCmd*(cmd: string): string =
   var sock = newSocket(AF_UNIX, SOCK_STREAM, IPPROTO_IP)
   try:
     sock.connectUnix(SocketPath)
     sock.send(cmd & "\n")
-    let resp = sock.recv(65536)
-    echo resp.strip()
+    result = sock.recv(65536).strip()
   except OSError:
-    echo "error: engine not running? (" & SocketPath & ")"
+    result = "error: engine not running? (" & SocketPath & ")"
   finally:
     sock.close()
+
+proc sendCmd*(cmd: string) =
+  echo queryCmd(cmd)
 
 # [CLI dispatch moved to aither.nim — engine.nim is now a library
 #  module. Build entry point is `nim c aither.nim`.]

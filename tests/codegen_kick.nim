@@ -53,6 +53,7 @@ type
     state: DspState
     t, dt, start_t: float64
     partGainsPtr: pointer
+    partOutPtr: pointer
     vars: array[32, float64]      # plenty of room
     inited: array[32, uint8]
   TickFn = proc (s: ptr VState; outL, outR: ptr float64) {.cdecl.}

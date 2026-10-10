@@ -5,7 +5,7 @@
 ## Single source of truth for line widths, dB rounding, table
 ## alignment, sparkline glyphs.
 
-import std/[math, strutils]
+import std/[math, strutils, algorithm]
 import engine_types, analysis
 
 const SparkBlocks = [" ", "▁", "▂", "▃", "▄",
@@ -33,7 +33,7 @@ proc voiceStateWord(s: VoiceState): string =
   of vsFadingOut:  "fading-out"
   of vsFadingIn:   "fading-in"
   of vsPlaying:    "playing"
-  of vsRunaway:    "muted: runaway output, fix and resend"
+  of vsRunaway:    "muted: runaway output"
 
 proc partStateWord(s: PartState): string =
   case s
@@ -90,10 +90,47 @@ proc formatParts*(q: PartsQuery): string =
   if q.parts.len == 0:
     return "(no parts)"
   var lines: seq[string]
+  var w = 0
+  for p in q.parts: w = max(w, p.name.len)
   for p in q.parts:
-    lines.add "  " & p.name & "  [" & partStateWord(p.state) & "]  gain=" &
-              formatFloat(p.gain, ffDecimal, 2)
+    lines.add "  " & p.name.alignLeft(w) & "  [" & partStateWord(p.state) &
+              "]  gain=" & formatFloat(p.gain, ffDecimal, 2) &
+              "  rms=" & fmtDb(p.rms).strip() & "dB peak=" &
+              fmtDb(p.peak).strip() & "dB"
   q.voiceName & "\n" & lines.join("\n")
+
+# A part this far below the loudest one is probably masked or inaudible.
+const QuietPartDb = -24.0
+
+proc formatCheck*(q: CheckQuery): string =
+  ## The report `send` prints a second after a swap.
+  if not q.found: return "not found: " & q.voice.name
+  var lines = @[formatMeterLine(q.voice.name, q.voice.stats) &
+                "  [" & voiceStateWord(q.voice.state) & "]"]
+  if q.rolledBack:
+    lines.add "  ROLLED BACK: it blew up right after the swap; the previous " &
+              "version is playing. Fix the patch and send again."
+  if q.retrying:
+    lines.add "  RUNAWAY: muted, state wiped, fading back in shortly"
+  elif q.voice.state == vsRunaway:
+    lines.add "  RUNAWAY: muted until resent"
+  if q.nanEvents > 0:
+    lines.add "  NaN: " & $q.nanEvents & " time(s) since the send (state reset)"
+  var loudest = 0.0
+  for p in q.parts:
+    if p.gain > 0.0: loudest = max(loudest, p.rms)
+  var quiet: seq[string]
+  for p in q.parts:
+    if p.gain > 0.0 and loudest > 0.0 and dBOf(p.rms) - dBOf(loudest) < QuietPartDb:
+      quiet.add p.name & " " & fmtDb(p.rms).strip()
+  if quiet.len > 0:
+    lines.add "  quiet parts (>" & $int(-QuietPartDb) & " dB under the loudest): " &
+              quiet.join(", ")
+  let mrms = max(q.master.rmsL, q.master.rmsR)
+  let mpeak = max(q.master.peakL, q.master.peakR)
+  lines.add "master  rms=" & fmtDb(mrms).strip() & "dB peak=" &
+            fmtDb(mpeak).strip() & "dB"
+  lines.join("\n")
 
 proc formatMidiHeader*(m: MidiStatus): string =
   ## Single line for the MIDI header in `list`. Empty string when
@@ -140,6 +177,31 @@ proc formatAudit*(path: string; seconds, sr: float64;
   "audit: " & path & " (" & formatFloat(seconds, ffDecimal, 1) &
     "s @ " & trimDot(formatFloat(sr, ffDecimal, 0)) & " Hz)\n" &
     formatSpectrum(s)
+
+proc formatPartLevels*(parts: seq[PartLevel]): string =
+  ## Per-part table under `audit` / `try`, loudest first, flagging parts
+  ## that are masked (far under the loudest) or mostly below 200 Hz.
+  if parts.len == 0: return ""
+  var ps = parts
+  ps.sort(proc (a, b: PartLevel): int = cmp(b.rms, a.rms))
+  var loudest = 0.0
+  var w = 4
+  for p in ps:
+    if p.gain > 0.0: loudest = max(loudest, p.rms)
+    w = max(w, p.name.len)
+  var lines = @["parts (rms / peak / share below 200 Hz):"]
+  for p in ps:
+    var notes: seq[string]
+    if p.gain <= 0.0: notes.add "muted"
+    elif p.rms < 1e-6: notes.add "SILENT"
+    else:
+      if loudest > 0.0 and dBOf(p.rms) - dBOf(loudest) < QuietPartDb:
+        notes.add "QUIET: " & $int(dBOf(loudest) - dBOf(p.rms)) & " dB under the loudest"
+      if p.low > 0.5: notes.add "MOSTLY <200 Hz: laptop speakers won't play it"
+    lines.add "  " & p.name.alignLeft(w) & "  " & fmtDb(p.rms) & " dB  " &
+              fmtDb(p.peak) & " dB  " & align($int(p.low * 100.0 + 0.5), 3) & "%" &
+              (if notes.len > 0: "  " & notes.join("; ") else: "")
+  lines.join("\n")
 
 proc formatVoiceList*(midi: MidiStatus; voices: seq[VoiceInfo]): string =
   var lines: seq[string]

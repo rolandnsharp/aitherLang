@@ -10,6 +10,27 @@ toward sounds that have never existed before.
 The items below are the loose ends from that session, ordered by how
 much they block forward work.
 
+## Session log: 2026-10-10 live set (bush doof on native title land)
+
+Two silences, slow iteration and inaudible layers during a streamed set.
+
+| Issue | Status |
+|-------|--------|
+| a hot-swap that blows up goes silent until resent | RESOLVED (rollback to the previous version within 20 s of a swap; +9.5 dBFS bar) |
+| NaN in a `$var` re-NaNs every sample (resetPool skipped vars) | RESOLVED (scrubState; hard reset after 100 ms; NaN vars never migrate) |
+| runaway guard mutes until resent | RESOLVED (wipes state, fades back in after 2 s, 3 tries) |
+| inserting a stateful call shifts slots in unrelated plays | RESOLVED (regions keyed by statement: `play x/let y`) |
+| `send` meter reads -inf (taken before any sound) | RESOLVED (`send` waits 1 s and reports; `check`) |
+| no per-part levels; parts isolated by sed | RESOLVED (`parts` meters; part table in `audit`/`try` with <200 Hz share) |
+| offline audit replays from t=0, not the live state | RESOLVED (`try`; `audit --from`) |
+| let used before its line → TCC "'l_x' undeclared" | RESOLVED |
+| `$x = init` can't see lets | RESOLVED (vars init where declared) |
+| `max`/`min` take only two args | RESOLVED |
+| play-only file compiles to silence | RESOLVED (sums its plays) |
+| haas / reverb reject stereo input | open |
+| a def param named like a top-level stereo let (adsr's `s`) was read as that pair | RESOLVED (the nearest scope binding wins) |
+| no number exponents (`1e-3`) | open |
+
 ## Session log: 2026-10-03 pipe chains + runaway guard
 
 Found while writing patches on a Pinebook Pro.

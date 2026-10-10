@@ -25,6 +25,7 @@ type
     name*: string
     state*: PartState
     gain*: float64
+    rms*, peak*: float64         # linear, the louder channel's level
 
   VoiceInfo* = object
     name*: string
@@ -54,6 +55,25 @@ type
     voiceName*: string
     found*: bool                 # false when the voice didn't exist
     parts*: seq[PartInfo]
+
+  # What `send` prints a second after the swap: did it land, how loud
+  # is it, which parts are too quiet to hear, did a guard fire.
+  CheckQuery* = object
+    found*: bool
+    voice*: VoiceStats
+    master*: StatsSnapshot
+    parts*: seq[PartInfo]
+    rolledBack*: bool
+    nanEvents*, runawayEvents*: int
+    retrying*: bool              # runaway-muted, will fade back in
+
+  # One play block's level over an offline render. `low` is the share
+  # of its energy below 200 Hz, which laptop speakers can't play: a part
+  # that is mostly `low` measures fine and still isn't heard.
+  PartLevel* = object
+    name*: string
+    rms*, peak*, low*: float64
+    gain*: float64               # its part gain (0 = muted)
 
   MidiStatus* = object
     portInfo*: string            # "" if never connected
