@@ -9,18 +9,31 @@
 def formant(x, f, res):
   bpf(x, f, res) * (2 * (1 - res))       # unity gain at the peak
 
-# Clapsticks: a hardwood bar held in the hand, heavily damped.
-def stick(strike, freq, decay, bright):
+# Clapsticks, the physics:
+# - The collision: two hardwood sticks meet for tau seconds; the contact
+#   force is a half-sine (Hertz contact). A harder hit is a shorter
+#   contact (tau ~ v^-1/5), and a shorter pulse reaches higher modes.
+# - Each stick is a free-free bar: modes at 1, 2.756, 5.404 x f1. The
+#   holding hand damps the higher modes faster (T60 / 2.2, / 4.5).
+# - Where on the stick the hit lands sets how much of each mode it
+#   excites (a2, a3), and it changes every hit.
+# - A bar radiates its surface velocity, so the output is the modes' v.
+def contact(trig, tau):
+  $touch = 1.0
+  $touch = if trig > 0 then 0 else min(1, $touch + dt / tau)
+  if $touch < 1 then sin(PI * $touch) else 0
+
+def bar(force, f1, t60, a2, a3):
   sum(3, n =>
-    let omega = TAU * freq * bar_partials(n)
-    let omega2 = omega * omega
-    let gamma = (1 + (n - 1) * 1.5) / decay
-    let amp = if n == 1 then 1.0 else bright / (n * n)
-    $x = 0.0
-    $dx = 0.0
-    $dx = $dx + (-2 * gamma * $dx - omega2 * $x + strike * omega2) * dt
-    $x = $x + $dx * dt
-    $x * amp)
+    let r = if n == 1 then 1 else if n == 2 then 2.756 else 5.404
+    let w = TAU * f1 * r
+    let g = 6.91 * (if n == 1 then 1 else if n == 2 then 2.2 else 4.5) / t60
+    let a = if n == 1 then 1 else if n == 2 then a2 else a3
+    $bv = 0.0
+    $bx = 0.0
+    $bv = clamp($bv + (-2 * g * $bv - w * w * $bx + force * a * 4000) * dt, -50, 50)
+    $bx = $bx + $bv * dt
+    $bv)
 
 # The first didge (2026-10-10, didge_minor): the same lips with a rest
 # opening, into a loop that returns the wave in phase after a full period,
@@ -138,12 +151,18 @@ play didge:
   let tract = formant(d, 320 + vWah * 420 - vTap * 60, 0.93) + formant(d, 850 + vWah * 350 + vTap * 1100, 0.94) * 0.7 + formant(d, 2300 + vWah * 300 + vTap * 500, 0.95) * 0.35
   ((tract * 0.9 + d * 0.35) |> drive(1.4)) |> hpf(200, 0.29) |> hpf(200, 0.29) |> lpf(7000, 0.2)
 
+# Each 16th gets its own strength and its own spot on the stick.
+let hN    = (bars * 16 + stepIx) * 1.0
+let hVel  = (sin(hN * 12.9898) * 43758.5453) mod 1
+let hPos  = (sin(hN * 78.233) * 12543.871) mod 1
+let hPos2 = (sin(hN * 39.425) * 23421.631) mod 1
+let vel   = vStick * (0.55 + 0.6 * hVel)
 play sticks:
-  let hit = slew(discharge(trig16 * vStick, 2500), 0.0004)
-  let s1 = stick(hit * 2.0, 1700, 0.015, 0.4 + vStick * 0.6)
-  let s2 = stick(hit * 1.3, 1270, 0.011, (0.4 + vStick * 0.6) * 0.7)
-  let click = (noise() |> bpf(2600, 0.55)) * discharge(trig16 * vStick, 450)
-  (s1 + s2 + click) * 0.11 |> lpf(4000, 0.2)
+  let tau = 0.0001 * pow(max(vel, 0.05), -0.2)
+  let f   = contact(trig16 * vel, tau) * vel
+  let sA  = bar(f, 1650, 0.14, 0.25 + 0.6 * hPos, 0.1 + 0.4 * hPos2)
+  let sB  = bar(f, 1750, 0.14 * 0.8, 0.9 - 0.6 * hPos, 0.5 - 0.4 * hPos2)
+  (sA + sB * 0.85) * 0.36 |> lpf(7000, 0.2)
 
 let roomD = reverb(mono(didge), 1.3, 0.1)
 let roomS = reverb(mono(sticks), 0.6, 0.06)
