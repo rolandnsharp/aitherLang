@@ -81,6 +81,8 @@ proc registerNatives(s: TccState) =
   discard s.addSymbol("n_hilbert_a", cast[pointer](nHilbertA))
   discard s.addSymbol("n_hilbert_b", cast[pointer](nHilbertB))
   discard s.addSymbol("n_freq_shift", cast[pointer](nFreqShift))
+  discard s.addSymbol("n_input_l",   cast[pointer](nInputL))
+  discard s.addSymbol("n_input_r",   cast[pointer](nInputR))
   discard s.addSymbol("shape_saw",   cast[pointer](shapeSaw))
   discard s.addSymbol("shape_tri",   cast[pointer](shapeTri))
   discard s.addSymbol("shape_sqr",   cast[pointer](shapeSqr))
@@ -236,13 +238,14 @@ proc isPoisonedRegion(pool: ptr UncheckedArray[float64];
 # whose typeName is "var" are skipped: those hold user-named state
 # (counters, fade-in start times, etc.) that performance patches rely
 # on, and resetting them would re-trigger user-authored fades on every
-# NaN event. Top-level vars sit after the pool in the struct and
+# NaN event. "pvar" regions (pair-valued state inside defs) are user
+# state too. Top-level vars sit after the pool in the struct and
 # aren't touched either.
 proc resetPool*(v: NativeVoice) =
   if v.state == nil: return
   let pool = cast[ptr UncheckedArray[float64]](v.state)
   for r in v.regions:
-    if r.typeName == "var": continue
+    if r.typeName in ["var", "pvar"]: continue
     zeroMem(addr pool[r.offset], r.size * sizeof(float64))
 
 proc commit*(v: NativeVoice; p: Prepared) =

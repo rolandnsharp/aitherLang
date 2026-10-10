@@ -7,15 +7,23 @@
 import std/[os, strutils]
 import engine, render, analysis, cli_output
 
-proc audit(path: string; seconds: float64) =
+proc audit(path: string; secondsArg: float64; inputPath: string) =
   ## Offline render → spectral analysis → text. Doesn't touch the
-  ## engine; safe to run with no daemon.
+  ## engine; safe to run with no daemon. With a WAV, `input()` in the
+  ## patch reads it, and the render runs its full length unless a
+  ## duration was given.
   if not fileExists(path):
     stderr.writeLine "audit: file not found: " & path
     quit 1
   var lBuf, rBuf: seq[float64]
+  var seconds = secondsArg
   try:
-    (lBuf, rBuf) = renderPatch(path, seconds, 48000)
+    var input: Stereo = (@[], @[])
+    if inputPath.len > 0:
+      input = readWav(inputPath, 48000)
+      if seconds <= 0.0: seconds = float64(input.left.len) / 48000.0
+    if seconds <= 0.0: seconds = 1.0
+    (lBuf, rBuf) = renderPatch(path, seconds, 48000, input)
   except CatchableError as e:
     stderr.writeLine "audit: " & e.msg
     quit 1
@@ -42,7 +50,8 @@ if args.len == 0:
   echo "  midi list                   show ALSA seq ports"
   echo "  midi connect <spec>         subscribe to a specific port (e.g. '28:0')"
   echo "  midi disconnect             drop MIDI and re-open the sequencer"
-  echo "  audit <patch> [seconds]     offline render + spectral summary (default 1.0s)"
+  echo "  audit <patch> [seconds] [in.wav]  offline render + spectral summary (default 1.0s;"
+  echo "                              a 48 kHz WAV feeds input() and sets the length)"
   echo "  spectrum [voice]            spectral summary of the engine's recent buffer"
   echo "  kill                        shut down engine"
   quit 0
@@ -89,13 +98,16 @@ of "midi":
   let rest = args[1 .. ^1].join(" ")
   sendCmd("midi " & rest)
 of "audit":
-  if args.len < 2: quit "usage: aither audit <patch> [seconds]"
-  let seconds =
-    if args.len >= 3:
-      try: parseFloat(args[2])
-      except ValueError: quit "audit: seconds must be numeric"
-    else: 1.0
-  audit(args[1], seconds)
+  if args.len < 2: quit "usage: aither audit <patch> [seconds] [input.wav]"
+  # A number is the duration; anything else is the input recording.
+  var seconds = 0.0
+  var inputPath = ""
+  for a in args[2 .. ^1]:
+    try: seconds = parseFloat(a)
+    except ValueError:
+      if inputPath.len > 0: quit "usage: aither audit <patch> [seconds] [input.wav]"
+      inputPath = a
+  audit(args[1], seconds, inputPath)
 of "spectrum":
   let extra = if args.len >= 2: " " & args[1] else: ""
   sendCmd("spectrum" & extra)

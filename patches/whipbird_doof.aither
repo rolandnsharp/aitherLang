@@ -1,0 +1,198 @@
+# whipbird_doof — a rolling bush doof in E phrygian, 142 bpm.
+#
+# Dusk in the rainforest: cicadas swell, an eastern whipbird whistles and
+# cracks, a physical didgeridoo in E (lip valve + conical bore, the same
+# physics as didge_minor) breathes in. Clapsticks bring the pulse, then
+# the drop: a kick and a rolling psy bassline (kick on the one, bass on
+# the three sixteenths after it), offbeat hats, later an acid lead with
+# dotted-eighth echoes. A breakdown, a riser, a second drop, an outro,
+# and round again: the cycle is 184 bars (~5 min) and the timbres ride
+# slow incommensurate LFOs, so no pass repeats the last.
+#
+# The arrangement runs from the voice's start (pos), the groove from the
+# wall clock (t). Mixed for laptop speakers: high-passed at 150–180 Hz,
+# lowpassed at 7–8 kHz, soft attacks.
+
+def didge_bore(mouth, lipF, lipD, f0):
+  $pm = 0.0                             # wave arriving back at the lips
+  $dp = 0.0                             # pressure drop across the lips
+  let lip = dho($dp * 1200000.0, lipF, lipD)
+  let a   = clamp(0.05 + lip, 0.0, 1.0) # lip opening; 0 = lips shut
+  let u   = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp))   # Bernoulli flow
+  let pplus = u * 0.8 + $pm             # outgoing wave: injected flow + reflection
+  let p     = pplus + $pm               # pressure at the lips
+  $dp = lp1(mouth - p, 5000)
+  let back = delay(pplus, 1.0 / f0, 0.05)
+  $pm = lp1(back, 2200) * 0.93          # reflected, in phase, lossy
+  back - lp1(back, 180)                 # what leaves the bell
+
+def formant(x, f, res):
+  bpf(x, f, res) * (2 * (1 - res))      # unity gain at the peak
+
+# Clapsticks: a hardwood bar held in the hand, heavily damped.
+def stick(strike, freq, decay, bright):
+  sum(3, n =>
+    let ratio = bar_partials(n)
+    let omega = TAU * freq * ratio
+    let omega2 = omega * omega
+    let gamma = (1 + (n - 1) * 1.5) / decay
+    let amp = if n == 1 then 1.0 else bright / (n * n)
+    $x = 0.0
+    $dx = 0.0
+    $dx = $dx + (-2 * gamma * $dx - omega2 * $x + strike * omega2) * dt
+    $x = $x + $dx * dt
+    $x * amp)
+
+let tempo = 142 / 60.0
+let pos   = t - start_t
+
+# ---------------------------------------------------------------- clocks
+let barPh  = (t * tempo / 4) mod 1
+let beatPh = (barPh * 4) mod 1
+let stepPh = (barPh * 16) mod 1
+let stepIx = int(barPh * 16)
+let sub    = stepIx mod 4                 # 0 = on the beat
+let trigB  = if beatPh < prev(beatPh) then 1 else 0
+let trig16 = if stepPh < prev(stepPh) then 1 else 0
+let bar8   = int(t * tempo / 32) mod 4    # which 8-bar phrase of 32
+
+# ----------------------------------------------------------- arrangement
+let bar  = pos * tempo / 4
+let cyc  = bar mod 184
+let duskIn  = ease(cyc / 8)                                   # the first 8 bars
+let pulse   = ease((cyc - 16) / 4)                            # sticks from bar 16
+let drop1   = ease((cyc - 32) / 0.25) * (1 - ease((cyc - 96) / 0.25))
+let brk     = ease((cyc - 96) / 0.25) * (1 - ease((cyc - 104) / 0.25))
+let drop2   = ease((cyc - 104) / 0.25) * (1 - ease((cyc - 168) / 4))
+let groove  = max(drop1, drop2)
+let riser   = max(ease((cyc - 28) / 4) * (1 - ease((cyc - 32) / 0.1)), ease((cyc - 100) / 4) * (1 - ease((cyc - 104) / 0.1)))
+let acidOn  = max(ease((cyc - 64) / 8) * drop1, drop2) * (1 - riser)
+let outro   = ease((cyc - 168) / 8) * (1 - ease((cyc - 182) / 2))
+
+# Slow timbre LFOs, incommensurate so the passes differ.
+let lfoA = (sin(TAU * t / 53) + 1) * 0.5          # acid filter
+let lfoB = (sin(TAU * t / 89 + 1.3) + 1) * 0.5    # bass brightness
+let lfoC = (sin(TAU * t / 37 + 2.1) + 1) * 0.5    # didge jaw / tongue mix
+let kEnv = discharge(trigB * groove, 11)
+let sc   = 1 - kEnv * 0.6                          # sidechain pump
+
+# ------------------------------------------------------------------ bush
+# Cicadas: bandpassed noise, pulsed ~190 Hz, swelling in long waves.
+play cicadas:
+  let swellL = (sin(TAU * t / 9.3) + 1) * 0.5
+  let swellR = (sin(TAU * t / 11.7 + 2) + 1) * 0.5
+  let pl = pow((sin(TAU * phasor(187)) + 1) * 0.5, 4)
+  let pr = pow((sin(TAU * phasor(203)) + 1) * 0.5, 4)
+  let l = (noise() |> bpf(4700, 0.85)) * pl * swellL
+  let r = (noise() |> bpf(5200, 0.85)) * pr * swellR
+  [l, r] * 0.05 * (0.4 + duskIn * 0.6) * (1 - groove * 0.5)
+
+# Eastern whipbird: a long clear whistle, the whip-crack, then the mate's
+# answer, "choo-choo". Every ~13 s, never quite on the same beat.
+play whipbird:
+  let wb = (t / 13.3) mod 1
+  let u  = wb / 0.12
+  let whistle = if u < 0.72 then 1 else 0
+  let crack   = if u >= 0.72 and u < 0.8 then 1 else 0
+  let answer  = if (u >= 0.86 and u < 0.9) or (u >= 0.94 and u < 0.98) then 1 else 0
+  let cu = (u - 0.72) / 0.08                                  # 0 → 1 through the crack
+  let f  = if whistle > 0 then 2300 + u * 260 else if crack > 0 then 1800 + 4600 * sin(PI * cu) else 3300
+  let amp = whistle * ease(u * 10) * 0.6 + crack * 0.9 * (1 - cu) + answer * 0.5
+  let call = sin(TAU * phasor(f)) * slew(amp, 0.004)
+  pan(call * 0.06 * (0.3 + duskIn * 0.7), 0.5 - 0.3 * sin(TAU * t / 41))
+
+# ----------------------------------------------------------------- didge
+# Tongue: dik-a-dik-a sixteenths, two patterns crossfaded by lfoC.
+let tongueA = [1, 0.3, 0.6, 0.3, 0.9, 0.3, 0.5, 0.4, 1, 0.3, 0.6, 0.3, 0.8, 0.4, 0.7, 0.5]
+let tongueB = [1, 0.5, 0.3, 0.8, 0.4, 0.3, 1, 0.3, 0.9, 0.5, 0.3, 0.8, 0.4, 0.3, 1, 0.6]
+let tongueV = (tongueA[stepIx] * (1 - lfoC) + tongueB[stepIx] * lfoC) * (0.6 + groove * 0.4 + riser * 0.6)
+let tongue  = slew(discharge(trig16 * tongueV, 15), 0.006)
+let cycleB  = (t / 5.9) mod 1
+let gulp    = ease((cycleB - 0.93) * 20) * (1 - ease((cycleB - 0.985) * 60))
+let jaw     = clamp((sin(TAU * t / 3.7) + 1) * 0.25 + lfoC * 0.3 + riser * 0.5, 0, 1)
+let toot    = groove * (if bar8 == 3 and stepIx >= 12 then 1 else 0)   # toots end each 32-bar phrase
+
+play didge:
+  let pressure = max(0.05, (0.9 + riser * 0.12 + toot * 0.2 - gulp * 0.45 + tongue * 0.12) * duskIn)
+  let bore = didge_bore(pressure, 71 + toot * 78, 0.1, 82.41)
+  let src  = bore + (noise() |> bpf(1700, 0.8)) * gulp * 0.03
+  let f1 = slew(330 + jaw * 400 - tongue * 60, 0.02)
+  let f2 = slew(880 + jaw * 380 + tongue * 1050, 0.012)
+  let f3 = slew(2350 + jaw * 300 + tongue * 450, 0.02)
+  let tract = formant(src, f1, 0.93) + formant(src, f2, 0.94) * 0.7 + formant(src, f3, 0.95) * 0.35
+  (tract * 0.9 + src * 0.35) |> drive(1.4)
+
+# ------------------------------------------------------------ clapsticks
+# Offbeat sticks once the pulse arrives; quarter notes in the breakdown.
+let stickPat = [0, 0, 1, 0, 0.3, 0, 0.9, 0.4, 0, 0, 1, 0, 0.3, 0.5, 0.9, 0]
+play sticks:
+  let vel  = (if brk > 0.5 then (if sub == 0 then 0.8 else 0) else stickPat[stepIx]) * pulse
+  let hit  = slew(discharge(trig16 * vel, 2500), 0.0004)
+  let bright = 0.4 + vel * 0.6
+  let struck = stick(hit * 2.0, 1580, 0.016, bright)
+  let holder = stick(hit * 1.3, 1190, 0.012, bright * 0.7)
+  let click  = (noise() |> bpf(2600, 0.55)) * discharge(trig16 * vel, 450)
+  let thump  = (noise() |> lpf(900, 0.3)) * discharge(trig16 * vel, 700) * 0.5
+  (struck + holder + click + thump) * 0.12
+
+# ------------------------------------------------------------------ doof
+play kick:
+  let p = 190 + discharge(trigB, 28) * 320                    # 510 → 190 Hz
+  $kph = 0.0
+  $kph = if trigB > 0.5 then 0.0 else ($kph + p * dt) mod 1.0  # phase reset: no click
+  let body  = sin(TAU * $kph) * kEnv
+  let click = (noise() |> lpf(2800, 0.3)) * discharge(trigB * groove, 650) * 0.35
+  (body + click) * groove * 0.55
+
+# Rolling bass: rest on the kick's sixteenth, then three. Each 8-bar
+# phrase takes its own line: E, the phrygian F, G, and back.
+let line0 = [82.41, 82.41, 82.41, 82.41, 82.41, 82.41, 82.41, 82.41, 82.41, 82.41, 82.41, 82.41, 82.41, 82.41, 98.0, 82.41]
+let line1 = [82.41, 82.41, 82.41, 87.31, 82.41, 82.41, 82.41, 87.31, 82.41, 82.41, 82.41, 87.31, 82.41, 98.0, 87.31, 82.41]
+let line2 = [82.41, 82.41, 98.0, 82.41, 82.41, 82.41, 98.0, 82.41, 82.41, 82.41, 110.0, 98.0, 82.41, 82.41, 98.0, 87.31]
+let line3 = [82.41, 82.41, 82.41, 82.41, 87.31, 87.31, 87.31, 87.31, 98.0, 98.0, 98.0, 98.0, 87.31, 87.31, 82.41, 73.42]
+play bass:
+  let note = if bar8 == 0 then line0[stepIx] else if bar8 == 1 then line1[stepIx] else if bar8 == 2 then line2[stepIx] else line3[stepIx]
+  $bn = 82.41
+  $bn = if trig16 > 0.5 then note else $bn
+  let gate = if sub == 0 then 0 else 1
+  let bEnv = discharge(trig16 * gate, 26)
+  let cut  = 350 + bEnv * (1200 + lfoB * 2000)
+  let raw  = additive($bn, saw_shape, 18)
+  ((raw |> lpf(cut, 0.55)) * slew(bEnv, 0.0008)) * sc * groove * 0.42
+
+let hatPat = [0, 0.2, 1, 0.2, 0, 0.2, 1, 0.3, 0, 0.2, 1, 0.2, 0, 0.3, 1, 0.4]
+play hats:
+  let hv = hatPat[stepIx] * groove
+  (noise() |> bpf(6500, 0.5)) * pluck(trig16 * hv, if hv > 0.5 then 0.09 else 0.03) * 0.09
+
+# A noise riser into each drop, opening upward.
+play swoosh:
+  (noise() |> bpf(800 + riser * riser * 5000, 0.6)) * riser * riser * 0.12
+
+# ------------------------------------------------------------------ acid
+# A 303-style line in E phrygian with slides, accents and a resonant
+# filter that the 53 s LFO walks open and shut.
+let acidNotes = [329.63, 0, 329.63, 349.23, 0, 392.0, 329.63, 0, 493.88, 0, 440.0, 392.0, 349.23, 0, 329.63, 293.66]
+let acidAcc   = [1, 0, 0.4, 0.7, 0, 0.5, 1, 0, 0.8, 0, 0.5, 0.6, 0.9, 0, 0.5, 0.7]
+play acid:
+  let n = acidNotes[stepIx]
+  $an = 329.63
+  $an = if trig16 > 0.5 and n > 0 then n else $an
+  let gate = if n > 0 then 1 else 0
+  let aF   = slew($an, 0.035)
+  let aEnv = discharge(trig16 * gate * acidAcc[stepIx], 9)
+  let cut  = 280 + slew(aEnv, 0.002) * (900 + lfoA * 3200)
+  let tone = additive(aF, saw_shape, 12) |> lpf(cut, 0.82)
+  (tone |> drive(2.2)) * (0.25 + aEnv * 0.75) * acidOn * sc * 0.16
+
+# ------------------------------------------------------------------- mix
+let dOut  = didge |> hpf(180, 0.29) |> hpf(180, 0.29) |> lpf(7000, 0.2)
+let roomD = reverb(mono(dOut), 1.4, 0.12)
+let bush  = (mono(cicadas) + mono(whipbird)) |> lpf(7500, 0.2)
+let roomB = reverb(bush, 3.0, 0.35)
+let roomS = reverb(mono(sticks) |> lpf(6500, 0.2), 0.7, 0.07)
+let acidW = fbdelay(mono(acid), 0.317, 0.5, 0.38)              # dotted-eighth echoes
+let drums = (mono(kick) + mono(bass) + mono(hats) + mono(swoosh)) |> hpf(150, 0.29) |> lpf(8000, 0.2)
+let mixD  = haas(roomD * 3.0, 8)
+let mixA  = pan((mono(acid) + acidW * 0.6) |> hpf(200, 0.29), -0.25)
+(mixD + cicadas + pan(roomB * 0.4 + mono(whipbird) * 0.6, 0.2) + pan(roomS * 1.0, 0.35) + mixA + haas(drums * 0.5, -5)) * 0.7 * (1 - outro * 0.3)

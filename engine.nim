@@ -1,7 +1,7 @@
 ## aither engine — audio callback + socket CLI for live coding
 
 import std/[os, net, strutils, math, locks, tables]
-import parser, voice, miniaudio, midi
+import parser, voice, miniaudio, midi, dsp
 import engine_types, cli_output, analysis
 export engine_types
 
@@ -86,7 +86,8 @@ initLock(mtx)
 
 # --------------------------------------------------------------- audio callback
 
-proc audioCallback(output: ptr UncheckedArray[cfloat], frameCount: cuint,
+proc audioCallback(output: ptr UncheckedArray[cfloat],
+                   input: ptr UncheckedArray[cfloat], frameCount: cuint,
                    userData: pointer) {.cdecl.} =
   let dt = 1.0 / float64(SampleRate)
   let frames = int(frameCount)
@@ -103,6 +104,10 @@ proc audioCallback(output: ptr UncheckedArray[cfloat], frameCount: cuint,
       timeSec += 1.0
       timeFrac -= 1.0
     let t = timeSec + timeFrac
+    # This frame's capture sample, read by `input()` in every voice.
+    if input != nil:
+      inputL = float64(input[i * 2])
+      inputR = float64(input[i * 2 + 1])
 
     var lMix = 0.0
     var rMix = 0.0
@@ -756,13 +761,18 @@ proc handleCmd(line: string): string =
 # ----------------------------------------------------------------------- engine
 
 proc startEngine*() =
-  if aither_audio_init(SampleRate, Channels, BufferFrames,
-                       audioCallback, nil) != 0:
+  let audioMode = aither_audio_init(SampleRate, Channels, BufferFrames,
+                                    audioCallback, nil)
+  if audioMode < 0:
     quit "audio init failed", 1
   if aither_audio_start() != 0:
     quit "audio start failed", 1
 
   echo "aither \xC2\xB7 ", SampleRate, " Hz \xC2\xB7 ", SocketPath
+  if audioMode == 1:
+    stderr.writeLine "[aither] audio input on: input() reads the capture device"
+  else:
+    stderr.writeLine "[aither] no audio input (playback only): input() reads 0"
   startOptimizer()
 
   # Bring up MIDI input. If no sequencer is available (unusual on Linux

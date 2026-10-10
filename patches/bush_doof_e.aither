@@ -1,0 +1,628 @@
+# bush_doof_e — rolling goa bush doof in E phrygian dominant, 145 bpm.
+#
+# All tonal parts are physics:
+#   didge    lip valve + conical bore in E (B joins on the drop), the
+#            sung line pushed through the mouth pressure (see
+#            bush_doof_didge for the full description).
+#   marimba  struck bars: three modes at the tuned-bar ratios 1 : 3.93 :
+#            9.24, rosewood damping, rolling sixteenth arpeggios.
+#   drums    two frame drums: membrane modes at the Bessel ratios, a
+#            hand strike, velocity patterns that shift every 32 bars.
+#   bass     a plucked string (Karplus-Strong) rolling the psy pattern:
+#            the kick on the one, three plucks after it.
+#   sticks   damped hardwood bars.
+# Opens with an 8-bar build into the drop (from the moment it loads),
+# then evolves on 59 / 101 / 163 s cycles with a break every 32 bars.
+# Mixed for laptop speakers: high-passed 160–200 Hz, soft attacks.
+
+def didge_bore(mouth, lipF, lipD, f0):
+  $pm = 0.0
+  $dp = 0.0
+  let lip = dho($dp * 1200000.0, lipF, lipD)
+  let a   = clamp(0.05 + lip, 0.0, 1.0)
+  let u   = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp))
+  let pplus = u * 0.8 + $pm
+  let p     = pplus + $pm
+  $dp = lp1(mouth - p, 5000)
+  let back = delay(pplus, 1.0 / f0, 0.05)
+  $pm = lp1(back, 2200) * 0.93
+  back - lp1(back, 180)
+
+def formant(x, f, res):
+  bpf(x, f, res) * (2 * (1 - res))
+
+# A struck mode bank: `ratios` picks the physics (bar, membrane), each
+# higher mode dying `spread` times faster.
+def stick(strike, freq, decay, bright):
+  sum(3, n =>
+    let omega = TAU * freq * bar_partials(n)
+    let omega2 = omega * omega
+    let gamma = (1 + (n - 1) * 1.5) / decay
+    let amp = if n == 1 then 1.0 else bright / (n * n)
+    $x = 0.0
+    $dx = 0.0
+    $dx = $dx + (-2 * gamma * $dx - omega2 * $x + strike * omega2) * dt
+    $x = $x + $dx * dt
+    $x * amp)
+
+# Marimba bar: tuned so the overtones sit at 3.93 and 9.24 (two octaves
+# plus a third), the resonator tube lifting the fundamental.
+def mbar(strike, freq):
+  sum(3, n =>
+    let ratio = if n == 1 then 1.0 else if n == 2 then 3.93 else 9.24
+    let omega = TAU * freq * ratio
+    let omega2 = omega * omega
+    let gamma = if n == 1 then 2.2 else if n == 2 then 9.0 else 30.0
+    let amp = if n == 1 then 1.0 else if n == 2 then 0.35 else 0.12
+    $x = 0.0
+    $dx = 0.0
+    $dx = $dx + (-2 * gamma * $dx - omega2 * $x + strike * omega2) * dt
+    $x = $x + $dx * dt
+    $x * amp)
+
+# Frame drum: a circular membrane, modes at the Bessel ratios.
+def membrane(strike, freq, decay):
+  sum(5, n =>
+    let ratio = if n == 1 then 1.0 else if n == 2 then 1.59 else if n == 3 then 2.14 else if n == 4 then 2.30 else 2.65
+    let omega = TAU * freq * ratio
+    let omega2 = omega * omega
+    let gamma = (1 + (n - 1) * 0.7) / decay
+    let amp = 1.0 / n
+    $x = 0.0
+    $dx = 0.0
+    $dx = $dx + (-2 * gamma * $dx - omega2 * $x + strike * omega2) * dt
+    $x = $x + $dx * dt
+    $x * amp)
+
+let tempo = 145 / 60.0
+
+# ---------------------------------------------------------------- clocks
+# Movement 5 (qi gong), from `$m8start`: over 40 s the tempo glides
+# 145 → 66 bpm, the doof and frogs leave, a physical flute arrives and
+# the didge settles. The clock is an accumulator so the glide is smooth.
+$m8start = t
+# The jam: from `$jamB` (where the clock stood when this version loaded)
+# the track walks 16-bar scenes by itself: 0 qi gong, 1 bush groove,
+# 2 Dm-C-F-E drop, 3 Kanye half-time, 4 breakdown. Four bars of build
+# lead into the high-energy ones; qi scenes ease in and out over four
+# bars, and the tempo glides with them.
+$jamB = $bpos
+let jamA  = [0, 4, 1, 2, 0, 3, 1, 4, 2, 0, 1, 3, 4, 2, 0]
+let jb    = $bpos - $jamB
+let jIx   = int(jb / 16)
+let jamS  = jamA[jIx mod 15]
+let jamP  = jamA[(jIx + 14) mod 15]
+let jamN  = jamA[(jIx + 1) mod 15]
+let ju    = jb - jIx * 16                                   # bars into the scene
+let hiS   = if jamS >= 1 and jamS <= 3 then 1 else 0
+let hiN   = if jamN >= 1 and jamN <= 3 then 1 else 0
+let qJ    = if jamS == 0 then (if jamP == 0 then 1 else ease(ju / 4)) else (if jamP == 0 then 1 - ease(ju / 4) else 0)
+let tensionJ = if ju >= 12 and hiN > 0.5 and jamN != jamS then (ju - 12) / 4 else 0
+let gapJ  = if tensionJ > 0 and ju >= 15.5 then 1 else 0
+let hitJ  = if ju < 0.02 and hiS > 0.5 and jamP != jamS then 1 else 0
+let drop3J = if jamS == 2 then 1 else 0
+let yzJ    = 0                                  # the Kanye scene is retired: slot 3 plays the groove
+let brkJ   = if jamS == 4 then 1 else 0
+# Movement 6, from `$m9start`: the advanced didge crossfades in (4 s)
+# and the focus scene strips back to it, clapsticks and the night.
+$m9start = t
+let nx = ease((t - $m9start) / 4)
+let fz = ease((t - $m9start) / 6)
+let q = qJ * (1 - fz)
+$m10start = t
+let algo = ease((t - $m10start) / 16)                        # movement 7: the algorithmic doof
+$m11start = t
+$m12start = t
+let back = ease((t - $m12start) / 6)                          # the first didge returns
+let med = ease((t - $m11start) / 20)                         # movement 8: meditative qi gong didge
+let tempoNow = (((145 - 79 * q) * (1 - fz) + (110 + 28 * algo) * fz) * (1 - med) + 60 * med) / 60
+$bpos = t * (145 / 60) / 4
+$bpos = $bpos + tempoNow / 4 * dt
+let barPh  = $bpos mod 1
+let beatPh = (barPh * 4) mod 1
+let stepPh = (barPh * 16) mod 1
+let stepIx = int(barPh * 16)
+let sub    = stepIx mod 4
+let beatIx = int(barPh * 4)
+let trigB  = if beatPh < prev(beatPh) then 1 else 0
+let trig16 = if stepPh < prev(stepPh) then 1 else 0
+let bars   = floor($bpos)
+let phrase = int(bars / 8) mod 4                     # which 8-bar phrase of 32
+# Seeds for the algorithmic doof (movement 7): re-rolled every 2 bars.
+let hb    = floor(bars / 2)
+let h1    = (sin(hb * 12.9898) * 43758.5453) mod 1
+let h2    = (sin(hb * 78.233 + 1.3) * 12543.871) mod 1
+let h3    = (sin(hb * 39.425 + 2.7) * 23421.631) mod 1
+let h4    = (sin(hb * 93.989 + 0.4) * 34567.123) mod 1
+let energy = (sin(TAU * bars / 16 - PI / 2) + 1) * 0.5        # 16-bar arc
+let dropBar = if (bars mod 16) == 15 then 1 else 0           # the last bar breathes
+
+# ------------------------------------------------------------ arrangement
+# The build begins on the first bar after loading; the drop is bar 8.
+$m3start = t
+let mbar0   = t * tempo / 4 - (floor($m3start * tempo / 4) + 1)
+# Movement 2, from the bar after `$m4start` (set when it was loaded):
+# 8 bars of breakdown, 8 of build, then a 32-bar drop where the harmony
+# moves to A and back, eased back into the cycles over 8 more bars.
+$m4start = t
+let m4bar    = t * tempo / 4 - (floor($m4start * tempo / 4) + 1)
+let brk2     = if m4bar >= 0 and m4bar < 8 then 1 else 0
+let tension2 = clamp((m4bar - 8) / 8, 0, 1) * (if m4bar >= 8 and m4bar < 16 then 1 else 0)
+let drop2    = (if m4bar >= 16 then 1 else 0) * (1 - ease((m4bar - 48) / 8))
+# Movement 3, from the bar after `$m5start`: 8 bars of build, then a
+# 32-bar drop in Dm-C-F-E with tree frogs on the hats.
+$m5start = t
+$m6start = t
+# Movement 4 (Kanye-inspired), from the bar after `$m7start`: 8 bars of
+# build, then 32 bars half-time: distorted 808, big clap on three,
+# gospel organ, a chipmunk-soul chop, over the didge.
+$m7start = t
+let m7bar    = t * tempo / 4 - (floor($m7start * tempo / 4) + 1)
+let tension4 = clamp(m7bar / 8, 0, 1) * (if m7bar >= 0 and m7bar < 8 then 1 else 0)
+let yz       = max((if m7bar >= 8 then 1 else 0) * (1 - ease((m7bar - 40) / 4)), yzJ)
+let hit4     = if m7bar >= 8 and m7bar < 8.02 then 1 else 0
+let oldFade = 1 - ease((t - $m6start) / 8)                  # kookaburras, bats, dingoes leave
+let m5bar    = t * tempo / 4 - (floor($m5start * tempo / 4) + 1)
+let tension3 = clamp(m5bar / 8, 0, 1) * (if m5bar >= 0 and m5bar < 8 then 1 else 0)
+let drop3    = (1 - fz) * max((if m5bar >= 8 then 1 else 0) * (1 - ease((m5bar - 40) / 8)), drop3J)
+let hit3     = if m5bar >= 8 and m5bar < 8.02 then 1 else 0
+let tension = max(max(max(max(clamp(mbar0 / 8, 0, 1) * (if mbar0 < 8 then 1 else 0), tension2), tension3), tension4), tensionJ)
+let gap     = max(max(if mbar0 >= 7.5 and mbar0 < 8 then 1 else 0, if m4bar >= 15.5 and m4bar < 16 then 1 else 0), max(max(if m5bar >= 7.5 and m5bar < 8 then 1 else 0, if m7bar >= 7.5 and m7bar < 8 then 1 else 0), gapJ))
+let dropHit = max(max(if mbar0 >= 8 and mbar0 < 8.02 then 1 else 0, if m4bar >= 16 and m4bar < 16.02 then 1 else 0), max(hit3, max(hit4, hitJ)))
+let roll    = if tension > 0.75 and gap < 0.5 then 1 else 0
+let started = if mbar0 >= 8 then 1 else 0
+
+let arcA = (sin(TAU * t / 163) + 1) * 0.5      # marimba vs didge focus
+let arcB = (sin(TAU * t / 101 + 1.0) + 1) * 0.5  # drum pattern, bass brightness
+let arcC = (sin(TAU * t / 59 + 2.0) + 1) * 0.5   # tongue, sticks
+let brkRaw = max(max((if (bars mod 32) >= 30 then 1 else 0) * started * (1 - drop2), gap), max(max(brk2, brkJ), if tension2 + tension3 + tension4 + tensionJ > 0 then 1 else 0))
+let brk    = slew(brkRaw, 0.1)
+let riser  = max((if (bars mod 32) == 31 then ease(barPh) else 0) * started, tension * tension)
+let groove = started * (1 - brk) * (1 - q) * (1 - fz)
+let kEnv   = discharge(trigB * groove, 11)
+let sc     = 1 - kEnv * 0.55
+
+# ------------------------------------------------------------------ didge
+let cycle = (t / 5.6) mod 1
+let gulp  = ease((cycle - 0.93) * 20) * (1 - ease((cycle - 0.985) * 60))
+let jaw   = clamp((sin(TAU * t / 2.9) + 1) * 0.25 * (0.5 + arcC) + riser * 0.6, 0, 1)
+let tongueA = [1, 0.3, 0.6, 0.4, 0.9, 0.3, 0.6, 0.5, 1, 0.3, 0.7, 0.4, 0.9, 0.5, 0.6, 0.6]
+let tongueB = [1, 0.6, 0.3, 0.6, 1, 0.3, 0.6, 0.3, 1, 0.6, 0.3, 0.6, 0.8, 0.6, 0.9, 0.6]
+let tongueV = (tongueA[stepIx] * (1 - arcC) + tongueB[stepIx] * arcC) * (1 - brk * 0.5) * (1 + tension * 0.6) * (1 - q * 0.7) * (1 - med * 0.7)
+let tongue  = slew(discharge(trig16 * tongueV, 15), 0.006)
+let toot    = started * (1 - q) * (1 - med) * (if phrase == 3 and beatIx == 0 and beatPh < 0.45 then 1 else 0)
+
+# Sung line in E phrygian dominant: E F G# A B C D.
+let phraseA = [164.81, 0, 174.61, 207.65, 220.0, 207.65, 174.61, 164.81, 0, 246.94, 261.63, 246.94, 207.65, 174.61, 164.81, 0]
+let phraseB = [246.94, 246.94, 261.63, 0, 293.66, 261.63, 246.94, 220.0, 207.65, 0, 174.61, 164.81, 174.61, 207.65, 164.81, 0]
+let pIx     = int(((t / 13.24) mod 1) * 16)                # 8 bars per phrase
+let whoop   = if tension > 0.75 then 164.81 * pow(2, (tension - 0.75) * 4) else 0
+let sungRaw = if whoop > 0 then whoop else (if ((t / 26.48) mod 2) < 1 then phraseA[pIx] else phraseB[pIx])
+$sung = 164.81
+$sung = if sungRaw > 0 then sungRaw else $sung
+let sungF  = slew($sung, 0.1) * (1 + sin(TAU * phasor(5.6)) * 0.006)
+let singOn = swell(if sungRaw > 0 then 1 else 0, 0.2, 0.3)
+let voice  = pow(max(0, sin(TAU * phasor(sungF))), 3) * singOn
+
+play didge:
+  let focus = 1 - arcA * 0.35 * started * (1 - brk2)
+  let pressure = max(0.05, 0.92 + tension * 0.1 + toot * 0.2 - gulp * 0.45 - gap * 0.6 + tongue * 0.12) * (1 + voice * 0.22)
+  let bore = didge_bore(pressure, 95 + toot * 105, 0.1, 110)          # in A, as it first played
+  let src  = bore + (noise() |> bpf(1800, 0.8)) * max(gulp, gap) * 0.03
+  let f1 = slew(330 + jaw * 420 - tongue * 60, 0.02)
+  let f2 = slew(870 + jaw * 360 + tongue * 1100, 0.012)
+  let f3 = slew(2300 + jaw * 300 + tongue * 500, 0.02)
+  let tract = formant(src, f1, 0.93) + formant(src, f2, 0.94) * 0.7 + formant(src, f3, 0.95) * 0.35
+  ((tract * 0.9 + src * 0.35) |> drive(1.4)) * focus
+
+play didge2:
+  let cycle2 = (t / 6.7) mod 1
+  let gulp2  = ease((cycle2 - 0.93) * 20) * (1 - ease((cycle2 - 0.985) * 60))
+  let toot2  = started * (if beatIx == 2 and beatPh < 0.4 and phrase >= 2 then 1 else 0)
+  let p2     = max(0.05, (0.95 + toot2 * 0.2 - gulp2 * 0.45 + tongue * 0.08) * started * (1 - brk * 0.7) * (1 - q * 0.6))
+  let bore2  = didge_bore(p2, 106.7 + toot2 * 117, 0.1, 123.47)
+  let tract2 = formant(bore2, slew(400 + jaw * 300, 0.02), 0.93) + formant(bore2, 1150 + arcC * 400, 0.94) * 0.6
+  (tract2 * 0.9 + bore2 * 0.35) |> drive(1.4)
+
+# ----------------------------------------------------------------- marimba
+# Rolling sixteenths over E phrygian dominant; each 8-bar phrase takes a
+# new chord shape (E, F, G#dim, E) and the 163 s cycle brings it forward.
+let arpE = [329.63, 415.30, 493.88, 659.26, 493.88, 415.30, 329.63, 415.30, 493.88, 587.33, 659.26, 587.33, 493.88, 415.30, 329.63, 246.94]
+let arpF = [349.23, 440.0, 523.25, 698.46, 523.25, 440.0, 349.23, 440.0, 523.25, 587.33, 698.46, 587.33, 523.25, 440.0, 349.23, 261.63]
+let arpG = [415.30, 493.88, 587.33, 698.46, 587.33, 493.88, 415.30, 493.88, 587.33, 659.26, 830.61, 659.26, 587.33, 493.88, 415.30, 329.63]
+let mVel = [1, 0.5, 0.7, 0.5, 0.9, 0.5, 0.7, 0.6, 1, 0.5, 0.7, 0.5, 0.9, 0.6, 0.8, 0.6]
+let arpA = [440.0, 523.25, 659.26, 880.0, 659.26, 523.25, 440.0, 523.25, 659.26, 830.61, 880.0, 830.61, 659.26, 523.25, 440.0, 329.63]
+let chordOf = [4, 0, 4, 1]                                   # drop 2: A E A F
+let arpD = [293.66, 349.23, 440.0, 587.33, 440.0, 349.23, 293.66, 349.23, 440.0, 523.25, 587.33, 523.25, 440.0, 349.23, 293.66, 220.0]
+let arpC = [261.63, 329.63, 415.30, 523.25, 415.30, 329.63, 261.63, 329.63, 415.30, 493.88, 523.25, 493.88, 415.30, 329.63, 261.63, 207.65]
+let chordOf3 = [5, 6, 1, 0]                                  # drop 3: Dm C(aug) F E
+let chord = if drop3 > 0.5 or yz > 0.5 then chordOf3[phrase] else if drop2 > 0.5 then chordOf[phrase] else phrase
+play marimba:
+  let note = if chord == 1 then arpF[stepIx] else if chord == 2 then arpG[stepIx] else if chord == 4 then arpA[stepIx] else if chord == 5 then arpD[stepIx] else if chord == 6 then arpC[stepIx] else arpE[stepIx]
+  $mn = 329.63
+  $mn = if trig16 > 0.5 then note else $mn
+  let half = if fz > 0.5 then 0 else if q > 0.5 and (stepIx mod 4) != 0 then 0 else if brk2 > 0.5 and (stepIx mod 2) == 1 then 0 else 1   # half-time / quarters
+  let vel = mVel[stepIx] * (0.35 + arcA * 0.65) * (1 - brk * 0.6 * (1 - brk2)) * max(started, tension) * half
+  let hit = slew(discharge(trig16 * vel, 400), 0.0015)        # yarn mallet, ~1.5 ms
+  (mbar(hit * 0.9, $mn) |> drive(1.3)) * 0.3 * sc * (1 - yz * 0.7)
+
+# -------------------------------------------------------------- frame drums
+let dLowA = [1, 0, 0, 0, 0, 0, 0.6, 0, 0, 0, 0.8, 0, 0, 0, 0, 0.4]
+let dLowB = [1, 0, 0, 0.5, 0, 0, 0.7, 0, 0.9, 0, 0, 0.5, 0, 0.6, 0, 0.4]
+let dHiA  = [0, 0, 0.7, 0, 0, 0.4, 0, 0.6, 0, 0, 0.7, 0, 0.5, 0, 0.8, 0]
+let dHiB  = [0, 0.4, 0.8, 0, 0.4, 0, 0.8, 0.4, 0, 0.5, 0.8, 0, 0.4, 0.4, 0.9, 0.5]
+let dLowC = [1, 0, 0.6, 0.6, 1, 0, 0.6, 0.6, 1, 0, 0.6, 0.6, 1, 0.5, 0.6, 0.7]   # drop 2 gallop
+let dLowD = [1, 0, 0, 0.7, 0, 0, 0.9, 0, 0, 0.6, 0, 0.8, 0, 0, 0.7, 0.4]          # drop 3 broken
+play drums:
+  let lv = (if drop3 > 0.5 then dLowD[stepIx] else if drop2 > 0.5 then dLowC[stepIx] else dLowA[stepIx] * (1 - arcB) + dLowB[stepIx] * arcB) * groove
+  let hv = if roll > 0.5 then 0.3 + (tension - 0.75) * 2.8 else (dHiA[stepIx] * (1 - arcB) + dHiB[stepIx] * arcB) * groove
+  let lowHit = slew(discharge(trig16 * lv, 500), 0.001)
+  let hiHit  = slew(discharge(trig16 * hv, 700), 0.0008)
+  let low  = membrane(lowHit * 1.2, 196, 0.09)
+  let hi   = membrane(hiHit * 0.8, 392, 0.05)
+  let slap = (noise() |> bpf(2200, 0.5)) * discharge(trig16 * hv, 500) * 0.25
+  (low + hi + slap) * 0.35 * (1 - yz * 0.9)
+
+let stickF = [1, 0, 0.5, 0, 0.8, 0, 0.5, 0.4, 1, 0, 0.5, 0, 0.8, 0.4, 0.6, 0.5]   # focus pattern
+let kS   = 3 + int(h2 * 5 + energy * 5)
+let rS   = int(h4 * 16)
+let euS  = if floor(((stepIx + rS) mod 16) * kS / 16) != floor((((stepIx + rS) mod 16) + 15) * kS / 16) - (if ((stepIx + rS) mod 16) == 0 then kS else 0) then 1 else 0
+let stickA7 = max(euS * (0.5 + h1 * 0.5), (if sub == 2 then 0.8 else 0) * ease((energy - 0.3) * 3)) * (1 - dropBar * 0.5)
+play sticks:
+  let sv = (if med > 0.5 then (if beatIx == 0 and sub == 0 then 0.35 else if stepIx == 10 and h1 > 0.8 then 0.15 else 0) else if algo > 0.5 then stickA7 else if fz > 0.5 then stickF[stepIx] else if q > 0.5 then (if stepIx == 0 then 0.35 else 0) else if sub == 2 then 0.9 else if sub == 3 then 0.35 * arcC else if sub == 1 then 0.5 * drop2 else 0) * started * (1 - gap)
+  let hit = slew(discharge(trig16 * sv, 2500), 0.0004)
+  let s1 = stick(hit * 2.0, 1700, 0.015, 0.4 + sv * 0.6)
+  let s2 = stick(hit * 1.3, 1270, 0.011, (0.4 + sv * 0.6) * 0.7)
+  let click = (noise() |> bpf(2600, 0.55)) * discharge(trig16 * sv, 450)
+  (s1 + s2 + click) * 0.11
+
+# ------------------------------------------------------------------- doof
+play kick:
+  let p = 200 + discharge(trigB, 30) * 320
+  $kph = 0.0
+  $kph = if trigB > 0.5 then 0.0 else ($kph + p * dt) mod 1.0
+  let body  = sin(TAU * $kph) * kEnv
+  let click = (noise() |> lpf(2800, 0.3)) * discharge(trigB * groove, 650) * 0.35
+  (body + click) * groove * 0.55 * (1 - yz)
+
+# Rolling bass: rest on the kick's sixteenth, three plucks after it.
+let bassLine = [82.41, 82.41, 82.41, 82.41, 87.31, 87.31, 87.31, 87.31, 103.83, 103.83, 103.83, 103.83, 82.41, 82.41, 98.0, 82.41]
+play bass:
+  $bn = 82.41
+  $bn = if trig16 > 0.5 then (if chord == 1 then 87.31 else if chord == 2 then 103.83 else if chord == 4 then 110.0 else if chord == 5 then 73.42 else if chord == 6 then 65.41 else bassLine[stepIx]) else $bn
+  let gate   = if sub == 0 then 0 else 1
+  let accent = if sub == 2 then 1 else 0.7
+  let excite = (noise() |> lpf(1800 + accent * 2000, 0.3)) * slew(discharge(trig16 * gate * accent, 320), 0.0005)
+  let str    = pluck_string(excite, $bn * 2, 0.5 + arcB * 0.3)
+  str * sc * groove * 0.55 * (1 - yz * 0.85)
+
+# Riser into each drop, and the crash on it.
+play swoosh:
+  (noise() |> bpf(700 + riser * riser * 5000, 0.6)) * riser * riser * 0.1 * (1 - gap)
+play crash:
+  (noise() |> bpf(5000, 0.2)) * slew(discharge(dropHit, 1.2), 0.002) * 0.25
+
+# Kookaburras: a chorus of two, the second farther off. First laugh 3 s
+# after loading, then every ~23 s, the rest of the mix ducking under it.
+$kstart = t
+# One laughing kookaburra. Source-filter: a harmonic-rich pulse (the
+# syrinx) with jitter and breath noise, through beak formants that open
+# from "koo" to "kaa". The call's arc: soft low chuckles, a rising
+# "kook-kook", the loud "kaa-kaa-kaa" with its ~27 Hz rattle, then
+# falling chuckles. `ku` is seconds into the call; `lift` its pitch.
+def kookaburra(ku, lift):
+  let on    = if ku > 0 and ku < 5.6 then 1 else 0
+  let kook  = ease((ku - 1.0) / 0.5)
+  let climax = ease((ku - 2.3) / 0.3) * (1 - ease((ku - 4.1) / 0.4))
+  let fall  = ease((ku - 4.1) / 0.4)
+  let rate  = 4.5 + kook * 1.5 + climax * 1.5 - fall * 2.5
+  let syl   = phasor(rate)
+  let alt   = if sin(TAU * phasor(rate * 0.5)) > 0 then 1.18 else 1.0
+  let base  = (430 + kook * 230 + climax * (170 * alt) - fall * (280 + (ku - 4.1) * 120)) * lift
+  let f0    = base * (1 + 0.2 * sin(PI * syl) - 0.12 * syl) * (1 + slew(noise(), 0.008) * 0.02)
+  let shape = if syl < 0.72 then pow(sin(PI * syl / 0.72), 0.8) else 0
+  let roll  = 1 - climax * 0.55 * (0.5 + 0.5 * sin(TAU * phasor(27)))
+  let amp   = (0.35 + kook * 0.35 + climax * 0.3) * (1 - fall * 0.5) * shape * roll * on
+  let pulse = pow(max(0, sin(TAU * phasor(f0))), 5) - 0.25
+  let src   = pulse + noise() * 0.18
+  let open  = kook * 0.5 + climax * 0.5
+  let f1    = formant(src, 750 + open * 600, 0.8)
+  let f2    = formant(src, 1900 + open * 700, 0.85) * 0.7
+  let f3    = formant(src, 3100, 0.88) * 0.3
+  (f1 + f2 + f3) * amp * 2.0
+
+let ku    = (t - $kstart - 3) mod 23.3
+let kDuck = ease(ku / 0.6) * (1 - ease((ku - 5.0) / 1.5))     # the bush goes quiet
+play kooka:
+  let a  = kookaburra(ku, 1.0) |> drive(1.4)
+  let b  = kookaburra(ku - 1.3, 1.09) |> drive(1.4)            # a second bird, out of step
+  let bf = b |> lpf(2600, 0.2)                                   # farther away: darker
+  [a * 0.85 + bf * 0.35, a * 0.3 + bf * 0.6] * 0.2
+
+# Bats at dusk. Microbats as a bat detector hears them (the bat_lure
+# chirp, pitched down into the speakers' range): a pass every ~17 s
+# flies across the stereo field and speeds into a feeding buzz. Flying
+# foxes squabble in the trees every ~29 s: rough harmonic squawks.
+def chirp(trig, hi, lo, len):
+  let sweep = discharge(trig, 4 / len)
+  let amp   = discharge(trig, 7 / len) - discharge(trig, 2500)
+  sin(TAU * phasor(lo + (hi - lo) * sweep)) * amp
+
+let bp = (t / 17.3) mod 1                                     # microbat pass
+let bu = bp * 17.3
+let passEnv = ease(bu / 0.8) * (1 - ease((bu - 2.8) / 0.5))
+let buzz    = ease((bu - 2.2) / 0.5)                           # closing on a moth
+let fp = (t / 29.1) mod 1                                      # flying-fox squabble
+let fu = fp * 29.1
+let foxOn = ease(fu / 0.3) * (1 - ease((fu - 3.5) / 0.6))
+play bats:
+  let rate = 9 + buzz * 55
+  let c = chirp(impulse(rate), 4000, 2200 - buzz * 400, 0.008 * (1 - buzz * 0.6)) * passEnv * 0.5
+  let micro = pan(c, -0.9 + bu * 0.6)
+  # squawks: a burst whenever two slow waves line up; pitch from a third
+  let gate  = if sin(TAU * t * 2.3) * sin(TAU * t * 3.7 + 1) > 0.25 then 1 else 0
+  let sq    = slew(gate * foxOn, 0.01)
+  let f0    = 1300 + 700 * (sin(TAU * t * 0.9) + 1) * 0.5
+  let rough = 0.6 + 0.4 * sin(TAU * phasor(85))
+  let pulse = pow(max(0, sin(TAU * phasor(f0))), 3) - 0.3
+  let fox   = (formant(pulse + noise() * 0.3, 2500, 0.85) + formant(pulse, 1300, 0.8) * 0.5) * sq * rough
+  micro + pan(fox * 0.35, 0.6)
+
+# Dingoes howling across the valley, about every 41 s: three dogs, one
+# after another, each a voiced glide up, a held wobbling note, a sag.
+def dingo(u, f, len):
+  let on  = if u > 0 and u < len then 1 else 0
+  let f0  = f * (0.72 + 0.28 * ease(u / 0.7)) * (1 - 0.14 * ease((u - len * 0.6) / (len * 0.4))) * (1 + 0.013 * sin(TAU * 5.1 * u)) * (1 + slew(noise(), 0.02) * 0.008)
+  let amp = ease(u / 0.5) * (1 - ease((u - len + 0.8) / 0.8)) * on
+  let src = pow(max(0, sin(TAU * phasor(f0))), 2) - 0.37 + noise() * 0.06
+  let mouth = 560 + 220 * ease(u / 0.9)                          # oo → ow
+  (formant(src, mouth, 0.85) + formant(src, mouth * 2.0, 0.88) * 0.45 + src * 0.08) * amp
+
+let du = (t / 41.3) mod 1 * 41.3
+let dDuck = ease(du / 0.5) * (1 - ease((du - 8.0) / 1.0))      # the bush goes quiet for them
+let bDuck = max(passEnv, foxOn)
+play dingoes:
+  let d1 = dingo(du, 470, 5.0)
+  let d2 = dingo(du - 1.2, 560, 4.5)
+  let d3 = dingo(du - 2.6, 410, 6.0) |> lpf(1800, 0.2)          # the farthest
+  [d1 * 0.8 + d2 * 0.4 + d3 * 0.6, d1 * 0.4 + d2 * 0.8 + d3 * 0.5]
+
+# Green tree frogs: a pulsed "crawk", glottal pulses at ~110 Hz through
+# two throat formants. In drop 3 they play the hats; a few call
+# anyway in the background.
+def frog(trig, rate, fA, fB):
+  let env = slew(discharge(trig, 9), 0.003)
+  let pulses = pow(max(0, sin(TAU * phasor(rate * (1 - env * 0.08)))), 10)
+  (formant(pulses, fA, 0.9) + formant(pulses, fB, 0.92) * 0.6) * env
+
+let frogA = [0, 0, 1, 0, 0, 0, 0.7, 0, 0, 0, 1, 0, 0, 0.5, 0.8, 0]
+let frogB = [0, 0.6, 0, 0, 0, 0.8, 0, 0.5, 0, 0.6, 0, 0, 0, 0.8, 0, 0.6]
+let frogC = [0.7, 0, 0, 0.5, 0, 0, 0, 0.9, 0, 0, 0, 0.6, 0.5, 0, 0, 0.9]
+play frogs:
+  let ambient = if sin(TAU * t * 0.37) * sin(TAU * t * 0.53 + 1) > 0.6 then 0.4 else 0
+  let fOn = max(drop3, 0.8 * (1 - brk * 0.7)) * (1 - q) * (1 - fz)
+  let fa = frog(trig16 * max(frogA[stepIx] * fOn, ambient * frogA[stepIx]), 108, 640, 1900)
+  let fb = frog(trig16 * frogB[stepIx] * fOn, 131, 760, 2200)
+  let fc = frog(trig16 * max(frogC[stepIx] * fOn, ambient * frogC[stepIx] * 0.7), 94, 560, 1650)
+  pan(fa, -0.5) + pan(fb, 0.55) + pan(fc, 0.1)
+
+# Bush stone-curlew: the eerie night wail, "weer-lo, weer-lo", ~31 s.
+let cu = (t / 17.3) mod 1 * 17.3
+let cuSide = if ((t / 17.3) mod 2) < 1 then -0.6 else 0.6        # two birds answering
+let cuDuck = ease(cu / 0.3) * (1 - ease((cu - 4.6) / 0.6))
+play curlew:
+  let n  = if cu < 2.2 then cu else cu - 2.3                     # two wails
+  let on = if cu > 0 and cu < 4.5 and n > 0 and n < 2.1 then 1 else 0
+  let f  = if n < 0.5 then 1150 + 1500 * ease(n / 0.5) else 2650 - 1250 * ease((n - 0.6) / 1.3)
+  let amp = ease(n / 0.15) * (1 - ease((n - 1.7) / 0.4)) * on
+  let w  = sin(TAU * phasor(f * (1 + 0.006 * sin(TAU * phasor(7))))) + (noise() |> bpf(f, 0.8)) * 0.25
+  pan(w * slew(amp, 0.005) * 0.28, cuSide)
+
+# Sulphur-crested cockatoo: a raucous screech on the drop, and now and
+# then (~53 s) from the treetops.
+let ck = (t / 23.9) mod 1 * 23.9
+let ck2 = if ((t / 23.9) mod 2) < 1 then 0 else 1                 # every other time, a second screech
+let ckOn = max(discharge(hit3, 1.6), max(if ck > 0 and ck < 0.7 then 1 - ck / 0.7 else 0, if ck2 > 0.5 and ck > 0.9 and ck < 1.5 then 1 - (ck - 0.9) / 0.6 else 0))
+let ckDuck = ease(ck / 0.1) * (1 - ease((ck - 1.6) / 0.4))
+play cockatoo:
+  let f0 = 760 + 180 * sin(TAU * phasor(19))
+  let src = pow(max(0, sin(TAU * phasor(f0) + 2.5 * sin(TAU * phasor(f0 * 1.51)))), 2) + noise() * 0.5
+  let sc2 = formant(src, 2400, 0.8) + formant(src, 1300, 0.75) * 0.6
+  pan(sc2 * slew(ckOn, 0.003) * 0.35, 0.65)
+
+# ---------------------------------------- movement 4: Kanye-inspired
+# Half-time over the same clock: the 808 on one, the and-of-two and
+# the four-e, the clap on three.
+let k8Pat = [1, 0, 0, 0, 0, 0, 0.8, 0, 0, 0, 0, 0.6, 0, 0, 0, 0]
+let k8Trig = trig16 * k8Pat[stepIx] * yz
+play k808:
+  $k8ph = 0.0
+  let f   = 82.41 * (1 + discharge(k8Trig, 40) * 1.2)             # glides down onto E2
+  $k8ph = if k8Trig > 0.5 then 0.0 else ($k8ph + f * dt) mod 1.0
+  let env = slew(discharge(k8Trig, 2.2), 0.002)
+  (sin(TAU * $k8ph) * env * 1.6) |> drive(3.0)                    # Yeezus: distortion carries it
+
+# The big clap: three hands a few ms apart, then the room. Pure
+# arithmetic on the time since beat three.
+let ct = (barPh - 0.5) * 4 / tempo
+play bigclap:
+  let h1 = if ct >= 0 then exp(-ct * 320) else 0
+  let h2 = if ct >= 0.009 then exp(-(ct - 0.009) * 300) else 0
+  let h3 = if ct >= 0.02 then exp(-(ct - 0.02) * 260) else 0
+  let tail = if ct >= 0 then exp(-ct * 16) * 0.35 else 0
+  ((noise() |> bpf(1150, 0.45)) * (h1 + h2 * 0.8 + h3 * 0.9 + tail)) * yz * 0.5
+
+# Gospel organ: tonewheel sines at drawbar ratios (1, 2, 3, 4, 6), four
+# voices on the chord, a Leslie wobble, swelling in.
+let orgDm = [293.66, 349.23, 440.0, 587.33]
+let orgC  = [261.63, 329.63, 415.30, 523.25]
+let orgF  = [349.23, 440.0, 523.25, 698.46]
+let orgE  = [329.63, 415.30, 493.88, 659.26]
+play organ:
+  let leslie = 1 + 0.22 * sin(TAU * phasor(6.4))
+  let tone = sum(4, v =>
+    let f = if chord == 5 then orgDm[v - 1] else if chord == 6 then orgC[v - 1] else if chord == 1 then orgF[v - 1] else orgE[v - 1]
+    let fv = slew(f, 0.03) * (1 + 0.003 * sin(TAU * phasor(6.4)))
+    sin(TAU * phasor(fv)) + sin(TAU * phasor(fv * 2)) * 0.6 + sin(TAU * phasor(fv * 3)) * 0.4 + sin(TAU * phasor(fv * 4)) * 0.3 + sin(TAU * phasor(fv * 6)) * 0.15)
+  tone * leslie * slew(yz, 1.5) * 0.035
+
+# Chipmunk soul: a pitched-up voice chopped into syncopated sixteenths,
+# each chop flipping between "ah" and "ee".
+let chopGate = [1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1]
+let chopNote = [659.26, 0, 659.26, 587.33, 0, 523.25, 0, 587.33, 659.26, 0, 783.99, 0, 659.26, 587.33, 0, 523.25]
+play chop:
+  let g   = slew(chopGate[stepIx] * (if stepPh < 0.8 then 1 else 0), 0.004)
+  $cn = 659.26
+  $cn = if trig16 > 0.5 and chopNote[stepIx] > 0 then chopNote[stepIx] else $cn
+  let f0  = slew($cn, 0.015) * (1 + 0.01 * sin(TAU * phasor(7.5)))
+  let src = pow(max(0, sin(TAU * phasor(f0))), 6) - 0.2
+  let ee  = if (stepIx mod 3) == 0 then 1 else 0
+  let v   = formant(src, 800 - ee * 450, 0.85) + formant(src, 1250 + ee * 1050, 0.88) * 0.7 + formant(src, 2900, 0.9) * 0.3
+  v * g * yz * 0.5
+
+# --------------------------------------------- the advanced didgeridoo
+# Lips: an outward-striking mass-spring (Q ~5) that collides when shut;
+# Bernoulli flow through the opening. Bore: a waveguide holds the drone
+# on the tube's pitch, its upper harmonics damped, while modal
+# resonances at measured didgeridoo ratios (2.65, 4.35, 6.05: a flaring,
+# irregular bore is not harmonic) give the upper structure and the
+# toots. Vocal tract: three impedance modes upstream of the lips, moved
+# by jaw and tongue; where the tract's impedance peaks it takes energy
+# out of the sound, which is where the didge's vowel bands come from.
+def xmode_r(k): if k == 1 then 2.65 else if k == 2 then 4.35 else 6.05
+def xmode_z(k): if k == 1 then 9.0 else if k == 2 then 6.0 else 3.5
+def didge_x(mouth, voiceP, lipF, f0, ft1, ft2, ft3, zt):
+  $pm = 0.0
+  $dp = 0.0
+  $u  = 0.0
+  $lx = 0.0
+  $lv = 0.0
+  let pModes = sum(3, k =>
+    let fk = f0 * xmode_r(k)
+    xmode_z(k) * 2 * 0.045 * TAU * fk * dho_v($u, fk, 0.045))
+  let pTract = sum(3, j =>
+    let fj = if j == 1 then ft1 else if j == 2 then ft2 else ft3
+    let zj = if j == 2 then 0.06 else 0.08
+    zt * (if j == 2 then 1.4 else 1.0) * 2 * zj * TAU * fj * dho_v($u, fj, zj))
+  let wl = TAU * lipF
+  let open = 0.05 + $lx
+  let contact = if open < 0 then -open * 30 * wl * wl else 0
+  $lv = clamp($lv + (-2 * 0.1 * wl * $lv - wl * wl * $lx + $dp * 3.4 * wl * wl + contact) * dt, -3000, 3000)
+  $lx = clamp($lx + $lv * dt, -2, 3)                      # bounded: the lips can't run away
+  let a = clamp(0.05 + $lx, 0.0, 1.0)
+  $u  = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp))
+  let pplus = $u * 0.8 + $pm
+  let p     = pplus + $pm + pModes
+  $dp = clamp(lp1(mouth * (1 + voiceP) - pTract - p, 5000), -4, 4)
+  let back = delay(pplus, 1.0 / f0, 0.05)
+  $pm = clamp(lp1(back, 900) * 0.93, -20, 20)
+  (back - lp1(back, 180)) + hp1(pModes, 150) * 0.12
+
+# Focus-scene playing: dik-a-dik tongue taps move the tract's tongue
+# resonance, the jaw sweeps oo -> ah, a vocal growl every 8 bars, huffs
+# on the circular breath.
+# The master player's set: 4-bar sections in turn. 0 drone + wah,
+# 1 kangaroo hop landing on a toot, 2 dik-a-dik double tonguing,
+# 3 growl + barks, 4 toot call and response, 5 breath huffs, 6 gallop.
+let sIx    = int(bars / 4) mod 7
+let kanga  = [1, 0, 0, 0.8, 0, 0, 1, 0, 0.9, 0, 0, 0.8, 0, 0, 1, 0.5]
+let dika   = [1, 0.6, 0.8, 0.6, 1, 0.6, 0.8, 0.6, 1, 0.6, 0.8, 0.6, 1, 0.7, 0.9, 0.7]
+let gallop = [1, 0, 0.7, 0.8, 1, 0, 0.7, 0.8, 1, 0, 0.7, 0.8, 1, 0.6, 0.8, 0.9]
+let huffP  = [0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 1]
+let barkP  = [1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0]
+let fTongue = [1, 0, 0.7, 0, 1, 0.6, 0, 0.7, 1, 0, 0.7, 0.5, 1, 0, 0.8, 0.6]
+# Movement 7, didge and clapsticks only, algorithmic: every 2 bars a
+# seeded hash re-rolls Euclidean patterns (k pulses in 16, rotated) for
+# the didge tongue and both sticks, and picks toots, growls and huffs.
+# A 16-bar energy arc builds and drops; on high energy the didge punches
+# a pressure kick on every beat.
+let kD    = max(1, int((4 + h1 * 6 + energy * 4) * (1 - med * 0.8)))                      # didge pulses per bar
+let rD    = int(h2 * 16)
+let euD   = if floor(((stepIx + rD) mod 16) * kD / 16) != floor((((stepIx + rD) mod 16) + 15) * kD / 16) - (if ((stepIx + rD) mod 16) == 0 then kD else 0) then 1 else 0
+let kickD = (if sub == 0 then 1 else 0) * ease((energy - 0.45) * 4) * (1 - dropBar) * (1 - med)
+let algoTap = max(euD * (0.55 + h3 * 0.45), kickD) * (1 - dropBar * 0.7)
+let tapPat = if algo > 0.01 then algoTap * algo + (1 - algo) * (if sIx == 1 then kanga[stepIx] else 0) else if sIx == 1 then kanga[stepIx] else if sIx == 2 then dika[stepIx] else if sIx == 6 then gallop[stepIx] else if sIx == 3 then dika[stepIx] * 0.4 else if sIx == 0 then 0 else fTongue[stepIx] * 0.5
+let tapX   = slew(discharge(trig16 * tapPat, 18), 0.004)
+let tootA  = (1 - med) * (if h3 > 0.68 and stepIx >= 12 then 1 else 0) * algo * (1 - dropBar)
+let tootX  = slew(min(1, tootA + (if sIx == 1 and stepIx >= 14 and (bars mod 2) == 1 then 1 else 0) + (if sIx == 4 and ((stepIx >= 4 and stepIx < 7) or (stepIx >= 12 and stepIx < 15)) then 1 else 0) + (if sIx == 6 and stepIx >= 14 and (bars mod 4) == 3 then 1 else 0)), 0.012)
+let jawX   = if sIx == 0 then (sin(TAU * t / 1.7) + 1) * 0.5 else clamp((sin(TAU * t / 3.3) + 1) * 0.35 + (sin(TAU * t / 0.91) + 1) * 0.15, 0, 1)
+let eeX    = if sIx == 2 then (stepIx mod 2) * 700 else 0
+let growl  = if algo > 0.5 then (if h4 > 0.72 then 0.8 else 0) else if sIx == 3 then 1 else if sIx == 6 then 0.4 else if (bars mod 8) == 7 then 0.6 else 0
+# Meditative: the overtone melody walks the drone's harmonic series,
+# a soft hum alternates E3 / B2, the jaw drifts on slow cycles.
+let harmMel = [6, 8, 9, 8, 10, 9, 12, 10, 8, 6, 9, 10]
+let nH      = harmMel[int((t / 4.4) mod 12)]
+let humF    = if ((t / 16) mod 2) < 1 then 164.81 else 123.47
+let gVoice = pow(max(0, sin(TAU * phasor((123.47 * (1 - med) + humF * med) * (1 + 0.01 * sin(TAU * phasor(4)))))), 3) * slew(max(growl * (1 - med), med * 0.45), 0.3)
+let bark   = (if sIx == 3 then 1 else 0) * discharge(trig16 * barkP[stepIx], 22)
+let barkV  = pow(max(0, sin(TAU * phasor(330 * (1 + bark * 0.25)))), 3) * bark
+let huffX  = (if sIx == 5 or (algo > 0.5 and h2 > 0.75) then 1 else 0) * slew(discharge(trig16 * huffP[stepIx], 12), 0.005)
+let huff   = max(ease((cycle - 0.9) * 25) * (1 - ease((cycle - 0.96) * 40)), huffX)
+play mdidge:
+  let stop  = slew((if tapPat > 0.6 and stepPh < 0.11 then 1 else 0) * algo, 0.002)   # the tongue's "d": brief, accents only
+  let press = max(0.05, (0.92 * (1 + 0.04 * sin(TAU * t / 9.1) * med) + tapX * 0.08 + kickD * 0.05 + tootX * 0.25 - gulp * 0.4 - huff * 0.3) * (1 - stop * 0.25))
+  let jawM  = (sin(TAU * t / 7.3) + 1) * 0.3 + (sin(TAU * t / 11.9) + 1) * 0.2
+  let jawW  = clamp(jawX * (0.6 + energy * 0.6) * (1 - med) + jawM * med, 0, 1)
+  let ovF   = slew(nH * 81.4, 0.35)                                   # the singled-out harmonic
+  let d = didge_x(press, gVoice * 0.3 + barkV * 0.35, 65 * (1 + tootX * 0.65), 75.5, 280 + jawW * 700, (900 + tapX * 2200 + eeX) * (1 - med) + ovF * med, 2600, 6.0)
+  let ring = formant(d * 3 |> drive(1.5), ovF, 0.975) * 2.5 * pow(nH / 6, 1.6) * med   # the harmonic rings in the bell
+  ((d + ring) * 2.2 |> drive(1.6)) * nx * 1.5 * (1 + med * 0.6)
+play mdidge2:
+  let p2 = max(0.05, (0.95 - gulp * 0.4 + tapX * 0.06) * started * (1 - fz * 0.8) * (1 - q * 0.6))
+  let d2 = didge_x(p2, 0, 97.5, 113.2, 350 + jawX * 300, 1100, 2700, 5.0)
+  (d2 * 2.2 |> drive(1.6)) * nx
+
+# The didge sings the chords: its own sound through tight resonators on
+# the chord tones (and an octave up), a didge choir.
+play didgeChoir:
+  let d = mono(didge)
+  let choir = sum(4, v =>
+    let f = if chord == 5 then orgDm[v - 1] else if chord == 6 then orgC[v - 1] else if chord == 1 then orgF[v - 1] else orgE[v - 1]
+    formant(d, slew(f, 0.05), 0.985) + formant(d, slew(f * 0.5, 0.05), 0.985) * 0.7)
+  (choir |> drive(2.0)) * slew(yz, 1.0) * 0.9
+
+# Trap hats for the half-time section: crisp sixteenths, rolling into
+# 32nds at the end of each bar.
+let hatT = [0.8, 0.3, 0.6, 0.3, 0.8, 0.3, 0.6, 0.3, 0.8, 0.3, 0.6, 0.3, 0.8, 0.5, 0.7, 0.9]
+play traphats:
+  let rollOn = if stepIx >= 14 then 1 else 0
+  let tr = max(trig16, if rollOn > 0.5 and stepPh >= 0.5 and prev(stepPh) < 0.5 then 1 else 0)
+  (noise() |> bpf(8000, 0.55)) * slew(discharge(tr * hatT[stepIx], 60), 0.0005) * yz * 0.18
+
+# (flute_bore: a jet-and-bore flute, not yet oscillating; unused.)
+# Physical flute: an air jet across the embouchure (a delay, then the
+# jet's cubic nonlinearity) driving an open bore (a delay with a lossy,
+# inverting reflection). Breath noise rides the jet.
+def flute_bore(breath, f0):
+  $bo = 0.0
+  let refl = -(lp1($bo, 2800))
+  let pd   = breath + noise() * 0.08 * breath - 0.5 * refl
+  let jet  = delay(pd, 0.32 / f0, 0.02)
+  let jt   = clamp(jet * (jet * jet - 1), -1, 1)
+  $bo = delay(jt + 0.5 * refl, 1 / f0, 0.02)
+  hp1($bo, 80)
+
+# A slow line over E: E G# A B D, two beats a note, rests to breathe.
+let fluteMel = [329.63, 0, 415.30, 440.0, 493.88, 0, 440.0, 415.30, 329.63, 0, 293.66, 329.63, 493.88, 0, 587.33, 493.88]
+play flute:
+  let ix = int((($bpos / 4) mod 1) * 16)
+  let n  = fluteMel[ix]
+  $fn = 329.63
+  $fn = if n > 0 then n else $fn
+  let blow = slew(if n > 0 then 0.9 else 0, 0.12) * (1 + 0.05 * sin(TAU * phasor(5)))   # breath with vibrato
+  let f   = slew($fn, 0.06) * (1 + sin(TAU * phasor(5.2)) * 0.008)
+  let air = (noise() |> bpf(f * 2, 0.6)) * 0.05
+  let tone = sin(TAU * phasor(f)) * 0.7 + sin(TAU * phasor(f * 3)) * 0.09 + sin(TAU * phasor(f * 5)) * 0.03 + air
+  tone * blow * q * 0.25                                           # the flute.aither tone
+
+# -------------------------------------------------------------------- mix
+let dOut  = ((didge + didge2 * 0.55 * (1 - back)) * (1 - nx * (1 - back)) + (mdidge + mdidge2 * 0.5) * (1 + fz * 0.4) * (1 - back)) |> hpf(200, 0.29) |> hpf(200, 0.29) |> lpf(7000, 0.2)
+let didgePat = [1, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 1, 1]
+let dGate = slew(1 - yz * 0.75 * (1 - didgePat[stepIx]), 0.004)    # half-time stutter
+let roomD = reverb(mono(dOut), 1.3 + med * 2.2, 0.1 + med * 0.25)
+let roomM = reverb(mono(marimba) |> hpf(200, 0.29), 1.8, 0.2)
+let roomT = reverb(mono(drums) |> hpf(160, 0.29), 0.9, 0.08)
+let roomS = reverb(mono(sticks) |> lpf(6500, 0.2), 0.6, 0.06)
+let doofM = (mono(kick) + mono(bass) + mono(swoosh) + mono(crash)) |> hpf(170, 0.29) |> lpf(7500, 0.2)
+let batsD = (bats |> drive(24)) * 0.25                         # gain 6, soft ceiling at -12 dB
+((haas(((roomD * 3.2) |> drive(1 + yz * 2.5)) * dGate * (1 - yz * 0.3), 8) + pan(roomM * 1.6, -0.35) + haas(roomT * 1.2, 4) + pan(roomS, 0.35) + haas(doofM * 0.5, -5)) * (1 - max(max(kDuck * 0.3 * oldFade, 0), max(max(dDuck * 0.37, bDuck * 0.2) * oldFade, ckDuck * 0.25))) + (kooka + pan(reverb(mono(kooka) |> hpf(300, 0.29), 2.2, 0.3) * 1.2, 0.5) + batsD + pan(reverb(mono(batsD), 1.8, 0.3), -0.2) + dingoes * 0.3 + haas(reverb(mono(dingoes), 3.2, 0.5) * 0.48, 12)) * oldFade + (frogs |> hpf(300, 0.29)) * 0.8 * (1 - yz) + (curlew + pan(reverb(mono(curlew), 2.8, 0.45) * 0.4, -0.3) + (cockatoo |> lpf(6000, 0.2)) * 0.6 * (1 - q)) * (1 - yz * 0.6) + (k808 |> hpf(120, 0.29)) * 0.35 + bigclap + haas(reverb(mono(bigclap), 1.6, 0.35) * 0.8, 9) + pan(reverb(mono(organ), 2.4, 0.3) * 1.0, -0.2) + haas(reverb(mono(chop), 1.4, 0.2) * 0.8, 6) + haas((mono(didgeChoir) |> hpf(200, 0.29)) * 1.0 + reverb(mono(didgeChoir), 2.0, 0.3) * 0.6, -7) + traphats + pan(fbdelay(mono(sticks), 0.326, 0.5, 0.35) * 0.3 * algo, -0.4) + pan(mono(flute) * 0.6 + reverb(mono(flute), 3.2, 0.45) * 0.9, 0.25)) * 0.78

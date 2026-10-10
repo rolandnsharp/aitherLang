@@ -297,3 +297,13 @@ proc nFreqShift*(s: var DspState; signal, hz: float64): float64
   # Net effect: hz > 0 shifts the spectrum up, hz < 0 shifts down —
   # the user-intuitive direction.
   realA * cos(phase) + imagB * sin(phase)
+
+# ------------------------------------------------------------------ input
+# The current input frame, written by whoever drives tick(): the engine's
+# audio callback (one capture frame per output frame) or render.nim (one
+# frame of a recording per sample). Zero when nothing feeds it, so a
+# patch that reads input() still runs silently without a capture device.
+var inputL*, inputR*: float64
+
+proc nInputL*(): float64 {.cdecl, exportc: "n_input_l".} = inputL
+proc nInputR*(): float64 {.cdecl, exportc: "n_input_r".} = inputR

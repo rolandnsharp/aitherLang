@@ -93,6 +93,16 @@ type
     typeCounter: Table[string, int]     # name -> next perTypeIdx
     typeCumSize: Table[string, int]     # name -> cumulative size so far
     typeOrder: seq[string]              # types in first-seen order
+    # File-level state declared with a pair (`$z = [0, 0]`). Each one is
+    # two struct fields, `v_<name>__0` and `v_<name>__1`, listed in
+    # topVarNames so they migrate across hot reloads by name like any
+    # other state.
+    pairVars: HashSet[string]
+    # Every file-level `$x = init` declaration (top level and play
+    # bodies), in source order, for the lazy-init block at tick() start.
+    varDecls: seq[Node]
+    # def name -> which params its body reads as a pair (see pairParams).
+    pairParamCache: Table[string, seq[bool]]
 
 # Native dsp.nim primitives callable from generated C.
 # Name -> arity (not counting the state pointer).
@@ -222,15 +232,23 @@ const BuiltinFns = ["saw", "tri", "sqr", "phasor", "noise", "abs", "pow",
                     "array_make", "array_get", "array_set", "array_len",
                     "array_push", "array_pop", "array_resize"]
 
-# Pair-returning builtins. Each takes scalars and emits two C expressions
-# — one for the real component, one for the imaginary. They piggy-back on
-# the stereo machinery (refsStereo / emitStereo) because aither already
-# represents two-valued returns as L/R-style pairs; "stereo" here means
+# Pair-returning builtins. Each emits two C expressions — one for the
+# real component, one for the imaginary. They piggy-back on the stereo
+# machinery (refsStereo / emitStereo) because aither already represents
+# two-valued returns as L/R-style pairs; "stereo" here means
 # "two-component", not literally "speaker channels". Composers index with
 # `out[0]` (real) / `out[1]` (imag), the same way they index a pan output
 # for L/R. Don't add type-system surgery; the value stays flat.
+#
+# Operands may be pairs or plain numbers in any mix — `cmul(p, q)` is
+# `cmul(p[0], p[1], q[0], q[1])` — see pairOperands. The operation, not
+# the value, decides that two cells are a complex number.
 const PairCalls = ["cmul", "cdiv", "cscale", "rotate", "analytic",
-                   "phasor_pair"]
+                   "phasor_pair", "conj", "input"]
+
+# Scalar reductions of a pair: one pair (or its two numbers) in, one
+# number out.
+const PairReaders = ["magnitude", "phase"]
 
 # Transparent helpers — process a signal without intentionally creating
 # L/R difference. Stereo input maps to stereo output by re-emitting the
@@ -273,6 +291,7 @@ proc isValueName(c: Ctx; sc: Scope; name: string): bool =
   if c.lookupArray(sc, name).ok: return true
   if name in c.topLets: return true
   if name in c.topVarSet: return true
+  if name in c.pairVars: return true
   if name in c.playSet: return true
   if name in c.stereoLets: return true
   false
@@ -293,6 +312,50 @@ proc isFnName(c: Ctx; sc: Scope; name: string): bool =
 proc stereoRef(c: Ctx; name, chan: string): string =
   let prefix = if name in c.playSet: "p_" else: "l_"
   prefix & name & "_" & chan
+
+# Struct field holding one side (k = 0 or 1) of file-level pair state.
+proc pairVarField(name: string; k: int): string = name & "__" & $k
+proc pairVarRef(name: string; k: int): string = "s->v_" & pairVarField(name, k)
+
+# A def takes a param as a pair when its body reads it as one: indexes
+# it with a constant `p[0]` / `p[1]`, hands it straight to a pair
+# operation (`cmul(p, q)`, `magnitude(p)`), or passes it on to another
+# def that takes a pair there. Such a param is bound whole, so
+# `def mono(s): (s[0] + s[1]) * 0.5` sees both channels instead of
+# being run once per channel. A plain number passed to a pair param
+# fills both sides.
+proc pairParams(c: Ctx; def: Node): seq[bool] =
+  if def.str in c.pairParamCache: return c.pairParamCache[def.str]
+  var res = newSeq[bool](def.params.len)
+  c.pairParamCache[def.str] = res          # guard against call cycles
+  proc mark(c: Ctx; res: var seq[bool]; params: seq[string]; n: Node) =
+    if n == nil: return
+    case n.kind
+    of nkIdx:
+      let a = n.kids[0]; let i = n.kids[1]
+      if a.kind == nkIdent and i.kind == nkNum and int(i.num) in {0, 1}:
+        let k = params.find(a.str)
+        if k >= 0: res[k] = true
+    of nkCall:
+      let callee =
+        if n.str in c.userDefs and n.str notin PairCalls and
+           n.str notin PairReaders: c.pairParams(c.userDefs[n.str])
+        else: @[]
+      for j, arg in n.kids:
+        if arg.kind != nkIdent: continue
+        let k = params.find(arg.str)
+        if k < 0: continue
+        if n.str in PairCalls or n.str in PairReaders or
+           (j < callee.len and callee[j]):
+          res[k] = true
+    else: discard
+    for k in n.kids: mark(c, res, params, k)
+  mark(c, res, def.params, def.kids[0])
+  c.pairParamCache[def.str] = res
+  res
+
+proc hasPairParams(c: Ctx; name: string): bool =
+  name in c.userDefs and c.pairParams(c.userDefs[name]).anyIt(it)
 
 proc errLoc(n: Node): string =
   # Format the node's source location for an error message. Prefers
@@ -399,8 +462,20 @@ proc emitDefInline(c: Ctx; sc: Scope; def: Node; call: Node): string =
       $def.params.len & " got " & $args.len & " " & errLoc(call))
   let inner = push(sc)
   var preface = ""
+  let pairs = c.pairParams(def)
   for i, p in def.params:
     let a = args[i]
+    # Pair param (see pairParams): bind both sides. emitStereo's
+    # statements are C declarations, legal inside the `({ ... })` below.
+    if pairs[i]:
+      var sub = ""
+      let sv = c.emitStereo(sc, a, sub)
+      let tmpL = c.fresh("p_" & p & "_l")
+      let tmpR = c.fresh("p_" & p & "_r")
+      preface.add sub
+      preface.add &"double {tmpL} = ({sv.l}); double {tmpR} = ({sv.r}); "
+      inner.stereoNames[p] = (tmpL, tmpR)
+      continue
     # Lambda-valued arg: either a literal `(a, b) => ...` at the call
     # site, or an ident that already resolves to a lambda in scope (the
     # def-of-def case where one def passes its own lambda param to
@@ -449,43 +524,142 @@ proc emitDefInline(c: Ctx; sc: Scope; def: Node; call: Node): string =
     else: c.emitExpr(inner, body)
   "(({ " & preface & "double __r = (" & bodyC & "); __r; }))"
 
-# Body of a def (nkBlock). All statements but the last are stmts; last
-# is the expression returned. `let` adds a C local; `var` is call-site
-# state stored in the pool.
-proc emitBlockExpr(c: Ctx; sc: Scope; blk: Node): string =
+# Evaluate `n` where one number is needed. An expression that mentions
+# a pair but reduces to one number (`mono(st)`, `magnitude(z)`) goes
+# through emitStereo, whose statements land in `pre`; a real pair here
+# is an error that says which side to pick.
+proc scalarValue(c: Ctx; sc: Scope; n: Node; pre: var string;
+                 what: string): string =
+  if not c.refsStereo(sc, n):
+    return c.emitExpr(sc, n)
+  let v = c.emitStereo(sc, n, pre)
+  if v.stereo:
+    raise newException(ValueError,
+      what & " needs one number but gets a pair — pick a side with " &
+      "[0] / [1], or make it pair state: $x = [0, 0] " & errLoc(n))
+  v.l
+
+# Operands of a pair operation, flattened to numbers: a pair operand
+# gives its two sides, a number gives itself, and each is evaluated
+# once into a temp. `cmul(p, q)`, `cmul(p, 0.5, -1)` and `cmul(1, 0, q)`
+# all flatten to four numbers.
+proc pairOperands(c: Ctx; sc: Scope; n: Node; pre: var string;
+                  want: int; usage: string): seq[string] =
+  for k in n.kids:
+    if c.refsStereo(sc, k):
+      let v = c.emitStereo(sc, k, pre)
+      let tmpL = c.fresh(n.str & "_a")
+      pre.add &"  double {tmpL} = ({v.l});\n"
+      result.add tmpL
+      if v.stereo:
+        let tmpR = c.fresh(n.str & "_a")
+        pre.add &"  double {tmpR} = ({v.r});\n"
+        result.add tmpR
+    else:
+      let tmp = c.fresh(n.str & "_a")
+      pre.add &"  double {tmp} = ({c.emitExpr(sc, k)});\n"
+      result.add tmp
+  if result.len != want:
+    raise newException(ValueError,
+      n.str & " takes " & usage & ", got " & $result.len &
+      (if result.len == 1: " number " else: " numbers ") & errLoc(n))
+
+# `target = rhs` for a pair target. Both sides are computed into temps
+# before either is stored, so `$z = [$z[1], $z[0]]` swaps rather than
+# reading a half-updated pair. A plain number fills both sides.
+proc assignPair(c: Ctx; sc: Scope; target: tuple[l, r: string];
+                rhs: Node): string =
   var pre = ""
-  let last = blk.kids.len - 1
-  for i, s in blk.kids:
-    if i == last:
-      return "({ " & pre & "double __r = (" & c.emitExpr(sc, s) & "); __r; })"
-    case s.kind
-    of nkLet:
-      let rhs = s.kids[0]
-      # Numeric-literal array let: hoist to a static const so def bodies
-      # can express tabular data (`let p = [2.0, 3.0, 5.0]; p[n - 1]`).
-      # Without this, a def body forced the parenthesised `if/else`
-      # cascade for any constant-table lookup.
-      if rhs.kind == nkArr and rhs.kids.len > 0 and
-         rhs.kids.allIt(it.kind == nkNum):
-        let sym = c.fresh("arr_def_" & s.str)
-        var items: seq[string] = @[]
-        for k in rhs.kids: items.add numLit(k.num)
-        c.arrayDecls.add &"static const double {sym}[{rhs.kids.len}] = {{" &
-          items.join(", ") & "};\n"
-        sc.arrays[s.str] = (sym, rhs.kids.len)
+  let v = c.emitStereo(sc, rhs, pre)
+  let tmpL = c.fresh("pa_l")
+  let tmpR = c.fresh("pa_r")
+  pre & &"  double {tmpL} = ({v.l});\n  double {tmpR} = ({v.r});\n" &
+    &"  {target.l} = {tmpL};\n  {target.r} = {tmpR};\n"
+
+# `$z[0] = expr` / `$z[1] = expr`: store one side of a pair.
+proc assignPairSide(c: Ctx; sc: Scope; st: Node): string =
+  let base = st.kids[0]
+  let idx = st.kids[1]
+  if base.kind == nkIdent and idx.kind == nkNum and int(idx.num) in {0, 1}:
+    let k = int(idx.num)
+    var target = ""
+    let pair = sc.lookupStereo(base.str)
+    if pair.ok: target = (if k == 0: pair.l else: pair.r)
+    elif base.str in c.pairVars: target = pairVarRef(base.str, k)
+    if target.len > 0:
+      var pre = ""
+      let rhs = c.scalarValue(sc, st.kids[2], pre,
+                              "$" & base.str & "[" & $k & "]")
+      return pre & &"  {target} = ({rhs});\n"
+  raise newException(ValueError,
+    "only one side of pair state can be assigned by index " &
+    "($z[0] = ... or $z[1] = ...) " & errLoc(st))
+
+# One non-final statement of a def, lambda or stereo-def body: `let`,
+# a `$state` declaration or assignment, `$z[k] = ...`, or a bare
+# expression run for its side effects. Appends C statements to `pre`.
+proc emitLocalStmt(c: Ctx; sc: Scope; st: Node; pre: var string) =
+  case st.kind
+  of nkLet:
+    let rhs = st.kids[0]
+    # Numeric-literal array let: hoist to a static const so def bodies
+    # can express tabular data (`let p = [2.0, 3.0, 5.0]; p[n - 1]`).
+    # Without this, a def body forced the parenthesised `if/else`
+    # cascade for any constant-table lookup. Two numbers are also a
+    # pair value (`let c = [0.3, 0.1]; cmul(z, c)`).
+    if rhs.kind == nkArr and rhs.kids.len > 0 and
+       rhs.kids.allIt(it.kind == nkNum):
+      let sym = c.fresh("arr_def_" & st.str)
+      var items: seq[string] = @[]
+      for k in rhs.kids: items.add numLit(k.num)
+      c.arrayDecls.add &"static const double {sym}[{rhs.kids.len}] = {{" &
+        items.join(", ") & "};\n"
+      sc.arrays[st.str] = (sym, rhs.kids.len)
+      if rhs.kids.len == 2:
+        let tmpL = c.fresh("l_" & st.str & "_l")
+        let tmpR = c.fresh("l_" & st.str & "_r")
+        pre.add &"  double {tmpL} = {items[0]};\n  double {tmpR} = {items[1]};\n"
+        sc.stereoNames[st.str] = (tmpL, tmpR)
+    elif c.refsStereo(sc, rhs):
+      let v = c.emitStereo(sc, rhs, pre)
+      if v.stereo:
+        let tmpL = c.fresh("l_" & st.str & "_l")
+        let tmpR = c.fresh("l_" & st.str & "_r")
+        pre.add &"  double {tmpL} = ({v.l});\n  double {tmpR} = ({v.r});\n"
+        sc.stereoNames[st.str] = (tmpL, tmpR)
       else:
-        let tmp = c.fresh("l_" & s.str)
-        let v = c.emitExpr(sc, rhs)
-        pre.add &"double {tmp} = ({v}); "
-        sc.names[s.str] = tmp
-        # Literal propagation: see the matching comment in emitDefInline.
-        if rhs.kind == nkNum:
-          sc.numLits[s.str] = rhs.num
-        elif rhs.kind == nkIdent:
-          let nv = sc.lookupNumLit(rhs.str)
-          if nv.ok: sc.numLits[s.str] = nv.val
-    of nkVar:
-      # `var` inside a def body -> claim two pool slots keyed under a
+        let tmp = c.fresh("l_" & st.str)
+        pre.add &"  double {tmp} = ({v.l});\n"
+        sc.names[st.str] = tmp
+    else:
+      let tmp = c.fresh("l_" & st.str)
+      let v = c.emitExpr(sc, rhs)
+      pre.add &"  double {tmp} = ({v});\n"
+      sc.names[st.str] = tmp
+      # Literal propagation: see the matching comment in emitDefInline.
+      if rhs.kind == nkNum:
+        sc.numLits[st.str] = rhs.num
+      elif rhs.kind == nkIdent:
+        let nv = sc.lookupNumLit(rhs.str)
+        if nv.ok: sc.numLits[st.str] = nv.val
+  of nkVar:
+    if c.isStereoReturn(st.kids[0]):
+      # Pair state (`$z = [1, 0]`): a "pvar" region of three slots, the
+      # inited flag then the two sides. Its own helper type, so adding
+      # one doesn't shift the "var" regions of scalar state.
+      let flagSlot = c.fresh("pf")
+      let off = c.registerRegion("pvar", 3)
+      pre.add &"  long {flagSlot} = {off};\n"
+      var initPre = ""
+      let v = c.emitStereo(sc, st.kids[0], initPre)
+      pre.add &"  if (s->pool[{flagSlot}] == 0.0) {{\n" & initPre &
+              &"    s->pool[{flagSlot} + 1] = ({v.l});\n" &
+              &"    s->pool[{flagSlot} + 2] = ({v.r});\n" &
+              &"    s->pool[{flagSlot}] = 1.0;\n  }}\n"
+      sc.stereoNames[st.str] = (&"s->pool[{flagSlot} + 1]",
+                                &"s->pool[{flagSlot} + 2]")
+    else:
+      # `$x` inside a def body -> claim two pool slots keyed under a
       # "var" helper-type region: one "inited" flag, one value. On the
       # first evaluation the init expression runs; thereafter the stored
       # value persists across samples (and across hot reloads, because
@@ -493,22 +667,45 @@ proc emitBlockExpr(c: Ctx; sc: Scope; blk: Node): string =
       let flagSlot = c.fresh("vf")
       let valSlot = c.fresh("vs")
       let off = c.registerRegion("var", 2)
-      pre.add &"long {flagSlot} = {off}; long {valSlot} = ({off}) + 1; "
-      pre.add &"if (s->pool[{flagSlot}] == 0.0) {{ " &
-              &"s->pool[{valSlot}] = ({c.emitExpr(sc, s.kids[0])}); " &
-              &"s->pool[{flagSlot}] = 1.0; }} "
-      sc.names[s.str] = &"s->pool[{valSlot}]"
-    of nkAssign:
-      let target = sc.lookup(s.str)
+      pre.add &"  long {flagSlot} = {off};\n  long {valSlot} = ({off}) + 1;\n"
+      var initPre = ""
+      let initC = c.scalarValue(sc, st.kids[0], initPre, "$" & st.str)
+      pre.add &"  if (s->pool[{flagSlot}] == 0.0) {{\n" & initPre &
+              &"    s->pool[{valSlot}] = ({initC});\n" &
+              &"    s->pool[{flagSlot}] = 1.0;\n  }}\n"
+      sc.names[st.str] = &"s->pool[{valSlot}]"
+  of nkAssign:
+    let pair = sc.lookupStereo(st.str)
+    if pair.ok:
+      pre.add c.assignPair(sc, (pair.l, pair.r), st.kids[0])
+    else:
+      let target = sc.lookup(st.str)
       if target.len == 0:
         raise newException(ValueError,
-          "unknown assignment target: " & s.str & " " & errLoc(s))
-      let rhs = c.emitExpr(sc, s.kids[0])
-      pre.add &"{target} = ({rhs}); "
+          "unknown assignment target: " & st.str & " " & errLoc(st))
+      let rhs = c.scalarValue(sc, st.kids[0], pre, "$" & st.str)
+      pre.add &"  {target} = ({rhs});\n"
+  of nkIdxAssign:
+    pre.add c.assignPairSide(sc, st)
+  else:
+    # A bare expression statement is legal (ignored value except last).
+    if c.refsStereo(sc, st):
+      let v = c.emitStereo(sc, st, pre)
+      pre.add &"  (void)({v.l});\n  (void)({v.r});\n"
     else:
-      # A bare expression statement is legal (ignored value except last).
-      let v = c.emitExpr(sc, s)
-      pre.add &"(void)({v}); "
+      pre.add &"  (void)({c.emitExpr(sc, st)});\n"
+
+# Body of a def (nkBlock). All statements but the last are stmts; last
+# is the expression returned. `let` adds a C local; `$x` is call-site
+# state stored in the pool.
+proc emitBlockExpr(c: Ctx; sc: Scope; blk: Node): string =
+  var pre = ""
+  let last = blk.kids.len - 1
+  for i, s in blk.kids:
+    if i == last:
+      let v = c.scalarValue(sc, s, pre, "the result")
+      return "({ " & pre & "double __r = (" & v & "); __r; })"
+    c.emitLocalStmt(sc, s, pre)
   "0.0"   # empty block
 
 # phasor(freq) inlined: one pool slot, advance, return wrapped value.
@@ -568,6 +765,12 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
     else:
       let scoped = sc.lookup(n.str)
       if scoped.len > 0: scoped
+      elif sc.lookupStereo(n.str).ok or n.str in c.stereoLets or
+           n.str in c.pairVars or n.str in c.playSet:
+        raise newException(ValueError,
+          n.str & " is a pair, but one number is needed here — pick a " &
+          "side with " & n.str & "[0] / " & n.str & "[1], or use mono(" &
+          n.str & ") " & errLoc(n))
       elif n.str in c.topLets: "l_" & n.str
       elif n.str in c.topVarSet: "s->v_" & n.str
       else:
@@ -749,28 +952,22 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
       return &"fmin(fmax({v}, {lo}), {hi})"
     if name == "int" and n.kids.len == 1:
       return "((double)(long)(" & c.emitExpr(sc, n.kids[0]) & "))"
-    # Pair-returning calls in scalar context: refuse with a hint about
-    # the let-binding pattern. The stereo/pair path captures these in
-    # emitStereo via `let p = cmul(...)`; reaching emitExpr means the
-    # user wrote them somewhere (a binop, a non-pair call arg, etc.)
-    # where we have no slot for two return values.
+    # Pair-returning calls in scalar context: refuse with a hint. The
+    # stereo/pair path captures these in emitStereo; reaching emitExpr
+    # means the user wrote one where a single number is needed.
     if name in PairCalls:
       raise newException(ValueError,
-        name & " returns a pair (real, imag) — bind with `let p = " &
-        name & "(...)` then use `p[0]` / `p[1]`, or pass to a pair-aware " &
-        "consumer like `magnitude` / `phase` " & errLoc(n))
-    # Scalar reductions of a pair: take real and imag as two scalar args.
-    if name == "magnitude" and n.kids.len == 2:
-      let re = c.emitExpr(sc, n.kids[0])
-      let im = c.emitExpr(sc, n.kids[1])
-      return &"sqrt(({re}) * ({re}) + ({im}) * ({im}))"
-    if name == "phase" and n.kids.len == 2:
-      let re = c.emitExpr(sc, n.kids[0])
-      let im = c.emitExpr(sc, n.kids[1])
-      return &"atan2(({im}), ({re}))"
-    if name in ["magnitude", "phase"]:
-      raise newException(ValueError,
-        name & "(re, im) takes exactly 2 scalars " & errLoc(n))
+        name & " returns a pair — pick a side with `" & name &
+        "(...)[0]` / `[1]`, bind it with `let p = " & name & "(...)`, " &
+        "or pass it to `magnitude` / `phase` " & errLoc(n))
+    # Scalar reductions of a pair: one pair, or its two sides as numbers.
+    if name in PairReaders:
+      var pre = ""
+      let a = c.pairOperands(sc, n, pre, 2, "one pair (or two numbers)")
+      let v =
+        if name == "magnitude": &"sqrt({a[0]} * {a[0]} + {a[1]} * {a[1]})"
+        else: &"atan2({a[1]}, {a[0]})"
+      return "(({\n" & pre & "  double __m = " & v & "; __m; }))"
     # freq_shift(signal, hz) — analytic + rotation, scalar real-part-only
     # output. Stateful native (32-slot Hilbert pair + 1 phase slot).
     if name == "freq_shift" and n.kids.len == 2:
@@ -959,6 +1156,8 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
       let stereo = sc.lookupStereo(a.str)
       if stereo.ok:
         return (if int(i.num) == 0: stereo.l else: stereo.r)
+      if a.str in c.pairVars:
+        return pairVarRef(a.str, int(i.num))
       if a.str in c.playSet or a.str in c.stereoLets:
         return stereoRef(c, a.str, if int(i.num) == 0: "l" else: "r")
     # Inline constant array literal with constant index.
@@ -968,6 +1167,13 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
         raise newException(ValueError,
           "array index out of range " & errLoc(n))
       return c.emitExpr(sc, a.kids[k])
+    # One side of any other pair-valued expression: `cmul(a, b)[0]`,
+    # `input()[1]`, `lpf(stereo, 800, 0.5)[0]`.
+    if i.kind == nkNum and int(i.num) in {0, 1} and c.refsStereo(sc, a):
+      var pre = ""
+      let v = c.emitStereo(sc, a, pre)
+      let pick = if int(i.num) == 0: v.l else: v.r
+      return "(({\n" & pre & "  double __pick = (" & pick & "); __pick; }))"
     raise newException(ValueError,
       "indexing non-constant arrays not supported " & errLoc(n))
   else:
@@ -1013,6 +1219,8 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
     let scoped = sc.lookupStereo(n.str)
     if scoped.ok:
       return (scoped.l, scoped.r, true)
+    if n.str in c.pairVars:
+      return (pairVarRef(n.str, 0), pairVarRef(n.str, 1), true)
     if n.str in c.playSet or n.str in c.stereoLets:
       return (stereoRef(c, n.str, "l"), stereoRef(c, n.str, "r"), true)
     raise newException(ValueError,
@@ -1037,6 +1245,9 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
       let stereo = sc.lookupStereo(base.str)
       if stereo.ok:
         let pick = if int(idx.num) == 0: stereo.l else: stereo.r
+        return (pick, pick, false)
+      if base.str in c.pairVars:
+        let pick = pairVarRef(base.str, int(idx.num))
         return (pick, pick, false)
       if base.str in c.playSet or base.str in c.stereoLets:
         let pick = stereoRef(c, base.str, if int(idx.num) == 0: "l" else: "r")
@@ -1079,30 +1290,18 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
     return (&"(({condTmp}) != 0.0 ? ({thn.l}) : ({els.l}))",
             &"(({condTmp}) != 0.0 ? ({thn.r}) : ({els.r}))", true)
   of nkCall:
-    # Pair-returning builtin (cmul / cdiv / cscale / rotate / analytic):
-    # bind the scalar args to fresh temps via `pre`, then return one C
-    # expression per component. analytic is the only stateful entry —
-    # it claims two Hilbert regions and dispatches via native calls.
+    # Pair-returning builtin: flatten the operands (pairs or numbers)
+    # into temps via `pre`, then return one C expression per component.
+    # analytic and phasor_pair are the stateful entries; input reads the
+    # engine's current input frame.
     if n.str in PairCalls:
-      proc evalArgs(c: Ctx; sc: Scope; n: Node; pre: var string;
-                    arity: int; tag: string): seq[string] =
-        if n.kids.len != arity:
-          raise newException(ValueError,
-            n.str & " takes " & $arity & " args, got " &
-            $n.kids.len & " " & errLoc(n))
-        result = @[]
-        for i, k in n.kids:
-          let argC = c.emitExpr(sc, k)
-          let tmp = c.fresh(tag & "_" & $i)
-          pre.add &"  double {tmp} = ({argC});\n"
-          result.add tmp
       case n.str
       of "cmul":
-        let a = evalArgs(c, sc, n, pre, 4, "cmul")
+        let a = c.pairOperands(sc, n, pre, 4, "two pairs (or four numbers)")
         return (&"({a[0]} * {a[2]} - {a[1]} * {a[3]})",
                 &"({a[0]} * {a[3]} + {a[1]} * {a[2]})", true)
       of "cdiv":
-        let a = evalArgs(c, sc, n, pre, 4, "cdiv")
+        let a = c.pairOperands(sc, n, pre, 4, "two pairs (or four numbers)")
         let den = c.fresh("cdiv_den")
         pre.add &"  double {den} = {a[2]} * {a[2]} + {a[3]} * {a[3]};\n"
         # Guard /0 by yielding (0, 0) when the divisor pair is the origin.
@@ -1110,23 +1309,25 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
         return (&"({den} == 0.0 ? 0.0 : ({a[0]} * {a[2]} + {a[1]} * {a[3]}) / {den})",
                 &"({den} == 0.0 ? 0.0 : ({a[1]} * {a[2]} - {a[0]} * {a[3]}) / {den})", true)
       of "cscale":
-        let a = evalArgs(c, sc, n, pre, 3, "cscale")
+        let a = c.pairOperands(sc, n, pre, 3,
+                               "a number and a pair (or three numbers)")
         return (&"({a[0]} * {a[1]})", &"({a[0]} * {a[2]})", true)
       of "rotate":
-        let a = evalArgs(c, sc, n, pre, 3, "rotate")
+        let a = c.pairOperands(sc, n, pre, 3,
+                               "a pair and an angle (or three numbers)")
         let cs = c.fresh("rot_c")
         let sn = c.fresh("rot_s")
         pre.add &"  double {cs} = cos({a[2]});\n"
         pre.add &"  double {sn} = sin({a[2]});\n"
         return (&"({a[0]} * {cs} - {a[1]} * {sn})",
                 &"({a[0]} * {sn} + {a[1]} * {cs})", true)
+      of "conj":
+        # Mirror across the real axis: the same pair turning the other way.
+        let a = c.pairOperands(sc, n, pre, 2, "one pair (or two numbers)")
+        return (a[0], &"(-{a[1]})", true)
       of "analytic":
-        if n.kids.len != 1:
-          raise newException(ValueError,
-            "analytic takes 1 arg " & errLoc(n))
-        let sig = c.emitExpr(sc, n.kids[0])
-        let sigT = c.fresh("an_sig")
-        pre.add &"  double {sigT} = ({sig});\n"
+        let a = c.pairOperands(sc, n, pre, 1, "one signal")
+        let sigT = a[0]
         let offA = c.registerRegion("hilbert_a", 16)
         let offB = c.registerRegion("hilbert_b", 16)
         let reT = c.fresh("an_re")
@@ -1145,16 +1346,20 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
         # slot for the phase accumulator; the cos/sin fall out cheaply
         # so the cost is one trig pair per sample, identical to
         # sin(TAU*phasor(r)) + cos(TAU*phasor(r)) but with shared phase.
-        if n.kids.len != 1:
-          raise newException(ValueError,
-            "phasor_pair takes 1 arg " & errLoc(n))
-        let freq = c.emitExpr(sc, n.kids[0])
+        let a = c.pairOperands(sc, n, pre, 1, "a frequency")
+        let freq = a[0]
         let off = c.registerRegion("phasor_pair", 1)
         let phT = c.fresh("ppair_ph")
         pre.add &"  s->pool[{off}] = fmod(s->pool[{off}] + ({freq}) / s->sr, 1.0);\n"
         pre.add &"  if (s->pool[{off}] < 0.0) s->pool[{off}] += 1.0;\n"
         pre.add &"  double {phT} = s->pool[{off}] * (2.0 * 3.14159265358979323846);\n"
         return (&"cos({phT})", &"sin({phT})", true)
+      of "input":
+        # The current input frame [L, R]: the capture device live, or a
+        # recording under `aither audit ... <input>`. Both sides are
+        # plain reads, so referencing them twice is free.
+        discard c.pairOperands(sc, n, pre, 0, "no arguments")
+        return ("n_input_l()", "n_input_r()", true)
       else: discard       # exhaustive case below
     # Stereo-returning user def (e.g. haas, pan): inline once, capture
     # the two output channels into fresh temps via the `pre` preamble.
@@ -1189,10 +1394,12 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
           inner.fns[p] = resolved
           continue
         # Stereo arg → bind param as a stereo local in the inlined body.
+        # A pair param (see pairParams) is bound as a pair even when the
+        # arg is one number, which then fills both sides.
         var sub = ""
         let sv = c.emitStereo(sc, a, sub)
         pre.add sub
-        if sv.stereo:
+        if sv.stereo or c.pairParams(def)[i]:
           let tmpL = c.fresh("p_" & p & "_l")
           let tmpR = c.fresh("p_" & p & "_r")
           blk.add &"    double {tmpL} = ({sv.l});\n"
@@ -1214,64 +1421,35 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
         if bodyNode.kind == nkBlock: bodyNode.kids else: @[bodyNode]
       let lastIdx = stmts.len - 1
       for si, st in stmts:
-        if si == lastIdx and st.kind notin {nkLet, nkVar, nkAssign}:
+        if si == lastIdx and st.kind notin {nkLet, nkVar, nkAssign, nkIdxAssign}:
           var sub = ""
           let v = c.emitStereo(inner, st, sub)
           blk.add sub
           blk.add &"    {tmpL} = ({v.l});\n"
           blk.add &"    {tmpR} = ({v.r});\n"
         else:
-          case st.kind
-          of nkLet:
-            let rhs = st.kids[0]
-            # Same numeric-array hoist as the scalar def-body path —
-            # so a stereo-returning def (e.g. one that takes a pos and
-            # returns [L, R]) can also use a constant-table lookup.
-            if rhs.kind == nkArr and rhs.kids.len > 0 and
-               rhs.kids.allIt(it.kind == nkNum):
-              let sym = c.fresh("arr_def_" & st.str)
-              var items: seq[string] = @[]
-              for k in rhs.kids: items.add numLit(k.num)
-              c.arrayDecls.add &"static const double {sym}[{rhs.kids.len}] = {{" &
-                items.join(", ") & "};\n"
-              inner.arrays[st.str] = (sym, rhs.kids.len)
-            else:
-              let v = c.emitExpr(inner, rhs)
-              let tmp = c.fresh("l_" & st.str)
-              blk.add &"    double {tmp} = ({v});\n"
-              inner.names[st.str] = tmp
-              if rhs.kind == nkNum:
-                inner.numLits[st.str] = rhs.num
-              elif rhs.kind == nkIdent:
-                let nv = inner.lookupNumLit(rhs.str)
-                if nv.ok: inner.numLits[st.str] = nv.val
-          of nkVar:
-            # `var` inside a stereo-def inline: treat as pool-backed
-            # call-site state, matching emitBlockExpr's approach.
-            let flagSlot = c.fresh("vf")
-            let valSlot = c.fresh("vs")
-            let off = c.registerRegion("var", 2)
-            blk.add &"    long {flagSlot} = {off};\n"
-            blk.add &"    long {valSlot} = ({off}) + 1;\n"
-            let initC = c.emitExpr(inner, st.kids[0])
-            blk.add &"    if (s->pool[{flagSlot}] == 0.0) {{\n"
-            blk.add &"      s->pool[{valSlot}] = ({initC});\n"
-            blk.add &"      s->pool[{flagSlot}] = 1.0;\n"
-            blk.add "    }\n"
-            inner.names[st.str] = &"s->pool[{valSlot}]"
-          of nkAssign:
-            let target = inner.lookup(st.str)
-            if target.len == 0:
-              raise newException(ValueError,
-                "unknown assign: " & st.str & " " & errLoc(st))
-            let rhs = c.emitExpr(inner, st.kids[0])
-            blk.add &"    {target} = ({rhs});\n"
-          else:
-            let v = c.emitExpr(inner, st)
-            blk.add &"    (void)({v});\n"
+          # Same statement handling as a scalar def body (emitLocalStmt):
+          # lets, scalar or pair state, assignments, side-effect calls.
+          c.emitLocalStmt(inner, st, blk)
       blk.add "  }\n"
       pre.add blk
       return (tmpL, tmpR, true)
+    # A def that reads some params as pairs (see pairParams): when every
+    # pair-valued arg lands on a pair param there is nothing to split,
+    # so inline it once for one result — `mono(input())`. Otherwise the
+    # split below runs it per channel and hands pair params the whole pair.
+    let pairs =
+      if n.str in c.userDefs: c.pairParams(c.userDefs[n.str]) else: @[]
+    if pairs.anyIt(it):
+      var perChannel = false
+      for i, k in n.kids:
+        if i < pairs.len and not pairs[i] and c.refsStereo(sc, k):
+          perChannel = true
+      if not perChannel:
+        let v = c.emitExpr(sc, n)
+        let tmp = c.fresh("pp")
+        pre.add &"  double {tmp} = ({v});\n"
+        return (tmp, tmp, false)
     # Otherwise: walk args stereo-aware. At least one arg is stereo
     # (else refsStereo would have caught the whole call at the top).
     var argVals: seq[StereoVal] = @[]
@@ -1328,7 +1506,16 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
     var callR = Node(kind: nkCall, str: n.str,
                      line: n.line, source: n.source, kids: @[])
     for i, k in n.kids:
-      if argVals[i].stereo:
+      if i < pairs.len and pairs[i] and argVals[i].stereo:
+        # Pair param: both channel calls get the whole pair.
+        let tmp = c.fresh("spp")
+        innerL.stereoNames[tmp] = (argVals[i].l, argVals[i].r)
+        innerR.stereoNames[tmp] = (argVals[i].l, argVals[i].r)
+        callL.kids.add Node(kind: nkIdent, str: tmp,
+                            line: n.line, source: n.source)
+        callR.kids.add Node(kind: nkIdent, str: tmp,
+                            line: n.line, source: n.source)
+      elif argVals[i].stereo:
         let tmpL = c.fresh("stl")
         let tmpR = c.fresh("str")
         innerL.names[tmpL] = argVals[i].l
@@ -1385,6 +1572,7 @@ proc refsStereo(c: Ctx; sc: Scope; n: Node): bool =
   case n.kind
   of nkIdent:
     if n.str in c.playSet or n.str in c.stereoLets: return true
+    if n.str in c.pairVars: return true
     if sc != nil and sc.lookupStereo(n.str).ok: return true
     return false
   of nkArr:
@@ -1400,13 +1588,23 @@ proc refsStereo(c: Ctx; sc: Scope; n: Node): bool =
     let a = n.kids[0]; let i = n.kids[1]
     if a.kind == nkIdent and i.kind == nkNum and int(i.num) in {0, 1}:
       let isStereoBase = a.str in c.playSet or a.str in c.stereoLets or
+                         a.str in c.pairVars or
                          (sc != nil and sc.lookupStereo(a.str).ok)
       if isStereoBase: return false
     return c.refsStereo(sc, i)   # ignore base; its stereo-ness is consumed
   of nkCall:
     if n.str in PairCalls: return true
-    if n.str in c.userDefs and isStereoDef(c, c.userDefs[n.str]):
-      return true
+    if n.str in PairReaders: return false    # a pair in, one number out
+    if n.str in c.userDefs:
+      let def = c.userDefs[n.str]
+      if isStereoDef(c, def): return true
+      # A pair arg on a pair param is consumed whole (see pairParams);
+      # only pair args elsewhere make the call per-channel.
+      let pairs = c.pairParams(def)
+      for i, k in n.kids:
+        if i < pairs.len and pairs[i]: continue
+        if k != nil and c.refsStereo(sc, k): return true
+      return false
     for k in n.kids:
       if k != nil and c.refsStereo(sc, k): return true
     return false
@@ -1428,17 +1626,28 @@ proc emit*(c: Ctx; program: Node): string =
     if s.kind == nkPlay:
       c.playSet.incl s.str
 
+  # A file-level `$x = init` (top level or play body). First declaration
+  # wins. A pair init (`$z = [0, 0]`, `$z = phasor_pair(1)`) makes pair
+  # state: two struct fields, z__0 and z__1.
+  proc declareVar(c: Ctx; n: Node) =
+    if n.str in c.playSet:
+      raise newException(ValueError,
+        "'" & n.str & "' is the name of a play block — " &
+        "choose a different variable name " & errLoc(n))
+    if n.str in c.topVarSet or n.str in c.pairVars: return
+    c.varDecls.add n
+    if c.isStereoReturn(n.kids[0]):
+      c.pairVars.incl n.str
+      c.topVarNames.add pairVarField(n.str, 0)
+      c.topVarNames.add pairVarField(n.str, 1)
+    else:
+      c.topVarSet.incl n.str
+      c.topVarNames.add n.str
   proc scanVars(c: Ctx; n: Node) =
     if n == nil: return
     case n.kind
     of nkVar:
-      if n.str in c.playSet:
-        raise newException(ValueError,
-          "'" & n.str & "' is the name of a play block — " &
-          "choose a different variable name " & errLoc(n))
-      if n.str notin c.topVarSet:
-        c.topVarSet.incl n.str
-        c.topVarNames.add n.str
+      c.declareVar(n)
     of nkPlay:
       let body = n.kids[0]
       if body.kind == nkBlock:
@@ -1448,13 +1657,7 @@ proc emit*(c: Ctx; program: Node): string =
   for s in program.kids:
     case s.kind
     of nkVar:
-      if s.str in c.playSet:
-        raise newException(ValueError,
-          "'" & s.str & "' is the name of a play block — " &
-          "choose a different variable name " & errLoc(s))
-      if s.str notin c.topVarSet:
-        c.topVarSet.incl s.str
-        c.topVarNames.add s.str
+      c.declareVar(s)
     of nkLet:
       if s.str in c.playSet:
         raise newException(ValueError,
@@ -1503,6 +1706,8 @@ proc emit*(c: Ctx; program: Node): string =
   pre.add "extern double n_midi_trig(DspState*,int);\n"
   pre.add "extern double n_midi_voice_freq(int);\n"
   pre.add "extern double n_midi_voice_gate(int);\n"
+  pre.add "extern double n_input_l(void);\n"
+  pre.add "extern double n_input_r(void);\n"
   # VoiceState — DspState prefix is *exactly* the Nim layout; new fields
   # go after.
   # NOTE: voice.nim depends on this exact layout for state migration:
@@ -1527,14 +1732,24 @@ proc emit*(c: Ctx; program: Node): string =
   body.add "void tick(VoiceState* s, double* outL, double* outR) {\n"
   body.add "  s->idx = 0;\n"
   let topSc = push(nil)
-  # Lazy-init top-level vars by name.
-  for i, vn in c.topVarNames:
-    # Find the var node to get its init expression.
-    for st in program.kids:
-      if st.kind == nkVar and st.str == vn:
-        let init = c.emitExpr(topSc, st.kids[0])
-        body.add &"  if (!(s->inited[{i}] & 1)) {{ s->v_{vn} = ({init}); s->inited[{i}] |= 1; }}\n"
-        break
+  # Lazy-init file-level state, top level and play bodies alike, in
+  # declaration order. (Play-body inits used to be skipped, so `$x = 0.1`
+  # inside a play started at 0.) A pair inits both of its fields.
+  for st in c.varDecls:
+    var initPre = ""
+    if st.str in c.pairVars:
+      let i0 = c.topVarNames.find(pairVarField(st.str, 0))
+      let i1 = i0 + 1
+      let v = c.emitStereo(topSc, st.kids[0], initPre)
+      body.add &"  if (!(s->inited[{i0}] & 1)) {{\n" & initPre &
+        &"    {pairVarRef(st.str, 0)} = ({v.l});\n" &
+        &"    {pairVarRef(st.str, 1)} = ({v.r});\n" &
+        &"    s->inited[{i0}] |= 1; s->inited[{i1}] |= 1;\n  }}\n"
+    else:
+      let i = c.topVarNames.find(st.str)
+      let init = c.scalarValue(topSc, st.kids[0], initPre, "$" & st.str)
+      body.add &"  if (!(s->inited[{i}] & 1)) {{\n" & initPre &
+        &"    s->v_{st.str} = ({init}); s->inited[{i}] |= 1;\n  }}\n"
 
   # Top-level statements: let -> local; var handled above (init) and via
   # assign below; def -> skipped (inlined at call sites); final expression
@@ -1542,7 +1757,7 @@ proc emit*(c: Ctx; program: Node): string =
   var finalIdx = -1
   for i in countdown(program.kids.len - 1, 0):
     let s = program.kids[i]
-    if s.kind notin {nkDef, nkVar, nkLet, nkAssign, nkPlay}:
+    if s.kind notin {nkDef, nkVar, nkLet, nkAssign, nkIdxAssign, nkPlay}:
       finalIdx = i; break
 
   for i, s in program.kids:
@@ -1568,6 +1783,12 @@ proc emit*(c: Ctx; program: Node): string =
         c.arrayDecls.add &"static const double {sym}[{arrKids.len}] = {{" &
           items.join(", ") & "};\n"
         c.topArrays[s.str] = (sym, arrKids.len)
+        # Two numbers are also a pair value, the same as inside a play:
+        # `let c = [0.3, 0.1]` then `c * x` or `cmul(z, c)`.
+        if arrKids.len == 2:
+          body.add &"  double l_{s.str}_l = {items[0]};\n"
+          body.add &"  double l_{s.str}_r = {items[1]};\n"
+          c.stereoLets.incl s.str
       elif c.refsStereo(topSc, s.kids[0]):
         var pre = ""
         let v = c.emitStereo(topSc, s.kids[0], pre)
@@ -1587,13 +1808,21 @@ proc emit*(c: Ctx; program: Node): string =
           let nv = topSc.lookupNumLit(s.kids[0].str)
           if nv.ok: topSc.numLits[s.str] = nv.val
     of nkAssign:
-      let target =
-        if s.str in c.topVarSet: "s->v_" & s.str
-        elif s.str in c.topLets: "l_" & s.str
-        else: raise newException(ValueError,
-                "unknown assign: " & s.str & " " & errLoc(s))
-      let rhs = c.emitExpr(topSc, s.kids[0])
-      body.add &"  {target} = ({rhs});\n"
+      if s.str in c.pairVars:
+        body.add c.assignPair(topSc,
+          (pairVarRef(s.str, 0), pairVarRef(s.str, 1)), s.kids[0])
+      else:
+        let target =
+          if s.str in c.topVarSet: "s->v_" & s.str
+          elif s.str in c.topLets: "l_" & s.str
+          else: raise newException(ValueError,
+                  "unknown assign: " & s.str & " " & errLoc(s))
+        var pre = ""
+        let rhs = c.scalarValue(topSc, s.kids[0], pre, "$" & s.str)
+        body.add pre
+        body.add &"  {target} = ({rhs});\n"
+    of nkIdxAssign:
+      body.add c.assignPairSide(topSc, s)
     of nkPlay:
       # A play's lets and computed value live inside a `{...}` block so
       # the lets can't collide with other plays or later code. Each play
@@ -1611,7 +1840,7 @@ proc emit*(c: Ctx; program: Node): string =
         if bodyNode.kind == nkBlock: bodyNode.kids else: @[bodyNode]
       let lastIdx = stmts.len - 1
       for si, st in stmts:
-        if si == lastIdx and st.kind notin {nkLet, nkVar, nkAssign}:
+        if si == lastIdx and st.kind notin {nkLet, nkVar, nkAssign, nkIdxAssign}:
           var sub = ""
           let v = c.emitStereo(inner, st, sub)
           body.add sub
@@ -1676,21 +1905,35 @@ proc emit*(c: Ctx; program: Node): string =
           of nkVar:
             discard              # top-level-var init already ran
           of nkAssign:
-            let target =
-              if st.str in c.topVarSet: "s->v_" & st.str
-              elif inner.lookup(st.str).len > 0: inner.lookup(st.str)
-              else: raise newException(ValueError,
-                "unknown assignment target '" & st.str & "' " & errLoc(st))
-            let rhs = c.emitExpr(inner, st.kids[0])
-            body.add &"    {target} = ({rhs});\n"
+            if st.str in c.pairVars:
+              body.add c.assignPair(inner,
+                (pairVarRef(st.str, 0), pairVarRef(st.str, 1)), st.kids[0])
+            else:
+              let target =
+                if st.str in c.topVarSet: "s->v_" & st.str
+                elif inner.lookup(st.str).len > 0: inner.lookup(st.str)
+                else: raise newException(ValueError,
+                  "unknown assignment target '" & st.str & "' " & errLoc(st))
+              var sub = ""
+              let rhs = c.scalarValue(inner, st.kids[0], sub, "$" & st.str)
+              body.add sub
+              body.add &"    {target} = ({rhs});\n"
+          of nkIdxAssign:
+            body.add c.assignPairSide(inner, st)
           else:
             # Non-final expression statements run for their side effects
             # (the value is dropped). This matters for stateful builtins
             # where the user expects mutation: `array_set(arr, i, v)`,
             # `array_push(arr, v)`. Without `(void)(...)` they'd silently
             # vanish and the array would never update.
-            let v = c.emitExpr(inner, st)
-            body.add &"    (void)({v});\n"
+            if c.refsStereo(inner, st):
+              var sub = ""
+              let v = c.emitStereo(inner, st, sub)
+              body.add sub
+              body.add &"    (void)({v.l}); (void)({v.r});\n"
+            else:
+              let v = c.emitExpr(inner, st)
+              body.add &"    (void)({v});\n"
       body.add "  }\n"
     else:
       if i == finalIdx:
@@ -1702,8 +1945,14 @@ proc emit*(c: Ctx; program: Node): string =
         # Non-final bare expression at top level: run for side effects.
         # `array_set`, `array_push`, and similar mutators are useful
         # statements; without this they'd compile to nothing.
-        let v = c.emitExpr(topSc, s)
-        body.add &"  (void)({v});\n"
+        if c.refsStereo(topSc, s):
+          var pre = ""
+          let v = c.emitStereo(topSc, s, pre)
+          body.add pre
+          body.add &"  (void)({v.l}); (void)({v.r});\n"
+        else:
+          let v = c.emitExpr(topSc, s)
+          body.add &"  (void)({v});\n"
   body.add "}\n"
 
   pre & c.arrayDecls & body
