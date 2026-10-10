@@ -26,7 +26,6 @@ type
     seconds*: float64            # length of the measured window
     skipped*: float64            # rendered first but not measured
 
-const LowSplitHz = 200.0
 
 # A render this long (lead-in included) is built with cc -O2 first: the
 # seconds of compiling pay for themselves against TCC's slow code.

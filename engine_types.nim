@@ -4,12 +4,25 @@
 ## formats them for stdout. Putting them in a third module breaks the
 ## otherwise-circular `engine ↔ cli_output` import.
 
+import std/[os, strutils]
+
 const EnvBins* = 20            # sparkline slots; matches engine.nim's stats ring
 
 # A single voice sample beyond ±8 (+18 dBFS) is never music — it's a
 # patch that has blown up. The output tanh would turn it into a
 # full-scale square wave, so the engine mutes the voice instead.
 const RunawayLimit* = 8.0
+
+proc envFloat*(name: string; default: float64): float64 =
+  ## A numeric tuning knob from the environment, or `default`.
+  let v = getEnv(name)
+  if v.len == 0: return default
+  try: parseFloat(v)
+  except ValueError: default
+
+# The per-part "share below" split in audit/try. 200 Hz is where small
+# laptop speakers give up; studio monitors might want AITHER_LOW_HZ=40.
+let LowSplitHz* = envFloat("AITHER_LOW_HZ", 200.0)
 
 proc isRunaway*(l, r: float64): bool {.inline.} =
   abs(l) > RunawayLimit or abs(r) > RunawayLimit

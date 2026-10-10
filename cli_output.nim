@@ -99,8 +99,9 @@ proc formatParts*(q: PartsQuery): string =
               fmtDb(p.peak).strip() & "dB"
   q.voiceName & "\n" & lines.join("\n")
 
-# A part this far below the loudest one is probably masked or inaudible.
-const QuietPartDb = -24.0
+# A part this far below the loudest one is flagged QUIET. Taste, so it
+# is settable: AITHER_QUIET_DB=-30 (0 turns the flag off).
+let QuietPartDb* = envFloat("AITHER_QUIET_DB", -24.0)
 
 proc formatCheck*(q: CheckQuery): string =
   ## The report `send` prints a second after a swap.
@@ -121,7 +122,8 @@ proc formatCheck*(q: CheckQuery): string =
     if p.gain > 0.0: loudest = max(loudest, p.rms)
   var quiet: seq[string]
   for p in q.parts:
-    if p.gain > 0.0 and loudest > 0.0 and dBOf(p.rms) - dBOf(loudest) < QuietPartDb:
+    if p.gain > 0.0 and loudest > 0.0 and QuietPartDb < 0.0 and
+       dBOf(p.rms) - dBOf(loudest) < QuietPartDb:
       quiet.add p.name & " " & fmtDb(p.rms).strip()
   if quiet.len > 0:
     lines.add "  quiet parts (>" & $int(-QuietPartDb) & " dB under the loudest): " &
@@ -180,7 +182,7 @@ proc formatAudit*(path: string; seconds, sr: float64;
 
 proc formatPartLevels*(parts: seq[PartLevel]): string =
   ## Per-part table under `audit` / `try`, loudest first, flagging parts
-  ## that are masked (far under the loudest) or mostly below 200 Hz.
+  ## far under the loudest or mostly below LowSplitHz (see render.nim).
   if parts.len == 0: return ""
   var ps = parts
   ps.sort(proc (a, b: PartLevel): int = cmp(b.rms, a.rms))
@@ -189,15 +191,16 @@ proc formatPartLevels*(parts: seq[PartLevel]): string =
   for p in ps:
     if p.gain > 0.0: loudest = max(loudest, p.rms)
     w = max(w, p.name.len)
-  var lines = @["parts (rms / peak / share below 200 Hz):"]
+  var lines = @["parts (rms / peak / share below " & $int(LowSplitHz) & " Hz):"]
   for p in ps:
     var notes: seq[string]
     if p.gain <= 0.0: notes.add "muted"
     elif p.rms < 1e-6: notes.add "SILENT"
     else:
-      if loudest > 0.0 and dBOf(p.rms) - dBOf(loudest) < QuietPartDb:
+      if loudest > 0.0 and QuietPartDb < 0.0 and
+         dBOf(p.rms) - dBOf(loudest) < QuietPartDb:
         notes.add "QUIET: " & $int(dBOf(loudest) - dBOf(p.rms)) & " dB under the loudest"
-      if p.low > 0.5: notes.add "MOSTLY <200 Hz: laptop speakers won't play it"
+      if p.low > 0.5: notes.add "mostly below " & $int(LowSplitHz) & " Hz"
     lines.add "  " & p.name.alignLeft(w) & "  " & fmtDb(p.rms) & " dB  " &
               fmtDb(p.peak) & " dB  " & align($int(p.low * 100.0 + 0.5), 3) & "%" &
               (if notes.len > 0: "  " & notes.join("; ") else: "")
