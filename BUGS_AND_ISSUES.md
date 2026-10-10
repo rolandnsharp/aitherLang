@@ -30,6 +30,8 @@ Two silences, slow iteration and inaudible layers during a streamed set.
 | haas / reverb reject stereo input | open |
 | a def param named like a top-level stereo let (adsr's `s`) was read as that pair | RESOLVED (the nearest scope binding wins) |
 | no number exponents (`1e-3`) | open |
+| renamed statement inherits a vanished statement's state when only (type, perTypeIdx, size) match, even from a different def: replacing `stick` ($x,$dx x3) with `bar` ($bv,$bx x3) copied old displacement in, `try` showed +24 dBFS (2026-10-11) | open (workaround: send the old part as `0` first, then the new one; fix idea: also match the helper/def name) |
+| a set that grows to many muted parts renders near real time and the stream underruns (holes of exact zeros = crackle); mute doesn't skip computation | open (workaround: lean patches, remove dead parts; `AITHER_BUFFER=2048` helps a little) |
 
 ## Session log: 2026-10-03 pipe chains + runaway guard
 
