@@ -151,18 +151,47 @@ play didge:
   let tract = formant(d, 320 + vWah * 420 - vTap * 60, 0.93) + formant(d, 850 + vWah * 350 + vTap * 1100, 0.94) * 0.7 + formant(d, 2300 + vWah * 300 + vTap * 500, 0.95) * 0.35
   ((tract * 0.9 + d * 0.35) |> drive(1.4)) |> hpf(200, 0.29) |> hpf(200, 0.29) |> lpf(7000, 0.2)
 
+# ---------------------------------------------------------- stick rhythms
+# The sticks pick their own style every 4 bars (independent of the
+# didge's routine), swing by a different amount each block, roll into the
+# 4th bar, flam the block's downbeat, and ghost more as a 16-bar arc rises.
+let ph32   = (barPh * 32) mod 1
+let trig32 = if ph32 < prev(ph32) then 1 else 0
+let ph12   = (barPh * 12) mod 1
+let trig12 = if ph12 < prev(ph12) then 1 else 0
+let t12    = int(barPh * 12)
+let hb1    = (sin(blk * 12.9898) * 43758.5453) mod 1
+let hb2    = (sin(blk * 78.233 + 1.3) * 12543.871) mod 1
+let hb3    = (sin(blk * 39.425 + 2.7) * 23421.631) mod 1
+let sMode  = int(((sin((blk + 7) * 31.7) * 15731.3) mod 1) * 6)
+let fillBar = if (bars mod 4) == 3 then 1 else 0
+let arc    = (sin(TAU * bars / 16) + 1) * 0.5
+let sw     = 0.08 + 0.14 * hb3                                  # swing: the off-16th lands late
+let trigSw = if (stepIx mod 2) == 1 then (if stepPh >= sw and prev(stepPh) < sw then 1 else 0) else trig16
 # Each 16th gets its own strength and its own spot on the stick.
 let hN    = (bars * 16 + stepIx) * 1.0
 let hVel  = (sin(hN * 12.9898) * 43758.5453) mod 1
 let hPos  = (sin(hN * 78.233) * 12543.871) mod 1
 let hPos2 = (sin(hN * 39.425) * 23421.631) mod 1
-let vel   = vStick * (0.55 + 0.6 * hVel)
+let ghost = if hVel > 0.75 - 0.4 * arc then 0.13 + 0.08 * hPos else 0
+let kE    = 5 + int(hb1 * 5)
+let iE    = (stepIx + int(hb2 * 16)) mod 16
+let euc   = if ((iE * kE) mod 16) < kE then 1 else 0
+let pClave  = [1, 0, 0, 0.8, 0, 0, 0.9, 0, 0, 0, 0.8, 0, 1, 0, 0, 0]
+let pGallop = [1, 0, 0.5, 0.6, 0.9, 0, 0.5, 0.6, 1, 0, 0.5, 0.6, 0.9, 0, 0.6, 0.7]
+let pHeart  = [1, 0, 0, 0.55, 0, 0, 0, 0, 0.8, 0, 0, 0.5, 0, 0, 0, 0]
+let acc   = if sub == 0 then 0.15 else 0
+let v16raw = if sMode == 0 then (if euc > 0 then 0.7 + acc else ghost) else if sMode == 1 then 0 else if sMode == 2 then (if vPat == 0 then 0.55 + acc else ghost) else if sMode == 3 then pGallop[stepIx] * 0.7 else if sMode == 4 then max(pClave[stepIx] * 0.9, ghost) else max(pHeart[stepIx], ghost * 0.5)
+let rollOn = fillBar * (if barPh >= 0.75 then 1 else 0)
+let v16   = v16raw * (0.8 + 0.35 * hVel) * (1 - rollOn)
+let v12   = if sMode == 1 then (if (t12 mod 2) == 0 then 0.6 else 0.22) * (0.85 + 0.3 * hPos) else 0
+let vRoll = rollOn * (0.15 + 0.65 * (barPh - 0.75) * 4) * (0.85 + 0.3 * hPos2)
+let flamT = if (bars mod 4) == 0 and stepIx == 0 and stepPh >= 0.16 and prev(stepPh) < 0.16 then 1 else 0
 play sticks:
-  let tau = 0.0001 * pow(max(vel, 0.05), -0.2)
-  let f   = contact(trig16 * vel, tau) * vel
+  let f   = contact(trigSw * v16, 0.0001 * pow(max(v16, 0.05), -0.2)) * v16 + contact(trig12 * v12, 0.0001 * pow(max(v12, 0.05), -0.2)) * v12 + contact(trig32 * vRoll, 0.0001 * pow(max(vRoll, 0.05), -0.2)) * vRoll + contact(flamT, 0.00011) * 0.5
   let sA  = bar(f, 1650, 0.14, 0.25 + 0.6 * hPos, 0.1 + 0.4 * hPos2)
   let sB  = bar(f, 1750, 0.14 * 0.8, 0.9 - 0.6 * hPos, 0.5 - 0.4 * hPos2)
-  (sA + sB * 0.85) * 1.4 |> lpf(7000, 0.2)
+  (sA + sB * 0.85) * 0.85 |> lpf(7000, 0.2)
 
 let roomD = reverb(mono(didge), 1.3, 0.1)
 let roomS = reverb(mono(sticks), 0.6, 0.06)
