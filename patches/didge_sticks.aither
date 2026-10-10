@@ -2,6 +2,9 @@
 # Two didges blended (the first, digital one and didge3, the physical one)
 # and clapsticks; an algorithmic routine every 4 bars at 108 bpm. Nothing
 # muted is computed, so it renders ~9x faster than bush_doof_e.
+#
+# 2026-10-11: Roland: "the new didge is great". The blend of the two didges
+# is a keeper; start further didge work from this patch.
 
 def formant(x, f, res):
   bpf(x, f, res) * (2 * (1 - res))       # unity gain at the peak
