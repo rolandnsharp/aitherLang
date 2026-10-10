@@ -51,6 +51,11 @@ int aither_audio_init(unsigned int sr, unsigned int ch, unsigned int buf,
         g_init = 1;
         return 0;
     }
+    /* AITHER_INPUT=0: playback only. A duplex device ties the output to
+       a capture clock too; a streaming engine that never reads input()
+       is better off without that second clock. */
+    const char* in = getenv("AITHER_INPUT");
+    int wantInput = !(in && strcmp(in, "0") == 0);
     ma_device_config cfg = ma_device_config_init(ma_device_type_duplex);
     cfg.playback.format = ma_format_f32;
     cfg.playback.channels = ch;
@@ -59,7 +64,7 @@ int aither_audio_init(unsigned int sr, unsigned int ch, unsigned int buf,
     cfg.sampleRate = sr;
     cfg.dataCallback = data_callback;
     cfg.periodSizeInFrames = buf;
-    if (ma_device_init(NULL, &cfg, &g_device) == MA_SUCCESS) {
+    if (wantInput && ma_device_init(NULL, &cfg, &g_device) == MA_SUCCESS) {
         g_capture = 1;
         g_init = 1;
         return 1;

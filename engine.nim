@@ -8,7 +8,6 @@ export engine_types
 const
   SampleRate    = 48000'u32
   Channels      = 2'u32
-  BufferFrames  = 512'u32
   MaxVoices     = 16
   DefaultFadeMs = 20.0
   # A voice that blows up this soon after a hot-swap is rolled back to
@@ -26,6 +25,10 @@ const Stdlib = staticRead("stdlib.aither")
 
 # AITHER_SOCK runs a second engine (or talks to one) beside the default.
 let SocketPath = getEnv("AITHER_SOCK", "/tmp/aither.sock")
+# Audio period in frames. 512 (10.7 ms) suits a laptop you play on; a
+# streaming engine, where latency is free, wants 2048 or more so a slow
+# period doesn't underrun the sink (heard as a click per hole).
+let BufferFrames = uint32(envFloat("AITHER_BUFFER", 512.0))
 
 const EnvBinSamples = 2400  # 50ms per bin at 48 kHz
 
