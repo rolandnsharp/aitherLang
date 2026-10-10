@@ -1,0 +1,147 @@
+# didge_sticks: the master's set from bush_doof_e, only what you hear.
+# Two didges blended (the first, digital one and didge3, the physical one)
+# and clapsticks; an algorithmic routine every 4 bars at 108 bpm. Nothing
+# muted is computed, so it renders ~9x faster than bush_doof_e.
+
+def formant(x, f, res):
+  bpf(x, f, res) * (2 * (1 - res))       # unity gain at the peak
+
+# Clapsticks: a hardwood bar held in the hand, heavily damped.
+def stick(strike, freq, decay, bright):
+  sum(3, n =>
+    let omega = TAU * freq * bar_partials(n)
+    let omega2 = omega * omega
+    let gamma = (1 + (n - 1) * 1.5) / decay
+    let amp = if n == 1 then 1.0 else bright / (n * n)
+    $x = 0.0
+    $dx = 0.0
+    $dx = $dx + (-2 * gamma * $dx - omega2 * $x + strike * omega2) * dt
+    $x = $x + $dx * dt
+    $x * amp)
+
+# The first didge (2026-10-10, didge_minor): the same lips with a rest
+# opening, into a loop that returns the wave in phase after a full period,
+# so every harmonic resonates. Physically wrong for a didge, digitally cool:
+# bright, even, buzzy. Kept as its own colour and blended with didge3.
+def didge_bore(mouth, lipF, lipD, f0):
+  $pm = 0.0                             # wave arriving back at the lips
+  $dp = 0.0                             # pressure drop across the lips
+  let lip = dho($dp * 1200000.0, lipF, lipD)
+  let a   = clamp(0.05 + lip, 0.0, 1.0) # lip opening; 0 = lips shut
+  let u   = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp))   # Bernoulli flow
+  let pplus = u * 0.8 + $pm             # outgoing wave: injected flow + reflection
+  let p     = pplus + $pm               # pressure at the lips
+  $dp = lp1(mouth - p, 5000)
+  let back = delay(pplus, 1.0 / f0, 0.05)
+  $pm = lp1(back, 2200) * 0.93          # reflected, in phase, lossy
+  back - lp1(back, 180)                 # what leaves the bell
+
+# didge3: lips at the closed end of a tube that is open at the bell.
+# - Lips (outward-striking valve): a mass-spring at lipF, pressed shut at
+#   rest (opening = $lx - 0.4) and blown open by the pressure drop $dp, so
+#   they shut once a cycle: that shut is the buzz.
+# - Flow: Bernoulli, u = a * sqrt(dp), with breath turbulence below 3 kHz.
+# - Bore: a pressure wave travels to the bell and back in half a period
+#   and comes back inverted (an open end reflects -1). Its impedance peaks
+#   sit at the odd harmonics 1, 3, 5..., so h2 and h4 come out weak, as in
+#   real drones. Two inharmonic modes (2.65, 4.35 x f0) add the flare.
+# - Player's tract: two resonances (ft1, ft2) loading the lips from
+#   upstream. Where they peak the flow is choked: they carve the moving
+#   dips that make the vowels.
+# - Radiation: the bell radiates the time derivative of the wave below
+#   ~2.5 kHz (+6 dB per octave), flat above.
+def didge3(mouth, voiceP, lipF, f0, ft1, ft2, zt, modeAmt, turb):
+  $pm = 0.0
+  $dp = 0.0
+  $lx = 0.0
+  $lv = 0.0
+  $u  = 0.0
+  let uS = lp1($u, 2500)
+  let pT = lp1(sum(2, j =>
+    let fj = if j == 1 then ft1 else ft2
+    let zj = if j == 1 then 0.09 else 0.07
+    zt * 2 * zj * TAU * fj * dho_v(uS, fj, zj)), 3000)
+  let wl = TAU * lipF
+  $lv = clamp($lv + (-2 * 0.1 * wl * $lv - wl * wl * $lx + $dp * 0.6 * wl * wl) * dt, -3000, 3000)
+  $lx = clamp($lx + $lv * dt, -2, 3)
+  let a = clamp($lx - 0.4, 0.0, 1.0)
+  let br = lp1(lp1(noise(), 2800), 2800)
+  $u  = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp)) * (1 + br * turb)
+  let pM = sum(2, k =>
+    let fk = f0 * (if k == 1 then 2.65 else 4.35)
+    modeAmt * (if k == 1 then 4.0 else 2.5) * 2 * 0.05 * TAU * fk * dho_v(uS, fk, 0.05))
+  let pplus = $u * 0.8 + $pm
+  let p   = pplus + $pm + pM
+  $dp = clamp(lp1(mouth * (1 + voiceP) - pT - p, 5000), -4, 4)
+  let back = delay(pplus, 0.5 / f0, 0.05)
+  $pm = clamp(-lp1(back, 2200) * 0.93, -20, 20)
+  hp1(back, 2500) + hp1(pM, 150) * 0.08 * modeAmt
+
+# ------------------------------------------------------------------ clock
+$bpos = 0.0
+$bpos = $bpos + 108 / 60 / 4 * dt
+let barPh  = $bpos mod 1
+let stepPh = (barPh * 16) mod 1
+let stepIx = int(barPh * 16)
+let sub    = stepIx mod 4
+let trig16 = if stepPh < prev(stepPh) then 1 else 0
+let bars   = floor($bpos)
+let hBar   = (sin(bars * 61.7) * 9123.77) mod 1
+
+# A routine every 4 bars, never the same twice running.
+let blk   = floor(bars / 4)
+let rA    = int(((sin(blk * 17.13) * 43758.5453) mod 1) * 10)
+let rB    = int(((sin((blk - 1) * 17.13) * 43758.5453) mod 1) * 10)
+let rout  = if rA == rB then (rA + 3) mod 10 else rA
+let pKanga = [1, 0, 0, 0.8, 0, 0, 1, 0, 0.9, 0, 0, 0.8, 0, 0, 1, 0.5]
+let pEmu   = [1, 0, 0, 0, 0, 0, 0.7, 0, 1, 0, 0, 0, 0, 0, 0.7, 0]
+let pFrog  = [1, 0, 0.8, 0, 0, 0, 1, 0, 1, 0, 0.8, 0, 0, 0, 1, 0]
+let pHorse = [1, 0, 0.6, 0.8, 1, 0, 0.6, 0.8, 1, 0, 0.6, 0.8, 1, 0, 0.6, 0.8]
+let pTrain = [1, 0.4, 0.7, 0.4, 1, 0.4, 0.7, 0.4, 1, 0.4, 0.7, 0.4, 1, 0.5, 0.8, 0.5]
+let pRain  = [1, 0.6, 0.8, 0.6, 0.9, 0.6, 0.8, 0.7, 1, 0.6, 0.8, 0.6, 0.9, 0.7, 0.9, 0.8]
+let pSparse = [1, 0, 0, 0, 0, 0, 0, 0, 0.6, 0, 0, 0, 0, 0, 0, 0]
+let vPat  = if rout == 1 then pKanga[stepIx] else if rout == 2 then pEmu[stepIx] else if rout == 3 then pFrog[stepIx] else if rout == 4 then pHorse[stepIx] else if rout == 5 then pTrain[stepIx] else if rout == 6 then pRain[stepIx] else if rout == 0 then 0 else pSparse[stepIx]
+let vAcc  = vPat * (0.75 + 0.25 * (if ((stepIx + int(hBar * 4)) mod 4) == 0 then 1 else 0))
+let vStick = if rout == 6 then 0.35 + (if sub == 0 then 0.4 else 0) else if rout == 5 then (if (stepIx mod 2) == 0 then 0.6 else 0) else (if sub == 0 then 0.75 else if sub == 2 and hBar > 0.4 then 0.35 else 0)
+
+# ---------------------------------------------------------- didge playing
+# Breath: a circular-breathing gulp every 5.6 s, and slow swells of the
+# diaphragm (real players swing the level 6-13 dB).
+let cycle = (t / 5.6) mod 1
+let gulp  = ease((cycle - 0.93) * 20) * (1 - ease((cycle - 0.985) * 60))
+let swellB = (sin(TAU * t / 6.7) + 1) * 0.5 * (0.6 + 0.4 * (sin(TAU * t / 23) + 1) * 0.5)
+let vTap   = slew(discharge(trig16 * vAcc, 16), 0.004)
+let vStop  = slew(if vAcc > 0.6 and stepPh < 0.1 then 1 else 0, 0.002)
+let vToot  = slew((if rout == 1 and stepIx >= 14 and (bars mod 2) == 1 then 1 else 0) + (if rout == 5 and (bars mod 4) == 3 and (stepIx == 4 or stepIx == 5 or stepIx == 8 or stepIx == 9 or stepIx == 10) then 1 else 0) + (if rout == 9 and ((stepIx >= 4 and stepIx < 7) or (stepIx >= 12 and stepIx < 15)) then 1 else 0), 0.04)
+# The tongue and jaw: vowels keep moving under every routine.
+let jaw    = (sin(TAU * t / 4.3) + 1) * 0.5 * 0.5 + (sin(TAU * t / 1.13) + 1) * 0.5 * 0.2
+let vWah   = clamp((if rout == 0 then (sin(TAU * t / 1.6) + 1) * 0.5 else if rout == 2 then slew(discharge(trig16 * vPat, 4), 0.02) else (sin(TAU * t / 3.1) + 1) * 0.3) * 0.7 + jaw * 0.5, 0, 1)
+let vHowl  = if rout == 7 then 280 + 200 * ease(((bars mod 4) + barPh) / 1.5) * (1 - 0.3 * ease(((bars mod 4) + barPh - 2.5) / 1.5)) else 0
+let vLaugh = if rout == 8 then (if stepIx < 12 then 1 else 0) * (if stepPh < 0.7 then 1 else 0) else 0
+let vCroak = if rout == 3 then discharge(trig16 * vPat, 20) else 0
+let vVoiceF = if rout == 7 then vHowl else if rout == 8 then (380 + (stepIx mod 2) * 90) * (1 + stepIx * 0.02) else 180
+let vVoiceA = slew(if rout == 7 then 0.2 else if rout == 8 then 0.19 * vLaugh else 0.3 * vCroak, 0.01)
+let vVoice  = pow(max(0, sin(TAU * phasor(vVoiceF * (1 + 0.012 * sin(TAU * phasor(5.5)))))), 3) * vVoiceA
+let press  = max(0.05, (0.8 + swellB * 0.3 + vTap * 0.3 + vToot * 0.25 - gulp * 0.4) * (1 - vStop * 0.3))
+
+# The two didges, crossfaded (equal power) on a slow 83 s swing so each
+# gets its turn; the first ducks under toots (it jumps an octave where
+# didge3 lands at 2.78x, and the two would clash).
+let blend = (0.5 + 0.35 * sin(TAU * t / 83)) * (1 - vToot * 0.6)
+play didge:
+  let d3 = didge3(press * 1.6, vVoice, (90 + vToot * 110) * 71.6 / 110, 71.6, 300 + vWah * 480, 950 + vTap * 1500 + vCroak * 600, 1.5, 0.4, 0.8)
+  let d1 = didge_bore(press * (1 + vVoice), 60, 0.1, 73.4)
+  let d = d3 * cos(blend * PI / 2) + d1 * 1.26 * sin(blend * PI / 2)
+  let tract = formant(d, 320 + vWah * 420 - vTap * 60, 0.93) + formant(d, 850 + vWah * 350 + vTap * 1100, 0.94) * 0.7 + formant(d, 2300 + vWah * 300 + vTap * 500, 0.95) * 0.35
+  ((tract * 0.9 + d * 0.35) |> drive(1.4)) |> hpf(200, 0.29) |> hpf(200, 0.29) |> lpf(7000, 0.2)
+
+play sticks:
+  let hit = slew(discharge(trig16 * vStick, 2500), 0.0004)
+  let s1 = stick(hit * 2.0, 1700, 0.015, 0.4 + vStick * 0.6)
+  let s2 = stick(hit * 1.3, 1270, 0.011, (0.4 + vStick * 0.6) * 0.7)
+  let click = (noise() |> bpf(2600, 0.55)) * discharge(trig16 * vStick, 450)
+  (s1 + s2 + click) * 0.11 |> lpf(4000, 0.2)
+
+let roomD = reverb(mono(didge), 1.3, 0.1)
+let roomS = reverb(mono(sticks), 0.6, 0.06)
+(haas(roomD * 3.2 * 0.8, 8) + pan(roomS, 0.35) + pan(fbdelay(mono(sticks), 0.326, 0.5, 0.35) * 0.3, -0.4)) * 0.78
