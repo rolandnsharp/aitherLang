@@ -8,19 +8,25 @@ args = ', '.join([f'a{i}' for i in range(1, N + 1)])
 L = []
 L.append(f'def tube8(src, noiz, place, {args}, tlen):')
 L.append('  # tlen: the tract scale (1 = 17 cm). One region is 1/8 of it.')
-L.append('  let rt = max(0.00002, 2.125 / 35000 * tlen - dt)')
+L.append('  # aither\'s delay() truncates to whole samples, so each region reads two')
+L.append('  # neighbouring whole-sample taps and crossfades (linear interpolation).')
+L.append('  let rs = max(0, 2.125 / 35000 * tlen * sr - 1)')
+L.append('  let rn = floor(rs)')
+L.append('  let rf = rs - rn')
+L.append('  let rt0 = (rn + 0.5) / sr')
+L.append('  let rt1 = (rn + 1.5) / sr')
 for i in range(1, N + 1):
     L.append(f'  $f{i} = 0.0')
     L.append(f'  $b{i} = 0.0')
 for i in range(1, N + 1):
-    L.append(f'  let fo{i} = delay($f{i}, rt, 0.001) * 0.9985')
-    L.append(f'  let bo{i} = delay($b{i}, rt, 0.001) * 0.9985')
+    L.append(f'  let fo{i} = (delay($f{i}, rt0, 0.001) * (1 - rf) + delay($f{i}, rt1, 0.001) * rf) * 0.9985')
+    L.append(f'  let bo{i} = (delay($b{i}, rt0, 0.001) * (1 - rf) + delay($b{i}, rt1, 0.001) * rf) * 0.9985')
 for i in range(1, N):
     L.append(f'  let k{i} = (a{i} - a{i+1}) / (a{i} + a{i+1})')
 L.append('  # frication enters at the narrowest place (1..8), shaped by the tube in front of it')
 for i in range(1, N):
     L.append(f'  let n{i} = noiz * exp(-(place - {i}.5) * (place - {i}.5) * 2)')
-L.append('  $f1 = src + 0.75 * bo1')
+L.append('  $f1 = src + 0.97 * bo1')
 for i in range(1, N):
     L.append(f'  $f{i+1} = (1 + k{i}) * fo{i} - k{i} * bo{i+1} + n{i}')
     L.append(f'  $b{i} = k{i} * fo{i} + (1 - k{i}) * bo{i+1}')

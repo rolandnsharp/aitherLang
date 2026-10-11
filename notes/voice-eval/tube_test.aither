@@ -1,0 +1,93 @@
+def tube8(src, noiz, place, a1, a2, a3, a4, a5, a6, a7, a8, tlen):
+  # tlen: the tract scale (1 = 17 cm). One region is 1/8 of it.
+  # aither's delay() truncates to whole samples, so each region reads two
+  # neighbouring whole-sample taps and crossfades (linear interpolation).
+  let rs = max(0, 2.125 / 35000 * tlen * sr - 1)
+  let rn = floor(rs)
+  let rf = rs - rn
+  let rt0 = (rn + 0.5) / sr
+  let rt1 = (rn + 1.5) / sr
+  $f1 = 0.0
+  $b1 = 0.0
+  $f2 = 0.0
+  $b2 = 0.0
+  $f3 = 0.0
+  $b3 = 0.0
+  $f4 = 0.0
+  $b4 = 0.0
+  $f5 = 0.0
+  $b5 = 0.0
+  $f6 = 0.0
+  $b6 = 0.0
+  $f7 = 0.0
+  $b7 = 0.0
+  $f8 = 0.0
+  $b8 = 0.0
+  let fo1 = (delay($f1, rt0, 0.001) * (1 - rf) + delay($f1, rt1, 0.001) * rf) * 0.9985
+  let bo1 = (delay($b1, rt0, 0.001) * (1 - rf) + delay($b1, rt1, 0.001) * rf) * 0.9985
+  let fo2 = (delay($f2, rt0, 0.001) * (1 - rf) + delay($f2, rt1, 0.001) * rf) * 0.9985
+  let bo2 = (delay($b2, rt0, 0.001) * (1 - rf) + delay($b2, rt1, 0.001) * rf) * 0.9985
+  let fo3 = (delay($f3, rt0, 0.001) * (1 - rf) + delay($f3, rt1, 0.001) * rf) * 0.9985
+  let bo3 = (delay($b3, rt0, 0.001) * (1 - rf) + delay($b3, rt1, 0.001) * rf) * 0.9985
+  let fo4 = (delay($f4, rt0, 0.001) * (1 - rf) + delay($f4, rt1, 0.001) * rf) * 0.9985
+  let bo4 = (delay($b4, rt0, 0.001) * (1 - rf) + delay($b4, rt1, 0.001) * rf) * 0.9985
+  let fo5 = (delay($f5, rt0, 0.001) * (1 - rf) + delay($f5, rt1, 0.001) * rf) * 0.9985
+  let bo5 = (delay($b5, rt0, 0.001) * (1 - rf) + delay($b5, rt1, 0.001) * rf) * 0.9985
+  let fo6 = (delay($f6, rt0, 0.001) * (1 - rf) + delay($f6, rt1, 0.001) * rf) * 0.9985
+  let bo6 = (delay($b6, rt0, 0.001) * (1 - rf) + delay($b6, rt1, 0.001) * rf) * 0.9985
+  let fo7 = (delay($f7, rt0, 0.001) * (1 - rf) + delay($f7, rt1, 0.001) * rf) * 0.9985
+  let bo7 = (delay($b7, rt0, 0.001) * (1 - rf) + delay($b7, rt1, 0.001) * rf) * 0.9985
+  let fo8 = (delay($f8, rt0, 0.001) * (1 - rf) + delay($f8, rt1, 0.001) * rf) * 0.9985
+  let bo8 = (delay($b8, rt0, 0.001) * (1 - rf) + delay($b8, rt1, 0.001) * rf) * 0.9985
+  let k1 = (a1 - a2) / (a1 + a2)
+  let k2 = (a2 - a3) / (a2 + a3)
+  let k3 = (a3 - a4) / (a3 + a4)
+  let k4 = (a4 - a5) / (a4 + a5)
+  let k5 = (a5 - a6) / (a5 + a6)
+  let k6 = (a6 - a7) / (a6 + a7)
+  let k7 = (a7 - a8) / (a7 + a8)
+  # frication enters at the narrowest place (1..8), shaped by the tube in front of it
+  let n1 = noiz * exp(-(place - 1.5) * (place - 1.5) * 2)
+  let n2 = noiz * exp(-(place - 2.5) * (place - 2.5) * 2)
+  let n3 = noiz * exp(-(place - 3.5) * (place - 3.5) * 2)
+  let n4 = noiz * exp(-(place - 4.5) * (place - 4.5) * 2)
+  let n5 = noiz * exp(-(place - 5.5) * (place - 5.5) * 2)
+  let n6 = noiz * exp(-(place - 6.5) * (place - 6.5) * 2)
+  let n7 = noiz * exp(-(place - 7.5) * (place - 7.5) * 2)
+  $f1 = src + 0.97 * bo1
+  $f2 = (1 + k1) * fo1 - k1 * bo2 + n1
+  $b1 = k1 * fo1 + (1 - k1) * bo2
+  $f3 = (1 + k2) * fo2 - k2 * bo3 + n2
+  $b2 = k2 * fo2 + (1 - k2) * bo3
+  $f4 = (1 + k3) * fo3 - k3 * bo4 + n3
+  $b3 = k3 * fo3 + (1 - k3) * bo4
+  $f5 = (1 + k4) * fo4 - k4 * bo5 + n4
+  $b4 = k4 * fo4 + (1 - k4) * bo5
+  $f6 = (1 + k5) * fo5 - k5 * bo6 + n5
+  $b5 = k5 * fo5 + (1 - k5) * bo6
+  $f7 = (1 + k6) * fo6 - k6 * bo7 + n6
+  $b6 = k6 * fo6 + (1 - k6) * bo7
+  $f8 = (1 + k7) * fo7 - k7 * bo8 + n7
+  $b7 = k7 * fo7 + (1 - k7) * bo8
+  let lipR = lp1(fo8, 5000)
+  $b8 = -0.85 * lipR
+  let out = fo8 - 0.85 * lipR
+  out - prev(out)
+
+let va1 = [0.77, 1.79, 1.37, 1.09, 1.80, 3.12, 5.60, 9.00, 3.04, 5.51, 3.60]
+let va2 = [2.88, 3.54, 2.35, 1.95, 1.54, 1.51, 3.19, 3.08, 2.35, 2.06, 3.53]
+let va3 = [7.86, 5.51, 3.40, 3.30, 1.65, 1.24, 2.44, 1.83, 1.96, 4.35, 3.36]
+let va4 = [6.56, 4.38, 3.28, 3.52, 2.34, 2.17, 2.80, 2.57, 2.36, 6.42, 3.13]
+let va5 = [2.68, 2.49, 2.76, 2.69, 3.58, 4.21, 3.32, 3.16, 3.61, 1.85, 2.92]
+let va6 = [1.01, 1.51, 2.34, 2.23, 5.31, 7.78, 3.91, 5.08, 4.77, 2.06, 2.72]
+let va7 = [0.86, 1.58, 2.60, 2.86, 6.44, 8.02, 3.33, 3.72, 4.33, 5.48, 2.56]
+let va8 = [2.37, 2.83, 4.17, 5.02, 5.88, 4.07, 1.95, 1.03, 3.35, 2.49, 2.49]
+
+# test: each vowel held 1 s, folds at 100 Hz
+let vi   = int(t) mod 11
+let gph  = phasor(100)
+let gt   = gph / 0.6
+let flow = if gph < 0.6 then gt * gt * (1 - gt) * 6.75 else 0
+play v:
+  tube8(flow, 0, 4, va1[vi], va2[vi], va3[vi], va4[vi], va5[vi], va6[vi], va7[vi], va8[vi], 1) * 0.5
+v

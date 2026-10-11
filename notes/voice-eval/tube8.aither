@@ -1,6 +1,12 @@
 def tube8(src, noiz, place, a1, a2, a3, a4, a5, a6, a7, a8, tlen):
   # tlen: the tract scale (1 = 17 cm). One region is 1/8 of it.
-  let rt = max(0.00002, 2.125 / 35000 * tlen - dt)
+  # aither's delay() truncates to whole samples, so each region reads two
+  # neighbouring whole-sample taps and crossfades (linear interpolation).
+  let rs = max(0, 2.125 / 35000 * tlen * sr - 1)
+  let rn = floor(rs)
+  let rf = rs - rn
+  let rt0 = (rn + 0.5) / sr
+  let rt1 = (rn + 1.5) / sr
   $f1 = 0.0
   $b1 = 0.0
   $f2 = 0.0
@@ -17,22 +23,22 @@ def tube8(src, noiz, place, a1, a2, a3, a4, a5, a6, a7, a8, tlen):
   $b7 = 0.0
   $f8 = 0.0
   $b8 = 0.0
-  let fo1 = delay($f1, rt, 0.001) * 0.9985
-  let bo1 = delay($b1, rt, 0.001) * 0.9985
-  let fo2 = delay($f2, rt, 0.001) * 0.9985
-  let bo2 = delay($b2, rt, 0.001) * 0.9985
-  let fo3 = delay($f3, rt, 0.001) * 0.9985
-  let bo3 = delay($b3, rt, 0.001) * 0.9985
-  let fo4 = delay($f4, rt, 0.001) * 0.9985
-  let bo4 = delay($b4, rt, 0.001) * 0.9985
-  let fo5 = delay($f5, rt, 0.001) * 0.9985
-  let bo5 = delay($b5, rt, 0.001) * 0.9985
-  let fo6 = delay($f6, rt, 0.001) * 0.9985
-  let bo6 = delay($b6, rt, 0.001) * 0.9985
-  let fo7 = delay($f7, rt, 0.001) * 0.9985
-  let bo7 = delay($b7, rt, 0.001) * 0.9985
-  let fo8 = delay($f8, rt, 0.001) * 0.9985
-  let bo8 = delay($b8, rt, 0.001) * 0.9985
+  let fo1 = (delay($f1, rt0, 0.001) * (1 - rf) + delay($f1, rt1, 0.001) * rf) * 0.9985
+  let bo1 = (delay($b1, rt0, 0.001) * (1 - rf) + delay($b1, rt1, 0.001) * rf) * 0.9985
+  let fo2 = (delay($f2, rt0, 0.001) * (1 - rf) + delay($f2, rt1, 0.001) * rf) * 0.9985
+  let bo2 = (delay($b2, rt0, 0.001) * (1 - rf) + delay($b2, rt1, 0.001) * rf) * 0.9985
+  let fo3 = (delay($f3, rt0, 0.001) * (1 - rf) + delay($f3, rt1, 0.001) * rf) * 0.9985
+  let bo3 = (delay($b3, rt0, 0.001) * (1 - rf) + delay($b3, rt1, 0.001) * rf) * 0.9985
+  let fo4 = (delay($f4, rt0, 0.001) * (1 - rf) + delay($f4, rt1, 0.001) * rf) * 0.9985
+  let bo4 = (delay($b4, rt0, 0.001) * (1 - rf) + delay($b4, rt1, 0.001) * rf) * 0.9985
+  let fo5 = (delay($f5, rt0, 0.001) * (1 - rf) + delay($f5, rt1, 0.001) * rf) * 0.9985
+  let bo5 = (delay($b5, rt0, 0.001) * (1 - rf) + delay($b5, rt1, 0.001) * rf) * 0.9985
+  let fo6 = (delay($f6, rt0, 0.001) * (1 - rf) + delay($f6, rt1, 0.001) * rf) * 0.9985
+  let bo6 = (delay($b6, rt0, 0.001) * (1 - rf) + delay($b6, rt1, 0.001) * rf) * 0.9985
+  let fo7 = (delay($f7, rt0, 0.001) * (1 - rf) + delay($f7, rt1, 0.001) * rf) * 0.9985
+  let bo7 = (delay($b7, rt0, 0.001) * (1 - rf) + delay($b7, rt1, 0.001) * rf) * 0.9985
+  let fo8 = (delay($f8, rt0, 0.001) * (1 - rf) + delay($f8, rt1, 0.001) * rf) * 0.9985
+  let bo8 = (delay($b8, rt0, 0.001) * (1 - rf) + delay($b8, rt1, 0.001) * rf) * 0.9985
   let k1 = (a1 - a2) / (a1 + a2)
   let k2 = (a2 - a3) / (a2 + a3)
   let k3 = (a3 - a4) / (a3 + a4)
@@ -48,7 +54,7 @@ def tube8(src, noiz, place, a1, a2, a3, a4, a5, a6, a7, a8, tlen):
   let n5 = noiz * exp(-(place - 5.5) * (place - 5.5) * 2)
   let n6 = noiz * exp(-(place - 6.5) * (place - 6.5) * 2)
   let n7 = noiz * exp(-(place - 7.5) * (place - 7.5) * 2)
-  $f1 = src + 0.75 * bo1
+  $f1 = src + 0.97 * bo1
   $f2 = (1 + k1) * fo1 - k1 * bo2 + n1
   $b1 = k1 * fo1 + (1 - k1) * bo2
   $f3 = (1 + k2) * fo2 - k2 * bo3 + n2
