@@ -7,7 +7,6 @@ export engine_types
 
 const
   SampleRate    = 48000'u32
-  Channels      = 2'u32
   MaxVoices     = 16
   DefaultFadeMs = 20.0
   # A voice that blows up this soon after a hot-swap is rolled back to
@@ -29,6 +28,14 @@ let SocketPath = getEnv("AITHER_SOCK", "/tmp/aither.sock")
 # streaming engine, where latency is free, wants 2048 or more so a slow
 # period doesn't underrun the sink (heard as a click per hole).
 let BufferFrames = uint32(envFloat("AITHER_BUFFER", 512.0))
+# AITHER_SCOPE=1 opens five output channels: the mix (L, R), then the
+# oscilloscope's beam (X, Y) and intensity (Z), for a streaming engine
+# whose viewers draw it. A voice's `play scope:` part is the beam's
+# (x, y) and `play beam:` its intensity (default 1 while a scope part
+# plays); neither is in the mix. With no scope part anywhere the beam
+# draws the mix itself, L against R.
+let ScopeOut = getEnv("AITHER_SCOPE") == "1"
+let Channels = if ScopeOut: 5'u32 else: 2'u32
 
 const EnvBinSamples = 2400  # 50ms per bin at 48 kHz
 
@@ -126,6 +133,17 @@ proc audioCallback(output: ptr UncheckedArray[cfloat],
     return
 
   let sc = slotCount
+  # Where each voice's scope and beam parts sit, looked up once per
+  # period (a hot-swap can't land mid-period: it needs this lock).
+  var scopeIdx, beamIdx: array[MaxVoices, int]
+  if ScopeOut:
+    for v in 0 ..< sc:
+      scopeIdx[v] = -1; beamIdx[v] = -1
+      if slots[v].active:
+        for p, name in slots[v].voice.partNames:
+          if name == "scope": scopeIdx[v] = p
+          elif name == "beam": beamIdx[v] = p
+  let nch = int(Channels)
   for i in 0 ..< frames:
     timeFrac += dt
     if timeFrac >= 1.0:
@@ -139,6 +157,8 @@ proc audioCallback(output: ptr UncheckedArray[cfloat],
 
     var lMix = 0.0
     var rMix = 0.0
+    var sx, sy, sz = 0.0
+    var scoped = false
     for v in 0 ..< sc:
       # A runaway mute lifts by itself after a gap, with a fade-in, so
       # one bad moment in a long patch doesn't end the voice.
@@ -231,13 +251,25 @@ proc audioCallback(output: ptr UncheckedArray[cfloat],
       slots[v].recent.idx = (slots[v].recent.idx + 1) mod RecentSamples
       lMix += gl
       rMix += gr
+      if ScopeOut and scopeIdx[v] >= 0:
+        let g = slots[v].fadeGain
+        scoped = true
+        sx += voice.partOut[2*scopeIdx[v]] * g
+        sy += voice.partOut[2*scopeIdx[v] + 1] * g
+        sz += (if beamIdx[v] >= 0: max(0.0, voice.partOut[2*beamIdx[v]]) else: 1.0) * g
 
     update(master, lMix, rMix)
     masterRecent.l[masterRecent.idx] = float32(lMix)
     masterRecent.r[masterRecent.idx] = float32(rMix)
     masterRecent.idx = (masterRecent.idx + 1) mod RecentSamples
-    output[i * 2]     = cfloat(tanh(lMix))
-    output[i * 2 + 1] = cfloat(tanh(rMix))
+    output[i * nch]     = cfloat(tanh(lMix))
+    output[i * nch + 1] = cfloat(tanh(rMix))
+    if ScopeOut:
+      if not scoped:
+        sx = lMix; sy = rMix; sz = 1.0
+      output[i * nch + 2] = cfloat(clamp(sx, -1.0, 1.0))
+      output[i * nch + 3] = cfloat(clamp(sy, -1.0, 1.0))
+      output[i * nch + 4] = cfloat(clamp(sz, 0.0, 1.0))
 
   release(mtx)
 

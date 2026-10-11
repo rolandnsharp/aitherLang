@@ -2012,9 +2012,11 @@ proc emit*(c: Ctx; program: Node): string =
           body.add &"  (void)({v});\n"
   # No final expression: a file of play blocks plays all of them, rather
   # than compiling to silence.
-  if finalIdx < 0 and c.playNames.len > 0:
-    body.add "  *outL = " & c.playNames.mapIt("p_" & it & "_l").join(" + ") & ";\n"
-    body.add "  *outR = " & c.playNames.mapIt("p_" & it & "_r").join(" + ") & ";\n"
+  # (`scope` and `beam` draw the oscilloscope; they're never heard.)
+  let heard = c.playNames.filterIt(it notin ["scope", "beam"])
+  if finalIdx < 0 and heard.len > 0:
+    body.add "  *outL = " & heard.mapIt("p_" & it & "_l").join(" + ") & ";\n"
+    body.add "  *outR = " & heard.mapIt("p_" & it & "_r").join(" + ") & ";\n"
   body.add "}\n"
 
   pre & c.arrayDecls & body

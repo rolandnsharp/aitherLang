@@ -1,0 +1,305 @@
+# didge_sticks: the master's set from bush_doof_e, only what you hear.
+# Two didges blended (the first, digital one and didge3, the physical one)
+# and clapsticks; an algorithmic routine every 4 bars at 108 bpm. Nothing
+# muted is computed, so it renders ~9x faster than bush_doof_e.
+#
+# 2026-10-11: Roland: "the new didge is great". The blend of the two didges
+# is a keeper; start further didge work from this patch.
+
+def formant(x, f, res):
+  bpf(x, f, res) * (2 * (1 - res))       # unity gain at the peak
+
+# Clapsticks, the physics:
+# - The collision: two hardwood sticks meet for tau seconds; the contact
+#   force is a half-sine (Hertz contact). A harder hit is a shorter
+#   contact (tau ~ v^-1/5), and a shorter pulse reaches higher modes.
+# - Each stick is a free-free bar: modes at 1, 2.756, 5.404 x f1. The
+#   holding hand damps the higher modes faster (T60 / 2.2, / 4.5).
+# - Where on the stick the hit lands sets how much of each mode it
+#   excites (a2, a3), and it changes every hit.
+# - A bar radiates its surface velocity, so the output is the modes' v.
+def contact(trig, tau):
+  $touch = 1.0
+  $touch = if trig > 0 then 0 else min(1, $touch + dt / tau)
+  if $touch < 1 then sin(PI * $touch) else 0
+
+def bar(force, f1, t60, a2, a3):
+  sum(3, n =>
+    let r = if n == 1 then 1 else if n == 2 then 2.756 else 5.404
+    let w = TAU * f1 * r
+    let g = 6.91 * (if n == 1 then 1 else if n == 2 then 2.2 else 4.5) / t60
+    let a = if n == 1 then 1 else if n == 2 then a2 else a3
+    $bv = 0.0
+    $bx = 0.0
+    $bv = clamp($bv + (-2 * g * $bv - w * w * $bx + force * a * 4000) * dt, -50, 50)
+    $bx = $bx + $bv * dt
+    $bv)
+
+# The first didge (2026-10-10, didge_minor): the same lips with a rest
+# opening, into a loop that returns the wave in phase after a full period,
+# so every harmonic resonates. Physically wrong for a didge, digitally cool:
+# bright, even, buzzy. Kept as its own colour and blended with didge3.
+def didge_bore(mouth, lipF, lipD, f0):
+  $pm = 0.0                             # wave arriving back at the lips
+  $dp = 0.0                             # pressure drop across the lips
+  let lip = dho($dp * 1200000.0, lipF, lipD)
+  let a   = clamp(0.05 + lip, 0.0, 1.0) # lip opening; 0 = lips shut
+  let u   = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp))   # Bernoulli flow
+  let pplus = u * 0.8 + $pm             # outgoing wave: injected flow + reflection
+  let p     = pplus + $pm               # pressure at the lips
+  $dp = lp1(mouth - p, 5000)
+  let back = delay(pplus, 1.0 / f0, 0.05)
+  $pm = lp1(back, 2200) * 0.93          # reflected, in phase, lossy
+  back - lp1(back, 180)                 # what leaves the bell
+
+# didge3: lips at the closed end of a tube that is open at the bell.
+# - Lips (outward-striking valve): a mass-spring at lipF, pressed shut at
+#   rest (opening = $lx - 0.4) and blown open by the pressure drop $dp, so
+#   they shut once a cycle: that shut is the buzz.
+# - Flow: Bernoulli, u = a * sqrt(dp), with breath turbulence below 3 kHz.
+# - Bore: a pressure wave travels to the bell and back in half a period
+#   and comes back inverted (an open end reflects -1). Its impedance peaks
+#   sit at the odd harmonics 1, 3, 5..., so h2 and h4 come out weak, as in
+#   real drones. Two inharmonic modes (2.65, 4.35 x f0) add the flare.
+# - Player's tract: two resonances (ft1, ft2) loading the lips from
+#   upstream. Where they peak the flow is choked: they carve the moving
+#   dips that make the vowels.
+# - Radiation: the bell radiates the time derivative of the wave below
+#   ~2.5 kHz (+6 dB per octave), flat above.
+def didge3(mouth, voiceP, lipF, f0, ft1, ft2, zt, modeAmt, turb):
+  $pm = 0.0
+  $dp = 0.0
+  $lx = 0.0
+  $lv = 0.0
+  $u  = 0.0
+  let uS = lp1($u, 2500)
+  let pT = lp1(sum(2, j =>
+    let fj = if j == 1 then ft1 else ft2
+    let zj = if j == 1 then 0.09 else 0.07
+    zt * 2 * zj * TAU * fj * dho_v(uS, fj, zj)), 3000)
+  let wl = TAU * lipF
+  $lv = clamp($lv + (-2 * 0.1 * wl * $lv - wl * wl * $lx + $dp * 0.6 * wl * wl) * dt, -3000, 3000)
+  $lx = clamp($lx + $lv * dt, -2, 3)
+  let a = clamp($lx - 0.4, 0.0, 1.0)
+  let br = lp1(lp1(noise(), 2800), 2800)
+  $u  = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp)) * (1 + br * turb)
+  let pM = sum(2, k =>
+    let fk = f0 * (if k == 1 then 2.65 else 4.35)
+    modeAmt * (if k == 1 then 4.0 else 2.5) * 2 * 0.05 * TAU * fk * dho_v(uS, fk, 0.05))
+  let pplus = $u * 0.8 + $pm
+  let p   = pplus + $pm + pM
+  $dp = clamp(lp1(mouth * (1 + voiceP) - pT - p, 5000), -4, 4)
+  let back = delay(pplus, 0.5 / f0, 0.05)
+  $pm = clamp(-lp1(back, 2200) * 0.93, -20, 20)
+  hp1(back, 2500) + hp1(pM, 150) * 0.08 * modeAmt
+
+# ------------------------------------------------------------------ clock
+$bpos = 0.0
+$bpos = $bpos + 108 / 60 / 4 * dt
+let barPh  = $bpos mod 1
+let stepPh = (barPh * 16) mod 1
+let stepIx = int(barPh * 16)
+let sub    = stepIx mod 4
+let trig16 = if stepPh < prev(stepPh) then 1 else 0
+let bars   = floor($bpos)
+let hBar   = (sin(bars * 61.7) * 9123.77) mod 1
+
+# A routine every 4 bars, never the same twice running.
+let blk   = floor(bars / 4)
+let rA    = int(((sin(blk * 17.13) * 43758.5453) mod 1) * 10)
+let rB    = int(((sin((blk - 1) * 17.13) * 43758.5453) mod 1) * 10)
+let rout  = if rA == rB then (rA + 3) mod 10 else rA
+let pKanga = [1, 0, 0, 0.8, 0, 0, 1, 0, 0.9, 0, 0, 0.8, 0, 0, 1, 0.5]
+let pEmu   = [1, 0, 0, 0, 0, 0, 0.7, 0, 1, 0, 0, 0, 0, 0, 0.7, 0]
+let pFrog  = [1, 0, 0.8, 0, 0, 0, 1, 0, 1, 0, 0.8, 0, 0, 0, 1, 0]
+let pHorse = [1, 0, 0.6, 0.8, 1, 0, 0.6, 0.8, 1, 0, 0.6, 0.8, 1, 0, 0.6, 0.8]
+let pTrain = [1, 0.4, 0.7, 0.4, 1, 0.4, 0.7, 0.4, 1, 0.4, 0.7, 0.4, 1, 0.5, 0.8, 0.5]
+let pRain  = [1, 0.6, 0.8, 0.6, 0.9, 0.6, 0.8, 0.7, 1, 0.6, 0.8, 0.6, 0.9, 0.7, 0.9, 0.8]
+let pSparse = [1, 0, 0, 0, 0, 0, 0, 0, 0.6, 0, 0, 0, 0, 0, 0, 0]
+let vPat  = if rout == 1 then pKanga[stepIx] else if rout == 2 then pEmu[stepIx] else if rout == 3 then pFrog[stepIx] else if rout == 4 then pHorse[stepIx] else if rout == 5 then pTrain[stepIx] else if rout == 6 then pRain[stepIx] else if rout == 0 then 0 else pSparse[stepIx]
+let vAcc  = vPat * (0.75 + 0.25 * (if ((stepIx + int(hBar * 4)) mod 4) == 0 then 1 else 0))
+let vStick = if rout == 6 then 0.35 + (if sub == 0 then 0.4 else 0) else if rout == 5 then (if (stepIx mod 2) == 0 then 0.6 else 0) else (if sub == 0 then 0.75 else if sub == 2 and hBar > 0.4 then 0.35 else 0)
+
+# ---------------------------------------------------------- didge playing
+# Breath: a circular-breathing gulp every 5.6 s, and slow swells of the
+# diaphragm (real players swing the level 6-13 dB).
+let cycle = (t / 5.6) mod 1
+let gulp  = ease((cycle - 0.93) * 20) * (1 - ease((cycle - 0.985) * 60))
+let swellB = (sin(TAU * t / 6.7) + 1) * 0.5 * (0.6 + 0.4 * (sin(TAU * t / 23) + 1) * 0.5)
+let vTap   = slew(discharge(trig16 * vAcc, 16), 0.004)
+let vStop  = slew(if vAcc > 0.6 and stepPh < 0.1 then 1 else 0, 0.002)
+let vToot  = slew((if rout == 1 and stepIx >= 14 and (bars mod 2) == 1 then 1 else 0) + (if rout == 5 and (bars mod 4) == 3 and (stepIx == 4 or stepIx == 5 or stepIx == 8 or stepIx == 9 or stepIx == 10) then 1 else 0) + (if rout == 9 and ((stepIx >= 4 and stepIx < 7) or (stepIx >= 12 and stepIx < 15)) then 1 else 0), 0.04)
+# The tongue and jaw: vowels keep moving under every routine.
+let jaw    = (sin(TAU * t / 4.3) + 1) * 0.5 * 0.5 + (sin(TAU * t / 1.13) + 1) * 0.5 * 0.2
+let vWah   = clamp((if rout == 0 then (sin(TAU * t / 1.6) + 1) * 0.5 else if rout == 2 then slew(discharge(trig16 * vPat, 4), 0.02) else (sin(TAU * t / 3.1) + 1) * 0.3) * 0.7 + jaw * 0.5, 0, 1)
+let vHowl  = if rout == 7 then 280 + 200 * ease(((bars mod 4) + barPh) / 1.5) * (1 - 0.3 * ease(((bars mod 4) + barPh - 2.5) / 1.5)) else 0
+let vLaugh = if rout == 8 then (if stepIx < 12 then 1 else 0) * (if stepPh < 0.7 then 1 else 0) else 0
+let vCroak = if rout == 3 then discharge(trig16 * vPat, 20) else 0
+let vVoiceF = if rout == 7 then vHowl else if rout == 8 then (380 + (stepIx mod 2) * 90) * (1 + stepIx * 0.02) else 180
+let vVoiceA = slew(if rout == 7 then 0.2 else if rout == 8 then 0.19 * vLaugh else 0.3 * vCroak, 0.01)
+let vVoice  = pow(max(0, sin(TAU * phasor(vVoiceF * (1 + 0.012 * sin(TAU * phasor(5.5)))))), 3) * vVoiceA
+let press  = max(0.05, (0.8 + swellB * 0.3 + vTap * 0.3 + vToot * 0.25 - gulp * 0.4) * (1 - vStop * 0.3))
+
+# The two didges, crossfaded (equal power) on a slow 83 s swing so each
+# gets its turn; the first ducks under toots (it jumps an octave where
+# didge3 lands at 2.78x, and the two would clash).
+let blend = (0.5 + 0.35 * sin(TAU * t / 83)) * (1 - vToot * 0.6)
+play didge:
+  let d3 = didge3(press * 1.6, vVoice, (90 + vToot * 110) * 71.6 / 110, 71.6, 300 + vWah * 480, 950 + vTap * 1500 + vCroak * 600, 1.5, 0.4, 0.8)
+  let d1 = didge_bore(press * (1 + vVoice), 60, 0.1, 73.4)
+  let d = d3 * cos(blend * PI / 2) + d1 * 1.26 * sin(blend * PI / 2)
+  let tract = formant(d, 320 + vWah * 420 - vTap * 60, 0.93) + formant(d, 850 + vWah * 350 + vTap * 1100, 0.94) * 0.7 + formant(d, 2300 + vWah * 300 + vTap * 500, 0.95) * 0.35
+  ((tract * 0.9 + d * 0.35) |> drive(1.4)) |> hpf(200, 0.29) |> hpf(200, 0.29) |> lpf(7000, 0.2)
+
+# ---------------------------------------------------------- stick rhythms
+# The sticks pick their own style every 4 bars (independent of the
+# didge's routine), swing by a different amount each block, roll into the
+# 4th bar, flam the block's downbeat, and ghost more as a 16-bar arc rises.
+let ph32   = (barPh * 32) mod 1
+let trig32 = if ph32 < prev(ph32) then 1 else 0
+let ph12   = (barPh * 12) mod 1
+let trig12 = if ph12 < prev(ph12) then 1 else 0
+let t12    = int(barPh * 12)
+let hb1    = (sin(blk * 12.9898) * 43758.5453) mod 1
+let hb2    = (sin(blk * 78.233 + 1.3) * 12543.871) mod 1
+let hb3    = (sin(blk * 39.425 + 2.7) * 23421.631) mod 1
+let sMode  = int(((sin((blk + 7) * 31.7) * 15731.3) mod 1) * 6)
+let fillBar = if (bars mod 4) == 3 then 1 else 0
+let arc    = (sin(TAU * bars / 16) + 1) * 0.5
+let sw     = 0.08 + 0.14 * hb3                                  # swing: the off-16th lands late
+let trigSw = if (stepIx mod 2) == 1 then (if stepPh >= sw and prev(stepPh) < sw then 1 else 0) else trig16
+# Each 16th gets its own strength and its own spot on the stick.
+let hN    = (bars * 16 + stepIx) * 1.0
+let hVel  = (sin(hN * 12.9898) * 43758.5453) mod 1
+let hPos  = (sin(hN * 78.233) * 12543.871) mod 1
+let hPos2 = (sin(hN * 39.425) * 23421.631) mod 1
+let ghost = if hVel > 0.75 - 0.4 * arc then 0.13 + 0.08 * hPos else 0
+let kE    = 5 + int(hb1 * 5)
+let iE    = (stepIx + int(hb2 * 16)) mod 16
+let euc   = if ((iE * kE) mod 16) < kE then 1 else 0
+let pClave  = [1, 0, 0, 0.8, 0, 0, 0.9, 0, 0, 0, 0.8, 0, 1, 0, 0, 0]
+let pGallop = [1, 0, 0.5, 0.6, 0.9, 0, 0.5, 0.6, 1, 0, 0.5, 0.6, 0.9, 0, 0.6, 0.7]
+let pHeart  = [1, 0, 0, 0.55, 0, 0, 0, 0, 0.8, 0, 0, 0.5, 0, 0, 0, 0]
+let acc   = if sub == 0 then 0.15 else 0
+let v16raw = if sMode == 0 then (if euc > 0 then 0.7 + acc else ghost) else if sMode == 1 then 0 else if sMode == 2 then (if vPat == 0 then 0.55 + acc else ghost) else if sMode == 3 then pGallop[stepIx] * 0.7 else if sMode == 4 then max(pClave[stepIx] * 0.9, ghost) else max(pHeart[stepIx], ghost * 0.5)
+let rollOn = fillBar * (if barPh >= 0.75 then 1 else 0)
+let v16   = v16raw * (0.8 + 0.35 * hVel) * (1 - rollOn)
+let v12   = if sMode == 1 then (if (t12 mod 2) == 0 then 0.6 else 0.22) * (0.85 + 0.3 * hPos) else 0
+let vRoll = rollOn * (0.15 + 0.65 * (barPh - 0.75) * 4) * (0.85 + 0.3 * hPos2)
+let flamT = if (bars mod 4) == 0 and stepIx == 0 and stepPh >= 0.16 and prev(stepPh) < 0.16 then 1 else 0
+play sticks:
+  let f   = contact(trigSw * v16, 0.0001 * pow(max(v16, 0.05), -0.2)) * v16 + contact(trig12 * v12, 0.0001 * pow(max(v12, 0.05), -0.2)) * v12 + contact(trig32 * vRoll, 0.0001 * pow(max(vRoll, 0.05), -0.2)) * vRoll + contact(flamT, 0.00011) * 0.5
+  let sA  = bar(f, 1650, 0.14, 0.25 + 0.6 * hPos, 0.1 + 0.4 * hPos2)
+  let sB  = bar(f, 1750, 0.14 * 0.8, 0.9 - 0.6 * hPos, 0.5 - 0.4 * hPos2)
+  (sA + sB * 0.85) * 0.85 |> lpf(7000, 0.2)
+
+# ------------------------------------------------------------------ scope
+# The beam (AITHER_SCOPE=1 streams it as X, Y, Z beside the mix): a phase
+# portrait of the didge, the signal against itself a quarter of a drone
+# period later, turning slowly. The beam is time-shared: 3/4 of every
+# 1/180 s draws the portrait, 1/4 a ring that every stick hit flashes
+# and opens out, blanked across the jumps. Every 64 s it unrolls into a
+# time trace (x a sweep at half the drone) and rolls back up.
+let dm     = lp1(lp1(mono(didge), 650), 650)             # the drone's first harmonics, no breath
+let dEnv   = lp1(abs(dm), 1.5)
+let dn     = clamp(dm / (dEnv * 3.4 + 0.006), -1, 1)
+let dq     = delay(dn, 0.25 / 73.4, 0.05)
+let rot    = TAU * t / 41
+let pxr    = dn * cos(rot) - dq * sin(rot)
+let pyr    = dn * sin(rot) + dq * cos(rot)
+let unroll = ease((sin(TAU * t / 64) + 1) * 0.5 * 1.6 - 0.3)
+let sweepX = phasor(73.4 / 2) * 2 - 1
+let hitEnv = discharge(trigSw * v16 + trig12 * v12 + trig32 * vRoll, 7)
+let ringR  = 0.2 + (1 - hitEnv) * 0.8
+let mux    = phasor(180)
+let onRing = if mux > 0.75 then 1 else 0
+let blank  = if abs(mux - 0.75) < 0.006 or mux < 0.006 or mux > 0.994 then 0 else 1
+let ringA  = TAU * (mux - 0.75) * 4
+# Scene 1: a (p, q) torus knot turning in 3D. Drawn twice per drone
+# cycle, so the tube's ripple (the didge's waveform) stands still on it.
+$v1start = t
+let v1     = ease((t - $v1start) / 3)
+let pK     = [2, 3, 2, 3, 5, 3]
+let qK     = [3, 5, 5, 4, 2, 7]
+let kp     = pK[sMode]
+let kq     = qK[sMode]
+let th     = TAU * phasor(73.4 / 2)
+let tube   = 0.2 + 0.09 * dn
+let ringK  = 0.55 + tube * cos(kq * th)
+let x3     = ringK * cos(kp * th)
+let y3     = ringK * sin(kp * th)
+let z3     = tube * sin(kq * th)
+let ra     = TAU * t / 13
+let rb     = TAU * t / 17
+let xr     = x3 * cos(ra) + z3 * sin(ra)
+let zr     = z3 * cos(ra) - x3 * sin(ra)
+let yr     = y3 * cos(rb) - zr * sin(rb)
+let zd     = y3 * sin(rb) + zr * cos(rb)
+let persp  = 2.5 / (2.6 - zd) * (1 + 0.1 * hitEnv)
+let kx     = xr * persp
+let ky     = yr * persp
+let kz     = (0.35 + 0.65 * (zd + 0.8) / 1.6) * (0.75 + 0.6 * hitEnv)
+
+# Scene 2: a Julia set by inverse iteration (z -> +-sqrt(z - c), a
+# random sign each step, which pulls every point onto the set), drawn as
+# blanked dots 12000 times a second; beside it the Mandelbrot set's main
+# cardioid and period-2 disc, with c marked. c tours just inside the
+# cardioid's edge, and the didge breathes it in and out.
+$v2start = t
+let v2     = ease((t - $v2start) / 3)
+let thc    = TAU * t / 47
+let pull   = 0.955 + 0.04 * lp1(dn, 40)
+let cr     = (cos(thc) / 2 - cos(2 * thc) / 4) * pull
+let ci     = (sin(thc) / 2 - sin(2 * thc) / 4) * pull
+let jph    = phasor(12000)
+let jtrig  = if jph < prev(jph) then 1 else 0
+let jsub   = int(jph * 4)
+$jr = 0.0
+$ji = 0.0
+let wr     = $jr - cr
+let wi     = $ji - ci
+let wm     = sqrt(wr * wr + wi * wi)
+let sqr    = sqrt(max(0, (wm + wr) / 2))
+let sqi    = (if wi >= 0 then 1 else -1) * sqrt(max(0, (wm - wr) / 2))
+let jsgn   = if noise() > 0 then 1 else -1
+$jr = if jtrig > 0 then sqr * jsgn else $jr
+$ji = if jtrig > 0 then sqi * jsgn else $ji
+let mux2   = phasor(50)
+let mu     = mux2 / 0.3
+let cardA  = TAU * mu / 0.7
+let discA  = TAU * (mu - 0.7) / 0.25
+let mcx    = if mu < 0.7 then cos(cardA) / 2 - cos(2 * cardA) / 4 else if mu < 0.95 then -1 + 0.25 * cos(discA) else cr
+let mcy    = if mu < 0.7 then sin(cardA) / 2 - sin(2 * cardA) / 4 else if mu < 0.95 then 0.25 * sin(discA) else ci
+let edge   = abs(mu - 0.7) < 0.01 or abs(mu - 0.95) < 0.01 or mux2 < 0.004 or abs(mux2 - 0.3) < 0.006 or mux2 > 0.996
+let fx     = if mux2 < 0.3 then -0.62 + (mcx + 0.75) * 0.2 else 0.42 + $jr * 0.31
+let fy     = if mux2 < 0.3 then mcy * 0.36 else $ji * 0.55
+let fz     = if edge then 0 else if mux2 < 0.3 then (if mu >= 0.95 then 1.6 else 0.35) else (if jsub == 1 or jsub == 2 then 1 else 0) * (0.8 + 0.5 * hitEnv)
+
+# Scene 3: the didge's waveform wrapped round a ring (two drone cycles
+# per turn, so it stands still), swelling on stick hits: ink for the
+# paint layer's feedback.
+$v3start = t
+let v3     = ease((t - $v3start) / 3)
+let wth    = TAU * phasor(73.4 / 2)
+let wrad   = 0.42 + 0.22 * dn + 0.1 * hitEnv
+let wx     = wrad * cos(wth) * 0.5625
+let wy     = wrad * sin(wth)
+
+play scope:
+  let sx = pxr * 0.9 * (1 - unroll) + sweepX * unroll
+  let sy = pyr * 0.85 * (1 - unroll) + dn * 0.7 * unroll
+  let ox = if onRing > 0 then ringR * cos(ringA) else sx
+  let oy = if onRing > 0 then ringR * sin(ringA) else sy
+  let k1x = ox * (1 - v1) + kx * v1
+  let k1y = oy * (1 - v1) + ky * v1
+  let f2x = k1x * (1 - v2) + fx * v2
+  let f2y = k1y * (1 - v2) + fy * v2
+  [f2x * (1 - v3) + wx * v3, f2y * (1 - v3) + wy * v3]
+play beam:
+  let ob = blank * (if onRing > 0 then hitEnv * 1.5 else 0.8)
+  let f2z = (ob * (1 - v1) + kz * v1) * (1 - v2) + fz * v2
+  f2z * (1 - v3) + (0.9 + 0.4 * hitEnv) * v3
+
+let roomD = reverb(mono(didge), 1.3, 0.1)
+let roomS = reverb(mono(sticks), 0.6, 0.06)
+(haas(roomD * 3.2 * 0.8, 8) + pan(roomS, 0.35) + pan(fbdelay(mono(sticks), 0.326, 0.5, 0.35) * 0.3, -0.4)) * 0.78
