@@ -148,7 +148,7 @@ let blend = (0.5 + 0.35 * sin(TAU * t / 83)) * (1 - vToot * 0.6)
 # The voice: speech (espeak-ng, analysed to 16 band envelopes and a hiss
 # track, data below) through a 16-band vocoder whose carrier is a small
 # saw choir singing D minor pentatonic over the drone. Eight lines, one per
-# 4-bar phrase: sung for 2 bars, then the didge answers for 2.
+# 4-bar phrase: sung for up to 3 bars, then the didge answers.
 # Vocoder data: 8 lines of speech (espeak-ng), 2620 frames at 100/s.
 # vocA[frame * 16 + band]: band envelopes, 180 Hz to 6.5 kHz, log spaced.
 # vocN[frame]: how much of the frame is hiss (s, t, sh, f).
@@ -2911,12 +2911,13 @@ let vocN = [
 ]
 let songBar = bars mod 32
 let li      = int(songBar / 4)
-let inLine  = if (songBar mod 4) < 2 then 1 else 0
+let inLine  = if (songBar mod 4) < 3 then 1 else 0
 let tl      = ((songBar mod 4) + barPh) * (4 * 60 / 108)
-let vfi     = int(tl * 100)
+let vRate   = 0.8                                   # speech read at 80%: slower words, same notes
+let vfi     = int(tl * 100 * vRate)
 let vOn     = slew(if inLine > 0 and vfi < vocL[li] - 2 then 1 else 0, 0.02)
 let vf0     = vocS[li] + min(vfi, vocL[li] - 2)
-let vfrac   = tl * 100 - vfi
+let vfrac   = tl * 100 * vRate - vfi
 let vNz     = vocN[vf0] * (1 - vfrac) + vocN[vf0 + 1] * vfrac
 let melody  = [7, 7, 5, 3, 5, 7, 10, 7, 7, 5, 3, 0, 3, 5, 7, 5, 12, 10, 7, 7, 10, 12, 10, 7, 7, 7, 5, 3, 5, 3, 0, 0, 0, 3, 5, 7, 10, 7, 5, 3, 12, 12, 10, 7, 5, 7, 10, 12, 7, 10, 12, 15, 12, 10, 7, 5, 5, 3, 0, 3, 5, 3, 0, 0]
 let beatIn  = min(int(((songBar mod 4) + barPh) * 4), 7)
@@ -2980,7 +2981,7 @@ play voc:
     let fk = 180 * pow(36.111, (k - 1) / 15)
     let e  = vocA[vf0 * 16 + k - 1] * (1 - vfrac) + vocA[(vf0 + 1) * 16 + k - 1] * vfrac
     formant(vSrc, fk, 0.88) * e)
-  (bands * vOn * 0.3) |> hpf(200, 0.29) |> lpf(7000, 0.2)
+  (bands * vOn * 0.48) |> hpf(200, 0.29) |> lpf(7000, 0.2)
 
 # ------------------------------------------------------------------ scope
 # The beam (AITHER_SCOPE=1 streams it as X, Y, Z beside the mix): a phase
