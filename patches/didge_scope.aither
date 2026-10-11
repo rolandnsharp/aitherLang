@@ -227,19 +227,27 @@ let slot    = min(int(((songBar mod 4) + barPh) * 32), 95)
 let slotPh  = (barPh * 32) mod 1
 let ph      = if inLine > 0 then lyr[li * 96 + slot] else 0
 let stp     = pST[ph]
-let clos    = if stp > 0 and slotPh < 0.55 then 1 else 0
-let burst   = if stp > 0 and slotPh >= 0.55 and slotPh < 0.68 then 1 else 0
-let avT     = if stp > 0 then (if stp == 2 or stp == 4 then (if clos > 0 then 0.15 else 0.6) else 0) else pAV[ph]
-let afT     = pAF[ph] + burst * 0.8 + (if stp >= 3 and slotPh >= 0.55 then 0.55 else 0)
-let ahT     = pAH[ph] + (if (stp == 1 or stp == 3) and slotPh >= 0.68 then 0.35 else 0)
+let clos    = if stp > 0 and slotPh < 0.6 then 1 else 0
+let isUnv   = if stp == 1 or stp == 3 then 1 else 0
+let relT    = if stp > 0 and slotPh >= 0.6 and prev(slotPh) < 0.6 then 1 else 0
+let burstE  = discharge(relT, 120)
+let aspE    = discharge(relT * isUnv, 16)
+let avT     = (if stp > 0 then (if stp == 2 or stp == 4 then (if clos > 0 then 0.15 else 0.6) else 0) else pAV[ph]) * (1 - 0.92 * aspE)
+let afT     = pAF[ph] + burstE * (if isUnv > 0 then 0.9 else 0.45) + (if stp >= 3 and slotPh >= 0.6 then 0.55 else 0)
+let ahT     = pAH[ph] + aspE * 0.55
 let vAV     = slew(avT, 0.012)
 let vAF     = slew(afT, 0.005)
-let vAH     = slew(ahT, 0.01)
+let vAH     = slew(ahT, 0.004)
 let vF1     = slew(pF1[ph], 0.022)
 let vF2     = slew(pF2[ph], 0.025)
 let vF3     = slew(pF3[ph], 0.035)
+let nasal   = if ph >= 12 and ph <= 14 then 1 else 0
+let vNas    = slew(nasal, 0.012)
+let vB1     = 95 + 120 * vNas
+let vB2     = 120 + 500 * vNas
+let vB3     = 180 + 650 * vNas
 let vFN     = if stp >= 3 then 3000 else pFN[ph]
-let gph     = phasor(vHz * vVib * (1 + 0.004 * noise()))
+let gph     = phasor(vHz * vVib)
 let gtau    = gph / 0.6
 let glot    = if gph < 0.6 then 2 * gtau - 3 * gtau * gtau else 0
 let vOn     = slew(inLine, 0.03)
@@ -295,8 +303,9 @@ play sticks:
 
 play voice:
   let src  = glot * vAV + noise() * (vAH + 0.04 * vAV)
-  let tract = kres(kres(kres(kres(kres(src, vF1, 80), vF2, 100), vF3, 150), 3500, 250), 4500, 300)
-  let lips = tract - prev(tract)
+  let tract = kres(kres(kres(kres(kres(src, vF1, vB1), vF2, vB2), vF3, vB3), 3500, 250), 4500, 300)
+  let murmur = kres(src, 270, 60) * vNas * 0.6
+  let lips = (tract + murmur) - prev(tract + murmur)
   let fric = formant(noise(), vFN, 0.55) * vAF
   ((lips * 1.6 + fric * 0.5) * vOn) |> hpf(200, 0.29) |> lpf(7000, 0.2)
 
