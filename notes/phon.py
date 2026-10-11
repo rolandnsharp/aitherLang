@@ -5,7 +5,8 @@ NAME:slots and one @note (semitones above D3). A slot is a 32nd note
 (69 ms at 108 bpm); a line has 96 (3 bars). Out come `lyr` (the phoneme
 in each slot) and `lyrN` (the note), 96 per line."""
 import sys
-IDS = 'sil IY IH EH AE AA AO UH UW AH ER AX M N NG L R W Y HH S SH F TH Z V DH ZH P T K B D G CH JH'.split()
+IDS = 'sil IY IH EH AE AA AO UH UW AH ER AX M N NG L R W Y HH S SH F TH Z V DH ZH P T K B D G CH JH VB'.split()
+STOPS = {'P': 'sil', 'T': 'sil', 'K': 'sil', 'CH': 'sil', 'B': 'VB', 'D': 'VB', 'G': 'VB', 'JH': 'VB'}
 SLOTS = 96
 LINES = [
  ("Out here in the bush, under southern stars",
@@ -33,7 +34,10 @@ for words, line in LINES:
         toks = syl.split(); note = int([t for t in toks if t.startswith('@')][0][1:])
         for tok in toks:
             if tok.startswith('@'): continue
-            p, n = tok.split(':'); slots += [IDS.index(p)] * int(n); ns += [note] * int(n)
+            p, n = tok.split(':'); n = int(n)
+            # a long stop holds one closure (silence, or a voice bar) and releases once, at the end
+            seq = [STOPS[p]] * (n - 1) + [p] if p in STOPS and n > 1 else [p] * n
+            slots += [IDS.index(q) for q in seq]; ns += [note] * n
     assert len(slots) <= SLOTS, (words, len(slots))
     last = ns[-1]
     slots += [0] * (SLOTS - len(slots)); ns += [last] * (SLOTS - len(ns))
