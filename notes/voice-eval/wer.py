@@ -18,7 +18,7 @@ def wer(ref, hyp):
     return d[len(h)] / len(r)
 def transcribe(x, sr, tag):
     y = resample_poly(x, 1, 3) if sr == 48000 else x
-    y = y / (np.abs(y).max() + 1e-9) * 0.9
+    y = np.clip(y / (np.sqrt((y ** 2).mean()) + 1e-9) * 0.1, -1, 1)   # by level, not peak: a spike can't bury the speech
     f = f'/tmp/wer_{os.getpid()}_{tag}.wav'; wavfile.write(f, 16000, (y * 32767).astype(np.int16))
     out = subprocess.run([W + '/build/bin/whisper-cli', '-m', W + '/models/ggml-small.en.bin', '-f', f, '-nt', '-np', '-t', '6', '-l', 'en'],
                          capture_output=True, text=True).stdout

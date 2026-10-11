@@ -29,3 +29,15 @@
   consonants as gestures over a moving vowel shape (labial region 8,
   alveolar 7, postalveolar 6, velar 4-5; velum branch for m/n/ng); then
   the score arrays (vowel substrate + gestures) and whisper scoring.
+
+## Tube singer (2026-10-11 evening): 72% WER
+
+`didge_scope_vT4_tube_singer.aither` (voice only; `phon_v3_tube.py` writes
+its score: stop runs whole, `lyrV` = the vowel each slot heads for). The
+tube's areas glide toward the target vowel; consonants are gestures
+(place gPl, degree gDg, velum gVl) multiplied onto them; nose branch;
+lowpassed turbulence injected at the constriction; per-vowel gains
+(vGain) so open vowels lead; tube waves clamped (a nasal-to-silence
+glitch spiked). WER path: 92% (noise too loud) -> 99% -> 73% (levels
+equalised) -> 72%. Vowels and rhythm come through; consonants don't yet.
+wer.py now normalises by RMS, not peak. The Klatt singer (30%) stays live.
