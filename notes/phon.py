@@ -9,7 +9,7 @@ IDS = 'sil IY IH EH AE AA AO UH UW AH ER AX M N NG L R W Y HH S SH F TH Z V DH Z
 SLOTS = 96
 LINES = [
  ("Out here in the bush, under southern stars",
-  "AA:5 UW:2 T:1 @7 / HH:1 IY:5 ER:2 @7 / IH:3 N:2 @5 / DH:1 AX:2 @3 / B:1 UH:5 SH:3 @5 / sil:3 @5 / AH:4 N:2 @7 / D:1 ER:4 @5 / S:2 AH:5 @3 / DH:1 ER:3 N:2 @0 / S:2 T:1 AA:7 R:2 Z:3 @3"),
+  "AA:5 UW:2 T:1 @7 / HH:1 IY:4 AX:1 R:2 @7 / IH:3 N:2 @5 / DH:1 AX:2 @3 / B:1 UH:5 SH:3 @5 / sil:3 @5 / AH:4 N:2 @7 / D:1 ER:4 @5 / S:2 AH:5 @3 / DH:1 ER:3 N:2 @0 / S:2 T:1 AA:7 R:2 Z:3 @3"),
  ("Solar on the roof, and the code runs far",
   "S:2 AO:4 UW:2 @7 / L:1 ER:4 @5 / AA:3 N:2 @7 / DH:1 AX:2 @5 / R:1 UW:5 F:3 @3 / sil:3 @3 / AE:3 N:1 D:1 @5 / DH:1 AX:2 @7 / K:1 AO:4 UW:2 D:1 @10 / R:1 AH:4 N:2 Z:2 @7 / F:2 AA:8 R:3 @7"),
  ("The didge breathes deep, and the land breathes too",
@@ -19,11 +19,11 @@ LINES = [
  ("Catch the rain, grow the food, live soft on the ground",
   "K:1 AE:4 CH:2 @0 / DH:1 AX:2 @3 / R:1 EH:4 IY:2 N:2 @5 / sil:2 @5 / G:1 R:1 AO:4 UW:2 @7 / DH:1 AX:2 @5 / F:2 UW:5 D:1 @3 / sil:2 @3 / L:2 IH:4 V:2 @7 / S:2 AO:5 F:2 T:1 @10 / AA:3 N:1 @7 / DH:1 AX:2 @5 / G:1 R:1 AA:4 UW:3 N:2 D:1 @3"),
  ("Old land, new minds, in the one same sound",
-  "AO:4 UW:2 L:2 D:1 @12 / L:2 AE:5 N:2 D:1 @10 / sil:2 @10 / N:2 Y:1 UW:5 @7 / M:2 AA:4 IY:2 N:2 D:1 Z:2 @10 / sil:2 @10 / IH:3 N:1 @7 / DH:1 AX:2 @5 / W:2 AH:4 N:2 @7 / S:2 EH:4 IY:2 M:2 @10 / S:2 AA:4 UW:3 N:2 D:1 @12"),
+  "AO:4 UW:2 L:2 D:1 @12 / L:2 AE:5 N:2 D:1 @10 / sil:2 @10 / N:2 UW:6 @7 / M:2 AA:4 IY:2 N:2 D:1 Z:2 @10 / sil:2 @10 / IH:3 N:1 @7 / DH:1 AX:2 @5 / W:2 AH:4 N:2 @7 / S:2 EH:4 IY:2 M:3 @10 / S:2 AA:4 UW:3 N:2 D:1 @12"),
  ("Respect to the people, this is native title land",
   "R:1 IH:2 @7 / S:2 P:1 EH:4 K:1 T:1 @10 / T:1 UW:3 @7 / DH:1 AX:2 @5 / P:1 IY:5 @7 / P:1 AX:2 L:2 @5 / sil:2 @5 / DH:1 IH:3 S:2 @7 / IH:3 Z:2 @5 / N:2 EH:4 IY:2 @7 / T:1 IH:3 V:2 @5 / T:1 AA:4 IY:2 @7 / T:1 AX:2 L:2 @5 / L:2 AE:6 N:2 D:1 @3"),
  ("Wires in the gum trees, dust on our hands",
-  "W:2 AA:4 IY:2 ER:2 Z:2 @7 / IH:3 N:1 @5 / DH:1 AX:2 @3 / G:1 AH:4 M:2 @5 / T:1 R:1 IY:5 Z:2 @7 / sil:3 @7 / D:1 AH:4 S:2 T:1 @10 / AA:3 N:1 @7 / AA:3 UW:2 ER:2 @5 / HH:1 AE:6 N:2 D:1 Z:2 @3"),
+  "W:2 AA:4 IY:1 AX:1 ER:2 Z:2 @7 / IH:3 N:1 @5 / DH:1 AX:2 @3 / G:1 AH:4 M:2 @5 / T:1 R:1 IY:5 Z:2 @7 / sil:3 @7 / D:1 AH:4 S:2 T:1 @10 / AA:3 N:1 @7 / AA:3 UW:2 ER:2 @5 / HH:1 AE:6 N:2 D:1 Z:2 @3"),
 ]
 out = ['# The words: syllables (phoneme:32nds @note above D3), 3 bars a line.']
 score, notes = [], []
