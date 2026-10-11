@@ -19,7 +19,7 @@ def wer(ref, hyp):
 def transcribe(x, sr, tag):
     y = resample_poly(x, 1, 3) if sr == 48000 else x
     y = y / (np.abs(y).max() + 1e-9) * 0.9
-    f = f'/tmp/wer_{tag}.wav'; wavfile.write(f, 16000, (y * 32767).astype(np.int16))
+    f = f'/tmp/wer_{os.getpid()}_{tag}.wav'; wavfile.write(f, 16000, (y * 32767).astype(np.int16))
     out = subprocess.run([W + '/build/bin/whisper-cli', '-m', W + '/models/ggml-small.en.bin', '-f', f, '-nt', '-np', '-t', '6', '-l', 'en'],
                          capture_output=True, text=True).stdout
     return ' '.join(out.split())
@@ -35,8 +35,14 @@ else:
     for k in range(8):
         a = int(4 * k * bar * sr); b = int((4 * k + 3) * bar * sr)
         lines.append((x[a:b], sr))
+# Whisper flips on small changes; average three lead-ins of silence.
+PADS = [0.0, 0.13, 0.27]
 tot = 0
 for k, (x, sr) in enumerate(lines):
-    hyp = transcribe(x, sr, k); e = wer(LYR[k], hyp); tot += e
-    print(f'{e*100:4.0f}%  {LYR[k]!r:58} -> {hyp!r}')
+    es, hyps = [], []
+    for j, pad in enumerate(PADS):
+        xp = np.concatenate([np.zeros(int(pad * sr)), x])
+        hyp = transcribe(xp, sr, f'{k}_{j}'); es.append(wer(LYR[k], hyp)); hyps.append(hyp)
+    e = sum(es) / len(es); tot += e
+    print(f'{e*100:4.0f}%  {LYR[k]!r:58} -> {hyps[0]!r}')
 print(f'MEAN WER {tot / 8 * 100:.0f}%')
