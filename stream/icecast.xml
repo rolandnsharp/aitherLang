@@ -1,0 +1,19 @@
+<icecast>
+  <limits><clients>100</clients><sources>4</sources><burst-size>8192</burst-size></limits>
+  <authentication>
+    <source-password>@SRCPW@</source-password>
+    <admin-user>admin</admin-user>
+    <admin-password>@ADMPW@</admin-password>
+  </authentication>
+  <hostname>aither.blah.dev</hostname>
+  <listen-socket><port>@PORT@</port><bind-address>127.0.0.1</bind-address></listen-socket>
+  <paths>
+    <basedir>/usr/share/icecast2</basedir>
+    <logdir>/tmp</logdir>
+    <webroot>/home/aither/web</webroot>
+    <adminroot>/usr/share/icecast2/admin</adminroot>
+    <alias source="/" destination="/index.html"/>
+  </paths>
+  <logging><accesslog>icecast-access.log</accesslog><errorlog>icecast-error.log</errorlog><loglevel>2</loglevel></logging>
+  <security><chroot>0</chroot></security>
+</icecast>

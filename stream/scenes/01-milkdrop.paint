@@ -1,0 +1,9 @@
+# MilkDrop-style: warp last frame, fade it, ink the beam on top.
+let r    = length(p)
+let zoom = 0.982 - 0.025 * low
+let tw   = 0.012 * sin(t * 0.31) + 0.04 * hit
+let drift = [0.004 * sin(t * 0.23), 0.004 * cos(t * 0.17)]
+let q    = rotate(p * zoom, tw + 0.015 * r) + drift
+let old  = feedback(q) * (0.86 + 0.06 * level) - 0.004
+let ink  = hsv(t * 0.04 + r * 0.35 + 0.2 * mid, 0.75, 1.0) * beam(p) * 1.0
+old + ink

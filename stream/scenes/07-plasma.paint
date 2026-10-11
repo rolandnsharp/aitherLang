@@ -1,0 +1,8 @@
+# Plasma: four sine fields summed, the demoscene classic, breathing with the drone.
+let s1   = sin(x * 3.1 + t * 0.9)
+let s2   = sin(y * 2.7 - t * 0.7)
+let s3   = sin((x + y) * 2.3 + t * 0.5)
+let s4   = sin(length(p * 3 + [sin(t * 0.3), cos(t * 0.4)]) * 3.5 - t)
+let v    = (s1 + s2 + s3 + s4) * 0.25
+let col  = hsv(v * 0.5 + t * 0.03 + 0.2 * mid, 0.85, 0.55 + 0.45 * sin(v * 6.2832 + t))
+col * (0.6 + 0.5 * level) + beam(p) * rgb(1, 1, 1) * 0.7

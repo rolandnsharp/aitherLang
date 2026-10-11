@@ -1,0 +1,9 @@
+# Tunnel: fly down a checkered tube; the low end is the throttle.
+let r    = length(p)
+let a    = phase(p)
+let u    = 0.35 / (r + 0.04) + t * (0.6 + 0.8 * low)
+let v    = a / TAU * 8 + t * 0.07
+let chk  = sin(u * 6.2832) * sin(v * 6.2832)
+let fog  = smoothstep(0.0, 0.7, r)
+let col  = palette(u * 0.08 + chk * 0.15 + 0.2 * mid, 0.7) * (0.45 + 0.55 * chk) * fog
+col * (0.7 + 0.6 * hit) + hsv(t * 0.1, 0.4, 1.0) * beam(p) * 0.9
