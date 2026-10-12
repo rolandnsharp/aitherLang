@@ -5,7 +5,12 @@ notes/voice-eval/third_party/). 44 sections run twice per audio sample, a
 enters where the tract is narrow but open, and a closure's release
 injects a decaying transient. Our part: the shape comes from 8 control
 points (glottis -> lips, cm^2) and two gestures, as in tube24."""
-N, NL, K = 48, 31, 8                              # 48 x 0.365 cm = 17.5 cm (Pink Trombone: 44, a 16 cm tract)
+import sys
+LIGHT = '--light' in sys.argv
+# full: 48 sections run twice a sample (0.365 cm each; Pink Trombone: 44, a 16 cm tract)
+# light: 24 sections once a sample (0.73 cm each), a quarter of the work, for live use
+N, NL, K = (24, 16, 8) if LIGHT else (48, 31, 8)
+STEPS = 1 if LIGHT else 2
 NS = N - NL + 1                                    # nose start (17)
 P = []
 args = ', '.join(f'p{i}' for i in range(1, K + 1))
@@ -77,8 +82,13 @@ def step(src, R, L, nR, nL, suf):
         Q.append(f'  let onL{i}{suf} = clamp(njL{i+1}{suf}, -20, 20)')
     return Q
 P += step('glot', lambda j: f'$R{j}', lambda j: f'$L{j}', lambda i: f'$nR{i}', lambda i: f'$nL{i}', 'a')
-P += step('glot', lambda j: f'oR{j}a', lambda j: f'oL{j}a', lambda i: f'onR{i}a', lambda i: f'onL{i}a', 'b')
-for j in range(N): P.append(f'  $R{j} = oR{j}b'); P.append(f'  $L{j} = oL{j}b')
-for i in range(NL): P.append(f'  $nR{i} = onR{i}b'); P.append(f'  $nL{i} = onL{i}b')
-P.append(f'  (oR{N-1}a + onR{NL-1}a + oR{N-1}b + onR{NL-1}b) * 0.125')
+last = 'a'
+if STEPS == 2:
+    P += step('glot', lambda j: f'oR{j}a', lambda j: f'oL{j}a', lambda i: f'onR{i}a', lambda i: f'onL{i}a', 'b'); last = 'b'
+for j in range(N): P.append(f'  $R{j} = oR{j}{last}'); P.append(f'  $L{j} = oL{j}{last}')
+for i in range(NL): P.append(f'  $nR{i} = onR{i}{last}'); P.append(f'  $nL{i} = onL{i}{last}')
+if STEPS == 2:
+    P.append(f'  (oR{N-1}a + onR{NL-1}a + oR{N-1}b + onR{NL-1}b) * 0.125')
+else:
+    P.append(f'  (oR{N-1}a + onR{NL-1}a) * 0.25')
 print('\n'.join(P))
