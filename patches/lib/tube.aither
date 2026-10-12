@@ -1,0 +1,43 @@
+# A vocal tract as a waveguide: 24 one-sample sections (0.73 cm each at
+# 48 kHz, 17.5 cm in all) with a forward and a backward wave per section,
+# Kelly-Lochbaum scattering at each junction, and area junctions at both
+# ends (a narrow glottal slit, the open air past the lips). Areas come in
+# as 8 control points (glottis -> lips, cm^2) interpolated to the 24
+# sections; two articulators narrow the tube on top (place 1..8 in
+# control-point units, deg 0 open .. 1 closed). `noiz` is turbulence,
+# injected at the first articulator's place. Same physics as
+# notes/voice-eval/gen_tube24.py's generated def, in 25 lines of arrays.
+#
+#   import "lib/tube.aither"
+#   tube24(flow, hiss, 5, 0.3, 7.5, 0.2, 3.6, 3.5, 3.4, 3.1, 2.9, 2.7, 2.6, 2.5)
+
+def tube24(src, noiz, place, deg, place2, deg2, p1, p2, p3, p4, p5, p6, p7, p8):
+  let p = [p1, p2, p3, p4, p5, p6, p7, p8]
+  let s = array(24)                              # section areas
+  each(24, j =>
+    let x = j * 7 / 23 + 1                       # control-point coordinate
+    let lo = floor(x)
+    let fr = x - lo
+    let base = p[lo - 1] * (1 - fr) + p[min(lo, 7)] * fr
+    s[j] = max(0.02, base * (1 - deg * exp(-(x - place) * (x - place) * 3))
+                          * (1 - deg2 * exp(-(x - place2) * (x - place2) * 3))))
+  let k = array(23)                              # reflection at each junction
+  let nz = array(23)                             # turbulence per junction
+  each(23, j =>
+    let x = j * 7 / 23 + 1
+    k[j] = (s[j] - s[j + 1]) / (s[j] + s[j + 1])
+    nz[j] = noiz * exp(-(x - place) * (x - place) * 6))
+  $f = array(24)                                 # forward waves
+  $b = array(24)                                 # backward waves
+  let kG = (s[0] - 0.15) / (s[0] + 0.15)         # the glottal slit
+  let g0 = src + kG * $b[0]
+  let kL = (s[23] - 25) / (s[23] + 25)           # the open lips
+  let lipR = lp1($f[23], 19580)                  # a true 4 kHz: lp1 takes cutoff/sr
+  let bwL = kL * lipR
+  let out = $f[23] + bwL
+  each(23, j =>
+    $f[j + 1] = clamp(((1 + k[j]) * $f[j] - k[j] * $b[j + 1] + nz[j]) * 0.996, -50, 50)
+    $b[j] = clamp((k[j] * $f[j] + (1 - k[j]) * $b[j + 1]) * 0.996, -50, 50))
+  $f[0] = clamp(g0 * 0.996, -50, 50)
+  $b[23] = clamp(bwL * 0.996, -50, 50)
+  out - prev(out)

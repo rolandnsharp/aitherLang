@@ -126,6 +126,24 @@ harp
 Each call to `pluck_voice` gets its own state. Two plucks,
 two independent resonators.
 
+### Libraries
+
+Once a def is worth keeping, move it to a file and import it.
+A library holds defs and constant tables; the patch that
+imports it holds the plays and the sound. Paths are relative
+to the importing file, and a def in the patch overrides the
+library's.
+
+```
+import "lib/tube.aither"           # the 24-section vocal tract
+
+play voice:
+  tube24(flow, hiss, 5, 0.3, 7.5, 0.2, 3.6, 3.5, 3.4, 3.1, 2.9, 2.7, 2.6, 2.5)
+```
+
+Every `send` re-reads the imports. `./aither watch set.aither`
+sends for you whenever the patch or a file it imports changes.
+
 ## Play blocks
 
 Parts are named, engine-controllable pieces of the voice:
@@ -206,13 +224,23 @@ Each file is an independent voice. Load several:
 ./aither stop hat              # stop immediately
 ```
 
-### Mute and solo
+### Mute, solo and park
 
 ```
 ./aither mute bass              # silence voice, state keeps running
 ./aither unmute bass            # resume from where it was
 ./aither solo kick 2            # fade everything else out
+./aither mute set lead 0.5      # one part of a voice, over 0.5 s
+./aither park set lead 0.5      # fade it out, then stop computing it
+./aither unpark set lead 0.5    # back from where it stopped
 ```
+
+A muted part still runs, so its LFOs and sequencers stay in
+step with the rest; it costs what it always cost. A parked
+part costs nothing and its state waits where it was. Park the
+parts that are out of the set for a while: twenty muted
+physical models can underrun the engine, twenty parked ones
+are free.
 
 ### Retrigger
 
@@ -310,6 +338,11 @@ they really are. The live sound isn't touched. It prints the spectrum
 and the per-part table, or `WOULD BREAK` and which part did it.
 
 ## Observability
+
+`./aither status` is `list` plus the master level. `./aither
+render set.aither take.wav 30` renders 30 seconds offline to a
+32-bit float WAV (`--scope` adds the oscilloscope beam as
+channels 3-5).
 
 ```
 ./aither scope                   # stats for master + all voices
@@ -774,7 +807,41 @@ tuning_fork
 Change the damping, the frequency, the excitation — same
 equation, different sound.
 
-### Shapes as waveshapers
+### Spatial physics with arrays
+
+A tube, a string or a membrane is many of those sections side
+by side, each talking to its neighbours. State arrays hold the
+field, and `each` steps every section at once:
+
+```
+def string(pluck, len, damp):
+  $y = array(len)                    # displacement
+  $v = array(len)                    # velocity
+  each(len, i =>
+    let force = ($y[i - 1] - 2 * $y[i] + $y[i + 1]) * 2e8
+    let v = ($v[i] + force * dt) * damp
+    $v[i] = v
+    $y[i] = $y[i] + v * dt)
+  $v[2] = $v[2] + pluck               # strike near one end
+  $y[len - 3]                         # listen near the other
+
+play guitar:
+  string(impulse(1) * 3000, 48, 0.99998) * 0.3
+
+guitar
+```
+
+`$y[i - 1]` at the first section reads 0: beyond the end there
+is nothing, and the ends are whatever you write there (here
+they stay 0, a fixed string). Inside `each` every section reads
+the arrays as they were before the step, so section order
+doesn't matter; that is also why the new velocity goes
+through `let v` (reading `$v[i]` again would give the old one,
+and the integrator would drift). `len` must be a compile-time number, because
+the step unrolls. `patches/lib/tube.aither` is a 24-section
+vocal tract written this way; SPEC.md "State arrays" has the
+rules.
+
 
 The shape functions work on any signal, not just
 oscillators:

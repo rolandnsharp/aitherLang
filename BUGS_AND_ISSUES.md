@@ -10,6 +10,14 @@ toward sounds that have never existed before.
 The items below are the loose ends from that session, ordered by how
 much they block forward work.
 
+## Session log: 2026-10-12 parallel session (from notes/handoff-2026-10-11.md)
+
+Fractional `delay`, state arrays + `each`, `import` + `watch`, migration
+keyed by owning def, `park`, scope-aware meters, `render`, `status`,
+`%`, `1e-3`, stereo `haas`/`reverb`. Rows below marked RESOLVED
+2026-10-12; status table in the handoff. Open: lyrics in the language
+(by choice), server-side visuals.
+
 ## Session log: 2026-10-10 live set (bush doof on native title land)
 
 Two silences, slow iteration and inaudible layers during a streamed set.

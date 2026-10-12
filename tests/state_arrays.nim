@@ -107,42 +107,10 @@ doAssert "constant table" in errOf("let c = [1, 2, 3]\nc[0] = 5\nc[0]")
 # per section, Kelly-Lochbaum scattering at each junction, area junctions
 # at the glottis and the lips), compared sample by sample. The generated
 # version rounds its interpolation weights to 4 decimals, hence the
-# tolerance.
+# tolerance. The array version is the library file patches/lib/tube.aither.
 const TubeGen = staticRead("../notes/voice-eval/tube24.aither")
-const TubeArr = """
-def tube24a(src, noiz, place, deg, place2, deg2, p1, p2, p3, p4, p5, p6, p7, p8):
-  # areas: 8 control points glottis -> lips, interpolated to 24 sections,
-  # narrowed by two articulators (place 1..8, deg 0 open .. 1 closed)
-  let p = [p1, p2, p3, p4, p5, p6, p7, p8]
-  let s = array(24)
-  each(24, j =>
-    let x = j * 7 / 23 + 1
-    let lo = floor(x)
-    let fr = x - lo
-    let base = p[lo - 1] * (1 - fr) + p[min(lo, 7)] * fr
-    s[j] = max(0.02, base * (1 - deg * exp(-(x - place) * (x - place) * 3))
-                          * (1 - deg2 * exp(-(x - place2) * (x - place2) * 3))))
-  let k = array(23)
-  let nz = array(23)
-  each(23, j =>
-    let x = j * 7 / 23 + 1
-    k[j] = (s[j] - s[j + 1]) / (s[j] + s[j + 1])
-    nz[j] = noiz * exp(-(x - place) * (x - place) * 6))
-  $f = array(24)
-  $b = array(24)
-  let kG = (s[0] - 0.15) / (s[0] + 0.15)
-  let g0 = src + kG * $b[0]
-  let kL = (s[23] - 25) / (s[23] + 25)
-  let lipR = lp1($f[23], 19580)
-  let bwL = kL * lipR
-  let out = $f[23] + bwL
-  each(23, j =>
-    $f[j + 1] = clamp(((1 + k[j]) * $f[j] - k[j] * $b[j + 1] + nz[j]) * 0.996, -50, 50)
-    $b[j] = clamp((k[j] * $f[j] + (1 - k[j]) * $b[j + 1]) * 0.996, -50, 50))
-  $f[0] = clamp(g0 * 0.996, -50, 50)
-  $b[23] = clamp(bwL * 0.996, -50, 50)
-  out - prev(out)
-"""
+# The array version lives in patches/lib/tube.aither (import "lib/tube.aither").
+const TubeArr = staticRead("../patches/lib/tube.aither").replace("def tube24(", "def tube24a(")
 const Drive = """
 let ph = phasor(110)
 let flow = pow(max(0, sin(TAU * ph)), 2) * 0.3
