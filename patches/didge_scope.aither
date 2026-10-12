@@ -220,8 +220,15 @@ let songBar = bars mod 32
 let li      = int(songBar / 4)
 let inLine  = if (songBar mod 4) < 3 then 1 else 0
 let tl      = ((songBar mod 4) + barPh) * (4 * 60 / 108)
+# The singer's knobs: who is singing. Defaults are the voice as it was.
+let vTract  = 1.0       # tract length: 0.85 giant .. 1 man .. 1.17 woman .. 1.3 child (scales every formant)
+let vRegister = 1.0     # pitch multiplier: 0.5 down an octave, 2 up one
+let vBreath = 0.04      # breath noise mixed into the voicing
+let vPress  = 0.6       # open quotient: 0.4 pressed, buzzy .. 0.75 soft, breathy
+let vVibD   = 1.0       # vibrato depth (0 = dead straight)
+let vRobot  = 0.0       # 0 vocal folds .. 1 a saw: the vocoder robot, same mouth
 let vHz     = slew(73.42 * pow(2, lyrN[li * 96 + min(int(((songBar mod 4) + barPh) * 32), 95)] / 12), 0.04)
-let vVib    = 1 + 0.009 * sin(TAU * phasor(5.3)) * ease((tl mod 0.55) / 0.3)
+let vVib    = 1 + 0.009 * vVibD * sin(TAU * phasor(5.3)) * ease((tl mod 0.55) / 0.3)
 let vDuck   = slew(inLine, 0.25)
 let slot    = min(int(((songBar mod 4) + barPh) * 32), 95)
 let slotPh  = (barPh * 32) mod 1
@@ -239,18 +246,18 @@ let vAV     = slew(avT, 0.012)
 let vAF     = slew(afT, 0.005)
 let vAH     = slew(ahT, 0.004)
 let fGlide  = if vAV < 0.05 and vAH < 0.05 then 0.15 else 1     # jump in silence, glide in sound
-let vF1     = slew(pF1[ph], 0.022 * fGlide)
-let vF2     = slew(pF2[ph], 0.025 * fGlide)
-let vF3     = slew(pF3[ph], 0.035 * fGlide)
+let vF1     = slew(pF1[ph] * vTract, 0.022 * fGlide)
+let vF2     = slew(pF2[ph] * vTract, 0.025 * fGlide)
+let vF3     = slew(pF3[ph] * vTract, 0.035 * fGlide)
 let nasal   = if ph >= 12 and ph <= 14 then 1 else 0
 let vNas    = slew(nasal, 0.012)
 let vB1     = 95 + 120 * vNas
 let vB2     = 120 + 500 * vNas
 let vB3     = 180 + 650 * vNas
 let vFN     = if stp >= 3 then 3000 else pFN[ph]
-let gph     = phasor(vHz * vVib)
-let gtau    = gph / 0.6
-let glot    = if gph < 0.6 then 2 * gtau - 3 * gtau * gtau else 0
+let gph     = phasor(vHz * vRegister * vVib)
+let gtau    = gph / vPress
+let glot    = (if gph < vPress then 2 * gtau - 3 * gtau * gtau else 0) * (1 - vRobot) + (gph * 2 - 1) * 0.6 * vRobot
 let vOn     = slew(inLine, 0.03)
 
 play didge:
@@ -303,8 +310,8 @@ play sticks:
   (sA + sB * 0.85) * 0.85 |> lpf(7000, 0.2)
 
 play voice:
-  let src  = glot * vAV + noise() * (vAH + 0.04 * vAV)
-  let tract = kres(kres(kres(kres(kres(src, vF1, vB1), vF2, vB2), vF3, vB3), 3500, 250), 4500, 300)
+  let src  = glot * vAV + noise() * (vAH + vBreath * vAV)
+  let tract = kres(kres(kres(kres(kres(src, vF1, vB1), vF2, vB2), vF3, vB3), 3500 * vTract, 250), 4500 * vTract, 300)
   let murmur = kres(src, 270, 60) * vNas * 0.6
   let lips = (tract + murmur) - prev(tract + murmur)
   let fric = formant(noise(), vFN, 0.55) * vAF
