@@ -1349,8 +1349,10 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
         let found = c.lookupArray(sc, arr.str)
         if not found.ok:
           raise newException(ValueError,
-            "wave: " & arr.str & " is not a numeric-literal array " &
-            errLoc(arr))
+            "wave: " & arr.str & " must be a constant table of numeric " &
+            "literals" &
+            (if c.lookupLarray(sc, arr.str).ok: " (it holds runtime values)"
+             else: "") & " " & errLoc(arr))
         (sym, length) = (found.sym, found.length)
       elif arr.kind == nkArr:
         sym = c.fresh("arr")
@@ -2036,6 +2038,7 @@ proc emit*(c: Ctx; program: Node): string =
   pre.add "  double t, dt, start_t;\n"
   pre.add "  double* part_gains;\n"
   pre.add "  double* part_out;\n"
+  pre.add "  double* part_park;\n"
   for vn in c.topVarNames:
     pre.add "  double v_" & vn & ";\n"
   pre.add "  unsigned char inited[" & $max(1, c.topVarNames.len) & "];\n"
@@ -2173,7 +2176,12 @@ proc emit*(c: Ctx; program: Node): string =
       c.playSet.incl s.str
       let inner = push(topSc)
       body.add &"  double p_{s.str}_l, p_{s.str}_r;\n"
-      body.add "  {\n"
+      # A parked part (see `park`) is silent and its body doesn't run, so
+      # it costs nothing and its state waits where it was.
+      body.add &"  if (s->part_park && s->part_park[{partIdx}] != 0.0) {{\n" &
+               &"    p_{s.str}_l = 0.0; p_{s.str}_r = 0.0;\n" &
+               &"    if (s->part_out) {{ s->part_out[{2*partIdx}] = 0.0; " &
+               &"s->part_out[{2*partIdx+1}] = 0.0; }}\n  }} else {{\n"
       let bodyNode = s.kids[0]
       let stmts: seq[Node] =
         if bodyNode.kind == nkBlock: bodyNode.kids else: @[bodyNode]

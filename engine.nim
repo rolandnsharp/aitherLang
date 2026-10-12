@@ -233,6 +233,11 @@ proc audioCallback(output: ptr UncheckedArray[cfloat],
           if (d > 0.0 and newG >= target) or (d < 0.0 and newG <= target):
             voice.partGains[p] = target
             voice.partFadeDeltas[p] = 0.0
+            # A `park` lands once the fade-out does: from here the
+            # part's body is skipped.
+            if voice.partParkPending[p] and target <= 0.0:
+              voice.partParked[p] = 1.0
+              voice.partParkPending[p] = false
           else:
             voice.partGains[p] = clamp(newG, 0.0, 1.0)
       let gl = l * slots[v].fadeGain
@@ -710,8 +715,9 @@ proc voiceStateOf(s: Slot): VoiceState =
   elif s.fadeDelta > 0.0:    vsFadingIn
   else:                      vsPlaying
 
-proc partStateOf(g, d: float64): PartState =
-  if d > 0.0:    psFadingIn
+proc partStateOf(g, d: float64; parked: bool): PartState =
+  if parked:     psParked
+  elif d > 0.0:  psFadingIn
   elif d < 0.0:  psFadingOut
   elif g <= 0.0: psSilent
   else:          psPlaying
@@ -727,7 +733,8 @@ proc snapshotPartsOf(v: NativeVoice): seq[PartInfo] =
   for i, name in v.partNames:
     result.add PartInfo(
       name: name,
-      state: partStateOf(v.partGains[i], v.partFadeDeltas[i]),
+      state: partStateOf(v.partGains[i], v.partFadeDeltas[i],
+                         v.partParked[i] != 0.0),
       gain: v.partGains[i],
       rms: sqrt(v.partRmsSq[i]), peak: v.partPeak[i])
 
@@ -863,7 +870,40 @@ proc setPartMute(voiceName, partName: string;
     return "no play named " & partName & " in voice " & voiceName
   let target = if muted: 0.0 else: 1.0
   let f = if fade > 0.0: fade else: DefaultFadeMs / 1000.0
-  acquire(mtx); setPartGainTarget(voice, pIdx, target, f); release(mtx)
+  acquire(mtx)
+  if not muted:                              # unmute wakes a parked part too
+    voice.partParked[pIdx] = 0.0
+    voice.partParkPending[pIdx] = false
+  setPartGainTarget(voice, pIdx, target, f)
+  release(mtx)
+  ""
+
+proc setPartPark*(voiceName, partName: string;
+                  parked: bool; fade: float64): string =
+  ## `park`: fade the part out, then skip its body (no CPU, state frozen).
+  ## `unpark`: run it again from where it stopped and fade it in. A mute
+  ## keeps computing (its LFOs and sequencers stay in step); a park is
+  ## for parts that are out of the set for a while.
+  let vIdx = findSlot(voiceName)
+  if vIdx < 0: return "voice not found: " & voiceName
+  let voice = slots[vIdx].voice
+  let pIdx = findPart(voice, partName)
+  if pIdx < 0:
+    return "no play named " & partName & " in voice " & voiceName
+  let f = if fade > 0.0: fade else: DefaultFadeMs / 1000.0
+  acquire(mtx)
+  if parked:
+    if voice.partGains[pIdx] <= 0.0:
+      voice.partParked[pIdx] = 1.0
+      voice.partParkPending[pIdx] = false
+    else:
+      voice.partParkPending[pIdx] = true
+      setPartGainTarget(voice, pIdx, 0.0, f)
+  else:
+    voice.partParked[pIdx] = 0.0
+    voice.partParkPending[pIdx] = false
+    setPartGainTarget(voice, pIdx, 1.0, f)
+  release(mtx)
   ""
 
 proc soloPart(voiceName, partName: string; fade: float64): string =
@@ -923,6 +963,11 @@ proc handleCmd(line: string): string =
     else:
       let err = setMute(parts[1], false)
       if err.len > 0: "ERR " & err else: "OK"
+  of "park", "unpark":
+    if parts.len < 3: return "ERR usage: " & parts[0] & " <voice> <play> [fade-seconds]"
+    let fade = if parts.len >= 4: parseFloatArg(parts[3]) else: 0.0
+    let err = setPartPark(parts[1], parts[2], parts[0] == "park", fade)
+    if err.len > 0: "ERR " & err else: "OK"
   of "solo":
     if parts.len < 2: return "ERR usage: solo <voice> [play] [fade-seconds]"
     if parts.len >= 3 and not isNumeric(parts[2]):

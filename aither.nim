@@ -104,7 +104,7 @@ proc render(path: string; secondsArg: float64; outPath, inputPath: string;
 
 let args = commandLineParams()
 if args.len == 0:
-  echo "usage: aither <start|send|watch|stop|mute|unmute|solo|clear|list|status|" &
+  echo "usage: aither <start|send|watch|stop|mute|unmute|solo|park|unpark|clear|list|status|" &
        "scope|parts|check|retrigger|midi|audit|try|render|spectrum|kill> [args]"
   echo ""
   echo "  start                       launch engine"
@@ -114,6 +114,8 @@ if args.len == 0:
   echo "  mute <voice> [play] [fade]  silence whole voice or one play block"
   echo "  unmute <voice> [play] [fade] resume voice or play block"
   echo "  solo <voice> [play] [fade]  fade out other voices, or other plays in this voice"
+  echo "  park <voice> <play> [fade]  fade a play out, then skip it: no CPU, state frozen"
+  echo "  unpark <voice> <play> [fade] run a parked play again from where it stopped"
   echo "  clear [fade]                stop all voices"
   echo "  list                        show active voices"
   echo "  status                      voices, parts and the master level"
@@ -162,6 +164,9 @@ of "unmute":
   if args.len < 2: quit "usage: aither unmute <voice> [play] [fade]"
   let extra = if args.len >= 3: " " & args[2 .. ^1].join(" ") else: ""
   sendCmd("unmute " & args[1] & extra)
+of "park", "unpark":
+  if args.len < 3: quit "usage: aither " & args[0] & " <voice> <play> [fade]"
+  sendCmd(args[0] & " " & args[1 .. ^1].join(" "))
 of "solo":
   if args.len < 2: quit "usage: aither solo <voice> [play] [fade]"
   let extra = if args.len >= 3: " " & args[2 .. ^1].join(" ") else: ""

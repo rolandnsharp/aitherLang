@@ -832,33 +832,41 @@ and accepts commands over a UNIX socket.
 
 | Command                          | Description                                |
 |----------------------------------|--------------------------------------------|
-| `send <file> [fade]`             | load / hot-swap a patch                    |
+| `send <file> [fade]`             | load / hot-swap a patch, then report level, quiet parts, guard trips |
+| `watch <file> [fade]`            | send, and send again whenever it or an imported file changes |
 | `stop <voice> [fade]`            | fade out & remove                          |
 | `mute <voice>` / `unmute`        | silence / resume (state keeps running)     |
-| `solo <voice> [fade]`            | fade out all other voices                  |
+| `solo <voice> [fade]`            | mute all other voices                      |
 | `clear [fade]`                   | stop all voices                            |
-| `list`                           | show active voices                         |
+| `list`                           | show active voices and their parts         |
+| `status`                         | `list` plus the master level               |
 | `retrigger <voice>`              | reset `start_t` in place                   |
 | `kill`                           | shut down engine                           |
 
 ### Part-level
 
-| Command                                                | Description                      |
-|--------------------------------------------------------|----------------------------------|
-| `parts <voice>`                                        | list parts with gain + state     |
-| `part <voice> <part> play [fade]`                      | fade gain to 1                   |
-| `part <voice> <part> stop [fade]`                      | fade gain to 0                   |
-| `part <voice> <part> mute` / `unmute`                  | instant silence / resume         |
-| `part <voice> <part> gain <value> [fade]`              | set gain to arbitrary value      |
+| Command                                   | Description                                   |
+|-------------------------------------------|-----------------------------------------------|
+| `parts <voice>`                           | list parts: state, gain, rms, peak            |
+| `mute <voice> <part> [fade]` / `unmute`   | fade the part's gain to 0 / 1; it keeps computing, so its LFOs and sequencers stay in step |
+| `solo <voice> <part> [fade]`              | mute the voice's other parts                  |
+| `park <voice> <part> [fade]`              | fade out, then skip the part's body: no CPU, state frozen where it was |
+| `unpark <voice> <part> [fade]`            | run a parked part again from where it stopped, fading in (`unmute` does this too) |
+
+`scope` and `beam` parts draw the oscilloscope and are never heard;
+the meters leave them out of the level comparison.
 
 ### Observability
 
 | Command                          | Description                                         |
 |----------------------------------|-----------------------------------------------------|
+| `check <voice>`                  | level, quiet parts, rollbacks and guard trips       |
 | `scope [voice]`                  | per-voice RMS / peak / clips / envelope sparkline   |
 | `scope master`                   | master-bus stats (pre-tanh mix)                     |
 | `spectrum [voice]`               | FFT analysis of voice's recent buffer (or master)   |
-| `audit <patch> [seconds]`        | render patch offline + spectral analysis            |
+| `try <patch> [seconds] [--from S]` | render the patch as a send would land it now: the live voice's state and time |
+| `audit <patch> [seconds] [--from S] [in.wav]` | render offline from t=0: spectrum + per-part levels |
+| `render <patch> <out.wav> [seconds] [--from S] [--scope] [in.wav]` | render offline to a 32-bit float WAV; `--scope` adds the beam X/Y/Z as channels 3-5 |
 
 Clips counters clear on read. `spectrum` runs against the
 engine's last ~0.5 s of audio per voice; `audit` is fully

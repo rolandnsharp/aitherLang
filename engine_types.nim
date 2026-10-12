@@ -37,7 +37,7 @@ type
     vsStopped, vsMuted, vsFadingOut, vsFadingIn, vsPlaying, vsRunaway
 
   PartState* = enum
-    psSilent, psFadingOut, psFadingIn, psPlaying
+    psSilent, psFadingOut, psFadingIn, psPlaying, psParked
 
   PartInfo* = object
     name*: string

@@ -31,7 +31,7 @@ Two silences, slow iteration and inaudible layers during a streamed set.
 | a def param named like a top-level stereo let (adsr's `s`) was read as that pair | RESOLVED (the nearest scope binding wins) |
 | no number exponents (`1e-3`) | RESOLVED 2026-10-12 (`1e-3`, `2.5E6`; `%` is an alias of `mod` too) |
 | renamed statement inherits a vanished statement's state when only (type, perTypeIdx, size) match, even from a different def: replacing `stick` ($x,$dx x3) with `bar` ($bv,$bx x3) copied old displacement in, `try` showed +24 dBFS (2026-10-11) | RESOLVED 2026-10-12 (regions are also keyed by the def they sit in and the `$state` name: `bar/$bv`; another def in the same place starts clean) |
-| a set that grows to many muted parts renders near real time and the stream underruns (holes of exact zeros = crackle); mute doesn't skip computation | open (workaround: lean patches, remove dead parts; `AITHER_BUFFER=2048` helps a little) |
+| a set that grows to many muted parts renders near real time and the stream underruns (holes of exact zeros = crackle); mute doesn't skip computation | RESOLVED 2026-10-12 (`park <voice> <part>`: fades out, then the part's body is skipped and its state frozen; `unpark`/`unmute` resume. `mute` still computes, so clocks stay in step) |
 
 ## Session log: 2026-10-03 pipe chains + runaway guard
 

@@ -25,6 +25,9 @@ type
     # Points at NativeVoice.partOut: tick() writes each part's L/R there,
     # and the engine meters them.
     partOutPtr*:    pointer
+    # Points at NativeVoice.partParked: 1.0 where a part is parked, and
+    # tick() skips that part's body (its state stays as it was).
+    partParkPtr*:   pointer
 
   NativeVoice* = ref object
     state*:     pointer          # malloc'd VoiceState buffer
@@ -45,6 +48,11 @@ type
     partOut*:         seq[float64]
     partPeak*:        seq[float64]
     partRmsSq*:       seq[float64]
+    # `park`: a part faded to silence whose body the tick skips, so it
+    # costs nothing and its state is frozen until `unpark`. 1.0 = parked.
+    # `partParkPending` marks a part that parks once its fade-out lands.
+    partParked*:      seq[float64]
+    partParkPending*: seq[bool]
     # Per-helper-type layout of this voice's pool (see codegen.Region).
     # Used at hot-reload time to copy matching (type, perTypeIdx) regions
     # from the old state into the new one.
@@ -299,7 +307,8 @@ proc setPartNames(v: NativeVoice; names: seq[string]) =
   ## Re-map per-part gains and fades onto a new list of part names,
   ## keeping each surviving part's gain. Linear search, no tables: the
   ## rollback path calls this from the audio callback.
-  var gains, targets, deltas, peaks, rms = newSeq[float64](names.len)
+  var gains, targets, deltas, peaks, rms, parked = newSeq[float64](names.len)
+  var pending = newSeq[bool](names.len)
   for i, n in names:
     gains[i] = 1.0
     targets[i] = 1.0
@@ -310,6 +319,8 @@ proc setPartNames(v: NativeVoice; names: seq[string]) =
         deltas[i] = v.partFadeDeltas[j]
         peaks[i] = v.partPeak[j]
         rms[i] = v.partRmsSq[j]
+        parked[i] = v.partParked[j]
+        pending[i] = v.partParkPending[j]
         break
   v.partNames = names
   v.partGains = gains
@@ -317,12 +328,15 @@ proc setPartNames(v: NativeVoice; names: seq[string]) =
   v.partFadeDeltas = deltas
   v.partPeak = peaks
   v.partRmsSq = rms
+  v.partParked = parked
+  v.partParkPending = pending
   v.partOut = newSeq[float64](2 * names.len)
 
 proc pointPartGains(v: NativeVoice) =
   let hdr = cast[ptr VoiceHeader](v.state)
   hdr.partGainsPtr = if v.partGains.len > 0: v.partGains[0].addr else: nil
   hdr.partOutPtr = if v.partOut.len > 0: v.partOut[0].addr else: nil
+  hdr.partParkPtr = if v.partParked.len > 0: v.partParked[0].addr else: nil
 
 proc dropPrev(v: NativeVoice) =
   if v.prev.state != nil: dealloc(v.prev.state)
@@ -478,6 +492,8 @@ proc snapshotInto*(src: NativeVoice; dst: NativeVoice; buf: pointer) =
   dst.partFadeDeltas = src.partFadeDeltas
   dst.partPeak = src.partPeak
   dst.partRmsSq = src.partRmsSq
+  dst.partParked = src.partParked
+  dst.partParkPending = src.partParkPending
   dst.startT = src.startT
 
 proc dispose*(v: NativeVoice) =

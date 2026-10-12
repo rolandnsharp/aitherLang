@@ -41,6 +41,7 @@ proc partStateWord(s: PartState): string =
   of psFadingOut:  "fading-out"
   of psFadingIn:   "fading-in"
   of psPlaying:    "playing"
+  of psParked:     "parked"
 
 proc formatMeterLine*(name: string; s: StatsSnapshot): string =
   ## Compact `name  rms=X dB peak=Y dB clips=N env=<bars>` summary
@@ -217,7 +218,10 @@ proc formatVoiceList*(midi: MidiStatus; voices: seq[VoiceInfo]): string =
     lines.add v.name & " [" & voiceStateWord(v.state) & "] gain=" &
               formatFloat(v.gain, ffDecimal, 2)
     for p in v.parts:
-      let suffix = if p.gain <= 0.0: " (muted)" else: ""
+      let suffix =
+        if p.state == psParked: " (parked)"
+        elif p.gain <= 0.0: " (muted)"
+        else: ""
       lines.add "  " & alignLeft(p.name, 8) & " gain=" &
                 formatFloat(p.gain, ffDecimal, 2) & suffix
   if lines.len == 0: "(no voices)" else: lines.join("\n")
