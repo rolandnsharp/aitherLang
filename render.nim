@@ -25,6 +25,11 @@ type
     parts*: seq[PartLevel]
     seconds*: float64            # length of the measured window
     skipped*: float64            # rendered first but not measured
+    # The oscilloscope's beam when the patch has a `play scope:` part:
+    # x, y from it, z from `play beam:` (1 without one), as the engine
+    # sends them on channels 3-5 under AITHER_SCOPE=1.
+    hasScope*: bool
+    beam*: tuple[x, y, z: seq[float64]]
 
 
 # A render this long (lead-in included) is built with cc -O2 first: the
@@ -80,6 +85,11 @@ proc renderVoice*(v: NativeVoice; seconds: float64; sr: int;
   for p in 0 ..< np:
     lp1[p] = lowpass(LowSplitHz, 0.5412, sr)
     lp2[p] = lowpass(LowSplitHz, 1.3066, sr)
+  let scopeIdx = v.partNames.find("scope")
+  let beamIdx = v.partNames.find("beam")
+  result.hasScope = scopeIdx >= 0
+  if result.hasScope:
+    result.beam.x.setLen(n); result.beam.y.setLen(n); result.beam.z.setLen(n)
   for i in 0 ..< nSkip + n:
     # Feed the recording one frame at a time; silence past its end.
     if not feedInput: discard
@@ -99,6 +109,11 @@ proc renderVoice*(v: NativeVoice; seconds: float64; sr: int;
     if i < nSkip: continue
     result.audio.left[i - nSkip] = s.l
     result.audio.right[i - nSkip] = s.r
+    if result.hasScope:
+      result.beam.x[i - nSkip] = clamp(v.partOut[2*scopeIdx], -1.0, 1.0)
+      result.beam.y[i - nSkip] = clamp(v.partOut[2*scopeIdx + 1], -1.0, 1.0)
+      result.beam.z[i - nSkip] =
+        if beamIdx >= 0: clamp(max(0.0, v.partOut[2*beamIdx]), 0.0, 1.0) else: 1.0
     for p in 0 ..< np:
       let m = (v.partOut[2*p] + v.partOut[2*p + 1]) * 0.5
       let low = lp2[p].step(lp1[p].step(m))
@@ -154,6 +169,42 @@ proc renderPatchFull*(srcPath: string; seconds: float64; sr: int = 48000;
 proc renderPatch*(srcPath: string; seconds: float64;
                   sr: int = 48000; input: Stereo = (@[], @[])): Stereo =
   renderPatchFull(srcPath, seconds, sr, input).audio
+
+proc writeWav*(path: string; channels: seq[seq[float64]]; sr: int = 48000) =
+  ## Write channels as a 32-bit float WAV (no normalising, no clipping:
+  ## what the engine would have sent to the device, before its tanh).
+  doAssert channels.len > 0
+  let frames = channels[0].len
+  let f = newFileStream(path, fmWrite)
+  if f == nil:
+    raise newException(IOError, "can't write " & path)
+  defer: f.close()
+  let dataBytes = uint32(frames * channels.len * 4)
+  f.write("RIFF"); f.write(uint32(36 + dataBytes)); f.write("WAVE")
+  f.write("fmt "); f.write(uint32(16))
+  f.write(uint16(3))                              # IEEE float
+  f.write(uint16(channels.len))
+  f.write(uint32(sr))
+  f.write(uint32(sr * channels.len * 4))          # byte rate
+  f.write(uint16(channels.len * 4))               # block align
+  f.write(uint16(32))
+  f.write("data"); f.write(dataBytes)
+  for i in 0 ..< frames:
+    for ch in channels:
+      f.write(float32(ch[i]))
+
+proc renderPatchToWav*(srcPath: string; seconds: float64; outPath: string;
+                       skip = 0.0; input: Stereo = (@[], @[]);
+                       withScope = false; sr: int = 48000): Rendered =
+  ## `aither render`: render the patch from t=0 (after `skip` seconds of
+  ## lead-in) and write the mix as a stereo WAV, or, with `withScope`
+  ## and a `play scope:` part, five channels: mix L/R then beam X/Y/Z,
+  ## the layout the streaming engine sends.
+  result = renderPatchFull(srcPath, seconds, sr, input, skip)
+  var chans = @[result.audio.left, result.audio.right]
+  if withScope and result.hasScope:
+    chans.add result.beam.x; chans.add result.beam.y; chans.add result.beam.z
+  writeWav(outPath, chans, sr)
 
 proc monoMix*(left, right: openArray[float64]): seq[float64] =
   ## (L + R) * 0.5 in fresh storage. Spectral analysis usually wants

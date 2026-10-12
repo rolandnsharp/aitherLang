@@ -73,10 +73,39 @@ proc watchPatch(path, extra: string) =
       echo "\n" & changed.join(", ") & " changed"
       discard sendPatch(path, extra)
 
+proc render(path: string; secondsArg: float64; outPath, inputPath: string;
+            skip: float64; withScope: bool) =
+  ## Offline render to a WAV: the mix, or the mix plus the beam.
+  if not fileExists(path):
+    stderr.writeLine "render: file not found: " & path
+    quit 1
+  var seconds = secondsArg
+  var r: Rendered
+  try:
+    var input: Stereo = (@[], @[])
+    if inputPath.len > 0:
+      input = readWav(inputPath, 48000)
+      if seconds <= 0.0: seconds = float64(input.left.len) / 48000.0 - skip
+    if seconds <= 0.0: seconds = 10.0
+    r = renderPatchToWav(path, seconds, outPath, skip, input, withScope)
+  except CatchableError as e:
+    stderr.writeLine "render: " & e.msg.splitLines()[0]
+    quit 1
+  var peak = 0.0
+  for i in 0 ..< r.audio.left.len:
+    peak = max(peak, max(abs(r.audio.left[i]), abs(r.audio.right[i])))
+  let chans = if withScope and r.hasScope: 5 else: 2
+  echo "wrote " & outPath & ": " & formatFloat(seconds, ffDecimal, 1) & "s, " &
+       $chans & " channels" & (if chans == 5: " (mix L/R, beam X/Y/Z)" else: "") &
+       ", peak " & fmtDb(peak).strip() & " dBFS" &
+       (if withScope and not r.hasScope: " (no scope part: mix only)" else: "")
+  let parts = formatPartLevels(r.parts)
+  if parts.len > 0: echo parts
+
 let args = commandLineParams()
 if args.len == 0:
   echo "usage: aither <start|send|watch|stop|mute|unmute|solo|clear|list|status|" &
-       "scope|parts|check|retrigger|midi|audit|try|spectrum|kill> [args]"
+       "scope|parts|check|retrigger|midi|audit|try|render|spectrum|kill> [args]"
   echo ""
   echo "  start                       launch engine"
   echo "  send <file> [fade]          load patch (instant or fade-in seconds)"
@@ -99,6 +128,9 @@ if args.len == 0:
   echo "                              offline render from t=0: spectrum + per-part levels"
   echo "                              (default 1s; --from runs S seconds first, unmeasured;"
   echo "                              a 48 kHz WAV feeds input() and sets the length)"
+  echo "  render <patch> <out.wav> [seconds] [--from S] [--scope] [in.wav]"
+  echo "                              offline render to a 32-bit float WAV (default 10s;"
+  echo "                              --scope adds the beam X/Y/Z as channels 3-5)"
   echo "  try <patch> [seconds] [--from S]"
   echo "                              render the patch as a send would land it NOW: the"
   echo "                              live voice's state and time, without touching the"
@@ -187,6 +219,30 @@ of "audit", "try":
                         $(if seconds > 0.0: seconds else: 2.0) & " " & $skip)
     echo (if resp.startsWith("OK\n"): resp[3 .. ^1] else: resp)
     if not resp.startsWith("OK"): quit 1
+of "render":
+  let usage = "usage: aither render <patch> <out.wav> [seconds] [--from S] [--scope] [in.wav]"
+  if args.len < 3: quit usage
+  var seconds = 0.0
+  var skip = 0.0
+  var inputPath = ""
+  var withScope = false
+  var i = 3
+  while i < args.len:
+    let a = args[i]
+    if a == "--from" and i + 1 < args.len:
+      try: skip = parseFloat(args[i + 1])
+      except ValueError: quit usage
+      i += 2
+      continue
+    if a == "--scope":
+      withScope = true
+    else:
+      try: seconds = parseFloat(a)
+      except ValueError:
+        if inputPath.len > 0: quit usage
+        inputPath = a
+    inc i
+  render(args[1], seconds, args[2], inputPath, skip, withScope)
 of "spectrum":
   let extra = if args.len >= 2: " " & args[1] else: ""
   sendCmd("spectrum" & extra)
