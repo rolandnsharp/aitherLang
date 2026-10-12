@@ -39,6 +39,13 @@ type
     # added to one play or let can't shift the state of any other.
     scope*: string
     scopeIdx*: int
+    # Which def the call sits in (the chain of inlined defs, `didge3>formant`;
+    # "" at file level), and for `$state` the state's name (`bar/$bv`).
+    # Part of both migration keys, so replacing one physical model by
+    # another of the same shape (`stick` with $x/$dx x3 -> `bar` with
+    # $bv/$bx x3) starts the new one clean instead of feeding it the old
+    # one's displacement (2026-10-11: +24 dBFS).
+    owner*: string
     offset*: int            # absolute start offset into pool (in slots)
     size*: int              # number of float64 slots
     # Optional payload written into the first `init.len` slots when the
@@ -102,7 +109,8 @@ type
     typeCumSize: Table[string, int]     # name -> cumulative size so far
     typeOrder: seq[string]              # types in first-seen order
     scope: string                       # statement being emitted (Region.scope)
-    scopeCounter: Table[string, int]    # scope & type -> next scopeIdx
+    scopeCounter: Table[string, int]    # scope & type & owner -> next scopeIdx
+    defStack: seq[string]               # defs being inlined (Region.owner)
     # File-level state declared with a pair (`$z = [0, 0]`). Each one is
     # two struct fields, `v_<name>__0` and `v_<name>__1`, listed in
     # topVarNames so they migrate across hot reloads by name like any
@@ -148,7 +156,9 @@ proc offsetPlaceholder(rid: int): string =
 # in the emitted C — substituted with the absolute pool offset after
 # the walk, once per-type bases are known.
 proc registerRegionInit(c: Ctx; typeName: string; size: int;
-                        init: seq[float64] = @[]): string =
+                        init: seq[float64] = @[]; stateName = ""): string =
+  var owner = c.defStack.join(">")
+  if stateName.len > 0: owner.add "/$" & stateName
   if typeName notin c.typeCounter:
     c.typeCounter[typeName] = 0
     c.typeCumSize[typeName] = 0
@@ -158,13 +168,13 @@ proc registerRegionInit(c: Ctx; typeName: string; size: int;
   c.typeCounter[typeName] = perTypeIdx + 1
   c.typeCumSize[typeName] = intraOffset + size
   let rid = c.regions.len
-  let scopeKey = c.scope & " | " & typeName
+  let scopeKey = c.scope & " | " & typeName & " | " & owner
   let scopeIdx = c.scopeCounter.getOrDefault(scopeKey, 0)
   c.scopeCounter[scopeKey] = scopeIdx + 1
   # `offset` holds the intra-region offset here; `finaliseLayout` rewrites
   # it to an absolute pool slot once region bases are assigned.
   c.regions.add Region(typeName: typeName, perTypeIdx: perTypeIdx,
-                       scope: c.scope, scopeIdx: scopeIdx,
+                       scope: c.scope, scopeIdx: scopeIdx, owner: owner,
                        offset: intraOffset, size: size, init: init)
   offsetPlaceholder(rid)
 
@@ -544,10 +554,13 @@ proc emitDefInline(c: Ctx; sc: Scope; def: Node; call: Node): string =
       let v = sc.lookupNumLit(a.str)
       if v.ok: inner.numLits[p] = v.val
   # def.kids[0] is the body (single expression or nkBlock of stmts).
+  # The def's name owns every state region its body claims.
   let body = def.kids[0]
+  c.defStack.add def.str
   let bodyC =
     if body.kind == nkBlock: c.emitBlockExpr(inner, body)
     else: c.emitExpr(inner, body)
+  discard c.defStack.pop()
   "(({ " & preface & "double __r = (" & bodyC & "); __r; }))"
 
 # Evaluate `n` where one number is needed. An expression that mentions
@@ -674,7 +687,7 @@ proc emitLocalStmt(c: Ctx; sc: Scope; st: Node; pre: var string) =
       # inited flag then the two sides. Its own helper type, so adding
       # one doesn't shift the "var" regions of scalar state.
       let flagSlot = c.fresh("pf")
-      let off = c.registerRegion("pvar", 3)
+      let off = c.registerRegionInit("pvar", 3, stateName = st.str)
       pre.add &"  long {flagSlot} = {off};\n"
       var initPre = ""
       let v = c.emitStereo(sc, st.kids[0], initPre)
@@ -692,7 +705,7 @@ proc emitLocalStmt(c: Ctx; sc: Scope; st: Node; pre: var string) =
       # the (type, perTypeIdx) pair survives a state migration).
       let flagSlot = c.fresh("vf")
       let valSlot = c.fresh("vs")
-      let off = c.registerRegion("var", 2)
+      let off = c.registerRegionInit("var", 2, stateName = st.str)
       pre.add &"  long {flagSlot} = {off};\n  long {valSlot} = ({off}) + 1;\n"
       var initPre = ""
       let initC = c.scalarValue(sc, st.kids[0], initPre, "$" & st.str)
@@ -1450,6 +1463,8 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
       let stmts: seq[Node] =
         if bodyNode.kind == nkBlock: bodyNode.kids else: @[bodyNode]
       let lastIdx = stmts.len - 1
+      c.defStack.add def.str
+      defer: discard c.defStack.pop()
       for si, st in stmts:
         if si == lastIdx and st.kind notin {nkLet, nkVar, nkAssign, nkIdxAssign}:
           var sub = ""

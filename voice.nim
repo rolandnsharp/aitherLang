@@ -370,26 +370,30 @@ proc commit*(v: NativeVoice; p: Prepared) =
           break
 
     # Region migration. Each new region takes the slots of the old one
-    # in the same statement with the same type and index there (see
-    # Region.scope), so an edit inside one play or let leaves every
-    # other statement's filters, delays and physics untouched. Regions
-    # of a statement that didn't exist before (a renamed let, say) fall
-    # back to the old (typeName, perTypeIdx) match, but only against old
-    # regions whose statement is gone, so they can't steal live state.
-    # Mismatched sizes and unmatched regions start zeroed — one helper
-    # loses its history rather than everything else shifting. Poisoned
-    # old regions (NaN, >1e6) are never copied.
+    # in the same statement with the same type, owner (the def it sits
+    # in, and the state's name) and index there (see Region.scope and
+    # Region.owner), so an edit inside one play or let leaves every
+    # other statement's filters, delays and physics untouched, and a
+    # different def put in the same place starts clean. Regions of a
+    # statement that didn't exist before (a renamed let, say) fall back
+    # to the old (typeName, owner, perTypeIdx) match, but only against
+    # old regions whose statement is gone, so they can't steal live
+    # state. Mismatched sizes and unmatched regions start zeroed — one
+    # helper loses its history rather than everything else shifting.
+    # Poisoned old regions (NaN, >1e6) are never copied.
     let oldPool = cast[ptr UncheckedArray[float64]](v.state)
     let newPool = cast[ptr UncheckedArray[float64]](p.state)
     var oldScopes, newScopes = initHashSet[string]()
     for r in v.regions: oldScopes.incl r.scope
     for r in p.regions: newScopes.incl r.scope
-    var oldByKey = initTable[(string, string, int), int]()
-    for i, r in v.regions: oldByKey[(r.scope, r.typeName, r.scopeIdx)] = i
+    var oldByKey = initTable[(string, string, string, int), int]()
+    for i, r in v.regions:
+      oldByKey[(r.scope, r.typeName, r.owner, r.scopeIdx)] = i
     var claimed = newSeq[bool](v.regions.len)
     var pending: seq[int]
     for ni, newR in p.regions:
-      let oi = oldByKey.getOrDefault((newR.scope, newR.typeName, newR.scopeIdx), -1)
+      let oi = oldByKey.getOrDefault(
+        (newR.scope, newR.typeName, newR.owner, newR.scopeIdx), -1)
       if oi >= 0:
         claimed[oi] = true
         let oldR = v.regions[oi]
@@ -403,7 +407,7 @@ proc commit*(v: NativeVoice; p: Prepared) =
       let newR = p.regions[ni]
       for oi, oldR in v.regions:
         if not claimed[oi] and oldR.scope notin newScopes and
-           oldR.typeName == newR.typeName and
+           oldR.typeName == newR.typeName and oldR.owner == newR.owner and
            oldR.perTypeIdx == newR.perTypeIdx and oldR.size == newR.size:
           claimed[oi] = true
           if not isPoisonedRegion(oldPool, oldR.offset, oldR.size):
