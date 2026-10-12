@@ -341,6 +341,7 @@ proc parseLambdaBody(p: var Parser; line: int; params: seq[string]): Node =
   ## body grammar stays in one place.
   pushStateScope(p)
   var stmts: seq[Node] = @[]
+  var finalExpr: Node = nil
   while true:
     if p.isKw("let"):
       let letLine = p.peek().line
@@ -361,9 +362,32 @@ proc parseLambdaBody(p: var Parser; line: int; params: seq[string]): Node =
       if kind == nkVar: p.markSeenInCurrentScope(name)
       stmts.add Node(kind: kind, str: name, kids: @[rhs], line: stateLine)
       while p.peek().kind == tkSemi: discard p.advance()
-    else:
+    elif p.peek().kind == tkRParen and stmts.len > 0:
+      # Statements only, no value: an `each(N, i => $f[i] = ...)` body.
+      # The block gets a 0 so the lambda still has a value where one is
+      # wanted (a `sum` of such a body adds nothing).
+      finalExpr = Node(kind: nkNum, num: 0.0, line: line)
       break
-  let finalExpr = p.parseExpr()
+    else:
+      # An element store (`$f[i] = v`, `a[i] += v`) or the final
+      # expression; which one shows only after the left side is parsed.
+      let stmtLine = p.peek().line
+      let lhs = p.parseExpr()
+      let nx = p.peek()
+      if nx.kind in {tkAssign, tkAugAssign} and lhs.kind == nkIdx:
+        discard p.advance()
+        var rhs = p.parseExpr()
+        if nx.kind == tkAugAssign:
+          rhs = Node(kind: nkBinOp, str: $nx.str[0], kids: @[lhs, rhs],
+                     line: stmtLine)
+        stmts.add Node(kind: nkIdxAssign,
+                       kids: @[lhs.kids[0], lhs.kids[1], rhs], line: stmtLine)
+        while p.peek().kind == tkSemi: discard p.advance()
+      elif nx.kind in {tkAssign, tkAugAssign}:
+        p.fail("only `$name = ...` or `name[i] = ...` can be assigned here")
+      else:
+        finalExpr = lhs
+        break
   popStateScope(p)
   let body =
     if stmts.len == 0: finalExpr

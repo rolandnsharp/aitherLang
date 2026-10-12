@@ -17,8 +17,9 @@ output.
 
 Float is the default. Function values exist for
 `osc(shape, freq)` (passing a shape function). Arrays exist
-for polyphony (input), stereo output (length-2 arrays), and
-delay/reverb/wavetable buffers.
+for polyphony (input), stereo output (length-2 arrays),
+constant tables, per-sample scratch (`let a = array(N)`) and
+persistent fields (`$f = array(N)`, see "State arrays").
 
 ## Globals
 
@@ -302,16 +303,82 @@ the table size (`p[n] === p[(int)n % len]`), so out-of-range
 reads cycle rather than crash. v1 doesn't allow passing
 arrays into `def` parameters or returning them from a `def`.
 
-### Mutable arrays
+### Local arrays (this sample's numbers)
+
+A `let` array whose elements aren't all literals, or `array(N)` /
+`array(N, init)`, is a per-sample local array: it is filled afresh
+every sample and its elements can be read and stored by any index.
+`N` must be a compile-time integer. Legal at top level, in a play
+and in a def.
 
 ```
-$buf = array(48000, 0.0)   # size N, initial value
-$buf[i]                    # read
-$buf[i] = x                # write
-len($buf)                  # length
+let p = [p1, p2, p3, p4]          # runtime values
+let k = array(23)                 # 23 zeros
+let w = array(8, 0.5)
+k[3] = (p[0] - p[1]) / (p[0] + p[1])
+len(k)                            # 23, a constant
 ```
 
-Used for delay lines, reverb buffers, wavetables.
+Indexes are truncated to `int` and cycle like a constant table's
+(`a[-1]` is the last element). A constant table (all literals) is
+hoisted and read-only; storing into one is a compile error.
+
+### State arrays (a field that persists)
+
+`$name = array(N)` or `array(N, init)` declares `N` persistent
+elements: a tube's waves, a string's displacement, a membrane's
+rows. They live in the pool next to the other `$state`, keep their
+values across samples and hot reloads (same name, same def, same
+size), and start at `init` (0 when omitted).
+
+```
+$f = array(24)                    # forward waves, one per section
+$f[i]                             # read; past either end reads 0
+$f[i] = x                         # store
+len($f)                           # 24
+```
+
+An element past either end reads 0 and a store there is dropped:
+beyond the end of a tube there is nothing, and the boundary is what
+the patch writes at `$f[0]` and `$f[len($f) - 1]`.
+
+Stores happen at once, in order, like `$x = ...` does, except inside
+`each`.
+
+### each: one simultaneous step
+
+```
+each(N, i => stmts)
+```
+
+Unrolls like `sum` (so `N` must be a compile-time integer), but the
+body is statements — element stores, `let`s, `$state` — and the
+value is 0. Every store to a **state array** inside an `each` is
+held back and lands when the `each` ends, so each body reads the
+arrays as they were before the step: section `i + 1` sees section
+`i`'s wave from the last sample, not the one just written. Stores
+to local arrays and scalars land in order, as usual.
+
+A waveguide is then its own equations and nothing else:
+
+```
+def tube(src, a1, a2, a3, a4):
+  let s = [a1, a2, a3, a4]                       # areas, glottis -> lips
+  let k = array(3)
+  each(3, j => k[j] = (s[j] - s[j + 1]) / (s[j] + s[j + 1]))
+  $f = array(4)                                  # forward waves
+  $b = array(4)                                  # backward waves
+  let out = $f[3]
+  each(3, j =>
+    $f[j + 1] = (1 + k[j]) * $f[j] - k[j] * $b[j + 1]
+    $b[j]     = k[j] * $f[j] + (1 - k[j]) * $b[j + 1])
+  $f[0] = src + 0.9 * $b[0]                      # the glottis end
+  $b[3] = -0.85 * $f[3]                          # the open lips
+  out
+```
+
+The 24-section vocal tract this replaces was 219 generated lines.
+See `tests/state_arrays.nim` for the full one.
 
 ### Polyphony (arrays as input to functions)
 
