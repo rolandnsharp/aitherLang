@@ -29,7 +29,7 @@ for j in range(N - 1):
     L.append(f'  let fw{j+1} = (1 + k{j}) * $f{j} - k{j} * $b{j+1} + n{j}')
     L.append(f'  let bw{j} = k{j} * $f{j} + (1 - k{j}) * $b{j+1}')
 L.append(f'  let kL = (s{N-1} - 25) / (s{N-1} + 25)')
-L.append(f'  let lipR = lp1($f{N-1}, 4000)')
+L.append(f'  let lipR = lp1($f{N-1}, 19580)                 # a true 4 kHz: lp1 takes a = cutoff/sr, not Hz')
 L.append(f'  let bwL = kL * lipR')
 L.append(f'  let out = $f{N-1} + bwL')
 L.append('  $f0 = clamp(g0 * 0.996, -50, 50)')
