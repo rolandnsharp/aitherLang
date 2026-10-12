@@ -75,7 +75,7 @@ proc watchPatch(path, extra: string) =
 
 let args = commandLineParams()
 if args.len == 0:
-  echo "usage: aither <start|send|watch|stop|mute|unmute|solo|clear|list|" &
+  echo "usage: aither <start|send|watch|stop|mute|unmute|solo|clear|list|status|" &
        "scope|parts|check|retrigger|midi|audit|try|spectrum|kill> [args]"
   echo ""
   echo "  start                       launch engine"
@@ -87,6 +87,7 @@ if args.len == 0:
   echo "  solo <voice> [play] [fade]  fade out other voices, or other plays in this voice"
   echo "  clear [fade]                stop all voices"
   echo "  list                        show active voices"
+  echo "  status                      voices, parts and the master level"
   echo "  scope [name]                per-voice RMS/peak/clips/envelope"
   echo "  retrigger <name>            reset start_t so the composition plays from the top"
   echo "  parts <voice>               list parts (play blocks): state, gain, rms, peak"
@@ -138,6 +139,10 @@ of "clear":
   sendCmd("clear" & extra)
 of "list":
   sendCmd("list")
+of "status":
+  # What people type: the voices and their parts, then the master level.
+  sendCmd("list")
+  sendCmd("scope master")
 of "scope":
   let extra = if args.len >= 2: " " & args[1] else: ""
   sendCmd("scope" & extra)

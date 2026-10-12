@@ -96,7 +96,8 @@ proc formatParts*(q: PartsQuery): string =
     lines.add "  " & p.name.alignLeft(w) & "  [" & partStateWord(p.state) &
               "]  gain=" & formatFloat(p.gain, ffDecimal, 2) &
               "  rms=" & fmtDb(p.rms).strip() & "dB peak=" &
-              fmtDb(p.peak).strip() & "dB"
+              fmtDb(p.peak).strip() & "dB" &
+              (if isScopePart(p.name): "  (scope: drawn, not heard)" else: "")
   q.voiceName & "\n" & lines.join("\n")
 
 # A part this far below the loudest one is flagged QUIET. Taste, so it
@@ -119,10 +120,11 @@ proc formatCheck*(q: CheckQuery): string =
     lines.add "  NaN: " & $q.nanEvents & " time(s) since the send (state reset)"
   var loudest = 0.0
   for p in q.parts:
-    if p.gain > 0.0: loudest = max(loudest, p.rms)
+    if p.gain > 0.0 and not isScopePart(p.name): loudest = max(loudest, p.rms)
   var quiet: seq[string]
   for p in q.parts:
     if p.gain > 0.0 and loudest > 0.0 and QuietPartDb < 0.0 and
+       not isScopePart(p.name) and
        dBOf(p.rms) - dBOf(loudest) < QuietPartDb:
       quiet.add p.name & " " & fmtDb(p.rms).strip()
   if quiet.len > 0:
@@ -189,12 +191,13 @@ proc formatPartLevels*(parts: seq[PartLevel]): string =
   var loudest = 0.0
   var w = 4
   for p in ps:
-    if p.gain > 0.0: loudest = max(loudest, p.rms)
+    if p.gain > 0.0 and not isScopePart(p.name): loudest = max(loudest, p.rms)
     w = max(w, p.name.len)
   var lines = @["parts (rms / peak / share below " & $int(LowSplitHz) & " Hz):"]
   for p in ps:
     var notes: seq[string]
-    if p.gain <= 0.0: notes.add "muted"
+    if isScopePart(p.name): notes.add "scope: drawn, not heard"
+    elif p.gain <= 0.0: notes.add "muted"
     elif p.rms < 1e-6: notes.add "SILENT"
     else:
       if loudest > 0.0 and QuietPartDb < 0.0 and

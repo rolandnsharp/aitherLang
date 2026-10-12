@@ -608,7 +608,8 @@ with `time` 0 is the current input; `fbdelay` starts at one sample
 literal (it sizes the buffer) and the longest delay is one sample
 under it.
 
-**Reverb**: `reverb(sig, rt60, wet)` (Schroeder).
+**Reverb**: `reverb(sig, rt60, wet)` (Schroeder); a pair in runs one
+reverb per side.
 
 **Physics**: `impulse(freq)`, `resonator(sig, freq, decay)`,
 `discharge(sig, rate)`.
@@ -759,7 +760,7 @@ def prev(x):                              # one-sample memory
 ### Stereo
 
 - `pan(mono_sig, pos)` — equal-power pan, pos in [-1, 1]
-- `haas(mono_sig, ms)` — 1-30 ms delay on one channel for width
+- `haas(sig, ms)` — 1-30 ms delay on one channel for width; mono in (both sides start equal) or a pair
 - `width(stereo_sig, amount)` — mid-side width (0 mono, 1 unchanged, >1 exaggerated)
 - `mono(stereo_sig)` — collapse to single channel
 

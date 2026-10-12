@@ -356,18 +356,19 @@ const PairReaders = ["magnitude", "phase"]
 # (whose own state slots are claimed per call site).
 const TransparentHelpers = ["lpf", "hpf", "bpf", "lp1", "hp1",
                             "drive", "fold",
-                            "delay", "fbdelay",
+                            "delay", "fbdelay", "reverb",
                             "slew", "discharge",
                             "pluck", "swell", "adsr",
                             "gain", "prev", "tremolo"]
 
-# Stereo-returning defs that semantically REQUIRE mono input — pan and
-# haas take a mono signal and widen it. Calling them with stereo input
-# would otherwise descend into the body and surface a misleading
-# "unknown identifier: signal" because emitStereo's nkArr branch
-# emits each component via emitExpr (scalar), which can't resolve a
-# stereo-bound param. Diagnose at the call site instead.
-const MonoOnlyInputDefs = ["pan", "haas"]
+# Stereo-returning defs that semantically REQUIRE mono input — pan takes
+# a mono signal and places it. Calling it with stereo input would
+# otherwise descend into the body and surface a misleading "unknown
+# identifier: signal" because emitStereo's nkArr branch emits each
+# component via emitExpr (scalar), which can't resolve a stereo-bound
+# param. Diagnose at the call site instead. (haas takes a pair now: it
+# delays one side of whatever it is given.)
+const MonoOnlyInputDefs = ["pan"]
 
 # True when `name` resolves to a value (scalar local, stereo local, top
 # lets/vars/arrays, play block, stereo let). Values shadow function

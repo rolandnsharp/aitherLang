@@ -120,10 +120,12 @@ def pan(signal, pos):
 # Haas effect: delay one channel by a few ms to create psychoacoustic width.
 # `ms` in roughly -30..30. Positive delays right channel, negative delays left.
 # Works because the ear localises by first-arrival time for short delays.
-def haas(signal, ms):
+# Takes a mono signal (both sides start equal) or a stereo pair.
+def haas(s, ms):
   let absMs = abs(ms)
-  let d = delay(signal, absMs * 0.001, 0.05)
-  if ms >= 0 then [signal, d] else [d, signal]
+  let dl = delay(s[0], absMs * 0.001, 0.05)
+  let dr = delay(s[1], absMs * 0.001, 0.05)
+  if ms >= 0 then [s[0], dr] else [dl, s[1]]
 
 # Mid-side width. Takes a stereo [L, R]; `amount` = 0 collapses to mono,
 # 1 is unchanged, >1 widens (diverges L and R). Classic tool for "spread."
