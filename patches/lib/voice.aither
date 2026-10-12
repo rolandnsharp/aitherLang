@@ -1,0 +1,196 @@
+# A singer made of physics: vocal folds into a vocal tract with a nose.
+# Import it and give it a score; the patch holds the song and the knobs.
+#
+#   import "lib/voice.aither"
+#   play voice:
+#     sing(ph, vv, toEnd, rel, hz, wob, tense, breath, robot) |> hpf(150, 0.29)
+#
+#   ph     the phoneme sounding now (ids below)
+#   vv     the vowel the tongue is heading for (the next vowel)
+#   toEnd  0..1 through a diphthong (EY, OW glide from va* to ve*)
+#   rel    1 in a phoneme's release (a stop opens: burst, aspiration)
+#   hz     pitch, vibrato included; wob: depth of the slow random wander
+#   tense  vocal-fold tenseness: 0.3 breathy .. 0.6 natural .. 0.9 pressed
+#   breath breath noise in the voice (0.06)
+#   robot  0 vocal folds .. 1 a saw (the vocoder robot), same tract
+#
+# Phonemes: 0 silence; vowels 1 IY 2 IH 3 EH 4 AE 5 AA 6 AO 7 UH 8 UW
+# 9 AH 10 ER 11 AX; 12 M 13 N 14 NG 15 L 16 R 17 W 18 Y 19 HH; 20 S 21 SH
+# 22 F 23 TH 24 Z 25 V 26 DH 27 ZH; stops 28 P 29 T 30 K 31 B 32 D 33 G;
+# 34 CH 35 JH; 36 a voiced stop's closure (the voice bar); 37 EY 38 OW.
+# notes/phon.py turns "DH:1 AX:2 @7 / ..." into the score's tables.
+#
+# The tract is translated from Pink Trombone 1.1 by Neil Thapen (MIT
+# licence): Copyright 2017 Neil Thapen. Permission is hereby granted, free
+# of charge, to any person obtaining a copy of this software ... (full
+# notice: notes/voice-eval/third_party/pinktrombone-1.1.html)
+
+# The vocal tract: 24 one-sample sections (0.73 cm each, glottis -> lips)
+# of rightward and leftward waves with Kelly-Lochbaum junctions; a
+# 16-section nose joins at section 9 through a 3-way junction, opened by
+# the velum. The shape is 8 control points (cm^2) plus two articulators
+# (place 1..8 in control-point units, deg 0 open .. 1 closed). Turbulence
+# enters where the tract is narrow but open (thinness x openness), at the
+# first articulator; a closure's release adds a decaying transient there.
+def trombone(glot, turb, relT, place, deg, place2, deg2, velum, p1, p2, p3, p4, p5, p6, p7, p8):
+  let p = [p1, p2, p3, p4, p5, p6, p7, p8]
+  let a = array(24)                              # areas (Pink Trombone units, 0.75 sqrt(cm^2) diameters squared)
+  each(24, j =>
+    let x = j * 7 / 23 + 1                       # control-point coordinate
+    let lo = floor(x)
+    let fr = x - lo
+    a[j] = max(0.0004, (p[lo - 1] * (1 - fr) + p[min(lo, 7)] * fr)
+                       * (1 - deg * exp(-(x - place) * (x - place) * 3))
+                       * (1 - deg2 * exp(-(x - place2) * (x - place2) * 3)) * 0.5625))
+  let r = array(24)                              # r[j]: reflection between sections j - 1 and j
+  each(23, j => r[j + 1] = (a[j] - a[j + 1]) / (a[j] + a[j + 1]))
+  let nA = [velum * velum, 0.36, 0.64, 1, 1.44, 1.96, 2.56, 3.24, 3.61, 3.2852, 2.6406, 2.0664, 1.5625, 1.1289, 0.7656, 0.4727]
+  let nr = array(16)                             # the nose's junctions
+  each(15, i => nr[i + 1] = (nA[i] - nA[i + 1]) / (nA[i] + nA[i + 1]))
+  let jsum = a[9] + a[10] + nA[0]                # the 3-way junction: tract, tract, nose
+  let rjL = (2 * a[9] - jsum) / jsum
+  let rjR = (2 * a[10] - jsum) / jsum
+  let rjN = (2 * nA[0] - jsum) / jsum
+  # turbulence and release transients, spread over the sections at the gesture
+  let cidx = min(23, (place - 1) / 7 * 23)
+  let h = array(24)
+  each(24, j => h[j] = max(0, 1 - abs(j - cidx)))
+  let dcon = sqrt(sum(24, j => a[j] * h[j]) / max(0.001, sum(24, j => h[j])))
+  let thin = clamp(8 * (0.7 - dcon), 0, 1)
+  let opn  = clamp(30 * (dcon - 0.3), 0, 1)
+  let fz   = turb * thin * opn * 0.66 * clamp((deg - 0.5) * 4, 0, 1)
+  let tr   = discharge(relT, 138.6) * 0.3        # a release: 0.3 * 2^(-200 t)
+  $R = array(24)
+  $L = array(24)
+  $nR = array(16)
+  $nL = array(16)
+  let iR = array(24)
+  let iL = array(24)
+  each(24, j =>
+    iR[j] = $R[j] + (fz + tr) * h[j] * 0.5
+    iL[j] = $L[j] + (fz + tr) * h[j] * 0.5)
+  # scattering: jR[j] leaves junction j rightward, jL[j] leftward
+  let jR = array(24)
+  let jL = array(25)
+  each(24, j =>
+    let w = r[j] * (iR[j - 1] + iL[j])
+    jR[j] = iR[j - 1] - w
+    jL[j] = iL[j] + w)
+  jR[0] = iL[0] * 0.75 + glot                    # the glottis
+  jL[24] = iR[23] * -0.85                        # the lips
+  jL[9] = rjL * iR[8] + (1 + rjL) * ($nL[0] + iL[9])
+  jR[9] = rjR * iL[9] + (1 + rjR) * (iR[8] + $nL[0])
+  let njR = array(16)
+  let njL = array(17)
+  each(16, i =>
+    let w = nr[i] * ($nR[i - 1] + $nL[i])
+    njR[i] = $nR[i - 1] - w
+    njL[i] = $nL[i] + w)
+  njR[0] = rjN * $nL[0] + (1 + rjN) * (iL[9] + iR[8])
+  njL[16] = $nR[15] * -0.85                      # the nostrils
+  each(24, j =>
+    $R[j] = clamp(jR[j] * 0.999, -20, 20)
+    $L[j] = clamp(jL[j + 1] * 0.999, -20, 20))
+  each(16, i =>
+    $nR[i] = clamp(njR[i], -20, 20)
+    $nL[i] = clamp(njL[i + 1], -20, 20))
+  (clamp(jR[23] * 0.999, -20, 20) + clamp(njR[15], -20, 20)) * 0.25
+
+# The vocal folds' flow derivative: the LF model shaped by tenseness, one
+# period per cycle of ph (Pink Trombone's setupWaveform).
+def lfpulse(ph, tense):
+  let lRd    = clamp(3 * (1 - tense), 0.5, 2.7)
+  let lRa    = -0.01 + 0.048 * lRd
+  let lRk    = 0.224 + 0.118 * lRd
+  let lRg    = (lRk / 4) * (0.5 + 1.2 * lRk) / (0.11 * lRd - lRa * (0.5 + 1.2 * lRk))
+  let lTp    = 1 / (2 * lRg)
+  let lTe    = lTp + lTp * lRk
+  let lEps   = 1 / lRa
+  let lShift = exp(-lEps * (1 - lTe))
+  let lDelta = 1 - lShift
+  let lRhs   = ((1 / lEps) * (lShift - 1) + (1 - lTe) * lShift) / lDelta
+  let lUpper = (lTe - lTp) / 2 - lRhs
+  let lOm    = PI / lTp
+  let lSin   = sin(lOm * lTe)
+  let lAlpha = log(-PI * lSin * lUpper / (lTp * 2)) / (lTp / 2 - lTe)
+  let lE0    = -1 / (lSin * exp(lAlpha * lTe))
+  if ph > lTe then (-exp(-lEps * (ph - lTe)) + lShift) / lDelta else lE0 * exp(lAlpha * ph) * sin(lOm * ph)
+
+# The singer: a phoneme's targets (voicing, frication, aspiration, the
+# vowel's shape, the consonant's gesture) glide into the folds and tract.
+def sing(ph, vv, toEnd, rel, hz, wob, tense, breath, robot):
+  let stp    = pST[ph]                           # 1 P/T/K, 2 B/D/G, 3 CH, 4 JH
+  let relS   = if stp > 0 then rel else 0
+  let clos   = if stp > 0 and relS < 1 then 1 else 0
+  let isUnv  = if stp == 1 or stp == 3 then 1 else 0
+  let relT   = if relS > 0 and prev(relS) < 1 then 1 else 0
+  let burstE = discharge(relT, 120)
+  let aspE   = discharge(relT * isUnv, 16)
+  let avT    = (if stp > 0 then (if stp == 2 or stp == 4 then (if clos > 0 then 0.15 else 0.7) else 0) else pAV[ph]) * (1 - min(1, aspE * 1.6))
+  let afT    = pAF[ph] + burstE * (if isUnv > 0 then 0.9 else 0.75) + (if stp >= 3 and relS > 0 then 0.55 else 0)
+  let ahT    = pAH[ph] + aspE * 0.7
+  let vAV    = slew(avT, 0.012)
+  let vAF    = slew(afT, 0.005)
+  let vAH    = slew(ahT, 0.004)
+  # the vowel shape the tongue is heading for, gliding
+  let a1v    = slew(va1[vv] + (ve1[vv] - va1[vv]) * toEnd, 0.045)
+  let a2v    = slew(va2[vv] + (ve2[vv] - va2[vv]) * toEnd, 0.045)
+  let a3v    = slew(va3[vv] + (ve3[vv] - va3[vv]) * toEnd, 0.045)
+  let a4v    = slew(va4[vv] + (ve4[vv] - va4[vv]) * toEnd, 0.045)
+  let a5v    = slew(va5[vv] + (ve5[vv] - va5[vv]) * toEnd, 0.045)
+  let a6v    = slew(va6[vv] + (ve6[vv] - va6[vv]) * toEnd, 0.045)
+  let a7v    = slew(va7[vv] + (ve7[vv] - va7[vv]) * toEnd, 0.045)
+  let a8v    = slew(va8[vv] + (ve8[vv] - va8[vv]) * toEnd, 0.045)
+  # the consonant gesture on top of it
+  let gDT    = if stp >= 3 and relS > 0 then 0.93 else gDg[ph] * (if relS > 0 then 0 else 1)
+  let gD     = slew(gDT, 0.012)
+  let gP     = slew(if gDg[ph] > 0 then gPl[ph] else 5, 0.01)
+  let gV     = slew(gVl[ph], 0.02)
+  let gD2    = slew(gDg2[ph], 0.015)
+  let gP2    = slew(gPl2[ph], 0.01)
+  # the vocal folds (or the robot's saw), wandering slowly as in Pink Trombone
+  let vWob   = lp1(lp1(noise(), 20), 20) * 1.5
+  let gph    = phasor(hz * (1 + vWob * wob))
+  let vTn    = clamp(tense + vWob * 2, 0, 1)
+  let folds  = lfpulse(gph, vTn) * (1 - robot) + (gph * 2 - 1) * 0.5 * robot
+  # breath noise rides the glottal cycle (Pink Trombone's getNoiseModulator)
+  let nMod   = vTn * vAV * (0.1 + 0.2 * max(0, sin(TAU * gph))) + (1 - vTn * vAV) * 0.3
+  let aspN   = bpf(noise(), 500, 0.3) * 1.4
+  let fricN  = bpf(noise(), 1000, 0.3) * 1.4
+  let asp    = aspN * (vAV * (1 - sqrt(vTn)) * nMod * 0.2 + vAH * 0.3 + breath * vAV * nMod)
+  trombone(folds * vAV + asp, fricN * nMod * 2.5, relT, gP, gD, gP2, gD2, 0.01 + 0.39 * gV, a1v, a2v, a3v, a4v, a5v, a6v, a7v, a8v)
+
+# The tables, one entry per phoneme id.
+# Voicing, frication, aspiration, and the stop type.
+let pAV = [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0.8, 0.25, 0.35, 0.35, 0.75, 0.9, 0.9, 0.9, 0, 0, 0, 0, 0, 0.25, 0.25, 0.25, 0.25, 0, 0, 0, 0.7, 0.7, 0.7, 0, 0.7, 0.15, 1, 1]
+let pAF = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.6, 0.6, 0.25, 0.2, 0.5, 0.3, 0.25, 0.5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+let pAH = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+let pST = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 4, 0, 0, 0]
+
+# The tube: 8 regions glottis -> lips (cm^2). Vowels fitted to the learned
+# formants (Hillenbrand 1995); diphthongs EY/OW move from va* to ve*.
+let va1 = [2.15, 1.53, 2.5, 1.22, 1.1, 1.25, 2.46, 2.5, 2.5, 1.87, 2.5, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 1.56, 2.5]
+let va2 = [2.46, 3.62, 4.57, 1.81, 1.6, 1.14, 1.36, 2.04, 1.32, 1.7, 1.19, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.73, 1.15]
+let va3 = [2.57, 7.65, 5.95, 2.81, 2.77, 1.24, 1.02, 1.54, 0.74, 1.44, 1.52, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 5.4, 0.72]
+let va4 = [2.45, 2.89, 3.82, 2.77, 2.93, 1.88, 1.62, 1.7, 0.93, 1.72, 4.29, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 3.78, 1.06]
+let va5 = [2.56, 1.06, 2.15, 2.44, 2.28, 3.45, 3.99, 2.43, 1.46, 3.2, 1.32, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 1.86, 2.36]
+let va6 = [2.47, 0.87, 1.96, 2.47, 2.51, 6.09, 9, 3.06, 2.6, 4.67, 1.36, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 1.69, 5.16]
+let va7 = [2.49, 2.26, 3.63, 3.8, 4.71, 7.58, 8.92, 2.28, 1.32, 4.07, 3.84, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 3.59, 3.43]
+let va8 = [2.92, 9, 8.43, 7.39, 9, 6.72, 4.34, 1.45, 0.37, 3.6, 1.23, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 9, 1.27]
+let ve1 = [2.15, 1.53, 2.5, 1.22, 1.1, 1.25, 2.46, 2.5, 2.5, 1.87, 2.5, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.5, 2.5]
+let ve2 = [2.46, 3.62, 4.57, 1.81, 1.6, 1.14, 1.36, 2.04, 1.32, 1.7, 1.19, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 2.46, 4.71, 1.01]
+let ve3 = [2.57, 7.65, 5.95, 2.81, 2.77, 1.24, 1.02, 1.54, 0.74, 1.44, 1.52, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 2.57, 8.17, 0.54]
+let ve4 = [2.45, 2.89, 3.82, 2.77, 2.93, 1.88, 1.62, 1.7, 0.93, 1.72, 4.29, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 2.45, 3.99, 0.74]
+let ve5 = [2.56, 1.06, 2.15, 2.44, 2.28, 3.45, 3.99, 2.43, 1.46, 3.2, 1.32, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 2.56, 1.54, 1.56]
+let ve6 = [2.47, 0.87, 1.96, 2.47, 2.51, 6.09, 9, 3.06, 2.6, 4.67, 1.36, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 2.47, 1.35, 3.71]
+let ve7 = [2.49, 2.26, 3.63, 3.8, 4.71, 7.58, 8.92, 2.28, 1.32, 4.07, 3.84, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 2.49, 3.42, 1.84]
+let ve8 = [2.92, 9, 8.43, 7.39, 9, 6.72, 4.34, 1.45, 0.37, 3.6, 1.23, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 2.92, 9, 0.49]
+
+# Consonants are gestures on top: a constriction at region gPl of degree
+# gDg (1 = closed), a second at gPl2/gDg2 (lips round for R/SH, the
+# tongue back for W), and the velum gVl (1 = open: M, N, NG).
+let gPl = [5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 8, 7, 4.5, 6.5, 6, 8, 6, 5, 7, 6, 8, 7.5, 7, 8, 7.5, 6, 8, 7, 4.5, 8, 7, 4.5, 6, 6, 5, 5, 5]
+let gDg = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0.7, 0.65, 0.75, 0.8, 0, 0.94, 0.93, 0.92, 0.9, 0.94, 0.92, 0.9, 0.93, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0]
+let gPl2 = [8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 4.5, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8]
+let gDg2 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.45, 0.5, 0, 0, 0, 0.3, 0, 0, 0, 0, 0, 0.3, 0, 0, 0, 0, 0, 0, 0.3, 0.3, 0, 0, 0]
+let gVl = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
