@@ -1,0 +1,322 @@
+# didge_sticks: the master's set from bush_doof_e, only what you hear.
+# Two didges blended (the first, digital one and didge3, the physical one)
+# and clapsticks; an algorithmic routine every 4 bars at 108 bpm. Nothing
+# muted is computed, so it renders ~9x faster than bush_doof_e.
+#
+# 2026-10-11: Roland: "the new didge is great". The blend of the two didges
+# is a keeper; start further didge work from this patch.
+
+def formant(x, f, res):
+  bpf(x, f, res) * (2 * (1 - res))       # unity gain at the peak
+
+# Clapsticks, the physics:
+# - The collision: two hardwood sticks meet for tau seconds; the contact
+#   force is a half-sine (Hertz contact). A harder hit is a shorter
+#   contact (tau ~ v^-1/5), and a shorter pulse reaches higher modes.
+# - Each stick is a free-free bar: modes at 1, 2.756, 5.404 x f1. The
+#   holding hand damps the higher modes faster (T60 / 2.2, / 4.5).
+# - Where on the stick the hit lands sets how much of each mode it
+#   excites (a2, a3), and it changes every hit.
+# - A bar radiates its surface velocity, so the output is the modes' v.
+def contact(trig, tau):
+  $touch = 1.0
+  $touch = if trig > 0 then 0 else min(1, $touch + dt / tau)
+  if $touch < 1 then sin(PI * $touch) else 0
+
+def bar(force, f1, t60, a2, a3):
+  sum(3, n =>
+    let r = if n == 1 then 1 else if n == 2 then 2.756 else 5.404
+    let w = TAU * f1 * r
+    let g = 6.91 * (if n == 1 then 1 else if n == 2 then 2.2 else 4.5) / t60
+    let a = if n == 1 then 1 else if n == 2 then a2 else a3
+    $bv = 0.0
+    $bx = 0.0
+    $bv = clamp($bv + (-2 * g * $bv - w * w * $bx + force * a * 4000) * dt, -50, 50)
+    $bx = $bx + $bv * dt
+    $bv)
+
+# The first didge (2026-10-10, didge_minor): the same lips with a rest
+# opening, into a loop that returns the wave in phase after a full period,
+# so every harmonic resonates. Physically wrong for a didge, digitally cool:
+# bright, even, buzzy. Kept as its own colour and blended with didge3.
+def didge_bore(mouth, lipF, lipD, f0):
+  $pm = 0.0                             # wave arriving back at the lips
+  $dp = 0.0                             # pressure drop across the lips
+  let lip = dho($dp * 1200000.0, lipF, lipD)
+  let a   = clamp(0.05 + lip, 0.0, 1.0) # lip opening; 0 = lips shut
+  let u   = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp))   # Bernoulli flow
+  let pplus = u * 0.8 + $pm             # outgoing wave: injected flow + reflection
+  let p     = pplus + $pm               # pressure at the lips
+  $dp = lp1(mouth - p, 5000)
+  let back = delay(pplus, 1.0 / f0, 0.05)
+  $pm = lp1(back, 2200) * 0.93          # reflected, in phase, lossy
+  back - lp1(back, 180)                 # what leaves the bell
+
+# didge3: lips at the closed end of a tube that is open at the bell.
+# - Lips (outward-striking valve): a mass-spring at lipF, pressed shut at
+#   rest (opening = $lx - 0.4) and blown open by the pressure drop $dp, so
+#   they shut once a cycle: that shut is the buzz.
+# - Flow: Bernoulli, u = a * sqrt(dp), with breath turbulence below 3 kHz.
+# - Bore: a pressure wave travels to the bell and back in half a period
+#   and comes back inverted (an open end reflects -1). Its impedance peaks
+#   sit at the odd harmonics 1, 3, 5..., so h2 and h4 come out weak, as in
+#   real drones. Two inharmonic modes (2.65, 4.35 x f0) add the flare.
+# - Player's tract: two resonances (ft1, ft2) loading the lips from
+#   upstream. Where they peak the flow is choked: they carve the moving
+#   dips that make the vowels.
+# - Radiation: the bell radiates the time derivative of the wave below
+#   ~2.5 kHz (+6 dB per octave), flat above.
+def didge3(mouth, voiceP, lipF, f0, ft1, ft2, zt, modeAmt, turb):
+  $pm = 0.0
+  $dp = 0.0
+  $lx = 0.0
+  $lv = 0.0
+  $u  = 0.0
+  let uS = lp1($u, 2500)
+  let pT = lp1(sum(2, j =>
+    let fj = if j == 1 then ft1 else ft2
+    let zj = if j == 1 then 0.09 else 0.07
+    zt * 2 * zj * TAU * fj * dho_v(uS, fj, zj)), 3000)
+  let wl = TAU * lipF
+  $lv = clamp($lv + (-2 * 0.1 * wl * $lv - wl * wl * $lx + $dp * 0.6 * wl * wl) * dt, -3000, 3000)
+  $lx = clamp($lx + $lv * dt, -2, 3)
+  let a = clamp($lx - 0.4, 0.0, 1.0)
+  let br = lp1(lp1(noise(), 2800), 2800)
+  $u  = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp)) * (1 + br * turb)
+  let pM = sum(2, k =>
+    let fk = f0 * (if k == 1 then 2.65 else 4.35)
+    modeAmt * (if k == 1 then 4.0 else 2.5) * 2 * 0.05 * TAU * fk * dho_v(uS, fk, 0.05))
+  let pplus = $u * 0.8 + $pm
+  let p   = pplus + $pm + pM
+  $dp = clamp(lp1(mouth * (1 + voiceP) - pT - p, 5000), -4, 4)
+  let back = delay(pplus, 0.5 / f0, 0.05)
+  $pm = clamp(-lp1(back, 2200) * 0.93, -20, 20)
+  hp1(back, 2500) + hp1(pM, 150) * 0.08 * modeAmt
+
+# ------------------------------------------------------------------ clock
+$bpos = 0.0
+$bpos = $bpos + 108 / 60 / 4 * dt
+let barPh  = $bpos mod 1
+let stepPh = (barPh * 16) mod 1
+let stepIx = int(barPh * 16)
+let sub    = stepIx mod 4
+let trig16 = if stepPh < prev(stepPh) then 1 else 0
+let bars   = floor($bpos)
+let hBar   = (sin(bars * 61.7) * 9123.77) mod 1
+
+# A routine every 4 bars, never the same twice running.
+let blk   = floor(bars / 4)
+let rA    = int(((sin(blk * 17.13) * 43758.5453) mod 1) * 10)
+let rB    = int(((sin((blk - 1) * 17.13) * 43758.5453) mod 1) * 10)
+let rout  = if rA == rB then (rA + 3) mod 10 else rA
+let pKanga = [1, 0, 0, 0.8, 0, 0, 1, 0, 0.9, 0, 0, 0.8, 0, 0, 1, 0.5]
+let pEmu   = [1, 0, 0, 0, 0, 0, 0.7, 0, 1, 0, 0, 0, 0, 0, 0.7, 0]
+let pFrog  = [1, 0, 0.8, 0, 0, 0, 1, 0, 1, 0, 0.8, 0, 0, 0, 1, 0]
+let pHorse = [1, 0, 0.6, 0.8, 1, 0, 0.6, 0.8, 1, 0, 0.6, 0.8, 1, 0, 0.6, 0.8]
+let pTrain = [1, 0.4, 0.7, 0.4, 1, 0.4, 0.7, 0.4, 1, 0.4, 0.7, 0.4, 1, 0.5, 0.8, 0.5]
+let pRain  = [1, 0.6, 0.8, 0.6, 0.9, 0.6, 0.8, 0.7, 1, 0.6, 0.8, 0.6, 0.9, 0.7, 0.9, 0.8]
+let pSparse = [1, 0, 0, 0, 0, 0, 0, 0, 0.6, 0, 0, 0, 0, 0, 0, 0]
+let vPat  = if rout == 1 then pKanga[stepIx] else if rout == 2 then pEmu[stepIx] else if rout == 3 then pFrog[stepIx] else if rout == 4 then pHorse[stepIx] else if rout == 5 then pTrain[stepIx] else if rout == 6 then pRain[stepIx] else if rout == 0 then 0 else pSparse[stepIx]
+let vAcc  = vPat * (0.75 + 0.25 * (if ((stepIx + int(hBar * 4)) mod 4) == 0 then 1 else 0))
+let vStick = if rout == 6 then 0.35 + (if sub == 0 then 0.4 else 0) else if rout == 5 then (if (stepIx mod 2) == 0 then 0.6 else 0) else (if sub == 0 then 0.75 else if sub == 2 and hBar > 0.4 then 0.35 else 0)
+
+# ---------------------------------------------------------- didge playing
+# Breath: a circular-breathing gulp every 5.6 s, and slow swells of the
+# diaphragm (real players swing the level 6-13 dB).
+let cycle = (t / 5.6) mod 1
+let gulp  = ease((cycle - 0.93) * 20) * (1 - ease((cycle - 0.985) * 60))
+let swellB = (sin(TAU * t / 6.7) + 1) * 0.5 * (0.6 + 0.4 * (sin(TAU * t / 23) + 1) * 0.5)
+let vTap   = slew(discharge(trig16 * vAcc, 16), 0.004)
+let vStop  = slew(if vAcc > 0.6 and stepPh < 0.1 then 1 else 0, 0.002)
+let vToot  = slew((if rout == 1 and stepIx >= 14 and (bars mod 2) == 1 then 1 else 0) + (if rout == 5 and (bars mod 4) == 3 and (stepIx == 4 or stepIx == 5 or stepIx == 8 or stepIx == 9 or stepIx == 10) then 1 else 0) + (if rout == 9 and ((stepIx >= 4 and stepIx < 7) or (stepIx >= 12 and stepIx < 15)) then 1 else 0), 0.04)
+# The tongue and jaw: vowels keep moving under every routine.
+let jaw    = (sin(TAU * t / 4.3) + 1) * 0.5 * 0.5 + (sin(TAU * t / 1.13) + 1) * 0.5 * 0.2
+let vWah   = clamp((if rout == 0 then (sin(TAU * t / 1.6) + 1) * 0.5 else if rout == 2 then slew(discharge(trig16 * vPat, 4), 0.02) else (sin(TAU * t / 3.1) + 1) * 0.3) * 0.7 + jaw * 0.5, 0, 1)
+let vHowl  = if rout == 7 then 280 + 200 * ease(((bars mod 4) + barPh) / 1.5) * (1 - 0.3 * ease(((bars mod 4) + barPh - 2.5) / 1.5)) else 0
+let vLaugh = if rout == 8 then (if stepIx < 12 then 1 else 0) * (if stepPh < 0.7 then 1 else 0) else 0
+let vCroak = if rout == 3 then discharge(trig16 * vPat, 20) else 0
+let vVoiceF = if rout == 7 then vHowl else if rout == 8 then (380 + (stepIx mod 2) * 90) * (1 + stepIx * 0.02) else 180
+let vVoiceA = slew(if rout == 7 then 0.2 else if rout == 8 then 0.19 * vLaugh else 0.3 * vCroak, 0.01)
+let vVoice  = pow(max(0, sin(TAU * phasor(vVoiceF * (1 + 0.012 * sin(TAU * phasor(5.5)))))), 3) * vVoiceA
+let press  = max(0.05, (0.8 + swellB * 0.3 + vTap * 0.3 + vToot * 0.25 - gulp * 0.4) * (1 - vStop * 0.3))
+
+# The two didges, crossfaded (equal power) on a slow 83 s swing so each
+# gets its turn; the first ducks under toots (it jumps an octave where
+# didge3 lands at 2.78x, and the two would clash).
+let blend = (0.5 + 0.35 * sin(TAU * t / 83)) * (1 - vToot * 0.6)
+# ------------------------------------------------------------------ voice
+# A singer made of phonetics, after Klatt (DECtalk): a glottal flow pulse
+# at the melody's pitch (KLGLOTT88: open for 60% of the cycle, flow
+# t^2 - t^3, so its derivative falls off at 12 dB/octave), breath noise,
+# a cascade of five two-pole resonators (the vocal tract's formants)
+# gliding between each phoneme's targets, noise bands for the fricatives,
+# closure-burst-aspiration inside each slot for the stops, and the lips'
+# radiation (a first difference). The words are a score of phonemes on the
+# 32nd grid, each syllable with its note: 8 lines, 3 bars each, then the
+# didge answers for a bar.
+#
+# Phonemes (id: name F1 F2 F3, voicing, frication, centre): 0 silence;
+# vowels 1 IY 2 IH 3 EH 4 AE 5 AA 6 AO 7 UH 8 UW 9 AH 10 ER 11 AX;
+# 12 M 13 N 14 NG 15 L 16 R 17 W 18 Y 19 HH; 20 S 21 SH 22 F 23 TH 24 Z
+# 25 V 26 DH 27 ZH; stops 28 P 29 T 30 K 31 B 32 D 33 G; 34 CH 35 JH.
+let pF1 = [500, 270, 390, 530, 660, 730, 570, 440, 300, 640, 490, 500, 250, 250, 250, 360, 420, 300, 270, 500, 400, 400, 400, 400, 300, 300, 300, 300, 400, 400, 400, 300, 300, 300, 400, 300, 250]
+let pF2 = [1500, 2290, 1990, 1840, 1720, 1090, 840, 1020, 870, 1190, 1350, 1500, 1100, 1600, 2000, 1050, 1300, 610, 2290, 1500, 1600, 1800, 1100, 1500, 1600, 1100, 1500, 1800, 900, 1800, 1990, 900, 1800, 1990, 1800, 1800, 1100]
+let pF3 = [2500, 3010, 2550, 2480, 2410, 2440, 2410, 2240, 2240, 2390, 1690, 2500, 2200, 2600, 2600, 2700, 1600, 2200, 3010, 2500, 2600, 2600, 2300, 2600, 2600, 2300, 2600, 2600, 2200, 2700, 2500, 2200, 2700, 2500, 2600, 2600, 2300]
+let pAV = [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0.8, 0.8, 0.8, 0.75, 0.75, 0.9, 0.9, 0.9, 0, 0, 0, 0, 0, 0.25, 0.25, 0.25, 0.25, 0, 0, 0, 0.7, 0.7, 0.7, 0, 0.7, 0.15]
+let pAF = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.6, 0.6, 0.25, 0.2, 0.5, 0.3, 0.25, 0.5, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+let pFN = [3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000, 6000, 3000, 4000, 5000, 6000, 4000, 5000, 3000, 1200, 4500, 2200, 1200, 4500, 2200, 3000, 3000, 3000]
+let pAH = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+let pST = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 4, 0]
+# The words: syllables (phoneme:32nds @note above D3), 3 bars a line.
+#   Out here in the bush, under southern stars
+#     AA:5 UW:2 T:1 @7 / HH:1 IY:4 AX:1 R:2 @7 / IH:3 N:2 @5 / DH:1 AX:2 @3 / B:1 UH:5 SH:3 @5 / sil:3 @5 / AH:4 N:2 @7 / D:1 ER:4 @5 / S:2 AH:5 @3 / DH:1 ER:3 N:2 @0 / S:2 T:1 AA:7 R:2 Z:3 @3
+#   Solar on the roof, and the code runs far
+#     S:2 AO:4 UW:2 @7 / L:1 ER:4 @5 / AA:3 N:2 @7 / DH:1 AX:2 @5 / R:1 UW:5 F:3 @3 / sil:3 @3 / AE:3 N:1 D:1 @5 / DH:1 AX:2 @7 / K:1 AO:4 UW:2 D:1 @10 / R:1 AH:4 N:2 Z:2 @7 / F:2 AA:8 R:3 @7
+#   The didge breathes deep, and the land breathes too
+#     DH:1 AX:2 @7 / D:1 IH:4 JH:2 @10 / B:1 R:1 IY:5 DH:1 Z:2 @12 / D:1 IY:5 P:2 @10 / sil:3 @10 / AE:3 N:1 D:1 @7 / DH:1 AX:2 @7 / L:2 AE:5 N:2 D:1 @10 / B:1 R:1 IY:5 DH:1 Z:2 @7 / T:1 UW:9 @7
+#   We're coding with AI in the morning dew
+#     W:2 IY:3 ER:3 @7 / K:1 AO:4 UW:2 @7 / D:1 IH:3 NG:2 @5 / W:1 IH:3 TH:2 @3 / EH:4 IY:2 @7 / AA:5 IY:3 @10 / IH:3 N:1 @7 / DH:1 AX:2 @5 / M:2 AO:5 R:2 @7 / N:1 IH:3 NG:2 @5 / D:1 Y:1 UW:9 @3
+#   Catch the rain, grow the food, live soft on the ground
+#     K:1 AE:4 CH:2 @0 / DH:1 AX:2 @3 / R:1 EH:4 IY:2 N:2 @5 / sil:2 @5 / G:1 R:1 AO:4 UW:2 @7 / DH:1 AX:2 @5 / F:2 UW:5 D:1 @3 / sil:2 @3 / L:2 IH:4 V:2 @7 / S:2 AO:5 F:2 T:1 @10 / AA:3 N:1 @7 / DH:1 AX:2 @5 / G:1 R:1 AA:4 UW:3 N:2 D:1 @3
+#   Old land, new minds, in the one same sound
+#     AO:4 UW:2 L:2 D:1 @12 / L:2 AE:5 N:2 D:1 @10 / sil:2 @10 / N:2 UW:6 @7 / M:2 AA:4 IY:2 N:2 D:1 Z:2 @10 / sil:2 @10 / IH:3 N:1 @7 / DH:1 AX:2 @5 / W:2 AH:4 N:2 @7 / S:2 EH:4 IY:2 M:3 @10 / S:2 AA:4 UW:3 N:2 D:1 @12
+#   Respect to the people, this is native title land
+#     R:1 IH:2 @7 / S:2 P:1 EH:4 K:1 T:1 @10 / T:1 UW:3 @7 / DH:1 AX:2 @5 / P:1 IY:5 @7 / P:1 AX:2 L:2 @5 / sil:2 @5 / DH:1 IH:3 S:2 @7 / IH:3 Z:2 @5 / N:2 EH:4 IY:2 @7 / T:1 IH:3 V:2 @5 / T:1 AA:4 IY:2 @7 / T:1 AX:2 L:2 @5 / L:2 AE:6 N:2 D:1 @3
+#   Wires in the gum trees, dust on our hands
+#     W:2 AA:4 IY:1 AX:1 ER:2 Z:2 @7 / IH:3 N:1 @5 / DH:1 AX:2 @3 / G:1 AH:4 M:2 @5 / T:1 R:1 IY:5 Z:2 @7 / sil:3 @7 / D:1 AH:4 S:2 T:1 @10 / AA:3 N:1 @7 / AA:3 UW:2 ER:2 @5 / HH:1 AE:6 N:2 D:1 Z:2 @3
+let lyr = [
+  5, 5, 5, 5, 5, 8, 8, 29, 19, 1, 1, 1, 1, 11, 16, 16, 2, 2, 2, 13, 13, 26, 11, 11, 31, 7, 7, 7, 7, 7, 21, 21, 21, 0, 0, 0, 9, 9, 9, 9, 13, 13, 32, 10, 10, 10, 10, 20, 20, 9, 9, 9, 9, 9, 26, 10, 10, 10, 13, 13, 20, 20, 29, 5, 5, 5, 5, 5, 5, 5, 16, 16, 24, 24, 24, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  20, 20, 6, 6, 6, 6, 8, 8, 15, 10, 10, 10, 10, 5, 5, 5, 13, 13, 26, 11, 11, 16, 8, 8, 8, 8, 8, 22, 22, 22, 0, 0, 0, 4, 4, 4, 13, 32, 26, 11, 11, 30, 6, 6, 6, 6, 8, 8, 32, 16, 9, 9, 9, 9, 13, 13, 24, 24, 22, 22, 5, 5, 5, 5, 5, 5, 5, 5, 16, 16, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  26, 11, 11, 32, 2, 2, 2, 2, 36, 35, 31, 16, 1, 1, 1, 1, 1, 26, 24, 24, 32, 1, 1, 1, 1, 1, 0, 28, 0, 0, 0, 4, 4, 4, 13, 32, 26, 11, 11, 15, 15, 4, 4, 4, 4, 4, 13, 13, 32, 31, 16, 1, 1, 1, 1, 1, 26, 24, 24, 29, 8, 8, 8, 8, 8, 8, 8, 8, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  17, 17, 1, 1, 1, 10, 10, 10, 30, 6, 6, 6, 6, 8, 8, 32, 2, 2, 2, 14, 14, 17, 2, 2, 2, 23, 23, 3, 3, 3, 3, 1, 1, 5, 5, 5, 5, 5, 1, 1, 1, 2, 2, 2, 13, 26, 11, 11, 12, 12, 6, 6, 6, 6, 6, 16, 16, 13, 2, 2, 2, 14, 14, 32, 18, 8, 8, 8, 8, 8, 8, 8, 8, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  30, 4, 4, 4, 4, 0, 34, 26, 11, 11, 16, 3, 3, 3, 3, 1, 1, 13, 13, 0, 0, 33, 16, 6, 6, 6, 6, 8, 8, 26, 11, 11, 22, 22, 8, 8, 8, 8, 8, 32, 0, 0, 15, 15, 2, 2, 2, 2, 25, 25, 20, 20, 6, 6, 6, 6, 6, 22, 22, 29, 5, 5, 5, 13, 26, 11, 11, 33, 16, 5, 5, 5, 5, 8, 8, 8, 13, 13, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  6, 6, 6, 6, 8, 8, 15, 15, 32, 15, 15, 4, 4, 4, 4, 4, 13, 13, 32, 0, 0, 13, 13, 8, 8, 8, 8, 8, 8, 12, 12, 5, 5, 5, 5, 1, 1, 13, 13, 32, 24, 24, 0, 0, 2, 2, 2, 13, 26, 11, 11, 17, 17, 9, 9, 9, 9, 13, 13, 20, 20, 3, 3, 3, 3, 1, 1, 12, 12, 12, 20, 20, 5, 5, 5, 5, 8, 8, 8, 13, 13, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  16, 2, 2, 20, 20, 28, 3, 3, 3, 3, 30, 29, 29, 8, 8, 8, 26, 11, 11, 28, 1, 1, 1, 1, 1, 28, 11, 11, 15, 15, 0, 0, 26, 2, 2, 2, 20, 20, 2, 2, 2, 24, 24, 13, 13, 3, 3, 3, 3, 1, 1, 29, 2, 2, 2, 25, 25, 29, 5, 5, 5, 5, 1, 1, 29, 11, 11, 15, 15, 15, 15, 4, 4, 4, 4, 4, 4, 13, 13, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  17, 17, 5, 5, 5, 5, 1, 11, 10, 10, 24, 24, 2, 2, 2, 13, 26, 11, 11, 33, 9, 9, 9, 9, 12, 12, 29, 16, 1, 1, 1, 1, 1, 24, 24, 0, 0, 0, 32, 9, 9, 9, 9, 20, 20, 29, 5, 5, 5, 13, 5, 5, 5, 8, 8, 10, 10, 19, 4, 4, 4, 4, 4, 4, 13, 13, 32, 24, 24, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+]
+let lyrN = [
+  7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 5, 5, 5, 5, 5, 3, 3, 3, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 7, 7, 7, 7, 7, 7, 5, 5, 5, 5, 5, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+  7, 7, 7, 7, 7, 7, 7, 7, 5, 5, 5, 5, 5, 7, 7, 7, 7, 7, 5, 5, 5, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 5, 5, 5, 5, 5, 7, 7, 7, 10, 10, 10, 10, 10, 10, 10, 10, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+  7, 7, 7, 10, 10, 10, 10, 10, 10, 10, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 7, 7, 7, 7, 7, 7, 7, 7, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+  7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 5, 5, 5, 5, 5, 5, 3, 3, 3, 3, 3, 3, 7, 7, 7, 7, 7, 7, 10, 10, 10, 10, 10, 10, 10, 10, 7, 7, 7, 7, 5, 5, 5, 7, 7, 7, 7, 7, 7, 7, 7, 7, 5, 5, 5, 5, 5, 5, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+  0, 0, 0, 0, 0, 0, 0, 3, 3, 3, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 7, 7, 7, 7, 7, 7, 7, 7, 5, 5, 5, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 7, 7, 7, 7, 7, 7, 7, 7, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 7, 7, 7, 7, 5, 5, 5, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+  12, 12, 12, 12, 12, 12, 12, 12, 12, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 7, 7, 7, 7, 7, 7, 7, 7, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 7, 7, 7, 7, 5, 5, 5, 7, 7, 7, 7, 7, 7, 7, 7, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12,
+  7, 7, 7, 10, 10, 10, 10, 10, 10, 10, 10, 10, 7, 7, 7, 7, 5, 5, 5, 7, 7, 7, 7, 7, 7, 5, 5, 5, 5, 5, 5, 5, 7, 7, 7, 7, 7, 7, 5, 5, 5, 5, 5, 7, 7, 7, 7, 7, 7, 7, 7, 5, 5, 5, 5, 5, 5, 7, 7, 7, 7, 7, 7, 7, 5, 5, 5, 5, 5, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+  7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 5, 5, 5, 5, 3, 3, 3, 5, 5, 5, 5, 5, 5, 5, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 10, 10, 10, 10, 10, 10, 10, 10, 7, 7, 7, 7, 5, 5, 5, 5, 5, 5, 5, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3
+]
+
+# Klatt's resonator: unity gain at DC, a peak at f of width bw.
+def kres(x, f, bw):
+  $ky1 = 0.0
+  $ky2 = 0.0
+  let kc = -exp(-TAU * bw * dt)
+  let kb = 2 * exp(-PI * bw * dt) * cos(TAU * f * dt)
+  let ky = (1 - kb - kc) * x + kb * $ky1 + kc * $ky2
+  $ky2 = $ky1
+  $ky1 = ky
+  ky
+
+let songBar = bars mod 32
+let li      = int(songBar / 4)
+let inLine  = if (songBar mod 4) < 3 then 1 else 0
+let tl      = ((songBar mod 4) + barPh) * (4 * 60 / 108)
+# The singer's knobs: who is singing. Defaults are the voice as it was.
+let vTract  = 1.0       # tract length: 0.85 giant .. 1 man .. 1.17 woman .. 1.3 child (scales every formant)
+let vRegister = 1.0     # pitch multiplier: 0.5 down an octave, 2 up one
+let vBreath = 0.04      # breath noise mixed into the voicing
+let vPress  = 0.6       # open quotient: 0.4 pressed, buzzy .. 0.75 soft, breathy
+let vVibD   = 1.0       # vibrato depth (0 = dead straight)
+let vRobot  = 0.0       # 0 vocal folds .. 1 a saw: the vocoder robot, same mouth
+let vHz     = slew(73.42 * pow(2, lyrN[li * 96 + min(int(((songBar mod 4) + barPh) * 32), 95)] / 12), 0.04)
+let vVib    = 1 + 0.009 * vVibD * sin(TAU * phasor(5.3)) * ease((tl mod 0.55) / 0.3)
+let vDuck   = slew(inLine, 0.25)
+let slot    = min(int(((songBar mod 4) + barPh) * 32), 95)
+let slotPh  = (barPh * 32) mod 1
+let ph      = if inLine > 0 then lyr[li * 96 + slot] else 0
+let stp     = pST[ph]
+let clos    = if stp > 0 and slotPh < 0.6 then 1 else 0
+let isUnv   = if stp == 1 or stp == 3 then 1 else 0
+let relT    = if stp > 0 and slotPh >= 0.6 and prev(slotPh) < 0.6 then 1 else 0
+let burstE  = discharge(relT, 120)
+let aspE    = discharge(relT * isUnv, 16)
+let avT     = (if stp > 0 then (if stp == 2 or stp == 4 then (if clos > 0 then 0.15 else 0.6) else 0) else pAV[ph]) * (1 - 0.92 * aspE)
+let afT     = pAF[ph] + burstE * (if isUnv > 0 then 0.9 else 0.75) + (if stp >= 3 and slotPh >= 0.6 then 0.55 else 0)
+let ahT     = pAH[ph] + aspE * 0.55
+let vAV     = slew(avT, 0.012)
+let vAF     = slew(afT, 0.005)
+let vAH     = slew(ahT, 0.004)
+let fGlide  = if vAV < 0.05 and vAH < 0.05 then 0.15 else 1     # jump in silence, glide in sound
+let vF1     = slew(pF1[ph] * vTract, 0.022 * fGlide)
+let vF2     = slew(pF2[ph] * vTract, 0.025 * fGlide)
+let vF3     = slew(pF3[ph] * vTract, 0.035 * fGlide)
+let nasal   = if ph >= 12 and ph <= 14 then 1 else 0
+let vNas    = slew(nasal, 0.012)
+let vB1     = 95 + 120 * vNas
+let vB2     = 120 + 500 * vNas
+let vB3     = 180 + 650 * vNas
+let vFN     = if stp >= 3 then 3000 else pFN[ph]
+let gph     = phasor(vHz * vRegister * vVib)
+let gtau    = gph / vPress
+let glot    = (if gph < vPress then 2 * gtau - 3 * gtau * gtau else 0) * (1 - vRobot) + (gph * 2 - 1) * 0.6 * vRobot
+let vOn     = slew(inLine, 0.03)
+
+play didge:
+  let d3 = didge3(press * 1.6, vVoice, (90 + vToot * 110) * 71.6 / 110, 71.6, 300 + vWah * 480, 950 + vTap * 1500 + vCroak * 600, 1.5, 0.4, 0.8)
+  let d1 = didge_bore(press * (1 + vVoice), 60, 0.1, 73.4)
+  let d = d3 * cos(blend * PI / 2) + d1 * 1.26 * sin(blend * PI / 2)
+  let tract = formant(d, 320 + vWah * 420 - vTap * 60, 0.93) + formant(d, 850 + vWah * 350 + vTap * 1100, 0.94) * 0.7 + formant(d, 2300 + vWah * 300 + vTap * 500, 0.95) * 0.35
+  (((tract * 0.9 + d * 0.35) |> drive(1.4)) |> hpf(200, 0.29) |> hpf(200, 0.29) |> lpf(7000, 0.2)) * (1 - 0.68 * vDuck)
+
+# ---------------------------------------------------------- stick rhythms
+# The sticks pick their own style every 4 bars (independent of the
+# didge's routine), swing by a different amount each block, roll into the
+# 4th bar, flam the block's downbeat, and ghost more as a 16-bar arc rises.
+let ph32   = (barPh * 32) mod 1
+let trig32 = if ph32 < prev(ph32) then 1 else 0
+let ph12   = (barPh * 12) mod 1
+let trig12 = if ph12 < prev(ph12) then 1 else 0
+let t12    = int(barPh * 12)
+let hb1    = (sin(blk * 12.9898) * 43758.5453) mod 1
+let hb2    = (sin(blk * 78.233 + 1.3) * 12543.871) mod 1
+let hb3    = (sin(blk * 39.425 + 2.7) * 23421.631) mod 1
+let sMode  = int(((sin((blk + 7) * 31.7) * 15731.3) mod 1) * 6)
+let fillBar = if (bars mod 4) == 3 then 1 else 0
+let arc    = (sin(TAU * bars / 16) + 1) * 0.5
+let sw     = 0.08 + 0.14 * hb3                                  # swing: the off-16th lands late
+let trigSw = if (stepIx mod 2) == 1 then (if stepPh >= sw and prev(stepPh) < sw then 1 else 0) else trig16
+# Each 16th gets its own strength and its own spot on the stick.
+let hN    = (bars * 16 + stepIx) * 1.0
+let hVel  = (sin(hN * 12.9898) * 43758.5453) mod 1
+let hPos  = (sin(hN * 78.233) * 12543.871) mod 1
+let hPos2 = (sin(hN * 39.425) * 23421.631) mod 1
+let ghost = if hVel > 0.75 - 0.4 * arc then 0.13 + 0.08 * hPos else 0
+let kE    = 5 + int(hb1 * 5)
+let iE    = (stepIx + int(hb2 * 16)) mod 16
+let euc   = if ((iE * kE) mod 16) < kE then 1 else 0
+let pClave  = [1, 0, 0, 0.8, 0, 0, 0.9, 0, 0, 0, 0.8, 0, 1, 0, 0, 0]
+let pGallop = [1, 0, 0.5, 0.6, 0.9, 0, 0.5, 0.6, 1, 0, 0.5, 0.6, 0.9, 0, 0.6, 0.7]
+let pHeart  = [1, 0, 0, 0.55, 0, 0, 0, 0, 0.8, 0, 0, 0.5, 0, 0, 0, 0]
+let acc   = if sub == 0 then 0.15 else 0
+let v16raw = if sMode == 0 then (if euc > 0 then 0.7 + acc else ghost) else if sMode == 1 then 0 else if sMode == 2 then (if vPat == 0 then 0.55 + acc else ghost) else if sMode == 3 then pGallop[stepIx] * 0.7 else if sMode == 4 then max(pClave[stepIx] * 0.9, ghost) else max(pHeart[stepIx], ghost * 0.5)
+let rollOn = fillBar * (if barPh >= 0.75 then 1 else 0)
+let v16   = v16raw * (0.8 + 0.35 * hVel) * (1 - rollOn)
+let v12   = if sMode == 1 then (if (t12 mod 2) == 0 then 0.6 else 0.22) * (0.85 + 0.3 * hPos) else 0
+let vRoll = rollOn * (0.15 + 0.65 * (barPh - 0.75) * 4) * (0.85 + 0.3 * hPos2)
+let flamT = if (bars mod 4) == 0 and stepIx == 0 and stepPh >= 0.16 and prev(stepPh) < 0.16 then 1 else 0
+play sticks:
+  let f   = contact(trigSw * v16, 0.0001 * pow(max(v16, 0.05), -0.2)) * v16 + contact(trig12 * v12, 0.0001 * pow(max(v12, 0.05), -0.2)) * v12 + contact(trig32 * vRoll, 0.0001 * pow(max(vRoll, 0.05), -0.2)) * vRoll + contact(flamT, 0.00011) * 0.5
+  let sA  = bar(f, 1650, 0.14, 0.25 + 0.6 * hPos, 0.1 + 0.4 * hPos2)
+  let sB  = bar(f, 1750, 0.14 * 0.8, 0.9 - 0.6 * hPos, 0.5 - 0.4 * hPos2)
+  (sA + sB * 0.85) * 0.85 |> lpf(7000, 0.2)
+
+play voice:
+  let src  = glot * vAV + noise() * (vAH + vBreath * vAV)
+  let tract = kres(kres(kres(kres(kres(src, vF1, vB1), vF2, vB2), vF3, vB3), 3500 * vTract, 250), 4500 * vTract, 300)
+  let murmur = kres(src, 270, 60) * vNas * 0.6
+  let lips = (tract + murmur) - prev(tract + murmur)
+  let fric = formant(noise(), vFN, 0.55) * vAF
+  ((lips * 1.6 + fric * 0.5) * vOn) |> hpf(200, 0.29) |> lpf(7000, 0.2)
+
+let roomD = reverb(mono(didge), 1.3, 0.1)
+let roomS = reverb(mono(sticks), 0.6, 0.06)
+(haas(roomD * 3.2 * 0.8, 8) + pan(roomS, 0.35) + pan(fbdelay(mono(sticks), 0.326, 0.5, 0.35) * 0.3, -0.4)) * 0.78 + haas(reverb(mono(voice), 1.6, 0.18), -6)
