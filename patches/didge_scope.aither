@@ -14,17 +14,16 @@ def formant(x, f, res):
 
 # Clapsticks, the physics:
 # - The collision: two hardwood sticks meet for tau seconds; the contact
-#   force is a half-sine (Hertz contact). A harder hit is a shorter
+#   force is a half-sine (Hertz contact), a function of the time since
+#   they met. A harder hit is a shorter
 #   contact (tau ~ v^-1/5), and a shorter pulse reaches higher modes.
 # - Each stick is a free-free bar: modes at 1, 2.756, 5.404 x f1. The
 #   holding hand damps the higher modes faster (T60 / 2.2, / 4.5).
 # - Where on the stick the hit lands sets how much of each mode it
 #   excites (a2, a3), and it changes every hit.
 # - A bar radiates its surface velocity, so the output is the modes' v.
-def contact(trig, tau):
-  $touch = 1.0
-  $touch = if trig > 0 then 0 else min(1, $touch + dt / tau)
-  if $touch < 1 then sin(PI * $touch) else 0
+def clack(tS, tau):                     # tS: seconds since the sticks met
+  if tS >= 0 and tS < tau then sin(PI * tS / tau) else 0
 
 def bar(force, f1, t60, a2, a3):
   sum(3, n =>
@@ -251,43 +250,49 @@ play didge:
   (((tract * 0.9 + d * 0.35) |> drive(1.4)) |> hpf(200, 0.29) |> hpf(200, 0.29) |> lpf(7000, 0.2)) * (1 - 0.68 * vDuck)
 
 # ---------------------------------------------------------- stick rhythms
-# The sticks pick their own style every 4 bars (independent of the
-# didge's routine), swing by a different amount each block, roll into the
-# 4th bar, flam the block's downbeat, and ghost more as a 16-bar arc rises.
-let ph32   = (barPh * 32) mod 1
-let trig32 = if ph32 < prev(ph32) then 1 else 0
-let ph12   = (barPh * 12) mod 1
-let trig12 = if ph12 < prev(ph12) then 1 else 0
-let t12    = int(barPh * 12)
-let hb1    = (sin(blk * 12.9898) * 43758.5453) mod 1
-let hb2    = (sin(blk * 78.233 + 1.3) * 12543.871) mod 1
-let hb3    = (sin(blk * 39.425 + 2.7) * 23421.631) mod 1
-let sMode  = int(((sin((blk + 7) * 31.7) * 15731.3) mod 1) * 6)
-let fillBar = if (bars mod 4) == 3 then 1 else 0
-let arc    = (sin(TAU * bars / 16) + 1) * 0.5
-let sw     = 0.08 + 0.14 * hb3                                  # swing: the off-16th lands late
-let trigSw = if (stepIx mod 2) == 1 then (if stepPh >= sw and prev(stepPh) < sw then 1 else 0) else trig16
-# Each 16th gets its own strength and its own spot on the stick.
-let hN    = (bars * 16 + stepIx) * 1.0
-let hVel  = (sin(hN * 12.9898) * 43758.5453) mod 1
-let hPos  = (sin(hN * 78.233) * 12543.871) mod 1
-let hPos2 = (sin(hN * 39.425) * 23421.631) mod 1
-let ghost = if hVel > 0.75 - 0.4 * arc then 0.13 + 0.08 * hPos else 0
-let kE    = 5 + int(hb1 * 5)
-let iE    = (stepIx + int(hb2 * 16)) mod 16
-let euc   = if ((iE * kE) mod 16) < kE then 1 else 0
-let pClave  = [1, 0, 0, 0.8, 0, 0, 0.9, 0, 0, 0, 0.8, 0, 1, 0, 0, 0]
-let pGallop = [1, 0, 0.5, 0.6, 0.9, 0, 0.5, 0.6, 1, 0, 0.5, 0.6, 0.9, 0, 0.6, 0.7]
-let pHeart  = [1, 0, 0, 0.55, 0, 0, 0, 0, 0.8, 0, 0, 0.5, 0, 0, 0, 0]
-let acc   = if sub == 0 then 0.15 else 0
-let v16raw = if sMode == 0 then (if euc > 0 then 0.7 + acc else ghost) else if sMode == 1 then 0 else if sMode == 2 then (if vPat == 0 then 0.55 + acc else ghost) else if sMode == 3 then pGallop[stepIx] * 0.7 else if sMode == 4 then max(pClave[stepIx] * 0.9, ghost) else max(pHeart[stepIx], ghost * 0.5)
-let rollOn = fillBar * (if barPh >= 0.75 then 1 else 0)
-let v16   = v16raw * (0.8 + 0.35 * hVel) * (1 - rollOn)
-let v12   = if sMode == 1 then (if (t12 mod 2) == 0 then 0.6 else 0.22) * (0.85 + 0.3 * hPos) else 0
-let vRoll = rollOn * (0.15 + 0.65 * (barPh - 0.75) * 4) * (0.85 + 0.3 * hPos2)
-let flamT = if (bars mod 4) == 0 and stepIx == 0 and stepPh >= 0.16 and prev(stepPh) < 0.16 then 1 else 0
+# Rhythm is oscillation (docs/guides/RHYTHM_PHILOSOPHY.md): every hit is a
+# function of the bar's phase, so there are no triggers and no counters,
+# and a hot swap lands on the beat.
+# - Feel: six playing styles, each a velocity contour over the bar's 16
+#   steps (the last one plays triplets instead). A 24-bar phasor walks
+#   through them: each holds for 3 bars and melts into the next over the
+#   4th, the drummer changing feel.
+# - Swing: the 8th-note phase is warped so the off-16th lands late; the
+#   warp breathes on a 37 s LFO. Ghost notes fill in as a 16-bar arc rises.
+# - The last beat of every 4 bars rolls in 32nds; the 4-bar downbeat flams.
+# - Each hit's strength and spot on the stick come from incommensurate
+#   LFOs sampled by the hit, so no two bars sound alike.
+let d16    = 4 * 60 / 108 / 16                                  # seconds per 16th
+let style  = (($bpos / 24) mod 1) * 6                           # 0..6 through the styles
+let sK     = floor(style)
+let sMix   = ease((style - sK - 0.75) * 4)                      # melt over the 4th bar
+let sNext  = (sK + 1) mod 6
+# One row of 16 per style: clave, euclid 7/16, gallop, train (driving 16ths),
+# heartbeat, and triplets (silent here: the 12 grid below plays them).
+let sVel   = [1, 0, 0, 0.8, 0, 0, 0.9, 0, 0, 0, 0.8, 0, 1, 0, 0, 0,  0.85, 0, 0, 0.7, 0, 0.7, 0, 0.7, 0, 0, 0.7, 0, 0.85, 0, 0.7, 0,  1, 0, 0.5, 0.6, 0.9, 0, 0.5, 0.6, 1, 0, 0.5, 0.6, 0.9, 0, 0.6, 0.7,  0.9, 0.35, 0.6, 0.35, 0.8, 0.35, 0.6, 0.4, 0.9, 0.35, 0.6, 0.35, 0.8, 0.4, 0.7, 0.5,  1, 0, 0, 0.55, 0, 0, 0, 0, 0.8, 0, 0, 0.5, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+let ghostAt = [1, 0.3, 0.8, 0.5, 1, 0.2, 0.7, 0.45, 1, 0.35, 0.85, 0.55, 1, 0.25, 0.65, 0.4]   # the arc's level where each step starts to ghost
+let arc    = (sin(TAU * $bpos / 16) + 1) * 0.5
+let four   = ($bpos / 4) mod 1                                  # where in the 4-bar phrase
+let rollOn = if four >= 0.9375 then 1 else 0
+# swing: warp the 8th so its second 16th starts at h, not 0.5
+let sw     = 0.08 + 0.14 * (sin(TAU * t / 37) + 1) * 0.5
+let q8     = (barPh * 8) mod 1
+let h      = 0.5 + sw / 2
+let i16    = int(barPh * 8) * 2 + (if q8 >= h then 1 else 0)
+let tHit   = (if q8 >= h then q8 - h else q8) * d16 * 2         # seconds since this 16th's hit
+let hVel   = (sin(TAU * t * 5.37) * cos(TAU * t * 0.71) + 1) * 0.5
+let hPos   = (sin(TAU * t * 3.11 + 2 * sin(TAU * t * 0.29)) + 1) * 0.5
+let hPos2  = (sin(TAU * t * 4.63 + 1.7 * sin(TAU * t * 0.17)) + 1) * 0.5
+let ghost  = if ghostAt[i16] < arc * 0.65 then 0.13 + 0.08 * hPos else 0
+let vStyle = sVel[sK * 16 + i16] * (1 - sMix) + sVel[sNext * 16 + i16] * sMix
+let w12    = (if sK == 5 then 1 - sMix else 0) + (if sNext == 5 then sMix else 0)
+let v16    = max(vStyle, ghost * (1 - w12)) * (0.8 + 0.35 * hVel) * (1 - rollOn)
+let i12    = int(barPh * 12)
+let v12    = w12 * (if (i12 mod 2) == 0 then 0.6 else 0.22) * (0.85 + 0.3 * hPos) * (1 - rollOn)
+let vRoll  = rollOn * (0.15 + 0.65 * (four - 0.9375) * 16) * (0.85 + 0.3 * hPos2)
+let tFlam  = if four < 1 / 64 then (stepPh - 0.16) * d16 else -1
 play sticks:
-  let f   = contact(trigSw * v16, 0.0001 * pow(max(v16, 0.05), -0.2)) * v16 + contact(trig12 * v12, 0.0001 * pow(max(v12, 0.05), -0.2)) * v12 + contact(trig32 * vRoll, 0.0001 * pow(max(vRoll, 0.05), -0.2)) * vRoll + contact(flamT, 0.00011) * 0.5
+  let f   = clack(tHit, 0.0001 * pow(max(v16, 0.05), -0.2)) * v16 + clack(((barPh * 12) mod 1) * d16 * 16 / 12, 0.0001 * pow(max(v12, 0.05), -0.2)) * v12 + clack(((barPh * 32) mod 1) * d16 / 2, 0.0001 * pow(max(vRoll, 0.05), -0.2)) * vRoll + clack(tFlam, 0.00011) * 0.5
   let sA  = bar(f, 1650, 0.14, 0.25 + 0.6 * hPos, 0.1 + 0.4 * hPos2)
   let sB  = bar(f, 1750, 0.14 * 0.8, 0.9 - 0.6 * hPos, 0.5 - 0.4 * hPos2)
   (sA + sB * 0.85) * 0.85 |> lpf(7000, 0.2)
@@ -311,7 +316,7 @@ let pxr    = dn * cos(rot) - dq * sin(rot)
 let pyr    = dn * sin(rot) + dq * cos(rot)
 let unroll = ease((sin(TAU * t / 64) + 1) * 0.5 * 1.6 - 0.3)
 let sweepX = phasor(73.4 / 2) * 2 - 1
-let hitEnv = discharge(trigSw * v16 + trig12 * v12 + trig32 * vRoll, 7)
+let hitEnv = max(v16 * exp(-tHit * 7), max(v12 * exp(-((barPh * 12) mod 1) * d16 * 16 / 12 * 7), vRoll * exp(-((barPh * 32) mod 1) * d16 / 2 * 7)))   # the last hit, fading
 let ringR  = 0.2 + (1 - hitEnv) * 0.8
 let mux    = phasor(180)
 let onRing = if mux > 0.75 then 1 else 0
@@ -323,8 +328,8 @@ $v1start = t
 let v1     = ease((t - $v1start) / 3)
 let pK     = [2, 3, 2, 3, 5, 3]
 let qK     = [3, 5, 5, 4, 2, 7]
-let kp     = pK[sMode]
-let kq     = qK[sMode]
+let kp     = pK[sK]
+let kq     = qK[sK]
 let th     = TAU * phasor(73.4 / 2)
 let tube   = 0.2 + 0.09 * dn
 let ringK  = 0.55 + tube * cos(kq * th)
