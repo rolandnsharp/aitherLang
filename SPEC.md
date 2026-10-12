@@ -596,7 +596,10 @@ float64 pool (4 MB).
 
 **Filters**: `lp1(sig, cut)`, `hp1(sig, cut)`,
 `lpf(sig, cut, res)`, `hpf(sig, cut, res)`,
-`bpf(sig, cut, res)`, `notch(sig, cut, res)`.
+`bpf(sig, cut, res)`, `notch(sig, cut, res)`. Every `cut` is in Hz.
+`lp1`/`hp1` are one-pole filters with the -3 dB point at `cut`
+(`a = 1 - exp(-2 pi cut / sr)`; before 2026-10-12 it was `cut / sr`,
+which put `lp1(x, 4000)` at 665 Hz, and patches were converted).
 
 **Delays**: `delay(sig, time, max_time)`,
 `fbdelay(sig, time, max_time, fb)`. `time` is in seconds and need

@@ -34,6 +34,6 @@ let far   = drums |> lpf(600, 0.3)
 let wet   = far |> reverb(3.5, 0.6)
 let mix   = far * 0.35 + wet * 0.5
 # block DC / sub-sonic drift so it doesn't eat headroom.
-let clean = mix |> hp1(30)
+let clean = mix |> hp1(4.7761)
 
 [clean * fadeIn * 0.16, clean * fadeIn * 0.15]

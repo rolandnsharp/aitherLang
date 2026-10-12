@@ -7,7 +7,7 @@ import numpy as np
 N, K, SR, LOSS = 24, 8, 48000.0, 0.996
 F = np.linspace(60, 4500, 900)
 z = np.exp(1j * 2 * np.pi * F / SR)
-A_LP = 19580 / SR                      # aither lp1(x, 19580): a = cutoff / sr
+A_LP = 1 - np.exp(-2 * np.pi * 4003.9 / SR)   # aither lp1(x, 4003.9): a = 1 - exp(-2 pi fc / sr)
 def sections(cp):
     xs = np.arange(N) * (K - 1) / (N - 1)
     return np.maximum(0.02, np.interp(xs, np.arange(K), cp))

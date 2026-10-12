@@ -61,7 +61,7 @@ openings), then recalibrate F1, then bring tube24 into the singer.
 shapes, gestures passed as (place, degree). The big fix was lp1's units
 again: the turbulence was `lp1(lp1(noise(), 4500), 4500)`, really ~700 Hz,
 so every s/sh/f was a dull rumble heard as "h". Now `lp1(noise(), 31300)`
-(~8 kHz) with frication and aspiration scaled to natural levels (s/sh -4,
+(~8 kHz; since lp1 takes hertz, written `lp1(noise(), 8065.7)`) with frication and aspiration scaled to natural levels (s/sh -4,
 f -18, t/p -6, k -8 dB re open vowels). WER: tube8 72% -> tube24 69% ->
 62%. vTract has no effect on tube24 yet (fixed one-sample sections).
 

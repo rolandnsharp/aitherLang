@@ -40,10 +40,10 @@ def didge_bore(mouth, lipF, lipD, f0):
   let u   = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp))   # Bernoulli flow
   let pplus = u * 0.8 + $pm             # outgoing wave: injected flow + reflection
   let p     = pplus + $pm               # pressure at the lips
-  $dp = lp1(mouth - p, 5000)
+  $dp = lp1(mouth - p, 840.34)
   let back = delay(pplus, 1.0 / f0, 0.05)
-  $pm = lp1(back, 2200) * 0.93          # reflected, in phase, lossy
-  back - lp1(back, 180)                 # what leaves the bell
+  $pm = lp1(back, 358.42) * 0.93          # reflected, in phase, lossy
+  back - lp1(back, 28.702)                 # what leaves the bell
 
 def formant(x, f, res):
   bpf(x, f, res) * (2 * (1 - res))      # unity gain at the peak

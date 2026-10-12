@@ -169,7 +169,7 @@ def tube24(src, noiz, place, deg, place2, deg2, p1, p2, p3, p4, p5, p6, p7, p8):
   let fw23 = (1 + k22) * $f22 - k22 * $b23 + n22
   let bw22 = k22 * $f22 + (1 - k22) * $b23
   let kL = (s23 - 25) / (s23 + 25)
-  let lipR = lp1($f23, 19580)                 # a true 4 kHz: lp1 takes a = cutoff/sr, not Hz
+  let lipR = lp1($f23, 4003.9)                 # the lips radiate up to ~4 kHz
   let bwL = kL * lipR
   let out = $f23 + bwL
   $f0 = clamp(g0 * 0.996, -50, 50)

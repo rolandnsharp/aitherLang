@@ -41,7 +41,7 @@ play far:
 play night:
   let wind = noise() |> lpf(350, 0.4)
   let chirp = (if phasor(28) < 0.5 then 1 else 0) * (if phasor(0.7) < 0.25 then 1 else 0)
-  let cricket = sin(TAU * phasor(4400)) * (chirp |> lp1(300))
+  let cricket = sin(TAU * phasor(4400)) * (chirp |> lp1(47.896))
   pan(wind * 0.03, 0.0) + pan(cricket * 0.015, 0.6)
 
 # Everything is bound with `let` before piping: piping straight out of a

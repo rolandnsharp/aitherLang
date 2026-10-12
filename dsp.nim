@@ -55,16 +55,22 @@ proc nWave*(s: var DspState; freq: float64;
   values[idx]
 
 # ---------------------------------------------------------------- 1-pole filters
+# The cutoff is in Hz: a = 1 - exp(-2 pi fc / sr) puts the -3 dB point at
+# fc (within 3% up to 4 kHz at 48 kHz). Until 2026-10-12 it was
+# a = cutoff / sr, so lp1(x, 4000) cut at 665 Hz; patches were converted.
+
+proc onePoleCoef(cutoff, sr: float64): float64 {.inline.} =
+  1.0 - exp(-TAU * max(cutoff, 0.0) / sr)
 
 proc nLp1*(s: var DspState; signal, cutoff: float64): float64 {.cdecl, exportc: "n_lp1".} =
   let i = s.claim()
-  let a = clamp(cutoff / s.sr, 0.0, 1.0)
+  let a = onePoleCoef(cutoff, s.sr)
   s.pool[i] += a * (signal - s.pool[i])
   s.pool[i]
 
 proc nHp1*(s: var DspState; signal, cutoff: float64): float64 {.cdecl, exportc: "n_hp1".} =
   let i = s.claim()
-  let a = clamp(cutoff / s.sr, 0.0, 1.0)
+  let a = onePoleCoef(cutoff, s.sr)
   s.pool[i] += a * (signal - s.pool[i])
   signal - s.pool[i]
 

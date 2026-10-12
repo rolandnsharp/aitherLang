@@ -47,10 +47,10 @@ def didge_bore(mouth, lipF, lipD, f0):
   let u   = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp))   # Bernoulli flow
   let pplus = u * 0.8 + $pm             # outgoing wave: injected flow + reflection
   let p     = pplus + $pm               # pressure at the lips
-  $dp = lp1(mouth - p, 5000)
+  $dp = lp1(mouth - p, 840.34)
   let back = delay(pplus, 1.0 / f0, 0.05)
-  $pm = lp1(back, 2200) * 0.93          # reflected, in phase, lossy
-  back - lp1(back, 180)                 # what leaves the bell
+  $pm = lp1(back, 358.42) * 0.93          # reflected, in phase, lossy
+  back - lp1(back, 28.702)                 # what leaves the bell
 
 # didge3: lips at the closed end of a tube that is open at the bell.
 # - Lips (outward-striking valve): a mass-spring at lipF, pressed shut at
@@ -72,26 +72,26 @@ def didge3(mouth, voiceP, lipF, f0, ft1, ft2, zt, modeAmt, turb):
   $lx = 0.0
   $lv = 0.0
   $u  = 0.0
-  let uS = lp1($u, 2500)
+  let uS = lp1($u, 408.62)
   let pT = lp1(sum(2, j =>
     let fj = if j == 1 then ft1 else ft2
     let zj = if j == 1 then 0.09 else 0.07
-    zt * 2 * zj * TAU * fj * dho_v(uS, fj, zj)), 3000)
+    zt * 2 * zj * TAU * fj * dho_v(uS, fj, zj)), 493.04)
   let wl = TAU * lipF
   $lv = clamp($lv + (-2 * 0.1 * wl * $lv - wl * wl * $lx + $dp * 0.6 * wl * wl) * dt, -3000, 3000)
   $lx = clamp($lx + $lv * dt, -2, 3)
   let a = clamp($lx - 0.4, 0.0, 1.0)
-  let br = lp1(lp1(noise(), 2800), 2800)
+  let br = lp1(lp1(noise(), 459.16), 459.16)
   $u  = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp)) * (1 + br * turb)
   let pM = sum(2, k =>
     let fk = f0 * (if k == 1 then 2.65 else 4.35)
     modeAmt * (if k == 1 then 4.0 else 2.5) * 2 * 0.05 * TAU * fk * dho_v(uS, fk, 0.05))
   let pplus = $u * 0.8 + $pm
   let p   = pplus + $pm + pM
-  $dp = clamp(lp1(mouth * (1 + voiceP) - pT - p, 5000), -4, 4)
+  $dp = clamp(lp1(mouth * (1 + voiceP) - pT - p, 840.34), -4, 4)
   let back = delay(pplus, 0.5 / f0, 0.05)
-  $pm = clamp(-lp1(back, 2200) * 0.93, -20, 20)
-  hp1(back, 2500) + hp1(pM, 150) * 0.08 * modeAmt
+  $pm = clamp(-lp1(back, 358.42) * 0.93, -20, 20)
+  hp1(back, 408.62) + hp1(pM, 23.911) * 0.08 * modeAmt
 
 # ------------------------------------------------------------------ clock
 $bpos = 0.0
@@ -312,7 +312,7 @@ def tube8(src, noiz, place, a1, a2, a3, a4, a5, a6, a7, a8, tlen):
   $b6 = clamp(k6 * fo6 + (1 - k6) * bo7, -4, 4)
   $f8 = clamp((1 + k7) * fo7 - k7 * bo8 + n7, -4, 4)
   $b7 = clamp(k7 * fo7 + (1 - k7) * bo8, -4, 4)
-  let lipR = lp1(fo8, 5000)
+  let lipR = lp1(fo8, 840.34)
   $b8 = clamp(-0.85 * lipR, -4, 4)
   let out = fo8 - 0.85 * lipR
   out - prev(out)
@@ -468,7 +468,7 @@ play sticks:
   (sA + sB * 0.85) * 0.85 |> lpf(7000, 0.2)
 
 play voice:
-  let turb = lp1(lp1(noise(), 4500), 4500)                 # turbulence: broadband, but falling above ~4 kHz
+  let turb = lp1(lp1(noise(), 752.03), 752.03)                 # turbulence: broadband, but falling above ~4 kHz
   let src  = folds * vAV + turb * (vAH * 0.12 + vBreath * vAV * flow * 0.5)
   let oral = tube8(src * vG, turb * vAF * 0.18, gP, max(0.02, a1v * c1), max(0.02, a2v * c2), max(0.02, a3v * c3), max(0.02, a4v * c4), max(0.02, a5v * c5), max(0.02, a6v * c6), max(0.02, a7v * c7), max(0.02, a8v * c8), vTract)
   let nose = kres(kres(src * gV, 280 / vTract, 90), 1100 / vTract, 250)
@@ -481,8 +481,8 @@ play voice:
 # 1/180 s draws the portrait, 1/4 a ring that every stick hit flashes
 # and opens out, blanked across the jumps. Every 64 s it unrolls into a
 # time trace (x a sweep at half the drone) and rolls back up.
-let dm     = lp1(lp1(mono(didge), 650), 650)             # the drone's first harmonics, no breath
-let dEnv   = lp1(abs(dm), 1.5)
+let dm     = lp1(lp1(mono(didge), 104.16), 104.16)             # the drone's first harmonics, no breath
+let dEnv   = lp1(abs(dm), 0.23874)
 let dn     = clamp(dm / (dEnv * 3.4 + 0.006), -1, 1)
 let dq     = delay(dn, 0.25 / 73.4, 0.05)
 let rot    = TAU * t / 41
@@ -529,7 +529,7 @@ let kz     = (0.35 + 0.65 * (zd + 0.8) / 1.6) * (0.75 + 0.6 * hitEnv)
 $v2start = t
 let v2     = ease((t - $v2start) / 3)
 let thc    = TAU * t / 47
-let pull   = 0.955 + 0.04 * lp1(dn, 40)
+let pull   = 0.955 + 0.04 * lp1(dn, 6.3689)
 let cr     = (cos(thc) / 2 - cos(2 * thc) / 4) * pull
 let ci     = (sin(thc) / 2 - sin(2 * thc) / 4) * pull
 let jph    = phasor(12000)

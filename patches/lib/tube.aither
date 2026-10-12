@@ -32,7 +32,7 @@ def tube24(src, noiz, place, deg, place2, deg2, p1, p2, p3, p4, p5, p6, p7, p8):
   let kG = (s[0] - 0.15) / (s[0] + 0.15)         # the glottal slit
   let g0 = src + kG * $b[0]
   let kL = (s[23] - 25) / (s[23] + 25)           # the open lips
-  let lipR = lp1($f[23], 19580)                  # a true 4 kHz: lp1 takes cutoff/sr
+  let lipR = lp1($f[23], 4003.9)                  # the lips radiate up to ~4 kHz
   let bwL = kL * lipR
   let out = $f[23] + bwL
   each(23, j =>

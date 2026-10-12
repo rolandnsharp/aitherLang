@@ -30,7 +30,7 @@ L.append('  $f1 = src + 0.97 * bo1')
 for i in range(1, N):
     L.append(f'  $f{i+1} = (1 + k{i}) * fo{i} - k{i} * bo{i+1} + n{i}')
     L.append(f'  $b{i} = k{i} * fo{i} + (1 - k{i}) * bo{i+1}')
-L.append('  let lipR = lp1(fo8, 5000)')
+L.append('  let lipR = lp1(fo8, 840.34)')
 L.append('  $b8 = -0.85 * lipR')
 L.append('  let out = fo8 - 0.85 * lipR')
 L.append('  out - prev(out)')

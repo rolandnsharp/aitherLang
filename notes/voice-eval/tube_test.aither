@@ -69,7 +69,7 @@ def tube8(src, noiz, place, a1, a2, a3, a4, a5, a6, a7, a8, tlen):
   $b6 = k6 * fo6 + (1 - k6) * bo7
   $f8 = (1 + k7) * fo7 - k7 * bo8 + n7
   $b7 = k7 * fo7 + (1 - k7) * bo8
-  let lipR = lp1(fo8, 5000)
+  let lipR = lp1(fo8, 840.34)
   $b8 = -0.85 * lipR
   let out = fo8 - 0.85 * lipR
   out - prev(out)

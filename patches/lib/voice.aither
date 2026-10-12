@@ -149,7 +149,7 @@ def sing(ph, vv, toEnd, rel, hz, wob, tense, breath, robot):
   let gD2    = slew(gDg2[ph], 0.015)
   let gP2    = slew(gPl2[ph], 0.01)
   # the vocal folds (or the robot's saw), wandering slowly as in Pink Trombone
-  let vWob   = lp1(lp1(noise(), 20), 20) * 1.5
+  let vWob   = lp1(lp1(noise(), 3.1838), 3.1838) * 1.5
   let gph    = phasor(hz * (1 + vWob * wob))
   let vTn    = clamp(tense + vWob * 2, 0, 1)
   let folds  = lfpulse(gph, vTn) * (1 - robot) + (gph * 2 - 1) * 0.5 * robot

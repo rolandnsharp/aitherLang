@@ -47,10 +47,10 @@ def didge_bore(mouth, lipF, lipD, f0):
   let u   = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp))   # Bernoulli flow
   let pplus = u * 0.8 + $pm             # outgoing wave: injected flow + reflection
   let p     = pplus + $pm               # pressure at the lips
-  $dp = lp1(mouth - p, 5000)
+  $dp = lp1(mouth - p, 840.34)
   let back = delay(pplus, 1.0 / f0, 0.05)
-  $pm = lp1(back, 2200) * 0.93          # reflected, in phase, lossy
-  back - lp1(back, 180)                 # what leaves the bell
+  $pm = lp1(back, 358.42) * 0.93          # reflected, in phase, lossy
+  back - lp1(back, 28.702)                 # what leaves the bell
 
 # didge3: lips at the closed end of a tube that is open at the bell.
 # - Lips (outward-striking valve): a mass-spring at lipF, pressed shut at
@@ -72,26 +72,26 @@ def didge3(mouth, voiceP, lipF, f0, ft1, ft2, zt, modeAmt, turb):
   $lx = 0.0
   $lv = 0.0
   $u  = 0.0
-  let uS = lp1($u, 2500)
+  let uS = lp1($u, 408.62)
   let pT = lp1(sum(2, j =>
     let fj = if j == 1 then ft1 else ft2
     let zj = if j == 1 then 0.09 else 0.07
-    zt * 2 * zj * TAU * fj * dho_v(uS, fj, zj)), 3000)
+    zt * 2 * zj * TAU * fj * dho_v(uS, fj, zj)), 493.04)
   let wl = TAU * lipF
   $lv = clamp($lv + (-2 * 0.1 * wl * $lv - wl * wl * $lx + $dp * 0.6 * wl * wl) * dt, -3000, 3000)
   $lx = clamp($lx + $lv * dt, -2, 3)
   let a = clamp($lx - 0.4, 0.0, 1.0)
-  let br = lp1(lp1(noise(), 2800), 2800)
+  let br = lp1(lp1(noise(), 459.16), 459.16)
   $u  = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp)) * (1 + br * turb)
   let pM = sum(2, k =>
     let fk = f0 * (if k == 1 then 2.65 else 4.35)
     modeAmt * (if k == 1 then 4.0 else 2.5) * 2 * 0.05 * TAU * fk * dho_v(uS, fk, 0.05))
   let pplus = $u * 0.8 + $pm
   let p   = pplus + $pm + pM
-  $dp = clamp(lp1(mouth * (1 + voiceP) - pT - p, 5000), -4, 4)
+  $dp = clamp(lp1(mouth * (1 + voiceP) - pT - p, 840.34), -4, 4)
   let back = delay(pplus, 0.5 / f0, 0.05)
-  $pm = clamp(-lp1(back, 2200) * 0.93, -20, 20)
-  hp1(back, 2500) + hp1(pM, 150) * 0.08 * modeAmt
+  $pm = clamp(-lp1(back, 358.42) * 0.93, -20, 20)
+  hp1(back, 408.62) + hp1(pM, 23.911) * 0.08 * modeAmt
 
 # ------------------------------------------------------------------ clock
 $bpos = 0.0
