@@ -2087,7 +2087,10 @@ proc emit*(c: Ctx; program: Node): string =
   var finalIdx = -1
   for i in countdown(program.kids.len - 1, 0):
     let s = program.kids[i]
-    if s.kind notin {nkDef, nkVar, nkLet, nkAssign, nkIdxAssign, nkPlay, nkImport}:
+    # `each(...)` is a statement (its value is 0), never the output: a
+    # top-level `each` must not silence a file of play blocks.
+    let isEach = s.kind == nkCall and s.str == "each"
+    if s.kind notin {nkDef, nkVar, nkLet, nkAssign, nkIdxAssign, nkPlay, nkImport} and not isEach:
       finalIdx = i; break
 
   for i, s in program.kids:

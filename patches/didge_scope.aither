@@ -96,31 +96,45 @@ def didge3(mouth, voiceP, lipF, f0, ft1, ft2, zt, modeAmt, turb):
   hp1(back, 2500) + hp1(pM, 150) * 0.08 * modeAmt
 
 # ------------------------------------------------------------------ clock
+# One clock for the whole set (docs/guides/RHYTHM_PHILOSOPHY.md): every
+# part's timing is a phase derived from $bpos, so a hot swap lands on the
+# beat.
 $bpos = 0.0
 $bpos = $bpos + 108 / 60 / 4 * dt
-let barPh  = $bpos mod 1
-let stepPh = (barPh * 16) mod 1
-let stepIx = int(barPh * 16)
-let sub    = stepIx mod 4
+let barPh  = $bpos mod 1                       # where in the bar
+let stepPh = (barPh * 16) mod 1                # where in the 16th
+let stepIx = int(barPh * 16)                   # which 16th
 let trig16 = if stepPh < prev(stepPh) then 1 else 0
-let bars   = floor($bpos)
-let hBar   = (sin(bars * 61.7) * 9123.77) mod 1
+let phrase = ($bpos / 4) mod 1                 # where in the 4-bar phrase
+let pBar   = int(phrase * 4)                   # which bar of it
 
-# A routine every 4 bars, never the same twice running.
-let blk   = floor(bars / 4)
-let rA    = int(((sin(blk * 17.13) * 43758.5453) mod 1) * 10)
-let rB    = int(((sin((blk - 1) * 17.13) * 43758.5453) mod 1) * 10)
-let rout  = if rA == rB then (rA + 3) mod 10 else rA
-let pKanga = [1, 0, 0, 0.8, 0, 0, 1, 0, 0.9, 0, 0, 0.8, 0, 0, 1, 0.5]
-let pEmu   = [1, 0, 0, 0, 0, 0, 0.7, 0, 1, 0, 0, 0, 0, 0, 0.7, 0]
-let pFrog  = [1, 0, 0.8, 0, 0, 0, 1, 0, 1, 0, 0.8, 0, 0, 0, 1, 0]
-let pHorse = [1, 0, 0.6, 0.8, 1, 0, 0.6, 0.8, 1, 0, 0.6, 0.8, 1, 0, 0.6, 0.8]
-let pTrain = [1, 0.4, 0.7, 0.4, 1, 0.4, 0.7, 0.4, 1, 0.4, 0.7, 0.4, 1, 0.5, 0.8, 0.5]
-let pRain  = [1, 0.6, 0.8, 0.6, 0.9, 0.6, 0.8, 0.7, 1, 0.6, 0.8, 0.6, 0.9, 0.7, 0.9, 0.8]
-let pSparse = [1, 0, 0, 0, 0, 0, 0, 0, 0.6, 0, 0, 0, 0, 0, 0, 0]
-let vPat  = if rout == 1 then pKanga[stepIx] else if rout == 2 then pEmu[stepIx] else if rout == 3 then pFrog[stepIx] else if rout == 4 then pHorse[stepIx] else if rout == 5 then pTrain[stepIx] else if rout == 6 then pRain[stepIx] else if rout == 0 then 0 else pSparse[stepIx]
-let vAcc  = vPat * (0.75 + 0.25 * (if ((stepIx + int(hBar * 4)) mod 4) == 0 then 1 else 0))
-let vStick = if rout == 6 then 0.35 + (if sub == 0 then 0.4 else 0) else if rout == 5 then (if (stepIx mod 2) == 0 then 0.6 else 0) else (if sub == 0 then 0.75 else if sub == 2 and hBar > 0.4 then 0.35 else 0)
+# The didge's routines, one per 4-bar phrase: a 40-bar phasor tours all
+# ten in an order that alternates busy and sparse, each melting into the
+# next over the phrase's last beat.
+#   0 drone with a fast wah   1 kangaroo hops, toots   2 emu, wah on the taps
+#   3 frog croaks             4 horse                  5 train, toots in bar 4
+#   6 rain                    7 dingo howl             8 kookaburra laugh
+#   9 toots
+let tour   = [1, 7, 4, 0, 5, 8, 3, 6, 9, 2]
+let tourK  = floor((($bpos / 40) mod 1) * 10)
+let rCur   = tour[tourK]
+let rNext  = tour[(tourK + 1) mod 10]
+let rMix   = ease((phrase - 0.9375) * 16)
+# How much of routine r is playing.
+def rw(r, cur, nxt, m): (if r == cur then 1 - m else 0) + (if r == nxt then m else 0)
+# Tongue taps on the 16 steps, one row per routine (7-9 share the sparse one).
+let pats   = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              1, 0, 0, 0.8, 0, 0, 1, 0, 0.9, 0, 0, 0.8, 0, 0, 1, 0.5,
+              1, 0, 0, 0, 0, 0, 0.7, 0, 1, 0, 0, 0, 0, 0, 0.7, 0,
+              1, 0, 0.8, 0, 0, 0, 1, 0, 1, 0, 0.8, 0, 0, 0, 1, 0,
+              1, 0, 0.6, 0.8, 1, 0, 0.6, 0.8, 1, 0, 0.6, 0.8, 1, 0, 0.6, 0.8,
+              1, 0.4, 0.7, 0.4, 1, 0.4, 0.7, 0.4, 1, 0.4, 0.7, 0.4, 1, 0.5, 0.8, 0.5,
+              1, 0.6, 0.8, 0.6, 0.9, 0.6, 0.8, 0.7, 1, 0.6, 0.8, 0.6, 0.9, 0.7, 0.9, 0.8,
+              1, 0, 0, 0, 0, 0, 0, 0, 0.6, 0, 0, 0, 0, 0, 0, 0,
+              1, 0, 0, 0, 0, 0, 0, 0, 0.6, 0, 0, 0, 0, 0, 0, 0,
+              1, 0, 0, 0, 0, 0, 0, 0, 0.6, 0, 0, 0, 0, 0, 0, 0]
+let vPat   = pats[rCur * 16 + stepIx] * (1 - rMix) + pats[rNext * 16 + stepIx] * rMix
+let vAcc   = vPat * (0.75 + 0.25 * (if ((stepIx + pBar) mod 4) == 0 then 1 else 0))   # the accent walks each bar
 
 # ---------------------------------------------------------- didge playing
 # Breath: a circular-breathing gulp every 5.6 s, and slow swells of the
@@ -130,15 +144,22 @@ let gulp  = ease((cycle - 0.93) * 20) * (1 - ease((cycle - 0.985) * 60))
 let swellB = (sin(TAU * t / 6.7) + 1) * 0.5 * (0.6 + 0.4 * (sin(TAU * t / 23) + 1) * 0.5)
 let vTap   = slew(discharge(trig16 * vAcc, 16), 0.004)
 let vStop  = slew(if vAcc > 0.6 and stepPh < 0.1 then 1 else 0, 0.002)
-let vToot  = slew((if rout == 1 and stepIx >= 14 and (bars mod 2) == 1 then 1 else 0) + (if rout == 5 and (bars mod 4) == 3 and (stepIx == 4 or stepIx == 5 or stepIx == 8 or stepIx == 9 or stepIx == 10) then 1 else 0) + (if rout == 9 and ((stepIx >= 4 and stepIx < 7) or (stepIx >= 12 and stepIx < 15)) then 1 else 0), 0.04)
+# Toots (the lips jump up a mode): kangaroo at the end of every 2nd bar,
+# train in its 4th bar, and the toot routine twice a bar.
+let tTrain = [0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0]
+let tNine  = [0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 0]
+let vToot  = slew(rw(1, rCur, rNext, rMix) * (if stepIx >= 14 and (pBar mod 2) == 1 then 1 else 0) + rw(5, rCur, rNext, rMix) * (if pBar == 3 then tTrain[stepIx] else 0) + rw(9, rCur, rNext, rMix) * tNine[stepIx], 0.04)
 # The tongue and jaw: vowels keep moving under every routine.
 let jaw    = (sin(TAU * t / 4.3) + 1) * 0.5 * 0.5 + (sin(TAU * t / 1.13) + 1) * 0.5 * 0.2
-let vWah   = clamp((if rout == 0 then (sin(TAU * t / 1.6) + 1) * 0.5 else if rout == 2 then slew(discharge(trig16 * vPat, 4), 0.02) else (sin(TAU * t / 3.1) + 1) * 0.3) * 0.7 + jaw * 0.5, 0, 1)
-let vHowl  = if rout == 7 then 280 + 200 * ease(((bars mod 4) + barPh) / 1.5) * (1 - 0.3 * ease(((bars mod 4) + barPh - 2.5) / 1.5)) else 0
-let vLaugh = if rout == 8 then (if stepIx < 12 then 1 else 0) * (if stepPh < 0.7 then 1 else 0) else 0
-let vCroak = if rout == 3 then discharge(trig16 * vPat, 20) else 0
-let vVoiceF = if rout == 7 then vHowl else if rout == 8 then (380 + (stepIx mod 2) * 90) * (1 + stepIx * 0.02) else 180
-let vVoiceA = slew(if rout == 7 then 0.2 else if rout == 8 then 0.19 * vLaugh else 0.3 * vCroak, 0.01)
+let wahTap = slew(discharge(trig16 * vPat, 4), 0.02)
+let vWah   = clamp((rw(0, rCur, rNext, rMix) * (sin(TAU * t / 1.6) + 1) * 0.5 + rw(2, rCur, rNext, rMix) * wahTap + (1 - rw(0, rCur, rNext, rMix) - rw(2, rCur, rNext, rMix)) * (sin(TAU * t / 3.1) + 1) * 0.3) * 0.7 + jaw * 0.5, 0, 1)
+# Voice into the didge: the dingo's howl glides up across the phrase, the
+# kookaburra laughs in 16ths, the frog croaks on its taps.
+let vHowl  = 280 + 200 * ease(phrase * 4 / 1.5) * (1 - 0.3 * ease((phrase * 4 - 2.5) / 1.5))
+let vLaugh = (if stepIx < 12 then 1 else 0) * (if stepPh < 0.7 then 1 else 0)
+let vCroak = rw(3, rCur, rNext, rMix) * discharge(trig16 * vPat, 20)
+let vVoiceF = rw(7, rCur, rNext, rMix) * vHowl + rw(8, rCur, rNext, rMix) * (380 + (stepIx mod 2) * 90) * (1 + stepIx * 0.02) + (1 - rw(7, rCur, rNext, rMix) - rw(8, rCur, rNext, rMix)) * 180
+let vVoiceA = slew(rw(7, rCur, rNext, rMix) * 0.2 + rw(8, rCur, rNext, rMix) * 0.19 * vLaugh + 0.3 * vCroak, 0.01)
 let vVoice  = pow(max(0, sin(TAU * phasor(vVoiceF * (1 + 0.012 * sin(TAU * phasor(5.5)))))), 3) * vVoiceA
 let press  = max(0.05, (0.8 + swellB * 0.3 + vTap * 0.3 + vToot * 0.25 - gulp * 0.4) * (1 - vStop * 0.3))
 
@@ -218,7 +239,7 @@ let lyrV = [
   5, 5, 5, 5, 5, 5, 1, 11, 10, 10, 2, 2, 2, 2, 2, 11, 11, 11, 11, 9, 9, 9, 9, 9, 1, 1, 1, 1, 1, 1, 1, 1, 1, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 8, 8, 10, 10, 4, 4, 4, 4, 4, 4, 4, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11
 ]
 
-let songBar = bars mod 32
+let songBar = floor($bpos mod 32)
 let li      = int(songBar / 4)
 let inLine  = if (songBar mod 4) < 3 then 1 else 0
 let tl      = ((songBar mod 4) + barPh) * (4 * 60 / 108)
