@@ -11,7 +11,7 @@ output.
 
 | Type     | Example                    |
 |----------|----------------------------|
-| float    | `440.0`, `0.5`, `-1.0`     |
+| float    | `440.0`, `0.5`, `-1.0`, `1e-3` |
 | function | `sin`, `saw`, `my_shape`   |
 | array    | `[220, 330, 440]`          |
 
@@ -78,7 +78,7 @@ Arithmetic (precedence high to low):
 | Operator       | Description              |
 |----------------|--------------------------|
 | `-x`, `not x`  | unary                    |
-| `*`, `/`, `mod`| multiplicative           |
+| `*`, `/`, `mod`, `%` | multiplicative     |
 | `+`, `-`       | additive                 |
 | `==`, `<`, `>`, `<=`, `>=`, `!=` | comparison |
 | `and`, `or`    | logical                  |
@@ -443,8 +443,9 @@ expression in parens if you need to split it.
 
 ## Program structure
 
-A file has four kinds of top-level declaration:
+A file has five kinds of top-level declaration:
 
+- `import "lib/voice.aither"` — splice a library file in (see Imports)
 - `def name(args): body` — helper function
 - `let name = expr` — file-level binding, visible in all plays
 - `$name = init` — file-level persistent state (declaration on first sight)
@@ -462,6 +463,24 @@ Files **must** end with an expression, not a declaration.
 The engine errors clearly if either rule is violated (no
 play block, no final expression, or an expression in a
 non-final position).
+
+## Imports
+
+```
+import "lib/voice.aither"
+```
+
+Splices the file's statements in at that point, so instruments
+live in a library and a patch is just the arrangement. The path is
+relative to the importing file. A library may hold `def`s, constant
+`let`s (a number or a table of numbers) and further imports; a
+`play`, `$state` or a sound belongs in the patch that imports it,
+and the compiler says so. A file imported twice is included once
+(cycles end there). A def in the patch overrides a library's of
+the same name. Imports are re-read on every `send`, and `aither
+watch patch.aither` sends again whenever the patch or any file it
+imports changes. Errors inside a library point at the library
+file and line.
 
 ## Scope rules
 

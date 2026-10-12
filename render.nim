@@ -11,8 +11,8 @@
 ## patch that processes the engine's audio input can be iterated on
 ## offline against the same material every time.
 
-import std/[os, streams, math, strutils]
-import parser, voice, dsp, engine_types
+import std/[os, streams, math, strutils, sets]
+import parser, voice, dsp, engine_types, imports
 
 const Stdlib = staticRead("stdlib.aither")
 
@@ -122,8 +122,14 @@ proc renderProgram(prog: Node; seconds: float64; sr: int;
 proc buildProgram(src, srcTag: string): Node =
   let stdAst = parseProgram(Stdlib)
   setSource(stdAst, "stdlib")
-  let userAst = parseProgram(src)
+  var userAst = parseProgram(src)
   setSource(userAst, srcTag)
+  # Imports resolve against the patch's directory (the current directory
+  # for inline source).
+  var files: seq[string]
+  var seen = initHashSet[string]()
+  let fromPath = if srcTag == "<inline>": "" else: srcTag
+  userAst = expandImports(userAst, fromPath, files, seen)
   Node(kind: nkBlock, kids: stdAst.kids & userAst.kids, line: 1)
 
 proc renderPatchSrc*(src: string; seconds: float64;

@@ -1,7 +1,7 @@
 ## aither engine — audio callback + socket CLI for live coding
 
-import std/[os, net, strutils, math, locks, tables]
-import parser, voice, miniaudio, midi, dsp, render
+import std/[os, net, strutils, math, locks, tables, sets]
+import parser, voice, miniaudio, midi, dsp, render, imports
 import engine_types, cli_output, analysis
 export engine_types
 
@@ -415,6 +415,7 @@ proc annotateErr(msg, userSrc, userPath: string): string =
         let body =
           if src == "stdlib": Stdlib
           elif src == userPath: userSrc
+          elif fileExists(src): (try: readFile(src) except IOError: "")
           else: ""
         if body.len > 0:
           let lines = body.split('\n')
@@ -450,6 +451,16 @@ proc loadPatch*(filename: string; fadeIn: float64): string =
   # stdlib (or in their invocation of a stdlib def).
   setSource(stdlibAst, "stdlib")
   setSource(userAst, filename)
+  # Splice `import "lib/x.aither"` files in (re-read on every send, so an
+  # edited library lands with the next send of the patch).
+  try:
+    var files: seq[string]
+    var seen = initHashSet[string]()
+    seen.incl(try: expandFilename(filename) except OSError: filename)
+    userAst = expandImports(userAst, filename, files, seen)
+  except ImportError as e:
+    stderr.writeLine "import FAIL"
+    return "import error: " & e.msg
 
   # Merge: stdlib's top-level statements come first, then the user's.
   let program = parser.Node(
@@ -537,14 +548,20 @@ proc tryPatch*(filename: string; seconds, skip: float64): string =
   var prepared: Prepared
   try:
     let stdlibAst = parseProgram(Stdlib)
-    let userAst = parseProgram(userSrc)
+    var userAst = parseProgram(userSrc)
     setSource(stdlibAst, "stdlib")
     setSource(userAst, filename)
+    var files: seq[string]
+    var seen = initHashSet[string]()
+    seen.incl(try: expandFilename(filename) except OSError: filename)
+    userAst = expandImports(userAst, filename, files, seen)
     let program = parser.Node(kind: parser.nkBlock,
                               kids: stdlibAst.kids & userAst.kids, line: 1)
     prepared = prepare(program, float64(SampleRate), filename)
   except ParseError as e:
     return "ERR parse error: " & e.msg
+  except ImportError as e:
+    return "ERR import error: " & e.msg
   except CatchableError as e:
     return "ERR compile error: " & annotateErr(e.msg, userSrc, filename)
   let scratch = newVoice(float64(SampleRate))

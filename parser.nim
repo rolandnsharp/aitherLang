@@ -4,7 +4,7 @@ import std/[strutils, sets]
 
 type
   TokKind* = enum
-    tkNum, tkIdent, tkStateIdent, tkKeyword, tkOp,
+    tkNum, tkIdent, tkStateIdent, tkKeyword, tkOp, tkStr,
     tkLParen, tkRParen, tkLBracket, tkRBracket,
     tkComma, tkColon, tkSemi, tkAssign, tkAugAssign,
     tkNewline, tkIndent, tkDedent, tkEof
@@ -18,7 +18,9 @@ type
   NodeKind* = enum
     nkNum, nkIdent, nkBinOp, nkUnary, nkCall, nkIf,
     nkVar, nkLet, nkDef, nkAssign, nkArr, nkIdx, nkIdxAssign, nkBlock,
-    nkPlay, nkLambda
+    nkPlay, nkLambda,
+    nkImport,                   # `import "lib/voice.aither"`; str = the path
+    nkStr                       # a string literal; str = its text
 
   Node* = ref object
     kind*: NodeKind
@@ -38,7 +40,7 @@ type
 # new code but loses the chance to redirect users running pre-sigil
 # patches with a clear message.
 const Keywords = ["var", "let", "def", "play", "if", "then", "else",
-                  "mod", "and", "or", "not"]
+                  "mod", "and", "or", "not", "import"]
 
 # ----------------------------------------------------------------- tokenizer
 
@@ -114,12 +116,28 @@ proc tokenize*(source: string): seq[Token] =
       var s = ""
       while i < n and (source[i].isDigit() or source[i] == '.'):
         s.add source[i]; i += 1; col += 1
+      # An exponent: `1e-3`, `2.5E6`. Only when digits follow, so
+      # `2e` stays a number and an identifier.
+      if i < n and source[i] in {'e', 'E'}:
+        var j = i + 1
+        if j < n and source[j] in {'+', '-'}: inc j
+        if j < n and source[j].isDigit():
+          while i < j: s.add source[i]; i += 1; col += 1
+          while i < n and source[i].isDigit():
+            s.add source[i]; i += 1; col += 1
       emit(tkNum, s, parseFloat(s))
     of '.':
       if i + 1 < n and source[i+1].isDigit():
         var s = ""
         while i < n and (source[i].isDigit() or source[i] == '.'):
           s.add source[i]; i += 1; col += 1
+        if i < n and source[i] in {'e', 'E'}:
+          var j = i + 1
+          if j < n and source[j] in {'+', '-'}: inc j
+          if j < n and source[j].isDigit():
+            while i < j: s.add source[i]; i += 1; col += 1
+            while i < n and source[i].isDigit():
+              s.add source[i]; i += 1; col += 1
         emit(tkNum, s, parseFloat(s))
       else:
         raise newException(ParseError, "unexpected '.' at " & $line & ":" & $col)
@@ -128,6 +146,20 @@ proc tokenize*(source: string): seq[Token] =
       while i < n and (source[i].isAlphaAscii() or source[i].isDigit() or source[i] == '_'):
         s.add source[i]; i += 1; col += 1
       if s in Keywords: emit(tkKeyword, s) else: emit(tkIdent, s)
+    of '"':
+      # A string literal: an import path, or text for a compile-time
+      # builtin. No escapes; it ends at the next `"` on the same line.
+      let startLine = line
+      let startCol = col
+      i += 1; col += 1
+      var s = ""
+      while i < n and source[i] != '"' and source[i] != '\n':
+        s.add source[i]; i += 1; col += 1
+      if i >= n or source[i] != '"':
+        raise newException(ParseError,
+          "unterminated string starting at " & $startLine & ":" & $startCol)
+      i += 1; col += 1
+      result.add Token(kind: tkStr, str: s, line: startLine, col: startCol)
     of '(':  emit(tkLParen); i += 1; col += 1; groupDepth += 1
     of ')':
       emit(tkRParen); i += 1; col += 1
@@ -194,6 +226,9 @@ proc tokenize*(source: string): seq[Token] =
         emit(tkAugAssign, c & "="); i += 2; col += 2
       else:
         emit(tkOp, $c); i += 1; col += 1
+    of '%':
+      # `%` is `mod` spelled the way most languages do.
+      emit(tkKeyword, "mod"); i += 1; col += 1
     else:
       raise newException(ParseError,
         "unexpected char '" & $c & "' at " & $line & ":" & $col)
@@ -217,6 +252,8 @@ type Parser = object
   # get, which is what users expect from "this state lives for the
   # whole patch."
   stateScopes: seq[HashSet[string]]
+  # How many def/play bodies we're inside: `import` is only legal at 0.
+  bodyDepth: int
 
 proc peek(p: Parser; off: int = 0): Token {.inline.} =
   if p.idx + off < p.toks.len: p.toks[p.idx + off]
@@ -430,6 +467,9 @@ proc parsePrimary(p: var Parser): Node =
   of tkNum:
     discard p.advance()
     return Node(kind: nkNum, num: t.num, line: t.line)
+  of tkStr:
+    discard p.advance()
+    return Node(kind: nkStr, str: t.str, line: t.line)
   of tkLParen:
     # Multi-arg lambda `(a, b, ...) => expr` competes with `(expr)` plain
     # grouping. Try the lambda parse first; on miss the helper restores
@@ -589,6 +629,8 @@ proc parseDef(p: var Parser): Node =
   # write `$prev_g = 0.0; $prev_g = gate` and only the first line gets
   # the slot-allocation treatment.
   pushStateScope(p)
+  inc p.bodyDepth
+  defer: dec p.bodyDepth
   var stmts: seq[Node]
   if p.peek().kind == tkNewline:
     discard p.advance()
@@ -620,6 +662,8 @@ proc parsePlay(p: var Parser): Node =
     mods.add p.advance().str
   discard p.expect(tkColon)
 
+  inc p.bodyDepth
+  defer: dec p.bodyDepth
   var stmts: seq[Node]
   if p.peek().kind == tkNewline:
     discard p.advance()
@@ -667,6 +711,12 @@ proc parseStmt(p: var Parser): Node =
     n = p.parseDef()
   elif t.kind == tkKeyword and t.str == "play":
     n = p.parsePlay()
+  elif t.kind == tkKeyword and t.str == "import":
+    if p.bodyDepth > 0:
+      p.fail("import belongs at the top of the file, not inside a def or play")
+    discard p.advance()
+    let path = p.expect(tkStr, "a quoted path after import").str
+    n = Node(kind: nkImport, str: path, line: t.line)
   else:
     let lhs = p.parseExpr()
     let nx = p.peek()

@@ -4,8 +4,8 @@
 ## socket (`send`, `stop`, `list`, ...), or runs offline analysis
 ## (`audit`). No business logic lives here.
 
-import std/[os, strutils]
-import engine, render, analysis, cli_output
+import std/[os, strutils, times, sequtils]
+import engine, render, analysis, cli_output, imports
 
 proc audit(path: string; secondsArg: float64; inputPath: string;
            skip: float64) =
@@ -36,13 +36,51 @@ proc audit(path: string; secondsArg: float64; inputPath: string;
   let parts = formatPartLevels(r.parts)
   if parts.len > 0: echo parts
 
+proc sendPatch(path, extra: string): bool =
+  ## `send`, then listen for a moment (AITHER_SEND_WAIT seconds, default
+  ## 1, 0 to skip) and report what actually happened: level, quiet parts,
+  ## rollback or guard trips, the master. The meter in the OK line alone
+  ## is read the instant the swap lands, before any new sound has played.
+  let resp = queryCmd("send " & absolutePath(path) & extra)
+  if not resp.startsWith("OK"):
+    echo resp
+    return false
+  echo "OK"
+  let wait = try: parseFloat(getEnv("AITHER_SEND_WAIT", "1")) except ValueError: 1.0
+  if wait > 0.0:
+    sleep(int(wait * 1000))
+    let check = queryCmd("check " & splitFile(path).name)
+    echo (if check.startsWith("OK\n"): check[3 .. ^1] else: check)
+  true
+
+proc watchPatch(path, extra: string) =
+  ## Send the patch, then send it again whenever it or a file it imports
+  ## changes on disk (checked five times a second). Ctrl-C stops.
+  proc stamps(): seq[(string, Time)] =
+    for f in importedFiles(path):
+      if fileExists(f): result.add (f, getLastModificationTime(f))
+  var last = stamps()
+  discard sendPatch(path, extra)
+  echo "watching " & path & (if last.len > 1: " and " & $(last.len - 1) & " imported file(s)" else: "")
+  while true:
+    sleep(200)
+    let now = stamps()
+    if now != last:
+      var changed: seq[string]
+      for (f, t) in now:
+        if (f, t) notin last: changed.add extractFilename(f)
+      last = now
+      echo "\n" & changed.join(", ") & " changed"
+      discard sendPatch(path, extra)
+
 let args = commandLineParams()
 if args.len == 0:
-  echo "usage: aither <start|send|stop|mute|unmute|solo|clear|list|" &
+  echo "usage: aither <start|send|watch|stop|mute|unmute|solo|clear|list|" &
        "scope|parts|check|retrigger|midi|audit|try|spectrum|kill> [args]"
   echo ""
   echo "  start                       launch engine"
   echo "  send <file> [fade]          load patch (instant or fade-in seconds)"
+  echo "  watch <file> [fade]         send, then send again whenever it or an imported file changes"
   echo "  stop <name> [fade]          fade out & remove voice"
   echo "  mute <voice> [play] [fade]  silence whole voice or one play block"
   echo "  unmute <voice> [play] [fade] resume voice or play block"
@@ -74,20 +112,11 @@ of "start":
 of "send":
   if args.len < 2: quit "usage: aither send <file> [fade]"
   let extra = if args.len >= 3: " " & args[2] else: ""
-  let resp = queryCmd("send " & absolutePath(args[1]) & extra)
-  # The meter in the OK line is read the instant the swap lands, before
-  # any new sound has played. Listen for a moment (AITHER_SEND_WAIT
-  # seconds, default 1, 0 to skip) and report what actually happened:
-  # level, quiet parts, rollback or guard trips, the master.
-  if not resp.startsWith("OK"):
-    echo resp
-    quit 1
-  echo "OK"
-  let wait = try: parseFloat(getEnv("AITHER_SEND_WAIT", "1")) except ValueError: 1.0
-  if wait > 0.0:
-    sleep(int(wait * 1000))
-    let check = queryCmd("check " & splitFile(args[1]).name)
-    echo (if check.startsWith("OK\n"): check[3 .. ^1] else: check)
+  if not sendPatch(args[1], extra): quit 1
+of "watch":
+  if args.len < 2: quit "usage: aither watch <file> [fade]"
+  let extra = if args.len >= 3: " " & args[2] else: ""
+  watchPatch(args[1], extra)
 of "stop":
   if args.len < 2: quit "usage: aither stop <name> [fade]"
   let extra = if args.len >= 3: " " & args[2] else: ""
