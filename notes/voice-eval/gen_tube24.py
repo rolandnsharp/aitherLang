@@ -7,13 +7,14 @@ per section."""
 N, K = 24, 8
 L = []
 args = ', '.join(f'p{i}' for i in range(1, K + 1))
-L.append(f'def tube24(src, noiz, place, deg, {args}):')
+L.append(f'def tube24(src, noiz, place, deg, place2, deg2, {args}):')
 L.append('  # place: where the constriction is (1 glottis .. 8 lips, in control-point units); deg: 0 open .. 1 closed')
+L.append('  # place2/deg2: a second articulator at the same time (lips rounding for r and w, ...)')
 for j in range(N):
     x = j * (K - 1) / (N - 1) + 1                    # control-point coordinate of section j
     lo = int(x); hi = min(K, lo + 1); fr = x - lo
     base = f'p{lo}' if fr < 1e-9 else f'(p{lo} * {1 - fr:.4f} + p{hi} * {fr:.4f})'
-    L.append(f'  let s{j} = max(0.02, {base} * (1 - deg * exp(-({x:.4f} - place) * ({x:.4f} - place) * 3)))')
+    L.append(f'  let s{j} = max(0.02, {base} * (1 - deg * exp(-({x:.4f} - place) * ({x:.4f} - place) * 3)) * (1 - deg2 * exp(-({x:.4f} - place2) * ({x:.4f} - place2) * 3)))')
 for j in range(N):
     L.append(f'  $f{j} = 0.0'); L.append(f'  $b{j} = 0.0')
 for j in range(N - 1):

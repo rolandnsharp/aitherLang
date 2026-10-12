@@ -171,7 +171,7 @@ let pF3 = [2500, 2929, 2641, 2586, 2530, 2434, 2436, 2432, 2373, 2520, 1705, 250
 let pAV = [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0.8, 0.25, 0.35, 0.35, 0.75, 0.9, 0.9, 0.9, 0, 0, 0, 0, 0, 0.25, 0.25, 0.25, 0.25, 0, 0, 0, 0.7, 0.7, 0.7, 0, 0.7, 0.15, 1, 1]
 let pAF = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.6, 0.6, 0.25, 0.2, 0.5, 0.3, 0.25, 0.5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 let pFN = [3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000, 6000, 3000, 4000, 5000, 6000, 4000, 5000, 3000, 1200, 4500, 2200, 1200, 4500, 2200, 3000, 3000, 3000, 3000, 3000]
-let pAH = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+let pAH = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 let pST = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 4, 0, 0, 0]
 # The words: syllables (phoneme:32nds @note above D3), 3 bars a line.
 #   Out here in the bush, under southern stars
@@ -241,32 +241,33 @@ let lyrV = [
   5, 5, 5, 5, 5, 5, 1, 11, 10, 10, 2, 2, 2, 2, 2, 11, 11, 11, 11, 9, 9, 9, 9, 9, 1, 1, 1, 1, 1, 1, 1, 1, 1, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 8, 8, 10, 10, 4, 4, 4, 4, 4, 4, 4, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11
 ]
 
-def tube24(src, noiz, place, deg, p1, p2, p3, p4, p5, p6, p7, p8):
+def tube24(src, noiz, place, deg, place2, deg2, p1, p2, p3, p4, p5, p6, p7, p8):
   # place: where the constriction is (1 glottis .. 8 lips, in control-point units); deg: 0 open .. 1 closed
-  let s0 = max(0.02, p1 * (1 - deg * exp(-(1.0000 - place) * (1.0000 - place) * 3)))
-  let s1 = max(0.02, (p1 * 0.6957 + p2 * 0.3043) * (1 - deg * exp(-(1.3043 - place) * (1.3043 - place) * 3)))
-  let s2 = max(0.02, (p1 * 0.3913 + p2 * 0.6087) * (1 - deg * exp(-(1.6087 - place) * (1.6087 - place) * 3)))
-  let s3 = max(0.02, (p1 * 0.0870 + p2 * 0.9130) * (1 - deg * exp(-(1.9130 - place) * (1.9130 - place) * 3)))
-  let s4 = max(0.02, (p2 * 0.7826 + p3 * 0.2174) * (1 - deg * exp(-(2.2174 - place) * (2.2174 - place) * 3)))
-  let s5 = max(0.02, (p2 * 0.4783 + p3 * 0.5217) * (1 - deg * exp(-(2.5217 - place) * (2.5217 - place) * 3)))
-  let s6 = max(0.02, (p2 * 0.1739 + p3 * 0.8261) * (1 - deg * exp(-(2.8261 - place) * (2.8261 - place) * 3)))
-  let s7 = max(0.02, (p3 * 0.8696 + p4 * 0.1304) * (1 - deg * exp(-(3.1304 - place) * (3.1304 - place) * 3)))
-  let s8 = max(0.02, (p3 * 0.5652 + p4 * 0.4348) * (1 - deg * exp(-(3.4348 - place) * (3.4348 - place) * 3)))
-  let s9 = max(0.02, (p3 * 0.2609 + p4 * 0.7391) * (1 - deg * exp(-(3.7391 - place) * (3.7391 - place) * 3)))
-  let s10 = max(0.02, (p4 * 0.9565 + p5 * 0.0435) * (1 - deg * exp(-(4.0435 - place) * (4.0435 - place) * 3)))
-  let s11 = max(0.02, (p4 * 0.6522 + p5 * 0.3478) * (1 - deg * exp(-(4.3478 - place) * (4.3478 - place) * 3)))
-  let s12 = max(0.02, (p4 * 0.3478 + p5 * 0.6522) * (1 - deg * exp(-(4.6522 - place) * (4.6522 - place) * 3)))
-  let s13 = max(0.02, (p4 * 0.0435 + p5 * 0.9565) * (1 - deg * exp(-(4.9565 - place) * (4.9565 - place) * 3)))
-  let s14 = max(0.02, (p5 * 0.7391 + p6 * 0.2609) * (1 - deg * exp(-(5.2609 - place) * (5.2609 - place) * 3)))
-  let s15 = max(0.02, (p5 * 0.4348 + p6 * 0.5652) * (1 - deg * exp(-(5.5652 - place) * (5.5652 - place) * 3)))
-  let s16 = max(0.02, (p5 * 0.1304 + p6 * 0.8696) * (1 - deg * exp(-(5.8696 - place) * (5.8696 - place) * 3)))
-  let s17 = max(0.02, (p6 * 0.8261 + p7 * 0.1739) * (1 - deg * exp(-(6.1739 - place) * (6.1739 - place) * 3)))
-  let s18 = max(0.02, (p6 * 0.5217 + p7 * 0.4783) * (1 - deg * exp(-(6.4783 - place) * (6.4783 - place) * 3)))
-  let s19 = max(0.02, (p6 * 0.2174 + p7 * 0.7826) * (1 - deg * exp(-(6.7826 - place) * (6.7826 - place) * 3)))
-  let s20 = max(0.02, (p7 * 0.9130 + p8 * 0.0870) * (1 - deg * exp(-(7.0870 - place) * (7.0870 - place) * 3)))
-  let s21 = max(0.02, (p7 * 0.6087 + p8 * 0.3913) * (1 - deg * exp(-(7.3913 - place) * (7.3913 - place) * 3)))
-  let s22 = max(0.02, (p7 * 0.3043 + p8 * 0.6957) * (1 - deg * exp(-(7.6957 - place) * (7.6957 - place) * 3)))
-  let s23 = max(0.02, p8 * (1 - deg * exp(-(8.0000 - place) * (8.0000 - place) * 3)))
+  # place2/deg2: a second articulator at the same time (lips rounding for r and w, ...)
+  let s0 = max(0.02, p1 * (1 - deg * exp(-(1.0000 - place) * (1.0000 - place) * 3)) * (1 - deg2 * exp(-(1.0000 - place2) * (1.0000 - place2) * 3)))
+  let s1 = max(0.02, (p1 * 0.6957 + p2 * 0.3043) * (1 - deg * exp(-(1.3043 - place) * (1.3043 - place) * 3)) * (1 - deg2 * exp(-(1.3043 - place2) * (1.3043 - place2) * 3)))
+  let s2 = max(0.02, (p1 * 0.3913 + p2 * 0.6087) * (1 - deg * exp(-(1.6087 - place) * (1.6087 - place) * 3)) * (1 - deg2 * exp(-(1.6087 - place2) * (1.6087 - place2) * 3)))
+  let s3 = max(0.02, (p1 * 0.0870 + p2 * 0.9130) * (1 - deg * exp(-(1.9130 - place) * (1.9130 - place) * 3)) * (1 - deg2 * exp(-(1.9130 - place2) * (1.9130 - place2) * 3)))
+  let s4 = max(0.02, (p2 * 0.7826 + p3 * 0.2174) * (1 - deg * exp(-(2.2174 - place) * (2.2174 - place) * 3)) * (1 - deg2 * exp(-(2.2174 - place2) * (2.2174 - place2) * 3)))
+  let s5 = max(0.02, (p2 * 0.4783 + p3 * 0.5217) * (1 - deg * exp(-(2.5217 - place) * (2.5217 - place) * 3)) * (1 - deg2 * exp(-(2.5217 - place2) * (2.5217 - place2) * 3)))
+  let s6 = max(0.02, (p2 * 0.1739 + p3 * 0.8261) * (1 - deg * exp(-(2.8261 - place) * (2.8261 - place) * 3)) * (1 - deg2 * exp(-(2.8261 - place2) * (2.8261 - place2) * 3)))
+  let s7 = max(0.02, (p3 * 0.8696 + p4 * 0.1304) * (1 - deg * exp(-(3.1304 - place) * (3.1304 - place) * 3)) * (1 - deg2 * exp(-(3.1304 - place2) * (3.1304 - place2) * 3)))
+  let s8 = max(0.02, (p3 * 0.5652 + p4 * 0.4348) * (1 - deg * exp(-(3.4348 - place) * (3.4348 - place) * 3)) * (1 - deg2 * exp(-(3.4348 - place2) * (3.4348 - place2) * 3)))
+  let s9 = max(0.02, (p3 * 0.2609 + p4 * 0.7391) * (1 - deg * exp(-(3.7391 - place) * (3.7391 - place) * 3)) * (1 - deg2 * exp(-(3.7391 - place2) * (3.7391 - place2) * 3)))
+  let s10 = max(0.02, (p4 * 0.9565 + p5 * 0.0435) * (1 - deg * exp(-(4.0435 - place) * (4.0435 - place) * 3)) * (1 - deg2 * exp(-(4.0435 - place2) * (4.0435 - place2) * 3)))
+  let s11 = max(0.02, (p4 * 0.6522 + p5 * 0.3478) * (1 - deg * exp(-(4.3478 - place) * (4.3478 - place) * 3)) * (1 - deg2 * exp(-(4.3478 - place2) * (4.3478 - place2) * 3)))
+  let s12 = max(0.02, (p4 * 0.3478 + p5 * 0.6522) * (1 - deg * exp(-(4.6522 - place) * (4.6522 - place) * 3)) * (1 - deg2 * exp(-(4.6522 - place2) * (4.6522 - place2) * 3)))
+  let s13 = max(0.02, (p4 * 0.0435 + p5 * 0.9565) * (1 - deg * exp(-(4.9565 - place) * (4.9565 - place) * 3)) * (1 - deg2 * exp(-(4.9565 - place2) * (4.9565 - place2) * 3)))
+  let s14 = max(0.02, (p5 * 0.7391 + p6 * 0.2609) * (1 - deg * exp(-(5.2609 - place) * (5.2609 - place) * 3)) * (1 - deg2 * exp(-(5.2609 - place2) * (5.2609 - place2) * 3)))
+  let s15 = max(0.02, (p5 * 0.4348 + p6 * 0.5652) * (1 - deg * exp(-(5.5652 - place) * (5.5652 - place) * 3)) * (1 - deg2 * exp(-(5.5652 - place2) * (5.5652 - place2) * 3)))
+  let s16 = max(0.02, (p5 * 0.1304 + p6 * 0.8696) * (1 - deg * exp(-(5.8696 - place) * (5.8696 - place) * 3)) * (1 - deg2 * exp(-(5.8696 - place2) * (5.8696 - place2) * 3)))
+  let s17 = max(0.02, (p6 * 0.8261 + p7 * 0.1739) * (1 - deg * exp(-(6.1739 - place) * (6.1739 - place) * 3)) * (1 - deg2 * exp(-(6.1739 - place2) * (6.1739 - place2) * 3)))
+  let s18 = max(0.02, (p6 * 0.5217 + p7 * 0.4783) * (1 - deg * exp(-(6.4783 - place) * (6.4783 - place) * 3)) * (1 - deg2 * exp(-(6.4783 - place2) * (6.4783 - place2) * 3)))
+  let s19 = max(0.02, (p6 * 0.2174 + p7 * 0.7826) * (1 - deg * exp(-(6.7826 - place) * (6.7826 - place) * 3)) * (1 - deg2 * exp(-(6.7826 - place2) * (6.7826 - place2) * 3)))
+  let s20 = max(0.02, (p7 * 0.9130 + p8 * 0.0870) * (1 - deg * exp(-(7.0870 - place) * (7.0870 - place) * 3)) * (1 - deg2 * exp(-(7.0870 - place2) * (7.0870 - place2) * 3)))
+  let s21 = max(0.02, (p7 * 0.6087 + p8 * 0.3913) * (1 - deg * exp(-(7.3913 - place) * (7.3913 - place) * 3)) * (1 - deg2 * exp(-(7.3913 - place2) * (7.3913 - place2) * 3)))
+  let s22 = max(0.02, (p7 * 0.3043 + p8 * 0.6957) * (1 - deg * exp(-(7.6957 - place) * (7.6957 - place) * 3)) * (1 - deg2 * exp(-(7.6957 - place2) * (7.6957 - place2) * 3)))
+  let s23 = max(0.02, p8 * (1 - deg * exp(-(8.0000 - place) * (8.0000 - place) * 3)) * (1 - deg2 * exp(-(8.0000 - place2) * (8.0000 - place2) * 3)))
   $f0 = 0.0
   $b0 = 0.0
   $f1 = 0.0
@@ -487,6 +488,8 @@ let ve8 = [2.92, 9, 8.43, 7.39, 9, 6.72, 4.34, 1.45, 0.37, 3.6, 1.23, 2.92, 2.92
 let vGain = [1.0, 0.89, 0.56, 0.89, 1.78, 1.0, 0.35, 0.16, 0.1, 0.4, 0.22, 0.32, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.89, 0.13]                 # per-vowel loudness, so open vowels lead
 let gPl = [5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 8, 7, 4.5, 6.5, 6, 8, 6, 5, 7, 6, 8, 7.5, 7, 8, 7.5, 6, 8, 7, 4.5, 8, 7, 4.5, 6, 6, 5, 5, 5]
 let gDg = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0.7, 0.65, 0.75, 0.8, 0, 0.94, 0.93, 0.92, 0.9, 0.94, 0.92, 0.9, 0.93, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0]
+let gPl2 = [8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 4.5, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8]
+let gDg2 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.45, 0.5, 0, 0, 0, 0.3, 0, 0, 0, 0, 0, 0.3, 0, 0, 0, 0, 0, 0, 0.3, 0.3, 0, 0, 0]                 # the second articulator: lips round for r/sh, tongue back for w
 let gVl = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
 # Klatt's resonator: unity gain at DC, a peak at f of width bw.
@@ -549,6 +552,8 @@ let gDT     = if stp >= 3 and rel > 0 then 0.93 else gDg[ph] * (if rel > 0 then 
 let gD      = slew(gDT, 0.012)
 let gP      = slew(if gDg[ph] > 0 then gPl[ph] else 5, 0.01)
 let gV      = slew(gVl[ph], 0.02)
+let gD2     = slew(gDg2[ph], 0.015)
+let gP2     = slew(gPl2[ph], 0.01)
 # the vocal folds (or the robot's saw)
 let fHz     = vHz * vRegister * (1 + (vVib - 1) * vVibD)
 let gph     = phasor(fHz)
@@ -610,7 +615,7 @@ play sticks:
 play voice:
   let turb = lp1(noise(), 31300)                           # turbulence: rolling off above ~8 kHz (lp1 takes a = cutoff/sr)
   let src  = folds * vAV + turb * (vAH * 0.02 + vBreath * vAV * flow * 0.1)
-  let oral = tube24(src * vG, turb * vAF * 0.006, gP, gD, a1v, a2v, a3v, a4v, a5v, a6v, a7v, a8v)
+  let oral = tube24(src * vG, turb * vAF * 0.006, gP, gD, gP2, gD2, a1v, a2v, a3v, a4v, a5v, a6v, a7v, a8v)
   let nose = kres(kres(src * gV, 280 / vTract, 90), 1100 / vTract, 250)
   ((oral + (nose - prev(nose)) * 0.15) * vOn * 2.0) |> hpf(150, 0.29) |> lpf(7000, 0.2)
 
