@@ -64,3 +64,16 @@ so every s/sh/f was a dull rumble heard as "h". Now `lp1(noise(), 31300)`
 (~8 kHz) with frication and aspiration scaled to natural levels (s/sh -4,
 f -18, t/p -6, k -8 dB re open vowels). WER: tube8 72% -> tube24 69% ->
 62%. vTract has no effect on tube24 yet (fixed one-sample sections).
+
+## Pink Trombone translation (2026-10-12)
+
+`gen_trombone.py` -> `trombone.aither`: Neil Thapen's Pink Trombone 1.1
+tract (MIT; original in third_party/), translated to aitherLang: 48
+sections (17.5 cm; PT uses 44 = 16 cm) run twice per sample, a 31-section
+nose through a 3-way velum junction, turbulence where the gesture makes a
+narrow-but-open channel (PT's thinness x openness), release transients.
+With our learned vowel shapes and no refit: F1 2%, F2 4%, F3 2% median
+(Praat now reads "oo" correctly too). `didge_scope_vP_trombone_singer.aither`
+adds PT's LF glottis (tenseness knob vTense) and glottal-cycle breath:
+82% -> 73% WER after fixing a noise-placement off-by-one (f was silent).
+Our tube24 singer is still ahead on Whisper (52%).
