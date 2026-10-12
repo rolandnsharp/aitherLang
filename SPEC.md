@@ -513,7 +513,14 @@ float64 pool (4 MB).
 `bpf(sig, cut, res)`, `notch(sig, cut, res)`.
 
 **Delays**: `delay(sig, time, max_time)`,
-`fbdelay(sig, time, max_time, fb)`.
+`fbdelay(sig, time, max_time, fb)`. `time` is in seconds and need
+not be a whole number of samples: the read point is interpolated
+linearly between the two nearest samples, so a tube, string or
+comb tunes to its length rather than to the sample grid. `delay`
+with `time` 0 is the current input; `fbdelay` starts at one sample
+(its feedback needs last sample's output). `max_time` must be a
+literal (it sizes the buffer) and the longest delay is one sample
+under it.
 
 **Reverb**: `reverb(sig, rt60, wet)` (Schroeder).
 
