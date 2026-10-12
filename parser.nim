@@ -461,6 +461,12 @@ proc tryParseParenLambda(p: var Parser): Node =
   discard p.advance()                           # `=>`
   p.parseLambdaBody(line, params)
 
+# `-` on a number is a negative number, so `[0, -0.5, 1]` is a table of
+# literals (wave, constant tables) and not an expression.
+proc negate(kid: Node; line: int): Node =
+  if kid.kind == nkNum: Node(kind: nkNum, num: -kid.num, line: line)
+  else: Node(kind: nkUnary, str: "-", kids: @[kid], line: line)
+
 proc parsePrimary(p: var Parser): Node =
   let t = p.peek()
   case t.kind
@@ -511,7 +517,7 @@ proc parsePrimary(p: var Parser): Node =
   of tkOp:
     if t.str == "-":
       discard p.advance()
-      return Node(kind: nkUnary, str: "-", kids: @[p.parsePrimary()], line: t.line)
+      return negate(p.parsePrimary(), t.line)
     p.fail("unexpected operator '" & t.str & "'")
   else:
     p.fail("unexpected token")
@@ -530,7 +536,7 @@ proc parseUnary(p: var Parser): Node =
   let t = p.peek()
   if t.kind == tkOp and t.str == "-":
     discard p.advance()
-    return Node(kind: nkUnary, str: "-", kids: @[p.parseUnary()], line: t.line)
+    return negate(p.parseUnary(), t.line)
   if t.kind == tkKeyword and t.str == "not":
     discard p.advance()
     return Node(kind: nkUnary, str: "not", kids: @[p.parseUnary()], line: t.line)

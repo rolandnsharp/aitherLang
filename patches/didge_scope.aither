@@ -267,9 +267,9 @@ let style  = (($bpos / 24) mod 1) * 6                           # 0..6 through t
 let sK     = floor(style)
 let sMix   = ease((style - sK - 0.75) * 4)                      # melt over the 4th bar
 let sNext  = (sK + 1) mod 6
-# One row of 16 per style: clave, euclid 7/16, gallop, train (driving 16ths),
+# One row of 16 per style: clave, euclid 7/16, gallop, train,
 # heartbeat, and triplets (silent here: the 12 grid below plays them).
-let sVel   = [1, 0, 0, 0.8, 0, 0, 0.9, 0, 0, 0, 0.8, 0, 1, 0, 0, 0,  0.85, 0, 0, 0.7, 0, 0.7, 0, 0.7, 0, 0, 0.7, 0, 0.85, 0, 0.7, 0,  1, 0, 0.5, 0.6, 0.9, 0, 0.5, 0.6, 1, 0, 0.5, 0.6, 0.9, 0, 0.6, 0.7,  0.9, 0.35, 0.6, 0.35, 0.8, 0.35, 0.6, 0.4, 0.9, 0.35, 0.6, 0.35, 0.8, 0.4, 0.7, 0.5,  1, 0, 0, 0.55, 0, 0, 0, 0, 0.8, 0, 0, 0.5, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+let sVel   = [1, 0, 0, 0.8, 0, 0, 0.9, 0, 0, 0, 0.8, 0, 1, 0, 0, 0,  0.85, 0, 0, 0.7, 0, 0.7, 0, 0.7, 0, 0, 0.7, 0, 0.85, 0, 0.7, 0,  1, 0, 0.5, 0.6, 0.9, 0, 0, 0, 1, 0, 0.5, 0.6, 0.9, 0, 0, 0,  0.9, 0, 0.6, 0.35, 0.8, 0, 0.6, 0, 0.9, 0, 0.6, 0.35, 0.8, 0, 0.7, 0,  1, 0, 0, 0.55, 0, 0, 0, 0, 0.8, 0, 0, 0.5, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 let ghostAt = [1, 0.3, 0.8, 0.5, 1, 0.2, 0.7, 0.45, 1, 0.35, 0.85, 0.55, 1, 0.25, 0.65, 0.4]   # the arc's level where each step starts to ghost
 let arc    = (sin(TAU * $bpos / 16) + 1) * 0.5
 let four   = ($bpos / 4) mod 1                                  # where in the 4-bar phrase
@@ -283,12 +283,12 @@ let tHit   = (if q8 >= h then q8 - h else q8) * d16 * 2         # seconds since 
 let hVel   = (sin(TAU * t * 5.37) * cos(TAU * t * 0.71) + 1) * 0.5
 let hPos   = (sin(TAU * t * 3.11 + 2 * sin(TAU * t * 0.29)) + 1) * 0.5
 let hPos2  = (sin(TAU * t * 4.63 + 1.7 * sin(TAU * t * 0.17)) + 1) * 0.5
-let ghost  = if ghostAt[i16] < arc * 0.65 then 0.13 + 0.08 * hPos else 0
+let ghost  = if ghostAt[i16] < arc * 0.35 then 0.13 + 0.08 * hPos else 0
 let vStyle = sVel[sK * 16 + i16] * (1 - sMix) + sVel[sNext * 16 + i16] * sMix
 let w12    = (if sK == 5 then 1 - sMix else 0) + (if sNext == 5 then sMix else 0)
 let v16    = max(vStyle, ghost * (1 - w12)) * (0.8 + 0.35 * hVel) * (1 - rollOn)
 let i12    = int(barPh * 12)
-let v12    = w12 * (if (i12 mod 2) == 0 then 0.6 else 0.22) * (0.85 + 0.3 * hPos) * (1 - rollOn)
+let v12    = w12 * (if (i12 mod 2) == 0 then 0.6 else if i12 == 11 then 0.3 else 0) * (0.85 + 0.3 * hPos) * (1 - rollOn)
 let vRoll  = rollOn * (0.15 + 0.65 * (four - 0.9375) * 16) * (0.85 + 0.3 * hPos2)
 let tFlam  = if four < 1 / 64 then (stepPh - 0.16) * d16 else -1
 play sticks:
