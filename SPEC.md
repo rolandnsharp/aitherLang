@@ -557,7 +557,7 @@ shapes via `osc(shape, freq)`.
 | Function      | Description                     |
 |---------------|---------------------------------|
 | `phasor(freq)`| ramp 0→1 at freq Hz, with state |
-| `noise()`     | white noise, stateless          |
+| `noise()`     | white noise; each call its own stream, the same every run |
 
 ### Compile-time fold
 

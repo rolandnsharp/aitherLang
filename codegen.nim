@@ -924,11 +924,14 @@ proc emitPhasor(c: Ctx; sc: Scope; freqNode: Node): string =
     "s->pool[" & slot & "]; }))"
 
 # noise() inlined: xorshift32 on a pool slot interpreted as uint32.
+# A fresh slot (0) seeds from its own slot number, so every call site
+# is its own stream, and the same one on every run.
 proc emitNoise(c: Ctx): string =
   let slot = c.fresh("nz")
   let off = c.registerRegion("noise", 1)
   "(({ long " & slot & " = " & off & "; " &
     "unsigned int r = (unsigned int)s->pool[" & slot & "]; " &
+    "if (r == 0) r = 2463534242u ^ ((unsigned int)" & slot & " * 2654435761u); " &
     "if (r == 0) r = 2463534242u; " &
     "r ^= r << 13; r ^= r >> 17; r ^= r << 5; " &
     "s->pool[" & slot & "] = (double)r; " &
