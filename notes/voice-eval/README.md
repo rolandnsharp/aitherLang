@@ -41,3 +41,16 @@ lowpassed turbulence injected at the constriction; per-vowel gains
 glitch spiked). WER path: 92% (noise too loud) -> 99% -> 73% (levels
 equalised) -> 72%. Vowels and rhythm come through; consonants don't yet.
 wer.py now normalises by RMS, not peak. The Klatt singer (30%) stays live.
+
+## tube24 (2026-10-12)
+
+24 sections, one sample each (17.5 cm at 48 kHz), shape from 8 control
+points (linear), gesture (place, deg) and frication built in; the glottis
+and lips are area junctions (a 0.15 cm^2 slit; 25 cm^2 of open air), waves
+clamped at +-50. Vowel shapes from `fit_tract24.py` (larynx end held to
+0.3-2.5 cm^2; a wide larynx broke the time-domain tube). Measured with a
+60 Hz voice (`tube24_test60.aither`): median F1 16% high, F2 3%, F3 3%;
+"hood" now right; "oo" (lips ~0.2 cm^2) still wrong and "er" F3 too high.
+Next: model lip radiation identically in the fit and the tube (the
+time-domain lip junction and the fit's piston load disagree at small
+openings), then recalibrate F1, then bring tube24 into the singer.
