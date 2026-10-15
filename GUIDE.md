@@ -226,6 +226,30 @@ be a parallel source of truth that drifts from the file.
 
 ## Live performance
 
+### Knobs from the uConsole's gamepad
+
+`tools/pad` (built with `make tools/pad`) turns the gamepad into eight
+MIDI knobs on a virtual ALSA port called `aither-pad`; the engine
+connects to it by itself when it is the only MIDI source (otherwise
+`./aither midi connect <client:port>`, the number the tool prints).
+Hold A, B, X or Y and press the d-pad: up/down moves that button's
+first knob, left/right its second. A press steps, holding sweeps,
+and a knob keeps its value when you let go. In a patch they are
+`midi_cc(20)` .. `midi_cc(27)`, each 0..1:
+
+| hold | up / down | left / right |
+|------|-----------|--------------|
+| A    | cc 20     | cc 21        |
+| B    | cc 22     | cc 23        |
+| X    | cc 24     | cc 25        |
+| Y    | cc 26     | cc 27        |
+
+`patches/pad_didge.aither` puts the set's didge on them (lip tension,
+breath, the mouth's two resonances, flare, turbulence, drive, bore
+length); `patches/morph.aither` morphs its body from tube to string to
+bell on A. While a button is held the d-pad is taken from the
+keyboard, so your cursor stays where it is.
+
 ### Multiple voices
 
 Each file is an independent voice. Load several:

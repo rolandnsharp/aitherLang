@@ -1,0 +1,82 @@
+# morph — the didge's lips into a body that changes shape while it sings.
+#
+# One pair of lips (didge3's outward-striking valve, pressed shut at rest
+# and blown open by the pressure drop) drives three bodies at once:
+#
+#   tube    the didge: open at the bell, the wave comes back inverted after
+#           half a period, so the odd harmonics stand (1, 3, 5...)
+#   string  a bridge that returns the wave in phase after a full period:
+#           every harmonic, bright (the first didge's "digital" bore)
+#   bell    six lightly damped modes at bell ratios (1, 2, 2.4, 3, 4, 5.33),
+#           pushed by the flow and ringing on
+#
+# All three run all the time, so their state survives the morph; `shape`
+# (0 tube, 1 string, 2 bell) blends what the lips feel coming back and
+# what leaves. The breath, the buzz and the phrasing stay one thing while
+# the instrument underneath becomes another. The lips always feel a
+# quarter of the tube (the mouthpiece), so the drone never stalls.
+
+def lips_into(mouth, lipF, f0, shape, bright):
+  $pm = 0.0                             # the wave arriving back at the lips
+  $dp = 0.0                             # pressure drop across the lips
+  $lx = 0.0
+  $lv = 0.0
+  $u  = 0.0
+  # the lips
+  let wl = TAU * lipF
+  $lv = clamp($lv + (-2 * 0.1 * wl * $lv - wl * wl * $lx + $dp * 0.6 * wl * wl) * dt, -3000, 3000)
+  $lx = clamp($lx + $lv * dt, -2, 3)
+  let a  = clamp($lx - 0.4, 0.0, 1.0)
+  let br = lp1(lp1(noise(), 459.16), 459.16)
+  $u = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp)) * (1 + br * 0.8)
+  let pplus = $u * 0.8 + $pm            # the wave leaving the lips
+  # tube
+  let tb      = delay(pplus, 0.5 / f0, 0.05)
+  let tubeR   = clamp(-lp1(tb, 358.42) * 0.93, -20, 20)
+  let tubeOut = hp1(tb, 408.62)
+  # string
+  let sb      = delay(pplus, 1.0 / f0, 0.05)
+  let strR    = clamp(lp1(sb, 358.42 + bright * 2500) * 0.95, -20, 20)
+  let strOut  = sb - lp1(sb, 28.702)
+  # bell
+  let buzz   = hp1(lp1($u, 3000), 500)   # the lip closures, not the breath: what rings a bell
+  let ratios = [1, 2.0, 2.4, 3.0, 4.0, 5.33]
+  let bellP  = sum(6, k =>
+    let fk = f0 * ratios[k - 1]
+    (if k == 1 then 4 else 2.5 / k) * 2 * 0.0015 * TAU * fk * dho_v(buzz * 300, fk, 0.0015))
+  let bellR  = clamp(bellP, -20, 20)
+  # the morph: hat weights over shape
+  let wT = max(0, 1 - abs(shape))
+  let wS = max(0, 1 - abs(shape - 1))
+  let wB = max(0, 1 - abs(shape - 2))
+  let p = pplus + $pm
+  $dp = clamp(lp1(mouth - p, 840.34), -4, 4)
+  $pm = tubeR * (0.25 + 0.75 * wT) + strR * wS + bellR * wB * 1.5
+  tubeOut * wT * 2 + strOut * wS * 0.32 + hp1(bellP, 23.911) * wB * 1.2
+
+# ---------------------------------------------------------------- the play
+# Knobs: the uConsole gamepad through tools/pad (hold a button, press the
+# d-pad; midi_cc is 0..1). Everything at 0 is the set's didge.
+#   A  up/down  shape: tube -> string -> bell     left/right  string brightness
+#   B  up/down  breath (mouth pressure)           left/right  lip tension
+#   X  up/down  vowel: first formant              left/right  second formant
+#   Y  up/down  drive                             left/right  breath noise in the mouth
+let shape  = midi_cc(20) * 2
+let bright = 0.5 + 0.5 * midi_cc(21)
+let mouth  = (0.9 + 0.3 * midi_cc(22)) + 0.08 * sin(TAU * phasor(0.19))
+let lipF   = 58.6 * (1 + 0.5 * midi_cc(23))
+let f1     = 320 * (1 + 1.5 * midi_cc(24))
+let f2     = 850 * (1 + 1.5 * midi_cc(25))
+let drv    = 1.4 + 3 * midi_cc(26)
+let hiss   = midi_cc(27)
+
+def formant(x, f, res):
+  bpf(x, f, res) * (2 * (1 - res))       # unity gain at the peak
+
+play drone:
+  let d = lips_into(mouth, lipF, 71.6, shape, bright) + bpf(noise(), f2, 0.6) * hiss * 0.2
+  let voiced = formant(d, f1, 0.93) + formant(d, f2, 0.94) * 0.7 + formant(d, 2300, 0.95) * 0.35
+  let out = ((voiced * 0.9 + d * 0.35) |> drive(drv)) |> hpf(55, 0.3) |> lpf(7000, 0.2)
+  out * 0.5
+
+drone

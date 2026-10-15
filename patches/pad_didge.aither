@@ -1,0 +1,59 @@
+# pad_didge — the set's didge (didge3, the physical one) alone, on the
+# uConsole's gamepad through tools/pad. Hold a button, press the d-pad.
+# Everything at zero is the set's didge; every knob is meant to be heard.
+#
+#   A  up/down  lip tension: the register (low drone .. toots)   left/right  breath
+#   B  up/down  the mouth: first tract resonance (the "wah")     left/right  second resonance
+#   X  up/down  the bell's flare (inharmonic modes)              left/right  breath turbulence
+#   Y  up/down  drive                                            left/right  how long the bore is (pitch)
+
+def formant(x, f, res):
+  bpf(x, f, res) * (2 * (1 - res))       # unity gain at the peak
+
+# didge3, as in didge_sticks: lips at the closed end of a tube open at
+# the bell, a player's tract loading them from upstream, two inharmonic
+# modes for the flare, the bell radiating the derivative.
+def didge3(mouth, voiceP, lipF, f0, ft1, ft2, zt, modeAmt, turb):
+  $pm = 0.0
+  $dp = 0.0
+  $lx = 0.0
+  $lv = 0.0
+  $u  = 0.0
+  let uS = lp1($u, 408.62)
+  let pT = lp1(sum(2, j =>
+    let fj = if j == 1 then ft1 else ft2
+    let zj = if j == 1 then 0.09 else 0.07
+    zt * 2 * zj * TAU * fj * dho_v(uS, fj, zj)), 493.04)
+  let wl = TAU * lipF
+  $lv = clamp($lv + (-2 * 0.1 * wl * $lv - wl * wl * $lx + $dp * 0.6 * wl * wl) * dt, -3000, 3000)
+  $lx = clamp($lx + $lv * dt, -2, 3)
+  let a = clamp($lx - 0.4, 0.0, 1.0)
+  let br = lp1(lp1(noise(), 459.16), 459.16)
+  $u  = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp)) * (1 + br * turb)
+  let pM = sum(2, k =>
+    let fk = f0 * (if k == 1 then 2.65 else 4.35)
+    modeAmt * (if k == 1 then 4.0 else 2.5) * 2 * 0.05 * TAU * fk * dho_v(uS, fk, 0.05))
+  let pplus = $u * 0.8 + $pm
+  let p   = pplus + $pm + pM
+  $dp = clamp(lp1(mouth * (1 + voiceP) - pT - p, 840.34), -4, 4)
+  let back = delay(pplus, 0.5 / f0, 0.05)
+  $pm = clamp(-lp1(back, 358.42) * 0.93, -20, 20)
+  hp1(back, 408.62) + hp1(pM, 23.911) * 0.08 * modeAmt
+
+# the knobs (midi_cc is 0..1)
+let lipF  = 58.6 * (1 + 1.2 * midi_cc(20))        # 58 .. 129 Hz: drone to toot
+let press = 1.6 * (0.75 + 0.6 * midi_cc(21))      # breath: soft .. hard
+let ft1   = 300 + 480 * midi_cc(22)               # the wah, as the set's vWah
+let ft2   = 950 + 1500 * midi_cc(23)
+let flare = 0.4 + 1.6 * midi_cc(24)               # the modes: 0.4 .. 2
+let turb  = 0.8 + 1.5 * midi_cc(25)
+let drv   = 1.4 + 3 * midi_cc(26)
+let f0    = 71.6 * (1 - 0.4 * midi_cc(27))        # the bore: 71.6 Hz .. a long 43 Hz
+
+play didge:
+  let d = didge3(press, 0, lipF, f0, ft1, ft2, 1.5, flare, turb)
+  let tract = formant(d, 320 + 420 * midi_cc(22), 0.93) + formant(d, 850 + 350 * midi_cc(22), 0.94) * 0.7 + formant(d, 2300, 0.95) * 0.35
+  let out = ((tract * 0.9 + d * 0.35) |> drive(drv)) |> hpf(55, 0.3) |> lpf(7000, 0.2)
+  out * 0.6
+
+didge

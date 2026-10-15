@@ -11,6 +11,9 @@ aither: aither.nim engine.nim engine_types.nim cli_output.nim analysis.nim rende
 tools/play: tools/play.c
 	cc -O2 tools/play.c -o tools/play -lasound
 
+tools/pad: tools/pad.c
+	cc -O2 tools/pad.c -o tools/pad -lasound
+
 # One binary for every test that doesn't touch the engine's voice
 # table (tests/all.nim), then the four that do, each on its own.
 TESTFLAGS := --mm:arc --threads:on --hints:off --warnings:off \
