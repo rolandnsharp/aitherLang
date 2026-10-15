@@ -39,6 +39,13 @@ type
     # added to one play or let can't shift the state of any other.
     scope*: string
     scopeIdx*: int
+    # Which def the call sits in (the chain of inlined defs, `didge3>formant`;
+    # "" at file level), and for `$state` the state's name (`bar/$bv`).
+    # Part of both migration keys, so replacing one physical model by
+    # another of the same shape (`stick` with $x/$dx x3 -> `bar` with
+    # $bv/$bx x3) starts the new one clean instead of feeding it the old
+    # one's displacement (2026-10-11: +24 dBFS).
+    owner*: string
     offset*: int            # absolute start offset into pool (in slots)
     size*: int              # number of float64 slots
     # Optional payload written into the first `init.len` slots when the
@@ -69,6 +76,12 @@ type
     # (parent scopes inherit top-level arrays via the topArrays fallback
     # used only if we bottom out here).
     arrays: Table[string, tuple[sym: string; length: int]]
+    # name -> (C expression of the region's first slot, length). State
+    # arrays declared in this scope with `$f = array(N)`.
+    sarrays: Table[string, tuple[base: string; n: int]]
+    # name -> (C array symbol, length). Per-sample local arrays:
+    # `let a = [p, q, r]` with runtime values, or `let a = array(N)`.
+    larrays: Table[string, tuple[sym: string; n: int]]
     # name -> compile-time numeric literal value. Populated alongside the
     # usual `names` binding whenever a def-param or let is initialised
     # from an nkNum. Consumed by builtins that need compile-time-constant
@@ -102,7 +115,8 @@ type
     typeCumSize: Table[string, int]     # name -> cumulative size so far
     typeOrder: seq[string]              # types in first-seen order
     scope: string                       # statement being emitted (Region.scope)
-    scopeCounter: Table[string, int]    # scope & type -> next scopeIdx
+    scopeCounter: Table[string, int]    # scope & type & owner -> next scopeIdx
+    defStack: seq[string]               # defs being inlined (Region.owner)
     # File-level state declared with a pair (`$z = [0, 0]`). Each one is
     # two struct fields, `v_<name>__0` and `v_<name>__1`, listed in
     # topVarNames so they migrate across hot reloads by name like any
@@ -113,6 +127,18 @@ type
     varDecls: seq[Node]
     # def name -> which params its body reads as a pair (see pairParams).
     pairParamCache: Table[string, seq[bool]]
+    # File-level state arrays (`$f = array(N)` at top level or in a play)
+    # and file-level local arrays (`let a = [p, q, r]`), by name. The
+    # state array's slots live in the pool; `base` is its offset
+    # placeholder, so any later statement can read or store elements.
+    topSarrays: Table[string, tuple[base: string; n: int]]
+    topLarrays: Table[string, tuple[sym: string; n: int]]
+    topSarrayNames: HashSet[string]
+    # Inside `each(N, i => ...)`: element stores to state arrays are held
+    # here (as C statements) and committed when the each ends, so every
+    # body reads the array as it was before the step.
+    eachDepth: int
+    deferred: string
 
 # Native dsp.nim primitives callable from generated C.
 # Name -> arity (not counting the state pointer).
@@ -148,7 +174,9 @@ proc offsetPlaceholder(rid: int): string =
 # in the emitted C — substituted with the absolute pool offset after
 # the walk, once per-type bases are known.
 proc registerRegionInit(c: Ctx; typeName: string; size: int;
-                        init: seq[float64] = @[]): string =
+                        init: seq[float64] = @[]; stateName = ""): string =
+  var owner = c.defStack.join(">")
+  if stateName.len > 0: owner.add "/$" & stateName
   if typeName notin c.typeCounter:
     c.typeCounter[typeName] = 0
     c.typeCumSize[typeName] = 0
@@ -158,13 +186,13 @@ proc registerRegionInit(c: Ctx; typeName: string; size: int;
   c.typeCounter[typeName] = perTypeIdx + 1
   c.typeCumSize[typeName] = intraOffset + size
   let rid = c.regions.len
-  let scopeKey = c.scope & " | " & typeName
+  let scopeKey = c.scope & " | " & typeName & " | " & owner
   let scopeIdx = c.scopeCounter.getOrDefault(scopeKey, 0)
   c.scopeCounter[scopeKey] = scopeIdx + 1
   # `offset` holds the intra-region offset here; `finaliseLayout` rewrites
   # it to an absolute pool slot once region bases are assigned.
   c.regions.add Region(typeName: typeName, perTypeIdx: perTypeIdx,
-                       scope: c.scope, scopeIdx: scopeIdx,
+                       scope: c.scope, scopeIdx: scopeIdx, owner: owner,
                        offset: intraOffset, size: size, init: init)
   offsetPlaceholder(rid)
 
@@ -182,6 +210,8 @@ proc push(parent: Scope): Scope =
         lambdas: initTable[string, Node](),
         stereoNames: initTable[string, tuple[l, r: string]](),
         arrays: initTable[string, tuple[sym: string; length: int]](),
+        sarrays: initTable[string, tuple[base: string; n: int]](),
+        larrays: initTable[string, tuple[sym: string; n: int]](),
         numLits: initTable[string, float64]())
 
 proc lookupNumLit(sc: Scope; name: string): tuple[val: float64; ok: bool] =
@@ -203,6 +233,37 @@ proc lookupArray(c: Ctx; sc: Scope; name: string):
     let (sym, length) = c.topArrays[name]
     return (sym, length, true)
   ("", 0, false)
+
+proc lookupSarray(c: Ctx; sc: Scope; name: string):
+    tuple[base: string; n: int; ok: bool] =
+  var s = sc
+  while s != nil:
+    if name in s.sarrays:
+      let a = s.sarrays[name]
+      return (a.base, a.n, true)
+    s = s.parent
+  if name in c.topSarrays:
+    let a = c.topSarrays[name]
+    return (a.base, a.n, true)
+  ("", 0, false)
+
+proc lookupLarray(c: Ctx; sc: Scope; name: string):
+    tuple[sym: string; n: int; ok: bool] =
+  var s = sc
+  while s != nil:
+    if name in s.larrays:
+      let a = s.larrays[name]
+      return (a.sym, a.n, true)
+    s = s.parent
+  if name in c.topLarrays:
+    let a = c.topLarrays[name]
+    return (a.sym, a.n, true)
+  ("", 0, false)
+
+# `array(N)` / `array(N, init)`: the right side of a state or local
+# array declaration.
+proc isArrayMake(n: Node): bool =
+  n != nil and n.kind == nkCall and n.str == "array" and n.kids.len in {1, 2}
 
 proc lookupStereo(sc: Scope; name: string): tuple[l, r: string, ok: bool] =
   var s = sc
@@ -295,18 +356,19 @@ const PairReaders = ["magnitude", "phase"]
 # (whose own state slots are claimed per call site).
 const TransparentHelpers = ["lpf", "hpf", "bpf", "lp1", "hp1",
                             "drive", "fold",
-                            "delay", "fbdelay",
+                            "delay", "fbdelay", "reverb",
                             "slew", "discharge",
                             "pluck", "swell", "adsr",
                             "gain", "prev", "tremolo"]
 
-# Stereo-returning defs that semantically REQUIRE mono input — pan and
-# haas take a mono signal and widen it. Calling them with stereo input
-# would otherwise descend into the body and surface a misleading
-# "unknown identifier: signal" because emitStereo's nkArr branch
-# emits each component via emitExpr (scalar), which can't resolve a
-# stereo-bound param. Diagnose at the call site instead.
-const MonoOnlyInputDefs = ["pan", "haas"]
+# Stereo-returning defs that semantically REQUIRE mono input — pan takes
+# a mono signal and places it. Calling it with stereo input would
+# otherwise descend into the body and surface a misleading "unknown
+# identifier: signal" because emitStereo's nkArr branch emits each
+# component via emitExpr (scalar), which can't resolve a stereo-bound
+# param. Diagnose at the call site instead. (haas takes a pair now: it
+# delays one side of whatever it is given.)
+const MonoOnlyInputDefs = ["pan"]
 
 # True when `name` resolves to a value (scalar local, stereo local, top
 # lets/vars/arrays, play block, stereo let). Values shadow function
@@ -315,6 +377,7 @@ proc isValueName(c: Ctx; sc: Scope; name: string): bool =
   if sc.lookup(name).len > 0: return true
   if sc.lookupStereo(name).ok: return true
   if c.lookupArray(sc, name).ok: return true
+  if c.lookupSarray(sc, name).ok or c.lookupLarray(sc, name).ok: return true
   if name in c.topLets: return true
   if name in c.topVarSet: return true
   if name in c.pairVars: return true
@@ -403,6 +466,11 @@ proc numLit(v: float64): string =
 proc emitExpr(c: Ctx; sc: Scope; n: Node): string
 proc emitBlockExpr(c: Ctx; sc: Scope; blk: Node): string
 proc refsStereo(c: Ctx; sc: Scope; n: Node): bool
+proc emitIdxAssign(c: Ctx; sc: Scope; st: Node): string
+proc declareStateArray(c: Ctx; sc: Scope; st: Node; pre: var string;
+                       topLevel = false)
+proc declareLocalArray(c: Ctx; sc: Scope; name: string; rhs: Node;
+                       pre: var string; topLevel = false)
 
 # Stereo-aware emission. Returns (l, r, stereo) where stereo=false means
 # l == r (the caller may collapse to a single emit). `pre` accumulates
@@ -447,7 +515,7 @@ proc isPureForStereo(c: Ctx; n: Node): bool =
     # body contains stateful primitives, duplicating the whole sum() for
     # both channels would claim twice the pool slots and desync L/R
     # state. Treat sum() as stateful for stereo-inlining purposes.
-    if n.str == "sum": return false
+    if n.str in ["sum", "each", "array"]: return false
     if n.str in ["phasor", "phasor_pair", "noise", "midi_trig"]: return false
     if NativeArities.hasKey(n.str): return false
     if n.str in c.userDefs:
@@ -544,10 +612,13 @@ proc emitDefInline(c: Ctx; sc: Scope; def: Node; call: Node): string =
       let v = sc.lookupNumLit(a.str)
       if v.ok: inner.numLits[p] = v.val
   # def.kids[0] is the body (single expression or nkBlock of stmts).
+  # The def's name owns every state region its body claims.
   let body = def.kids[0]
+  c.defStack.add def.str
   let bodyC =
     if body.kind == nkBlock: c.emitBlockExpr(inner, body)
     else: c.emitExpr(inner, body)
+  discard c.defStack.pop()
   "(({ " & preface & "double __r = (" & bodyC & "); __r; }))"
 
 # Evaluate `n` where one number is needed. An expression that mentions
@@ -621,7 +692,109 @@ proc assignPairSide(c: Ctx; sc: Scope; st: Node): string =
     "only one side of pair state can be assigned by index " &
     "($z[0] = ... or $z[1] = ...) " & errLoc(st))
 
-# One non-final statement of a def, lambda or stereo-def body: `let`,
+# The size of `array(N, init)`: N must be a compile-time integer.
+proc arrayMakeSize(c: Ctx; sc: Scope; call: Node): int =
+  let nArg = call.kids[0]
+  var nVal = 0.0
+  if nArg.kind == nkNum: nVal = nArg.num
+  elif nArg.kind == nkIdent and sc.lookupNumLit(nArg.str).ok:
+    nVal = sc.lookupNumLit(nArg.str).val
+  else:
+    raise newException(ValueError,
+      "array: the size must be a compile-time integer " & errLoc(nArg))
+  let n = int(nVal)
+  if float64(n) != nVal or n < 1 or n > 1_000_000:
+    raise newException(ValueError,
+      "array: the size must be a whole number from 1 to 1000000, got " &
+      $nVal & " " & errLoc(nArg))
+  n
+
+# `$f = array(N, init)`: a state array. One "sarr" region of 1 + N pool
+# slots: an inited flag, then the elements. On the first sample every
+# element is set to `init` (0 when omitted); after that the slots keep
+# their values across samples and hot reloads (same name, def and
+# size). Elements are read with `$f[i]` and stored with `$f[i] = v`;
+# see `each` for the simultaneous step.
+proc declareStateArray(c: Ctx; sc: Scope; st: Node; pre: var string;
+                       topLevel = false) =
+  let call = st.kids[0]
+  let n = c.arrayMakeSize(sc, call)
+  let off = c.registerRegionInit("sarr", 1 + n, stateName = st.str)
+  var initPre = ""
+  let initC =
+    if call.kids.len == 2: c.scalarValue(sc, call.kids[1], initPre, "$" & st.str)
+    else: "0.0"
+  if topLevel:
+    # Readable from every later statement through its offset placeholder.
+    c.topSarrays[st.str] = (off, n)
+  else:
+    let base = c.fresh("sa")
+    pre.add &"  long {base} = {off};\n"
+    sc.sarrays[st.str] = (base, n)
+  let base = if topLevel: off else: sc.sarrays[st.str].base
+  pre.add &"  if (s->pool[{base}] == 0.0) {{\n" & initPre &
+          &"    double _v = ({initC});\n" &
+          &"    for (long _k = 0; _k < {n}; ++_k) s->pool[{base} + 1 + _k] = _v;\n" &
+          &"    s->pool[{base}] = 1.0;\n  }}\n"
+
+# `let a = [e1, ..., eN]` with runtime values, or `let a = array(N, init)`:
+# a per-sample local array, a plain C array of this sample's numbers.
+proc declareLocalArray(c: Ctx; sc: Scope; name: string; rhs: Node;
+                       pre: var string; topLevel = false) =
+  let sym = c.fresh("la_" & name)
+  if rhs.kind == nkArr:
+    pre.add &"  double {sym}[{rhs.kids.len}];\n"
+    for k, e in rhs.kids:
+      let v = c.scalarValue(sc, e, pre, name & "[" & $k & "]")
+      pre.add &"  {sym}[{k}] = ({v});\n"
+    if topLevel: c.topLarrays[name] = (sym, rhs.kids.len)
+    else: sc.larrays[name] = (sym, rhs.kids.len)
+  else:
+    let n = c.arrayMakeSize(sc, rhs)
+    let initC =
+      if rhs.kids.len == 2: c.scalarValue(sc, rhs.kids[1], pre, name)
+      else: "0.0"
+    pre.add &"  double {sym}[{n}];\n" &
+            &"  {{ double _v = ({initC}); " &
+            &"for (long _k = 0; _k < {n}; ++_k) {sym}[_k] = _v; }}\n"
+    if topLevel: c.topLarrays[name] = (sym, n)
+    else: sc.larrays[name] = (sym, n)
+
+# `name[i] = v`: an element store. A state array inside `each` takes the
+# store at the end of the step (see each); elsewhere it lands at once. A
+# local array cycles its index like a read does. Anything else is a pair
+# side (`$z[0] = ...`).
+proc emitIdxAssign(c: Ctx; sc: Scope; st: Node): string =
+  let base = st.kids[0]
+  if base.kind == nkIdent:
+    let sa = c.lookupSarray(sc, base.str)
+    if sa.ok:
+      var pre = ""
+      let ix = c.emitExpr(sc, st.kids[1])
+      let v = c.scalarValue(sc, st.kids[2], pre, "$" & base.str & "[i]")
+      let it = c.fresh("ai")
+      let vt = c.fresh("av")
+      pre.add &"  long {it} = (long)({ix}); double {vt} = ({v});\n"
+      let store = &"  if ({it} >= 0 && {it} < {sa.n}) " &
+                  &"s->pool[{sa.base} + 1 + {it}] = {vt};\n"
+      if c.eachDepth > 0:
+        c.deferred.add store
+        return pre
+      return pre & store
+    let la = c.lookupLarray(sc, base.str)
+    if la.ok:
+      var pre = ""
+      let ix = c.emitExpr(sc, st.kids[1])
+      let v = c.scalarValue(sc, st.kids[2], pre, base.str & "[i]")
+      return pre & &"  {{ long _i = (long)({ix}) % {la.n}; " &
+             &"{la.sym}[_i < 0 ? _i + {la.n} : _i] = ({v}); }}\n"
+    if c.lookupArray(sc, base.str).ok:
+      raise newException(ValueError,
+        base.str & " is a constant table; to change elements declare it " &
+        "with runtime values or array(N) " & errLoc(st))
+  c.assignPairSide(sc, st)
+
+# One non-final statement of a def, lambda or stereo-def body: `let`, a
 # a `$state` declaration or assignment, `$z[k] = ...`, or a bare
 # expression run for its side effects. Appends C statements to `pre`.
 proc emitLocalStmt(c: Ctx; sc: Scope; st: Node; pre: var string) =
@@ -633,7 +806,10 @@ proc emitLocalStmt(c: Ctx; sc: Scope; st: Node; pre: var string) =
     # Without this, a def body forced the parenthesised `if/else`
     # cascade for any constant-table lookup. Two numbers are also a
     # pair value (`let c = [0.3, 0.1]; cmul(z, c)`).
-    if rhs.kind == nkArr and rhs.kids.len > 0 and
+    if (rhs.kind == nkArr and rhs.kids.len != 2 and rhs.kids.len > 0 and
+        not rhs.kids.allIt(it.kind == nkNum)) or isArrayMake(rhs):
+      c.declareLocalArray(sc, st.str, rhs, pre)
+    elif rhs.kind == nkArr and rhs.kids.len > 0 and
        rhs.kids.allIt(it.kind == nkNum):
       let sym = c.fresh("arr_def_" & st.str)
       var items: seq[string] = @[]
@@ -669,12 +845,14 @@ proc emitLocalStmt(c: Ctx; sc: Scope; st: Node; pre: var string) =
         let nv = sc.lookupNumLit(rhs.str)
         if nv.ok: sc.numLits[st.str] = nv.val
   of nkVar:
-    if c.isStereoReturn(st.kids[0]):
+    if isArrayMake(st.kids[0]):
+      c.declareStateArray(sc, st, pre)
+    elif c.isStereoReturn(st.kids[0]):
       # Pair state (`$z = [1, 0]`): a "pvar" region of three slots, the
       # inited flag then the two sides. Its own helper type, so adding
       # one doesn't shift the "var" regions of scalar state.
       let flagSlot = c.fresh("pf")
-      let off = c.registerRegion("pvar", 3)
+      let off = c.registerRegionInit("pvar", 3, stateName = st.str)
       pre.add &"  long {flagSlot} = {off};\n"
       var initPre = ""
       let v = c.emitStereo(sc, st.kids[0], initPre)
@@ -692,7 +870,7 @@ proc emitLocalStmt(c: Ctx; sc: Scope; st: Node; pre: var string) =
       # the (type, perTypeIdx) pair survives a state migration).
       let flagSlot = c.fresh("vf")
       let valSlot = c.fresh("vs")
-      let off = c.registerRegion("var", 2)
+      let off = c.registerRegionInit("var", 2, stateName = st.str)
       pre.add &"  long {flagSlot} = {off};\n  long {valSlot} = ({off}) + 1;\n"
       var initPre = ""
       let initC = c.scalarValue(sc, st.kids[0], initPre, "$" & st.str)
@@ -712,7 +890,7 @@ proc emitLocalStmt(c: Ctx; sc: Scope; st: Node; pre: var string) =
       let rhs = c.scalarValue(sc, st.kids[0], pre, "$" & st.str)
       pre.add &"  {target} = ({rhs});\n"
   of nkIdxAssign:
-    pre.add c.assignPairSide(sc, st)
+    pre.add c.emitIdxAssign(sc, st)
   else:
     # A bare expression statement is legal (ignored value except last).
     if c.refsStereo(sc, st):
@@ -746,11 +924,14 @@ proc emitPhasor(c: Ctx; sc: Scope; freqNode: Node): string =
     "s->pool[" & slot & "]; }))"
 
 # noise() inlined: xorshift32 on a pool slot interpreted as uint32.
+# A fresh slot (0) seeds from its own slot number, so every call site
+# is its own stream, and the same one on every run.
 proc emitNoise(c: Ctx): string =
   let slot = c.fresh("nz")
   let off = c.registerRegion("noise", 1)
   "(({ long " & slot & " = " & off & "; " &
     "unsigned int r = (unsigned int)s->pool[" & slot & "]; " &
+    "if (r == 0) r = 2463534242u ^ ((unsigned int)" & slot & " * 2654435761u); " &
     "if (r == 0) r = 2463534242u; " &
     "r ^= r << 13; r ^= r >> 17; r ^= r << 5; " &
     "s->pool[" & slot & "] = (double)r; " &
@@ -955,6 +1136,70 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
           else: c.emitExpr(iter, body)
         terms.add bodyC
       return "(" & terms.join(" + ") & ")"
+    # each(N, i => stmts) — the element-wise step. Unrolled like sum, but
+    # the body is statements (`$f[i] = ...`, lets) and the value is 0.
+    # Every store to a state array inside it is held back and committed
+    # when the each ends, so each body reads the arrays as they were
+    # before the step: a waveguide's section i+1 reads section i's wave
+    # from the last sample, not the one just written. Stores to local
+    # arrays and scalars happen in order, as usual.
+    if name == "each":
+      if n.kids.len != 2 or n.kids[1].kind != nkLambda or
+         n.kids[1].params.len != 1:
+        raise newException(ValueError,
+          "each takes a count and a one-parameter lambda: " &
+          "each(N, i => ...) " & errLoc(n))
+      let nArg = n.kids[0]
+      var nVal: float64
+      if nArg.kind == nkNum: nVal = nArg.num
+      elif nArg.kind == nkIdent and sc.lookupNumLit(nArg.str).ok:
+        nVal = sc.lookupNumLit(nArg.str).val
+      else:
+        raise newException(ValueError,
+          "each: the count must be a compile-time integer " & errLoc(nArg))
+      let N = int(nVal)
+      if float64(N) != nVal or N < 0:
+        raise newException(ValueError,
+          "each: the count must be a non-negative integer, got " & $nVal &
+          " " & errLoc(nArg))
+      let lam = n.kids[1]
+      let savedDeferred = c.deferred
+      c.deferred = ""
+      inc c.eachDepth
+      var body = ""
+      for k in 0 ..< N:
+        let iter = push(sc)
+        iter.names[lam.params[0]] = numLit(float64(k))
+        iter.numLits[lam.params[0]] = float64(k)
+        let b = lam.kids[0]
+        if b.kind == nkBlock:
+          for st in b.kids[0 ..< b.kids.len - 1]:
+            c.emitLocalStmt(iter, st, body)
+          let last = b.kids[^1]
+          if not (last.kind == nkNum and last.num == 0.0):
+            body.add &"  (void)({c.emitExpr(iter, last)});\n"
+        else:
+          body.add &"  (void)({c.emitExpr(iter, b)});\n"
+      dec c.eachDepth
+      let commits = c.deferred
+      c.deferred = savedDeferred
+      return "(({\n" & body & commits & "  0.0; }))"
+    # len(a): the length of an array, a compile-time constant.
+    if name == "len":
+      if n.kids.len == 1 and n.kids[0].kind == nkIdent:
+        let a = n.kids[0].str
+        let sa = c.lookupSarray(sc, a)
+        if sa.ok: return numLit(float64(sa.n))
+        let la = c.lookupLarray(sc, a)
+        if la.ok: return numLit(float64(la.n))
+        let ca = c.lookupArray(sc, a)
+        if ca.ok: return numLit(float64(ca.length))
+      raise newException(ValueError,
+        "len takes the name of an array " & errLoc(n))
+    if name == "array":
+      raise newException(ValueError,
+        "array(N) declares an array: `$f = array(N)` for state that " &
+        "lasts, `let a = array(N)` for this sample's scratch " & errLoc(n))
     # Stateful builtins inlined
     if name == "phasor":
       if n.kids.len != 1:
@@ -1115,8 +1360,10 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
         let found = c.lookupArray(sc, arr.str)
         if not found.ok:
           raise newException(ValueError,
-            "wave: " & arr.str & " is not a numeric-literal array " &
-            errLoc(arr))
+            "wave: " & arr.str & " must be a constant table of numeric " &
+            "literals" &
+            (if c.lookupLarray(sc, arr.str).ok: " (it holds runtime values)"
+             else: "") & " " & errLoc(arr))
         (sym, length) = (found.sym, found.length)
       elif arr.kind == nkArr:
         sym = c.fresh("arr")
@@ -1171,6 +1418,12 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
     raise newException(ValueError,
       "array value can't appear here " & errLoc(n) &
       " — only numeric literals for wave() or top-level stereo return")
+  of nkStr:
+    raise newException(ValueError,
+      "a string is only an import path here " & errLoc(n))
+  of nkImport:
+    raise newException(ValueError,
+      "import belongs at the top of the file " & errLoc(n))
   of nkLambda:
     # v1: lambdas are not first-class values. They may only appear as
     # the second arg to sum(N, fn); reaching emitExpr here means the
@@ -1182,12 +1435,28 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
   of nkIdx:
     let a = n.kids[0]
     let i = n.kids[1]
-    # Numeric array: top-level, or auto-hoisted play-local.
     if a.kind == nkIdent:
+      # State array: an element past either end reads 0 — beyond a
+      # tube or string there is nothing, and a boundary is written by
+      # the patch, not borrowed from the far end.
+      let sa = c.lookupSarray(sc, a.str)
+      if sa.ok:
+        let ix = c.emitExpr(sc, i)
+        return "(({ long _i = (long)(" & ix & "); " &
+               "(_i >= 0 && _i < " & $sa.n & ") ? s->pool[" & sa.base &
+               " + 1 + _i] : 0.0; }))"
+      # Local and constant arrays cycle, like a table should.
+      let la = c.lookupLarray(sc, a.str)
+      if la.ok:
+        let ix = c.emitExpr(sc, i)
+        return "(({ long _i = (long)(" & ix & ") % " & $la.n & "; " &
+               la.sym & "[_i < 0 ? _i + " & $la.n & " : _i]; }))"
+      # Numeric array: top-level, or auto-hoisted play-local.
       let found = c.lookupArray(sc, a.str)
       if found.ok:
         let ix = c.emitExpr(sc, i)
-        return &"({found.sym}[(int)({ix}) % {found.length}])"
+        return "(({ long _i = (long)(" & ix & ") % " & $found.length & "; " &
+               found.sym & "[_i < 0 ? _i + " & $found.length & " : _i]; }))"
     # Play-name / stereo-let / scope-bound stereo indexed with a
     # constant 0 or 1 → L or R channel scalar.
     if a.kind == nkIdent and i.kind == nkNum and int(i.num) in {0, 1}:
@@ -1458,6 +1727,8 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
       let stmts: seq[Node] =
         if bodyNode.kind == nkBlock: bodyNode.kids else: @[bodyNode]
       let lastIdx = stmts.len - 1
+      c.defStack.add def.str
+      defer: discard c.defStack.pop()
       for si, st in stmts:
         if si == lastIdx and st.kind notin {nkLet, nkVar, nkAssign, nkIdxAssign}:
           var sub = ""
@@ -1629,8 +1900,11 @@ proc refsStereo(c: Ctx; sc: Scope; n: Node): bool =
   of nkIdx:
     # Indexing a stereo (play / stereo-let / scoped) with a constant 0
     # or 1 collapses to scalar; only propagate stereo if the index
-    # isn't a constant pick.
+    # isn't a constant pick. An array element is one number.
     let a = n.kids[0]; let i = n.kids[1]
+    if a.kind == nkIdent and (c.lookupSarray(sc, a.str).ok or
+                              c.lookupLarray(sc, a.str).ok):
+      return c.refsStereo(sc, i)
     if a.kind == nkIdent and i.kind == nkNum and int(i.num) in {0, 1}:
       let isStereoBase = (sc == nil or not sc.scalarShadows(a.str)) and
                          (a.str in c.playSet or a.str in c.stereoLets or
@@ -1692,9 +1966,12 @@ proc emit*(c: Ctx; program: Node): string =
       raise newException(ValueError,
         "'" & n.str & "' is the name of a play block — " &
         "choose a different variable name " & errLoc(n))
-    if n.str in c.topVarSet or n.str in c.pairVars: return
+    if n.str in c.topVarSet or n.str in c.pairVars or
+       n.str in c.topSarrayNames: return
     c.varDecls.add n
-    if c.isStereoReturn(n.kids[0]):
+    if isArrayMake(n.kids[0]):
+      c.topSarrayNames.incl n.str
+    elif c.isStereoReturn(n.kids[0]):
       c.pairVars.incl n.str
       c.topVarNames.add pairVarField(n.str, 0)
       c.topVarNames.add pairVarField(n.str, 1)
@@ -1782,6 +2059,7 @@ proc emit*(c: Ctx; program: Node): string =
   pre.add "  double t, dt, start_t;\n"
   pre.add "  double* part_gains;\n"
   pre.add "  double* part_out;\n"
+  pre.add "  double* part_park;\n"
   for vn in c.topVarNames:
     pre.add "  double v_" & vn & ";\n"
   pre.add "  unsigned char inited[" & $max(1, c.topVarNames.len) & "];\n"
@@ -1804,6 +2082,9 @@ proc emit*(c: Ctx; program: Node): string =
       if d == st: isFirst = true
     if not isFirst: return ""
     var initPre = ""
+    if st.str in c.topSarrayNames:
+      c.declareStateArray(sc, st, initPre, topLevel = true)
+      return initPre
     if st.str in c.pairVars:
       let i0 = c.topVarNames.find(pairVarField(st.str, 0))
       let i1 = i0 + 1
@@ -1824,7 +2105,10 @@ proc emit*(c: Ctx; program: Node): string =
   var finalIdx = -1
   for i in countdown(program.kids.len - 1, 0):
     let s = program.kids[i]
-    if s.kind notin {nkDef, nkVar, nkLet, nkAssign, nkIdxAssign, nkPlay}:
+    # `each(...)` is a statement (its value is 0), never the output: a
+    # top-level `each` must not silence a file of play blocks.
+    let isEach = s.kind == nkCall and s.str == "each"
+    if s.kind notin {nkDef, nkVar, nkLet, nkAssign, nkIdxAssign, nkPlay, nkImport} and not isEach:
       finalIdx = i; break
 
   for i, s in program.kids:
@@ -1842,10 +2126,21 @@ proc emit*(c: Ctx; program: Node): string =
       c.letsDone.incl program.kids[i - 1].str
     case s.kind
     of nkDef: discard              # inlined at call sites
+    of nkImport:
+      raise newException(ValueError,
+        "import \"" & s.str & "\" was not resolved — the program was built " &
+        "without import expansion " & errLoc(s))
     of nkVar: body.add c.varInit(topSc, s)
     of nkLet:
+      # Runtime-valued array (`let a = [p, q, r]`, `let a = array(N)`):
+      # a per-sample local array.
+      if (s.kids[0].kind == nkArr and s.kids[0].kids.len != 2 and
+          s.kids[0].kids.len > 0 and
+          not s.kids[0].kids.allIt(it.kind == nkNum)) or
+         isArrayMake(s.kids[0]):
+        c.declareLocalArray(topSc, s.str, s.kids[0], body, topLevel = true)
       # Numeric array literal -> hoist to a static const, record it.
-      if s.kids[0].kind == nkArr and
+      elif s.kids[0].kind == nkArr and
          s.kids[0].kids.allIt(it.kind == nkNum):
         let arrKids = s.kids[0].kids
         let sym = "arr_" & s.str
@@ -1893,7 +2188,7 @@ proc emit*(c: Ctx; program: Node): string =
         body.add pre
         body.add &"  {target} = ({rhs});\n"
     of nkIdxAssign:
-      body.add c.assignPairSide(topSc, s)
+      body.add c.emitIdxAssign(topSc, s)
     of nkPlay:
       # A play's lets and computed value live inside a `{...}` block so
       # the lets can't collide with other plays or later code. Each play
@@ -1905,7 +2200,12 @@ proc emit*(c: Ctx; program: Node): string =
       c.playSet.incl s.str
       let inner = push(topSc)
       body.add &"  double p_{s.str}_l, p_{s.str}_r;\n"
-      body.add "  {\n"
+      # A parked part (see `park`) is silent and its body doesn't run, so
+      # it costs nothing and its state waits where it was.
+      body.add &"  if (s->part_park && s->part_park[{partIdx}] != 0.0) {{\n" &
+               &"    p_{s.str}_l = 0.0; p_{s.str}_r = 0.0;\n" &
+               &"    if (s->part_out) {{ s->part_out[{2*partIdx}] = 0.0; " &
+               &"s->part_out[{2*partIdx+1}] = 0.0; }}\n  }} else {{\n"
       let bodyNode = s.kids[0]
       let stmts: seq[Node] =
         if bodyNode.kind == nkBlock: bodyNode.kids else: @[bodyNode]
@@ -1948,17 +2248,13 @@ proc emit*(c: Ctx; program: Node): string =
               c.arrayDecls.add &"static const double {sym}[{rhs.kids.len}] = {{" &
                 items.join(", ") & "};\n"
               inner.arrays[st.str] = (sym, rhs.kids.len)
-            if numericArr and rhs.kids.len != 2:
+            # A non-numeric array of length != 2, or array(N): a local
+            # array of this sample's numbers (see declareLocalArray).
+            if (rhs.kind == nkArr and rhs.kids.len != 2 and rhs.kids.len > 0 and
+                not numericArr) or isArrayMake(rhs):
+              c.declareLocalArray(inner, st.str, rhs, body)
+            elif numericArr and rhs.kids.len != 2:
               discard
-            # A non-numeric array with length != 2 has no legal interpretation
-            # (not a wave() data arg, not a stereo pair). Catch it here with a
-            # message that points the user at the numeric-literal requirement
-            # rather than letting emitExpr raise the stale "array value can't
-            # appear here" from the bottom of the expression walker.
-            elif rhs.kind == nkArr and rhs.kids.len != 2:
-              raise newException(ValueError,
-                "array let '" & st.str & "' must be numeric literals only " &
-                "(for wave) or a length-2 stereo pair " & errLoc(st))
             # Stereo-producing RHS (haas, pan, arr literal, or references
             # to a prior stereo local): emit two locals, register name
             # as a stereo let for downstream emission.
@@ -1997,7 +2293,7 @@ proc emit*(c: Ctx; program: Node): string =
               body.add sub
               body.add &"    {target} = ({rhs});\n"
           of nkIdxAssign:
-            body.add c.assignPairSide(inner, st)
+            body.add c.emitIdxAssign(inner, st)
           else:
             # Non-final expression statements run for their side effects
             # (the value is dropped). This matters for stateful builtins
@@ -2033,9 +2329,11 @@ proc emit*(c: Ctx; program: Node): string =
           body.add &"  (void)({v});\n"
   # No final expression: a file of play blocks plays all of them, rather
   # than compiling to silence.
-  if finalIdx < 0 and c.playNames.len > 0:
-    body.add "  *outL = " & c.playNames.mapIt("p_" & it & "_l").join(" + ") & ";\n"
-    body.add "  *outR = " & c.playNames.mapIt("p_" & it & "_r").join(" + ") & ";\n"
+  # (`scope` and `beam` draw the oscilloscope; they're never heard.)
+  let heard = c.playNames.filterIt(it notin ["scope", "beam"])
+  if finalIdx < 0 and heard.len > 0:
+    body.add "  *outL = " & heard.mapIt("p_" & it & "_l").join(" + ") & ";\n"
+    body.add "  *outR = " & heard.mapIt("p_" & it & "_r").join(" + ") & ";\n"
   body.add "}\n"
 
   pre & c.arrayDecls & body

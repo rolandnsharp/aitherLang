@@ -13,7 +13,7 @@
 ##    filters are truly independent, not shared.
 ## 3. Pipe chains (stereo |> lpf |> drive |> fold) compile and run.
 ## 4. Mono-input helpers stay single-region (no regression).
-## 5. pan / haas with stereo input raise a clear, actionable error.
+## 5. pan with stereo input raises a clear, actionable error.
 ## 6. A stateful scalar arg (e.g. lfo modulator) is shared across the
 ##    two channel emissions instead of registering twice — a bug-fix
 ##    that surfaces once stereo splits routinely include native
@@ -177,11 +177,10 @@ doAssert countRegions(
   "s |> lpf(800 + sin(TAU*phasor(2)) * 100, 0.5)\n",
   "lpf") == 2
 
-# ---- 6. pan / haas refuse stereo input with a clear error --------------
+# ---- 6. pan refuses stereo input with a clear error --------------------
+# (haas takes a pair since 2026-10-12: see tests/stereo_haas_reverb.nim.)
 shouldFail("let s = [sin(t), cos(t)]\ns |> pan(0)\n",
            "pan takes a mono signal")
-shouldFail("let s = [sin(t), cos(t)]\ns |> haas(8)\n",
-           "haas takes a mono signal")
 
 # ---- 7. Migration identity preserved across mono → mono reload ---------
 # A patch that uses a transparent helper on mono input must still match

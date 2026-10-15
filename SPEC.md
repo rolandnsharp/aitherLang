@@ -11,16 +11,18 @@ output.
 
 | Type     | Example                    |
 |----------|----------------------------|
-| float    | `440.0`, `0.5`, `-1.0`     |
+| float    | `440.0`, `0.5`, `-1.0`, `1e-3` |
 | function | `sin`, `saw`, `my_shape`   |
 | array    | `[220, 330, 440]`          |
 
 Float is the default. Function values exist so a shape can
 be passed to a def (`osc(shape, freq)`, `sum(N, fn)`).
 Arrays hold data: lookup tables, `wave` note lists,
-delay/reverb/wavetable buffers, and a returned `[L, R]`
-stereo pair. Nothing maps over an array — a function that
-wants a float gets a float.
+delay/reverb/wavetable buffers, per-sample scratch
+(`let a = array(N)`), persistent fields (`$f = array(N)`,
+see "State arrays"), and a returned `[L, R]` stereo pair.
+Nothing maps over an array — a function that wants a float
+gets a float.
 
 ## Globals
 
@@ -79,7 +81,7 @@ Arithmetic (precedence high to low):
 | Operator       | Description              |
 |----------------|--------------------------|
 | `-x`, `not x`  | unary                    |
-| `*`, `/`, `mod`| multiplicative           |
+| `*`, `/`, `mod`, `%` | multiplicative     |
 | `+`, `-`       | additive                 |
 | `==`, `<`, `>`, `<=`, `>=`, `!=` | comparison |
 | `and`, `or`    | logical                  |
@@ -305,16 +307,82 @@ the table size (`p[n] === p[(int)n % len]`), so out-of-range
 reads cycle rather than crash. v1 doesn't allow passing
 arrays into `def` parameters or returning them from a `def`.
 
-### Mutable arrays
+### Local arrays (this sample's numbers)
+
+A `let` array whose elements aren't all literals, or `array(N)` /
+`array(N, init)`, is a per-sample local array: it is filled afresh
+every sample and its elements can be read and stored by any index.
+`N` must be a compile-time integer. Legal at top level, in a play
+and in a def.
 
 ```
-$buf = array(48000, 0.0)   # size N, initial value
-$buf[i]                    # read
-$buf[i] = x                # write
-len($buf)                  # length
+let p = [p1, p2, p3, p4]          # runtime values
+let k = array(23)                 # 23 zeros
+let w = array(8, 0.5)
+k[3] = (p[0] - p[1]) / (p[0] + p[1])
+len(k)                            # 23, a constant
 ```
 
-Used for delay lines, reverb buffers, wavetables.
+Indexes are truncated to `int` and cycle like a constant table's
+(`a[-1]` is the last element). A constant table (all literals) is
+hoisted and read-only; storing into one is a compile error.
+
+### State arrays (a field that persists)
+
+`$name = array(N)` or `array(N, init)` declares `N` persistent
+elements: a tube's waves, a string's displacement, a membrane's
+rows. They live in the pool next to the other `$state`, keep their
+values across samples and hot reloads (same name, same def, same
+size), and start at `init` (0 when omitted).
+
+```
+$f = array(24)                    # forward waves, one per section
+$f[i]                             # read; past either end reads 0
+$f[i] = x                         # store
+len($f)                           # 24
+```
+
+An element past either end reads 0 and a store there is dropped:
+beyond the end of a tube there is nothing, and the boundary is what
+the patch writes at `$f[0]` and `$f[len($f) - 1]`.
+
+Stores happen at once, in order, like `$x = ...` does, except inside
+`each`.
+
+### each: one simultaneous step
+
+```
+each(N, i => stmts)
+```
+
+Unrolls like `sum` (so `N` must be a compile-time integer), but the
+body is statements — element stores, `let`s, `$state` — and the
+value is 0. Every store to a **state array** inside an `each` is
+held back and lands when the `each` ends, so each body reads the
+arrays as they were before the step: section `i + 1` sees section
+`i`'s wave from the last sample, not the one just written. Stores
+to local arrays and scalars land in order, as usual.
+
+A waveguide is then its own equations and nothing else:
+
+```
+def tube(src, a1, a2, a3, a4):
+  let s = [a1, a2, a3, a4]                       # areas, glottis -> lips
+  let k = array(3)
+  each(3, j => k[j] = (s[j] - s[j + 1]) / (s[j] + s[j + 1]))
+  $f = array(4)                                  # forward waves
+  $b = array(4)                                  # backward waves
+  let out = $f[3]
+  each(3, j =>
+    $f[j + 1] = (1 + k[j]) * $f[j] - k[j] * $b[j + 1]
+    $b[j]     = k[j] * $f[j] + (1 - k[j]) * $b[j + 1])
+  $f[0] = src + 0.9 * $b[0]                      # the glottis end
+  $b[3] = -0.85 * $f[3]                          # the open lips
+  out
+```
+
+The 24-section vocal tract this replaces was 219 generated lines.
+See `tests/state_arrays.nim` for the full one.
 
 ### Arrays are data, not a map
 
@@ -390,8 +458,9 @@ expression in parens if you need to split it.
 
 ## Program structure
 
-A file has four kinds of top-level declaration:
+A file has five kinds of top-level declaration:
 
+- `import "lib/voice.aither"` — splice a library file in (see Imports)
 - `def name(args): body` — helper function
 - `let name = expr` — file-level binding, visible in all plays
 - `$name = init` — file-level persistent state (declaration on first sight)
@@ -409,6 +478,24 @@ Files **must** end with an expression, not a declaration.
 The engine errors clearly if either rule is violated (no
 play block, no final expression, or an expression in a
 non-final position).
+
+## Imports
+
+```
+import "lib/voice.aither"
+```
+
+Splices the file's statements in at that point, so instruments
+live in a library and a patch is just the arrangement. The path is
+relative to the importing file. A library may hold `def`s, constant
+`let`s (a number or a table of numbers) and further imports; a
+`play`, `$state` or a sound belongs in the patch that imports it,
+and the compiler says so. A file imported twice is included once
+(cycles end there). A def in the patch overrides a library's of
+the same name. Imports are re-read on every `send`, and `aither
+watch patch.aither` sends again whenever the patch or any file it
+imports changes. Errors inside a library point at the library
+file and line.
 
 ## Scope rules
 
@@ -481,7 +568,7 @@ sin(TAU * phasor(220))
 | Function      | Description                                  |
 |---------------|----------------------------------------------|
 | `phasor(freq)`| the clock: ramp 0→1 at freq Hz, with state   |
-| `noise()`     | white noise, stateless                       |
+| `noise()`     | white noise; each call its own stream, the same every run |
 
 `phasor` is the only stateful part. Its output is a
 *position in the cycle*, 0..1 — a fraction of time, not an
@@ -552,12 +639,23 @@ float64 pool (4 MB).
 
 **Filters**: `lp1(sig, cut)`, `hp1(sig, cut)`,
 `lpf(sig, cut, res)`, `hpf(sig, cut, res)`,
-`bpf(sig, cut, res)`, `notch(sig, cut, res)`.
+`bpf(sig, cut, res)`, `notch(sig, cut, res)`. Every `cut` is in Hz.
+`lp1`/`hp1` are one-pole filters with the -3 dB point at `cut`
+(`a = 1 - exp(-2 pi cut / sr)`; before 2026-10-12 it was `cut / sr`,
+which put `lp1(x, 4000)` at 665 Hz, and patches were converted).
 
 **Delays**: `delay(sig, time, max_time)`,
-`fbdelay(sig, time, max_time, fb)`.
+`fbdelay(sig, time, max_time, fb)`. `time` is in seconds and need
+not be a whole number of samples: the read point is interpolated
+linearly between the two nearest samples, so a tube, string or
+comb tunes to its length rather than to the sample grid. `delay`
+with `time` 0 is the current input; `fbdelay` starts at one sample
+(its feedback needs last sample's output). `max_time` must be a
+literal (it sizes the buffer) and the longest delay is one sample
+under it.
 
-**Reverb**: `reverb(sig, rt60, wet)` (Schroeder).
+**Reverb**: `reverb(sig, rt60, wet)` (Schroeder); a pair in runs one
+reverb per side.
 
 **Physics**: `impulse(freq)`, `resonator(sig, freq, decay)`,
 `discharge(sig, rate)`.
@@ -708,7 +806,7 @@ def prev(x):                              # one-sample memory
 ### Stereo
 
 - `pan(mono_sig, pos)` — equal-power pan, pos in [-1, 1]
-- `haas(mono_sig, ms)` — 1-30 ms delay on one channel for width
+- `haas(sig, ms)` — 1-30 ms delay on one channel for width; mono in (both sides start equal) or a pair
 - `width(stereo_sig, amount)` — mid-side width (0 mono, 1 unchanged, >1 exaggerated)
 - `mono(stereo_sig)` — collapse to single channel
 
@@ -780,33 +878,46 @@ and accepts commands over a UNIX socket.
 
 | Command                          | Description                                |
 |----------------------------------|--------------------------------------------|
-| `send <file> [fade]`             | load / hot-swap a patch                    |
+| `send <file> [fade]`             | load / hot-swap a patch, then report level, quiet parts, guard trips |
+| `watch <file> [fade]`            | send, and send again whenever it or an imported file changes |
 | `stop <voice> [fade]`            | fade out & remove                          |
 | `mute <voice>` / `unmute`        | silence / resume (state keeps running)     |
-| `solo <voice> [fade]`            | fade out all other voices                  |
+| `solo <voice> [fade]`            | mute all other voices                      |
 | `clear [fade]`                   | stop all voices                            |
-| `list`                           | show active voices                         |
+| `list`                           | show active voices and their parts         |
+| `status`                         | `list` plus the master level               |
 | `retrigger <voice>`              | reset `start_t` in place                   |
 | `kill`                           | shut down engine                           |
 
 ### Part-level
 
-| Command                                                | Description                      |
-|--------------------------------------------------------|----------------------------------|
-| `parts <voice>`                                        | list parts with gain + state     |
-| `part <voice> <part> play [fade]`                      | fade gain to 1                   |
-| `part <voice> <part> stop [fade]`                      | fade gain to 0                   |
-| `part <voice> <part> mute` / `unmute`                  | instant silence / resume         |
-| `part <voice> <part> gain <value> [fade]`              | set gain to arbitrary value      |
+| Command                                   | Description                                   |
+|-------------------------------------------|-----------------------------------------------|
+| `parts <voice>`                           | list parts: state, gain, rms, peak            |
+| `mute <voice> <part> [fade]` / `unmute`   | fade the part's gain to 0 / 1; it keeps computing, so its LFOs and sequencers stay in step |
+| `solo <voice> <part> [fade]`              | mute the voice's other parts                  |
+| `park <voice> <part> [fade]`              | fade out, then skip the part's body: no CPU, state frozen where it was |
+| `unpark <voice> <part> [fade]`            | run a parked part again from where it stopped, fading in (`unmute` does this too) |
+
+`scope` and `beam` parts draw the oscilloscope and are never heard;
+the meters leave them out of the level comparison. This is the
+live stream's interim mechanism: the output is becoming one pair
+read by whatever sink is attached, with the trace as the patch's
+final expression ([SCOPE.md](SCOPE.md),
+[notes/pair-output-2026-10-15.md](notes/pair-output-2026-10-15.md)).
+Don't build on the magic names.
 
 ### Observability
 
 | Command                          | Description                                         |
 |----------------------------------|-----------------------------------------------------|
+| `check <voice>`                  | level, quiet parts, rollbacks and guard trips       |
 | `scope [voice]`                  | per-voice RMS / peak / clips / envelope sparkline   |
 | `scope master`                   | master-bus stats (pre-tanh mix)                     |
 | `spectrum [voice]`               | FFT analysis of voice's recent buffer (or master)   |
-| `audit <patch> [seconds]`        | render patch offline + spectral analysis            |
+| `try <patch> [seconds] [--from S]` | render the patch as a send would land it now: the live voice's state and time |
+| `audit <patch> [seconds] [--from S] [in.wav]` | render offline from t=0: spectrum + per-part levels |
+| `render <patch> <out.wav> [seconds] [--from S] [--scope] [in.wav]` | render offline to a 32-bit float WAV; `--scope` adds the beam X/Y/Z as channels 3-5 |
 
 Clips counters clear on read. `spectrum` runs against the
 engine's last ~0.5 s of audio per voice; `audit` is fully

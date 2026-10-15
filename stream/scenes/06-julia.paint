@@ -1,0 +1,9 @@
+# Julia bloom: c steered by the music (mids turn it, the low end pulls it in).
+#! res 1
+let ang  = t * 0.11 + mid * 0.8
+let c    = [0.7885 * cos(ang), 0.7885 * sin(ang)] * (0.98 - 0.04 * low)
+let z0   = rotate(p * 1.25, t * 0.03)
+let e    = escape(90, z0, z => cmul(z, z) + c)
+let tr   = trap(40, z0, z => cmul(z, z) + c)
+let glow = palette(e * 3.5 + t * 0.05, 0.15) * (if e >= 1 then 0.12 else 1)
+glow + hsv(0.6 + tr * 0.4, 0.8, 0.5) * smoothstep(0.4, 0.0, tr) + beam(p) * 0.6

@@ -1,0 +1,712 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aither scope</title>
+<style>
+  :root { --bg: #030504; --fg: #9fe8b0; --dim: #3c5a44; --panel: rgba(8, 14, 10, 0.86); }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+    font: 13px/1.4 ui-monospace, "DejaVu Sans Mono", monospace; overflow: hidden; }
+  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+  #start { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 10px; cursor: pointer; background: rgba(0,0,0,0.35); }
+  #start b { font-size: 22px; letter-spacing: 0.2em; color: #c8ffd4; }
+  #start span { color: var(--dim); }
+  #hud { position: fixed; left: 12px; bottom: 10px; color: var(--dim); pointer-events: none;
+    white-space: pre; font-size: 12px; }
+  #panel { position: fixed; right: 12px; top: 12px; background: var(--panel); padding: 10px 12px;
+    border: 1px solid #1d2b21; border-radius: 6px; display: none; min-width: 230px; }
+  #panel.open { display: block; }
+  #panel label { display: grid; grid-template-columns: 92px 1fr; align-items: center; gap: 8px; margin: 5px 0; }
+  #panel input[type=range] { width: 130px; accent-color: #6fdc8c; }
+  #panel select, #panel button { background: #0c140f; color: var(--fg); border: 1px solid #284033;
+    border-radius: 4px; font: inherit; padding: 2px 6px; }
+  #gear { position: fixed; right: 12px; top: 12px; background: none; border: 0; color: var(--dim);
+    font-size: 18px; cursor: pointer; }
+  #panel .row { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  @media (max-width: 520px) { #panel { left: 12px; right: 12px; } }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="start"><b>AITHER · SCOPE</b><span>tap to listen and watch</span></div>
+<div id="hud"></div>
+<button id="gear" title="settings (h)">⚙</button>
+<div id="panel">
+  <label>phosphor <select id="phos">
+    <option value="P31">P31 green</option><option value="P1">P1 green</option>
+    <option value="P7">P7 blue + amber tail</option><option value="P3">P3 amber</option>
+    <option value="P4">P4 white</option><option value="P11">P11 blue</option></select></label>
+  <label>persistence <input id="pers" type="range" min="-2" max="2" step="0.05" value="0"></label>
+  <label>intensity <input id="inten" type="range" min="-3" max="3" step="0.05" value="0"></label>
+  <label>focus <input id="focus" type="range" min="0.6" max="6" step="0.1" value="1.4"></label>
+  <label>glow <input id="glow" type="range" min="0" max="1.5" step="0.05" value="0.55"></label>
+  <label>graticule <input id="grat" type="range" min="0" max="1" step="0.05" value="0.35"></label>
+  <label>volume <input id="vol" type="range" min="0" max="1" step="0.01" value="0.9"></label>
+  <label>paint <input id="pamt" type="range" min="0" max="1.5" step="0.05" value="1"></label>
+  <label>scope <input id="samt" type="range" min="0" max="1.5" step="0.05" value="1"></label>
+  <label>paint res <select id="pres"><option value="auto">auto</option><option value="0.5">1/2</option><option value="0.35">1/3</option><option value="0.75">3/4</option><option value="1">full</option></select></label>
+  <label>view <select id="view"><option value="fill">fill the screen</option><option value="square">square</option></select></label>
+  <label>resolution <select id="res"><option value="1">full</option><option value="0.75">3/4</option><option value="0.5">1/2</option></select></label>
+  <div class="row"><button id="fs">fullscreen</button><button id="close">close</button></div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@wasm-audio-decoders/flac@0.2.10/dist/flac-decoder.min.js" charset="UTF-8"></script>
+<script>
+"use strict";
+// aither scope: the stream's five channels are the mix (L, R) and an
+// oscilloscope beam (X, Y, Z) computed by the patch itself. The audio and
+// the beam come from the same samples, so the picture is locked to the
+// sound; we draw the beam where the speakers are.
+const SR = 48000;
+const RING = SR * 8;                       // seconds of beam history kept
+const $ = (id) => document.getElementById(id);
+const store = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } };
+
+// ------------------------------------------------------------ beam store
+const bx = new Float32Array(RING), by = new Float32Array(RING), bz = new Float32Array(RING);
+const am = new Float32Array(RING);         // the mix, mono, for the paint's audio inputs
+let written = 0;                           // absolute frames received
+
+// ------------------------------------------------------------ audio
+let ctx = null, node = null, gainNode = null;
+let played = 0, playedAt = 0;              // frames the worklet has output, and when (performance.now)
+const workletSrc = `
+class Feed extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.cap = ${SR * 12}; this.l = new Float32Array(this.cap); this.r = new Float32Array(this.cap);
+    this.w = 0; this.rd = 0; this.out = 0; this.primed = false; this.tick = 0;
+    this.port.onmessage = (e) => {
+      const m = e.data;
+      if (m.l) { const n = m.l.length;
+        for (let i = 0; i < n; i++) { const k = (this.w + i) % this.cap; this.l[k] = m.l[i]; this.r[k] = m.r[i]; }
+        this.w += n; }
+      if (m.base !== undefined) { this.w = this.rd = this.out = m.base; }
+      if (m.skipTo !== undefined) { this.rd = Math.max(this.rd, m.skipTo); this.out = this.rd; }
+    };
+  }
+  process(_, outputs) {
+    const o = outputs[0], n = o[0].length, have = this.w - this.rd;
+    if (!this.primed && have > ${Math.round(SR * 0.3)}) this.primed = true;
+    if (this.primed && have >= n) {
+      for (let i = 0; i < n; i++) { const k = (this.rd + i) % this.cap; o[0][i] = this.l[k]; if (o[1]) o[1][i] = this.r[k]; }
+      this.rd += n;
+    } else { if (have < n) this.primed = false; for (const ch of o) ch.fill(0); }
+    if ((this.tick++ & 7) === 0) this.port.postMessage({ rd: this.rd, primed: this.primed, have });
+    return true;
+  }
+}
+registerProcessor('feed', Feed);`;
+
+let audioState = { primed: false, have: 0 };
+async function startAudio() {
+  ctx = new AudioContext({ sampleRate: SR, latencyHint: 'playback' });
+  const url = URL.createObjectURL(new Blob([workletSrc], { type: 'text/javascript' }));
+  await ctx.audioWorklet.addModule(url);
+  node = new AudioWorkletNode(ctx, 'feed', { numberOfInputs: 0, outputChannelCount: [2] });
+  gainNode = ctx.createGain(); gainNode.gain.value = +$('vol').value;
+  node.connect(gainNode).connect(ctx.destination);
+  node.port.onmessage = (e) => { played = e.data.rd; playedAt = performance.now(); audioState = e.data; };
+  node.port.postMessage({ base: written });        // frames are counted from the stream's start
+  await ctx.resume();
+}
+
+// The frame under the speakers now (or, without audio, just behind live).
+function playhead() {
+  if (ctx && audioState.primed) {
+    const lat = (ctx.outputLatency || 0) + (ctx.baseLatency || 0);
+    return played + (performance.now() - playedAt) / 1000 * SR - lat * SR;
+  }
+  return written - SR * 0.25;
+}
+
+// ------------------------------------------------------------ stream
+let kbps = 0, bytes = 0, bytesAt = performance.now(), streamErr = '';
+async function stream() {
+  const decoder = new window['flac-decoder'].FLACDecoderWebWorker();
+  await decoder.ready;
+  for (;;) {
+    try {
+      // the low-latency mount if the server has one, else the plain one
+      let res = await fetch('/scope-ll.ogg', { cache: 'no-store' });
+      if (!res.ok) res = await fetch('/scope.ogg', { cache: 'no-store' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const reader = res.body.getReader();
+      await decoder.reset();
+      let first = true;
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        bytes += value.length;
+        const out = await decoder.decode(value);
+        if (!out.samplesDecoded) continue;
+        const ch = out.channelData, n = out.samplesDecoded;
+        if (ch.length < 5) { streamErr = 'stream has ' + ch.length + ' channels'; continue; }
+        if (first && node) node.port.postMessage({ skipTo: written });   // a reconnect starts fresh
+        first = false;
+        for (let i = 0; i < n; i++) {
+          const k = (written + i) % RING; bx[k] = ch[2][i]; by[k] = ch[3][i]; bz[k] = ch[4][i]; am[k] = 0.5 * (ch[0][i] + ch[1][i]);
+        }
+        if (node) node.port.postMessage({ l: ch[0], r: ch[1] });
+        written += n;
+        streamErr = '';
+      }
+    } catch (e) { streamErr = String(e.message || e); }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+}
+
+// Stay near live: if we've fallen behind (a stall, a slow tab), skip ahead.
+setInterval(() => {
+  if (!node || !audioState.primed) return;
+  const behind = (written - played) / SR;
+  if (behind > 1.6) node.port.postMessage({ skipTo: written - Math.round(SR * 0.45) });
+  const now = performance.now();
+  kbps = bytes * 8 / ((now - bytesAt) / 1000) / 1000; bytes = 0; bytesAt = now;
+}, 1000);
+
+// ------------------------------------------------------------ phosphors
+// Each phosphor is two components: fluorescence (glows while hit, decays
+// in tau1) and phosphorescence (the afterglow, tau2), each with a colour
+// and a share of the deposited energy.
+const PHOS = {
+  P31: { c1: [0.42, 1.0, 0.52], c2: [0.25, 0.85, 0.35], t1: 0.035, t2: 0.45, s2: 0.06 },
+  P1:  { c1: [0.35, 1.0, 0.35], c2: [0.30, 0.90, 0.30], t1: 0.024, t2: 0.20, s2: 0.04 },
+  P7:  { c1: [0.55, 0.70, 1.0], c2: [0.95, 0.85, 0.25], t1: 0.008, t2: 1.60, s2: 0.25 },
+  P3:  { c1: [1.0, 0.70, 0.22], c2: [0.95, 0.55, 0.15], t1: 0.040, t2: 0.50, s2: 0.06 },
+  P4:  { c1: [0.92, 0.94, 1.0], c2: [0.95, 0.85, 0.70], t1: 0.030, t2: 0.25, s2: 0.04 },
+  P11: { c1: [0.30, 0.50, 1.0], c2: [0.25, 0.40, 0.95], t1: 0.020, t2: 0.15, s2: 0.03 },
+};
+
+// ------------------------------------------------------------ WebGL
+const canvas = $('c');
+const gl = canvas.getContext('webgl2', { antialias: false, alpha: false, premultipliedAlpha: false });
+if (!gl) document.body.innerHTML = '<p style="padding:2em">This needs WebGL2.</p>';
+gl.getExtension('EXT_color_buffer_float');
+gl.getExtension('EXT_color_buffer_half_float');
+
+function sh(type, src) {
+  const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+function prog(vs, fs) {
+  const p = gl.createProgram(); gl.attachShader(p, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p); if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  const u = {}; const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for (let i = 0; i < n; i++) { const a = gl.getActiveUniform(p, i); u[a.name] = gl.getUniformLocation(p, a.name); }
+  return { p, u };
+}
+const FSQ = `#version 300 es
+layout(location=0) in vec2 a; out vec2 uv;
+void main(){ uv = a*0.5+0.5; gl_Position = vec4(a,0.,1.); }`;
+
+// Beam: one instance per segment between consecutive samples. The quad is
+// the segment's bounding capsule; the fragment shader lays down the energy
+// of a gaussian spot swept along it. Energy per sample is z*dt, spread over
+// the segment's length, so a slow beam is bright and a fast one faint.
+const beamP = prog(`#version 300 es
+layout(location=0) in vec2 corner;
+layout(location=1) in vec3 s0;     // x, y, z of this sample
+layout(location=2) in vec3 s1;     // and the next
+uniform vec2 scale;                // plot units -> clip
+uniform vec2 px;                   // clip units per pixel
+uniform float sigma;               // spot radius, pixels
+out vec2 p; out vec2 a; out vec2 b; out float z;
+void main(){
+  vec2 A = s0.xy*scale, B = s1.xy*scale;
+  vec2 d = B - A; float L = length(d/px);
+  vec2 t = L > 1e-4 ? normalize(d/px) : vec2(1.,0.);
+  vec2 n = vec2(-t.y, t.x);
+  float r = sigma*3.;
+  vec2 P = mix(A, B, corner.x*0.5+0.5);
+  P += (t*(corner.x*r) + n*(corner.y*r))*px;
+  a = A/px; b = B/px; p = P/px; z = 0.5*(s0.z+s1.z);
+  gl_Position = vec4(P, 0., 1.);
+}`, `#version 300 es
+precision highp float;
+in vec2 p; in vec2 a; in vec2 b; in float z;
+uniform float sigma, energy, share2;
+out vec4 o;
+void main(){
+  vec2 ab = b - a; float L = length(ab);
+  float h = L > 1e-4 ? clamp(dot(p-a, ab)/(L*L), 0., 1.) : 0.;
+  float d = length(p - (a + ab*h));
+  float g = exp(-0.5*d*d/(sigma*sigma)) / (2.5066*sigma);
+  float e = energy * z * g / max(L, sigma);      // per unit length of trace
+  o = vec4(e*(1.-share2), e*share2, 0., 1.);
+}`);
+
+// Decay: each component fades with its own time constant.
+const decayP = prog(FSQ, `#version 300 es
+precision highp float; in vec2 uv; uniform sampler2D src; uniform vec2 k; out vec4 o;
+void main(){ vec4 s = min(texture(src, uv), vec4(60000.)); o = vec4(s.r*k.x, s.g*k.y, 0., 1.); }   // half floats top out at 65504`);
+
+// Blur for the glow (scatter in the glass and the phosphor layer).
+const blurP = prog(FSQ, `#version 300 es
+precision highp float; in vec2 uv; uniform sampler2D src; uniform vec2 dir; out vec4 o;
+void main(){
+  vec4 s = texture(src, uv)*0.227027;
+  s += (texture(src, uv+dir*1.384615)+texture(src, uv-dir*1.384615))*0.316216;
+  s += (texture(src, uv+dir*3.230769)+texture(src, uv-dir*3.230769))*0.070270;
+  o = s;
+}`);
+
+// Display: the phosphor's light is a saturating function of its stored
+// energy; very hot spots go white. Then glow, graticule, glass.
+const showP = prog(FSQ, `#version 300 es
+precision highp float; in vec2 uv; out vec4 o;
+uniform sampler2D acc, halo; uniform vec3 c1, c2; uniform float gain, glow, grat, aspect, plot;
+uniform float time; uniform vec2 scale; uniform vec2 div; uniform sampler2D paint; uniform float pamt, samt;
+float lines(vec2 q){
+  vec2 g = abs(fract(q*div+0.5)-0.5)/fwidth(q*div);
+  float l = 1. - min(min(g.x, g.y), 1.);
+  vec2 m = abs(fract(q*20.+0.5)-0.5)/fwidth(q*20.);
+  float t = (1. - min(m.x,1.)) * step(abs(q.y), 0.02) + (1. - min(m.y,1.)) * step(abs(q.x), 0.02);
+  return max(l*0.6, t*0.8);
+}
+void main(){
+  vec4 e = texture(acc, uv); vec4 h = texture(halo, uv);
+  vec3 pc = texture(paint, uv).rgb * pamt;
+  vec3 col = c1*(1.-exp(-e.r*gain)) + c2*(1.-exp(-e.g*gain*1.5));
+  float hot = 1.-exp(-(e.r+e.g)*gain*0.12);
+  col = mix(col, vec3(1.), clamp(hot*hot, 0., 0.85));
+  col += (c1*(1.-exp(-h.r*gain*0.6)) + c2*(1.-exp(-h.g*gain)))*glow;
+  vec2 q = (uv*2.-1.)/scale;                      // plot units, as the beam uses
+  if (max(abs(q.x), abs(q.y)) <= 1.0) col += vec3(0.30,0.55,0.38)*lines(q)*grat*0.25;
+  float vig = smoothstep(1.6, 0.4, length((uv*2.-1.)*vec2(aspect,1.)*0.75));
+  col *= mix(0.88, 1.0, vig);                              // a light vignette, not a frame
+  col += vec3(0.010,0.016,0.012)*vig;                       // faint glass
+  o = vec4(pc + col*samt, 1.);
+}`);
+
+const quad = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+const fsqVao = gl.createVertexArray(); gl.bindVertexArray(fsqVao);
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+const MAXSEG = 16384;
+const segBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, segBuf);
+gl.bufferData(gl.ARRAY_BUFFER, (MAXSEG + 1) * 12, gl.DYNAMIC_DRAW);
+const segData = new Float32Array((MAXSEG + 1) * 3);
+const beamVao = gl.createVertexArray(); gl.bindVertexArray(beamVao);
+gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+gl.bindBuffer(gl.ARRAY_BUFFER, segBuf);
+gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 12, 0); gl.vertexAttribDivisor(1, 1);
+gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 3, gl.FLOAT, false, 12, 12); gl.vertexAttribDivisor(2, 1);
+gl.bindVertexArray(null);
+
+function target(w, h) {
+  const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const f = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+  gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+  return { t, f, w, h };
+}
+let W = 0, H = 0, accA, accB, haloA, haloB;
+function resize() {
+  const s = +$('res').value * (window.devicePixelRatio || 1);
+  const w = Math.max(64, Math.round(innerWidth * s)), h = Math.max(64, Math.round(innerHeight * s));
+  if (w === W && h === H) return;
+  W = w; H = h; canvas.width = w; canvas.height = h;
+  accA = target(w, h); accB = target(w, h);
+  haloA = target(w >> 2, h >> 2); haloB = target(w >> 2, h >> 2);
+}
+
+function pass(p, dst) {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, dst ? dst.f : null);
+  gl.viewport(0, 0, dst ? dst.w : W, dst ? dst.h : H);
+  gl.useProgram(p.p); gl.bindVertexArray(fsqVao);
+}
+function tex(unit, t, loc) { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, t); gl.uniform1i(loc, unit); }
+
+// ===================================================================== paint
+// A paint scene is aitherLang evaluated per pixel: lets, then a colour.
+// This compiles that subset to a GLSL fragment shader. Types are float,
+// pair (vec2: complex numbers, points) and colour (vec3).
+const PaintLang = (() => {
+  const KW = new Set(['let', 'if', 'then', 'else', 'and', 'or', 'not']);
+  function lex(src) {
+    const out = []; let i = 0, line = 1;
+    while (i < src.length) {
+      const c = src[i];
+      if (c === '#') { while (i < src.length && src[i] !== '\n') i++; continue; }
+      if (c === '\n') { out.push({ t: 'nl', line }); line++; i++; continue; }
+      if (/\s/.test(c)) { i++; continue; }
+      if (/[0-9]/.test(c) || (c === '.' && /[0-9]/.test(src[i + 1] || ''))) {
+        let j = i; while (j < src.length && /[0-9.eE]/.test(src[j])) { if (/[eE]/.test(src[j]) && /[-+]/.test(src[j + 1])) j++; j++; }
+        out.push({ t: 'num', v: src.slice(i, j), line }); i = j; continue;
+      }
+      if (/[A-Za-z_]/.test(c)) {
+        let j = i; while (j < src.length && /[A-Za-z0-9_]/.test(src[j])) j++;
+        const w = src.slice(i, j); out.push({ t: KW.has(w) ? w : 'id', v: w, line }); i = j; continue;
+      }
+      const two = src.slice(i, i + 2);
+      if (['=>', '==', '!=', '<=', '>=', '|>'].includes(two)) { out.push({ t: two, line }); i += 2; continue; }
+      if ('+-*/%()[],=<>:'.includes(c)) { out.push({ t: c, line }); i++; continue; }
+      throw new Error(`line ${line}: unexpected '${c}'`);
+    }
+    out.push({ t: 'nl', line }); out.push({ t: 'eof', line });
+    return out;
+  }
+  function parse(src) {
+    const tk = lex(src); let k = 0;
+    const peek = () => tk[k], next = () => tk[k++];
+    const eat = (t) => { if (tk[k].t !== t) throw new Error(`line ${tk[k].line}: expected '${t}'`); return tk[k++]; };
+    let depth = 0;
+    const skipNl = () => { while (depth > 0 && peek().t === 'nl') k++; };
+    function expr() { return ifExpr(); }
+    function ifExpr() {
+      if (peek().t === 'if') { next(); const c = expr(); eat('then'); const a = expr(); eat('else'); const b = expr(); return { k: 'if', c, a, b }; }
+      return pipe();
+    }
+    function pipe() { let a = or(); while (peek().t === '|>') { next(); const f = postfix(); if (f.k !== 'call') throw new Error('|> needs a call'); f.args.unshift(a); a = f; } return a; }
+    function bin(nextFn, ops) { return () => { let a = nextFn(); skipNl(); while (ops.includes(peek().t)) { const op = next().t; skipNl(); a = { k: 'bin', op, a, b: nextFn() }; skipNl(); } return a; }; }
+    const mul = bin(unary, ['*', '/', '%']);
+    const add = bin(mul, ['+', '-']);
+    const cmp = bin(add, ['<', '>', '<=', '>=', '==', '!=']);
+    const and = bin(cmp, ['and']);
+    const or = bin(and, ['or']);
+    function unary() {
+      if (peek().t === '-') { next(); return { k: 'neg', a: unary() }; }
+      if (peek().t === 'not') { next(); return { k: 'not', a: unary() }; }
+      return postfix();
+    }
+    function postfix() {
+      let a = primary();
+      for (;;) {
+        if (peek().t === '(' && a.k === 'id') {
+          next(); depth++; skipNl(); const args = [];
+          while (peek().t !== ')') {
+            if (peek().t === 'id' && tk[k + 1].t === '=>') { const p = next().v; next(); args.push({ k: 'lam', p, body: expr() }); }
+            else args.push(expr());
+            skipNl(); if (peek().t === ',') { next(); skipNl(); }
+          }
+          eat(')'); depth--; a = { k: 'call', f: a.v, args };
+        } else if (peek().t === '[') { next(); const i = expr(); eat(']'); a = { k: 'idx', a, i }; }
+        else return a;
+      }
+    }
+    function primary() {
+      const t = next();
+      if (t.t === 'num') return { k: 'num', v: parseFloat(t.v) };
+      if (t.t === 'id') return { k: 'id', v: t.v, line: t.line };
+      if (t.t === '(') { depth++; skipNl(); const e = expr(); skipNl(); eat(')'); depth--; return e; }
+      if (t.t === '[') { depth++; skipNl(); const items = []; while (peek().t !== ']') { items.push(expr()); skipNl(); if (peek().t === ',') { next(); skipNl(); } } eat(']'); depth--; return { k: 'vec', items }; }
+      throw new Error(`line ${t.line}: unexpected ${t.v || t.t}`);
+    }
+    const stmts = [];
+    for (;;) {
+      while (peek().t === 'nl') next();
+      if (peek().t === 'eof') break;
+      if (peek().t === 'let') { next(); const name = eat('id').v; eat('='); stmts.push({ k: 'let', name, e: expr() }); }
+      else stmts.push({ k: 'out', e: expr() });
+      if (peek().t !== 'nl' && peek().t !== 'eof') throw new Error(`line ${peek().line}: unexpected ${peek().v || peek().t}`);
+    }
+    return stmts;
+  }
+
+  // ---- code generation
+  const T = { f: 'float', v: 'vec2', c: 'vec3', b: 'bool' };
+  const ENV = { x: 'f', y: 'f', t: 'f', p: 'v', PI: 'f', TAU: 'f', level: 'f', low: 'f', mid: 'f', high: 'f', hit: 'f',
+    c1: 'f', c2: 'f', c3: 'f', aspect: 'f', beat: 'f' };
+  const HELPERS = `
+vec2 cmul(vec2 a, vec2 b){ return vec2(a.x*b.x-a.y*b.y, a.x*b.y+a.y*b.x); }
+vec2 cdiv(vec2 a, vec2 b){ float d = dot(b,b)+1e-12; return vec2(a.x*b.x+a.y*b.y, a.y*b.x-a.x*b.y)/d; }
+vec2 cexp(vec2 z){ return exp(z.x)*vec2(cos(z.y), sin(z.y)); }
+vec2 clog(vec2 z){ return vec2(log(length(z)+1e-12), atan(z.y, z.x)); }
+vec2 cpow(vec2 z, float n){ float r = pow(length(z), n), a = atan(z.y, z.x)*n; return r*vec2(cos(a), sin(a)); }
+vec2 rotate(vec2 v, float a){ float c = cos(a), s = sin(a); return vec2(c*v.x-s*v.y, s*v.x+c*v.y); }
+vec3 hsv(float h, float s, float v){ vec3 k = clamp(abs(mod(h*6.+vec3(0.,4.,2.),6.)-3.)-1., 0., 1.); return v*mix(vec3(1.), k, s); }
+vec3 palette(float t, float s){ return 0.5+0.5*cos(6.2831853*(t+s+vec3(0.,0.33,0.67))); }
+float hash2(vec2 q){ q = fract(q*vec2(123.34, 456.21)); q += dot(q, q+45.32); return fract(q.x*q.y); }
+float vnoise(vec2 q){ vec2 i = floor(q), f = fract(q); f = f*f*(3.-2.*f);
+  return mix(mix(hash2(i), hash2(i+vec2(1,0)), f.x), mix(hash2(i+vec2(0,1)), hash2(i+vec2(1,1)), f.x), f.y); }
+float fbm(vec2 q){ float a = 0.5, s = 0.; for (int i = 0; i < 5; i++){ s += a*vnoise(q); q = q*2.03+17.1; a *= 0.5; } return s; }
+`;
+  function compile(src) {
+    const stmts = parse(src);
+    const vars = Object.assign({}, ENV);
+    let pre = '', n = 0;
+    const lit = (v) => { const s = String(v); return /[.eE]/.test(s) ? s : s + '.0'; };
+    const promote = (e, to) => (e.t === to ? e.s : to === 'v' && e.t === 'f' ? `vec2(${e.s})` : to === 'c' && e.t === 'f' ? `vec3(${e.s})` : e.s);
+    const wider = (a, b) => (a === 'c' || b === 'c' ? 'c' : a === 'v' || b === 'v' ? 'v' : 'f');
+    const FN1 = ['sin', 'cos', 'tan', 'abs', 'sqrt', 'exp', 'log', 'floor', 'fract', 'sign', 'asin', 'acos', 'tanh', 'sinh', 'cosh', 'normalize'];
+    function g(e, scope) {
+      switch (e.k) {
+        case 'num': return { s: lit(e.v), t: 'f' };
+        case 'id': {
+          const ty = scope[e.v] || vars[e.v];
+          if (!ty) throw new Error(`unknown name '${e.v}'`);
+          const name = e.v === 'PI' ? '3.14159265' : e.v === 'TAU' ? '6.28318531' : (scope[e.v] ? scope['$' + e.v] : 'v_' + e.v);
+          return { s: ['x', 'y', 't', 'p', 'level', 'low', 'mid', 'high', 'hit', 'c1', 'c2', 'c3', 'aspect', 'beat'].includes(e.v) && !scope[e.v] ? e.v : name, t: ty };
+        }
+        case 'vec': {
+          const it = e.items.map((i) => g(i, scope));
+          if (it.length === 2) return { s: `vec2(${it[0].s}, ${it[1].s})`, t: 'v' };
+          if (it.length === 3) return { s: `vec3(${it[0].s}, ${it[1].s}, ${it[2].s})`, t: 'c' };
+          throw new Error('[...] takes 2 (pair) or 3 (colour) values');
+        }
+        case 'idx': { const a = g(e.a, scope); const i = e.i.k === 'num' ? e.i.v : 0; return { s: `${a.s}.${'xyz'[i]}`, t: 'f' }; }
+        case 'neg': { const a = g(e.a, scope); return { s: `(-${a.s})`, t: a.t }; }
+        case 'not': { const a = g(e.a, scope); return { s: `(!${a.s})`, t: 'b' }; }
+        case 'bin': {
+          const a = g(e.a, scope), b = g(e.b, scope);
+          if (e.op === 'and') return { s: `(${a.s} && ${b.s})`, t: 'b' };
+          if (e.op === 'or') return { s: `(${a.s} || ${b.s})`, t: 'b' };
+          if (['<', '>', '<=', '>=', '==', '!='].includes(e.op)) return { s: `(${a.s} ${e.op} ${b.s})`, t: 'b' };
+          const w = wider(a.t, b.t);
+          if (e.op === '%') return { s: `mod(${promote(a, w)}, ${b.s})`, t: w };
+          return { s: `(${promote(a, w)} ${e.op} ${promote(b, w)})`, t: w };
+        }
+        case 'if': {
+          const c = g(e.c, scope), a = g(e.a, scope), b = g(e.b, scope), w = wider(a.t, b.t);
+          const cs = c.t === 'b' ? c.s : `(${c.s} > 0.0)`;
+          return { s: `(${cs} ? ${promote(a, w)} : ${promote(b, w)})`, t: w };
+        }
+        case 'call': return call(e, scope);
+        case 'lam': throw new Error('a lambda only goes inside escape/iterate/trap');
+      }
+    }
+    function call(e, scope) {
+      const f = e.f, A = () => e.args.map((a) => g(a, scope));
+      if (FN1.includes(f)) { const [a] = A(); return { s: `${f}(${a.s})`, t: a.t }; }
+      if (['min', 'max', 'pow', 'mod', 'step'].includes(f)) { const [a, b] = A(); const w = wider(a.t, b.t); return { s: `${f}(${promote(a, w)}, ${b.t === 'f' && w !== 'f' && f !== 'pow' ? b.s : promote(b, w)})`, t: w }; }
+      if (f === 'atan') { const [a, b] = A(); return { s: b ? `atan(${a.s}, ${b.s})` : `atan(${a.s})`, t: 'f' }; }
+      if (f === 'clamp') { const [a, lo, hi] = A(); return { s: `clamp(${a.s}, ${lo.s}, ${hi.s})`, t: a.t }; }
+      if (f === 'mix') { const [a, b, m] = A(); const w = wider(a.t, b.t); return { s: `mix(${promote(a, w)}, ${promote(b, w)}, ${m.s})`, t: w }; }
+      if (f === 'smoothstep') { const [a, b, x] = A(); return { s: `smoothstep(${a.s}, ${b.s}, ${x.s})`, t: x.t }; }
+      if (f === 'ease') { const [a] = A(); return { s: `smoothstep(0.0, 1.0, ${a.s})`, t: a.t }; }
+      if (f === 'length' || f === 'magnitude') { const [a] = A(); return { s: `length(${a.s})`, t: 'f' }; }
+      if (f === 'phase') { const [a] = A(); return { s: `atan(${a.s}.y, ${a.s}.x)`, t: 'f' }; }
+      if (f === 'dot') { const [a, b] = A(); return { s: `dot(${a.s}, ${b.s})`, t: 'f' }; }
+      if (f === 'conj') { const [a] = A(); return { s: `vec2(${a.s}.x, -${a.s}.y)`, t: 'v' }; }
+      if (['cmul', 'cdiv'].includes(f)) { const [a, b] = A(); return { s: `${f}(${promote(a, 'v')}, ${promote(b, 'v')})`, t: 'v' }; }
+      if (['cexp', 'clog'].includes(f)) { const [a] = A(); return { s: `${f}(${a.s})`, t: 'v' }; }
+      if (f === 'cpow') { const [a, b] = A(); return { s: `cpow(${a.s}, ${b.s})`, t: 'v' }; }
+      if (f === 'rotate') { const [a, b] = A(); return { s: `rotate(${a.s}, ${b.s})`, t: 'v' }; }
+      if (f === 'rgb') { const [r, gg, b] = A(); return { s: `vec3(${r.s}, ${gg.s}, ${b.s})`, t: 'c' }; }
+      if (f === 'hsv') { const [h, s, v] = A(); return { s: `hsv(${h.s}, ${s.s}, ${v.s})`, t: 'c' }; }
+      if (f === 'palette') { const [a, s] = A(); return { s: `palette(${a.s}, ${s ? s.s : '0.0'})`, t: 'c' }; }
+      if (f === 'noise') { const [a] = A(); return { s: `vnoise(${promote(a, 'v')})`, t: 'f' }; }
+      if (f === 'fbm') { const [a] = A(); return { s: `fbm(${promote(a, 'v')})`, t: 'f' }; }
+      if (f === 'beam') { const [a] = A(); return { s: `(1.0-exp(-dot(texture(beamTex, (${promote(a, 'v')}/vec2(aspect, 1.0))*0.5+0.5).rg, vec2(1.0))*0.8))`, t: 'f' }; }
+      if (f === 'feedback') { const [a] = A(); return { s: `texture(prevTex, (${promote(a, 'v')}/vec2(aspect, 1.0))*0.5+0.5).rgb`, t: 'c' }; }
+      if (['escape', 'iterate', 'trap'].includes(f)) {
+        // fold a lambda n times. escape: smooth escape time 0..1 (1 = never
+        // escaped); iterate: the final z; trap: the orbit's closest approach
+        // to the origin.
+        const [ne, z0e, lam] = e.args;
+        if (!lam || lam.k !== 'lam') throw new Error(`${f}(n, z0, z => ...)`);
+        const N = g(ne, scope), z0 = g(z0e, scope);
+        const id = ++n, zv = `z_${id}`, rv = `r_${id}`;
+        const inner = Object.assign({}, scope); inner[lam.p] = 'v'; inner['$' + lam.p] = zv;
+        const body = g(lam.body, inner);
+        pre += `  vec2 ${zv} = ${promote(z0, 'v')}; float ${rv} = ${f === 'trap' ? '1e9' : '1.0'};\n`;
+        pre += `  for (int i = 0; i < 400; i++) { if (float(i) >= ${N.s}) break;\n    ${zv} = ${promote(body, 'v')};\n`;
+        if (f === 'escape') pre += `    float m2 = dot(${zv}, ${zv}); if (m2 > 256.0) { ${rv} = (float(i) + 1.0 - log2(log2(m2) * 0.5)) / ${N.s}; break; }\n`;
+        if (f === 'trap') pre += `    ${rv} = min(${rv}, length(${zv})); if (dot(${zv}, ${zv}) > 256.0) break;\n`;
+        pre += `  }\n`;
+        return f === 'iterate' ? { s: zv, t: 'v' } : { s: `clamp(${rv}, 0.0, 1.0)`.replace('clamp(' + rv + ', 0.0, 1.0)', f === 'trap' ? rv : `clamp(${rv}, 0.0, 1.0)`), t: 'f' };
+      }
+      throw new Error(`unknown function '${f}'`);
+    }
+    let body = '', outE = null;
+    for (const s of stmts) {
+      if (s.k === 'let') {
+        const e = g(s.e, {});
+        if (e.t === 'b') throw new Error(`let ${s.name}: a condition, not a value`);
+        body += pre; pre = '';
+        body += `  ${T[e.t]} v_${s.name} = ${e.s};\n`; vars[s.name] = e.t;
+      } else { outE = g(s.e, {}); body += pre; pre = ''; }
+    }
+    if (!outE) throw new Error('the last line must be a colour');
+    const col = outE.t === 'c' ? outE.s : outE.t === 'v' ? `vec3(${outE.s}, 0.0)` : `vec3(${outE.s})`;
+    return `#version 300 es
+precision highp float;
+in vec2 uv; out vec4 o;
+uniform float t, level, low, mid, high, hit, c1, c2, c3, aspect, beat;
+uniform sampler2D prevTex, beamTex;
+${HELPERS}
+void main(){
+  vec2 p = (uv*2.0-1.0)*vec2(aspect, 1.0); float x = p.x, y = p.y;
+${body}  o = vec4(clamp(${col}, vec3(0.0), vec3(1.2)), 1.0);   // capped, so feedback can't run away
+}`;
+  }
+  return { compile };
+})();
+
+// The scene: /scene.paint, polled; a scene that doesn't compile leaves the
+// last good one running and shows why.
+let paintProg = null, paintSrc = '', paintErr = '', pW = 0, pH = 0, pA = null, pB = null;
+// A scene asks for its resolution with a line `#! res 0.8`; in auto the
+// page gives it that, stepping down only while the GPU can't hold ~24 fps.
+let sceneRes = 0.5, autoScale = 0.5, slowFor = 0, fastFor = 0;
+async function pollPaint() {
+  try {
+    const r = await fetch('/scene.paint', { cache: 'no-store' });
+    const txt = r.ok ? await r.text() : '';
+    if (txt !== paintSrc) {
+      paintSrc = txt;
+      if (!txt.trim()) { paintProg = null; paintErr = ''; }
+      else {
+        try { const glsl = PaintLang.compile(txt); paintProg = prog(FSQ, glsl); paintErr = '';
+          const m = txt.match(/^#!\s*res\s+([0-9.]+)/m); sceneRes = m ? Math.min(1, Math.max(0.2, +m[1])) : 0.5; autoScale = sceneRes; }
+        catch (e) { paintErr = String(e.message || e).split('\n')[0].slice(0, 160); }
+      }
+    }
+  } catch (e) {}
+  setTimeout(pollPaint, 600);
+}
+// Audio at the playhead -> level, low, mid, high (auto-gained 0..1) and hit.
+const an = { level: 0, low: 0, mid: 0, high: 0, hit: 0, max: [1e-3, 1e-3, 1e-3, 1e-3], hb: 0 };
+function analyse(head) {
+  const n = 1024, end = Math.floor(head);
+  if (end - n < 0 || end > written) return;
+  let lp1 = 0, lp2 = 0, sl = 0, sm = 0, sh = 0, sa = 0;
+  const k1 = 1 - Math.exp(-6.2832 * 250 / SR), k2 = 1 - Math.exp(-6.2832 * 2500 / SR);
+  for (let i = end - n; i < end; i++) {
+    const v = am[((i % RING) + RING) % RING];
+    lp1 += (v - lp1) * k1; lp2 += (v - lp2) * k2;
+    sa += v * v; sl += lp1 * lp1; sm += (lp2 - lp1) * (lp2 - lp1); sh += (v - lp2) * (v - lp2);
+  }
+  const vals = [sa, sl, sm, sh].map((e) => Math.sqrt(e / n));
+  const keys = ['level', 'low', 'mid', 'high'];
+  vals.forEach((v, i) => { an.max[i] = Math.max(an.max[i] * 0.9985, v, 1e-4); an[keys[i]] += (v / an.max[i] - an[keys[i]]) * 0.35; });
+  const onset = vals[3] / an.max[3];
+  an.hit = Math.max(an.hit * 0.86, onset > an.hb * 1.35 + 0.08 ? Math.min(1, onset) : 0);
+  an.hb += (onset - an.hb) * 0.1;
+}
+function paintTargets(dt) {
+  let s = +$('pres').value;
+  if ($('pres').value === 'auto') {
+    const f = dt > 0 ? 1 / dt : 60;
+    slowFor = f < 24 ? slowFor + dt : 0; fastFor = f > 40 ? fastFor + dt : 0;
+    if (slowFor > 0.6) { autoScale = Math.max(0.25, autoScale * 0.85); slowFor = 0; }
+    if (fastFor > 2.0) { autoScale = Math.min(sceneRes, autoScale * 1.12); fastFor = 0; }
+    s = autoScale;
+  }
+  const w = Math.max(32, Math.round(W * s)), h = Math.max(32, Math.round(H * s));
+  if (w !== pW || h !== pH) { pW = w; pH = h; pA = target(w, h); pB = target(w, h); }
+}
+function paintPass(now, head, dt) {
+  if (!paintProg) return;
+  paintTargets(dt);
+  analyse(head);
+  const P = paintProg, u = P.u;
+  pass(P, pB);
+  tex(0, pA.t, u.prevTex); tex(1, accA.t, u.beamTex);
+  const k = ((Math.floor(head) % RING) + RING) % RING;
+  const set = (n, v) => { if (u[n]) gl.uniform1f(u[n], v); };
+  set('t', now / 1000); set('aspect', W / H); set('level', an.level); set('low', an.low); set('mid', an.mid);
+  set('high', an.high); set('hit', an.hit); set('c1', bx[k]); set('c2', by[k]); set('c3', bz[k]); set('beat', 0);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  [pA, pB] = [pB, pA];
+}
+
+// ------------------------------------------------------------ frame loop
+let drawn = -1, lastT = performance.now(), fps = 0;
+// Plot units (-1..1) to clip space: fill stretches the beam over the
+// window, like a scope's 10 x 8 screen; square keeps circles round.
+function plotScale(aspect) {
+  if ($('view').value === 'fill') return [0.97, 0.95];
+  const plot = 0.94;
+  return aspect >= 1 ? [plot / aspect, plot] : [plot, plot * aspect];
+}
+function frame(now) {
+  requestAnimationFrame(frame);
+  resize();
+  const dt = Math.min(0.1, (now - lastT) / 1000); lastT = now;
+  fps = fps * 0.95 + (dt > 0 ? 1 / dt : 0) * 0.05;
+  const ph = PHOS[$('phos').value];
+  const pers = Math.pow(4, +$('pers').value);
+  const aspect = W / H, plot = 0.92;
+
+  // decay accA -> accB
+  pass(decayP, accB); tex(0, accA.t, decayP.u.src);
+  gl.uniform2f(decayP.u.k, Math.exp(-dt / (ph.t1 * pers)), Math.exp(-dt / (ph.t2 * pers)));
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+  // new beam since last frame, additively into accB
+  const head = Math.floor(playhead());
+  if (drawn < 0 || head - drawn > SR || head < drawn) drawn = Math.max(0, head - 800);
+  let from = Math.max(drawn, written - RING + 1), to = Math.min(head, written - 1);
+  if (to - from > MAXSEG) from = to - MAXSEG;
+  const nseg = to - from;
+  if (nseg > 0) {
+    for (let i = 0; i <= nseg; i++) {
+      const k = (from + i) % RING;
+      segData[i * 3] = bx[k]; segData[i * 3 + 1] = by[k]; segData[i * 3 + 2] = bz[k];
+    }
+    gl.bindBuffer(gl.ARRAY_BUFFER, segBuf);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, segData, 0, (nseg + 1) * 3);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, accB.f); gl.viewport(0, 0, W, H);
+    gl.useProgram(beamP.p); gl.bindVertexArray(beamVao);
+    gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
+    const [sx, sy] = plotScale(aspect);
+    gl.uniform2f(beamP.u.scale, sx, sy);
+    gl.uniform2f(beamP.u.px, 2 / W, 2 / H);
+    const sigma = +$('focus').value * (H / 900);
+    gl.uniform1f(beamP.u.sigma, sigma);
+    gl.uniform1f(beamP.u.energy, 14 * Math.pow(4, +$('inten').value) * (H / 900));
+    gl.uniform1f(beamP.u.share2, ph.s2);
+    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, nseg);
+    gl.disable(gl.BLEND);
+  }
+  drawn = Math.max(drawn, to);
+  [accA, accB] = [accB, accA];
+
+  // glow: quarter-res blur of the energy
+  pass(blurP, haloA); tex(0, accA.t, blurP.u.src); gl.uniform2f(blurP.u.dir, 1 / haloA.w, 0); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  pass(blurP, haloB); tex(0, haloA.t, blurP.u.src); gl.uniform2f(blurP.u.dir, 0, 1 / haloA.h); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  pass(blurP, haloA); tex(0, haloB.t, blurP.u.src); gl.uniform2f(blurP.u.dir, 2 / haloA.w, 0); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  pass(blurP, haloB); tex(0, haloA.t, blurP.u.src); gl.uniform2f(blurP.u.dir, 0, 2 / haloA.h); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+  paintPass(now, head, dt);
+  // show
+  pass(showP, null); tex(0, accA.t, showP.u.acc); tex(1, haloB.t, showP.u.halo);
+  gl.uniform3fv(showP.u.c1, ph.c1); gl.uniform3fv(showP.u.c2, ph.c2);
+  gl.uniform1f(showP.u.gain, 1.0); gl.uniform1f(showP.u.glow, +$('glow').value);
+  gl.uniform1f(showP.u.grat, +$('grat').value); gl.uniform1f(showP.u.aspect, aspect);
+  gl.uniform1f(showP.u.plot, plot); gl.uniform1f(showP.u.time, now / 1000);
+  const ps = plotScale(aspect); gl.uniform2f(showP.u.scale, ps[0], ps[1]);
+  gl.uniform2f(showP.u.div, $('view').value === 'fill' ? 5 : 4, 4);
+  if (pA) tex(2, pA.t, showP.u.paint); gl.uniform1f(showP.u.pamt, paintProg ? +$('pamt').value : 0.0); gl.uniform1f(showP.u.samt, +$('samt').value);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+// ------------------------------------------------------------ HUD + UI
+setInterval(() => {
+  const buf = ctx ? ((written - played) / SR).toFixed(1) + ' s' : '—';
+  $('hud').textContent = (streamErr ? 'stream: ' + streamErr + '\n' : '') + (paintErr ? 'paint: ' + paintErr + '\n' : '') +
+    `${Math.round(fps)} fps · ${Math.round(kbps)} kbit/s · buffer ${buf}` + (paintProg ? ` · paint ${Math.round(pW)}×${Math.round(pH)}` : '') + (ctx ? '' : ' · tap to hear');
+}, 500);
+
+for (const id of ['phos', 'pers', 'inten', 'focus', 'glow', 'grat', 'vol', 'res', 'view', 'pamt', 'samt', 'pres']) {
+  const el = $(id), saved = store('scope.' + id);
+  if (saved !== null && saved !== undefined) el.value = saved;
+  el.addEventListener('input', () => { store('scope.' + id, el.value);
+    if (id === 'vol' && gainNode) gainNode.gain.value = +el.value; });
+}
+const panel = $('panel');
+$('gear').onclick = () => panel.classList.toggle('open');
+$('close').onclick = () => panel.classList.remove('open');
+$('fs').onclick = () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => {});
+canvas.addEventListener('dblclick', () => $('fs').onclick());
+addEventListener('keydown', (e) => { if (e.key === 'h') panel.classList.toggle('open'); if (e.key === 'f') $('fs').onclick(); });
+$('start').onclick = async () => { $('start').style.display = 'none'; try { await startAudio(); } catch (e) { streamErr = 'audio: ' + e.message; } };
+
+stream();
+pollPaint();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

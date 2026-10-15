@@ -55,16 +55,22 @@ proc nWave*(s: var DspState; freq: float64;
   values[idx]
 
 # ---------------------------------------------------------------- 1-pole filters
+# The cutoff is in Hz: a = 1 - exp(-2 pi fc / sr) puts the -3 dB point at
+# fc (within 3% up to 4 kHz at 48 kHz). Until 2026-10-12 it was
+# a = cutoff / sr, so lp1(x, 4000) cut at 665 Hz; patches were converted.
+
+proc onePoleCoef(cutoff, sr: float64): float64 {.inline.} =
+  1.0 - exp(-TAU * max(cutoff, 0.0) / sr)
 
 proc nLp1*(s: var DspState; signal, cutoff: float64): float64 {.cdecl, exportc: "n_lp1".} =
   let i = s.claim()
-  let a = clamp(cutoff / s.sr, 0.0, 1.0)
+  let a = onePoleCoef(cutoff, s.sr)
   s.pool[i] += a * (signal - s.pool[i])
   s.pool[i]
 
 proc nHp1*(s: var DspState; signal, cutoff: float64): float64 {.cdecl, exportc: "n_hp1".} =
   let i = s.claim()
-  let a = clamp(cutoff / s.sr, 0.0, 1.0)
+  let a = onePoleCoef(cutoff, s.sr)
   s.pool[i] += a * (signal - s.pool[i])
   signal - s.pool[i]
 
@@ -107,22 +113,46 @@ proc nNotch*(s: var DspState; signal, cutoff, res: float64): float64 {.cdecl, ex
 
 # ------------------------------------------------------------------- delays
 # Buffer lives inline in the pool. Layout: [cursor, sample0, sample1, ...].
+#
+# `time` is a real number of samples, not a whole one: the read point
+# sits between two taps and the two are mixed linearly (a fractional
+# delay). Physical models need this: a tube or string whose length is a
+# whole number of samples is tuned to the sample rate, not to the
+# player, and an 8-section tract came out 27% too short before this.
+# Linear interpolation has a mild highpass-ish droop at half-sample
+# positions (about -2 dB at 10 kHz, nothing below 2 kHz); if that ever
+# matters an allpass interpolator can take its place.
+#
+# `delay` writes before it reads, so a time of 0 is this sample's input
+# (it used to return the oldest sample in the buffer). The longest delay
+# is one sample short of `max_time`. `fbdelay` reads before it writes
+# (the feedback needs last pass's output) and so starts at one sample.
+
+proc tapInterp(s: var DspState; base, bufLen, cursor: int;
+               d: float64): float64 {.inline.} =
+  # Sample `d` (>= 0, <= bufLen - 1) samples behind `cursor`.
+  let d0 = int(d)
+  let frac = d - float64(d0)
+  let i0 = (cursor - d0 + bufLen) mod bufLen
+  if frac <= 0.0: return s.pool[base + 1 + i0]
+  let i1 = (i0 - 1 + bufLen) mod bufLen         # one sample older
+  s.pool[base + 1 + i0] * (1.0 - frac) + s.pool[base + 1 + i1] * frac
 
 proc nDelay*(s: var DspState; signal, time, maxTime: float64): float64 {.cdecl, exportc: "n_delay".} =
   let bufLen = max(1, int(maxTime * s.sr))
   let base = s.claim(1 + bufLen)
   let cursor = int(s.pool[base]) mod bufLen
-  let rd = (cursor - clamp(int(time * s.sr), 0, bufLen - 1) + bufLen) mod bufLen
-  result = s.pool[base + 1 + rd]
   s.pool[base + 1 + cursor] = signal
+  let d = clamp(time * s.sr, 0.0, float64(bufLen - 1))
+  result = tapInterp(s, base, bufLen, cursor, d)
   s.pool[base] = float64((cursor + 1) mod bufLen)
 
 proc nFbdelay*(s: var DspState; signal, time, maxTime, fb: float64): float64 {.cdecl, exportc: "n_fbdelay".} =
   let bufLen = max(1, int(maxTime * s.sr))
   let base = s.claim(1 + bufLen)
   let cursor = int(s.pool[base]) mod bufLen
-  let rd = (cursor - clamp(int(time * s.sr), 0, bufLen - 1) + bufLen) mod bufLen
-  result = s.pool[base + 1 + rd]
+  let d = clamp(time * s.sr, min(1.0, float64(bufLen - 1)), float64(bufLen - 1))
+  result = tapInterp(s, base, bufLen, cursor, d)
   s.pool[base + 1 + cursor] = signal + result * fb
   s.pool[base] = float64((cursor + 1) mod bufLen)
 

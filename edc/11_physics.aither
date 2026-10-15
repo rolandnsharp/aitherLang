@@ -89,7 +89,7 @@ spring + bar + marimba
 #      circulating in a short delay loop that loses its top
 #      end each lap. Add a part:
 #        play string:
-#          let burst = (noise() |> lp1(3000)) * discharge(impulse(1), 300)
+#          let burst = (noise() |> lp1(490)) * discharge(impulse(1), 300)
 #          pluck_string(burst, 262, 0.9) * 2
 #      The stdlib marks pluck_string as work in progress:
 #      it rings about 3% flat (the filter in the loop adds

@@ -1,0 +1,11 @@
+# Kaleidoscope: fold space into 6 mirrored wedges, feed back with a spin.
+let n    = 6
+let a    = phase(p)
+let r    = length(p)
+let w    = TAU / n
+let af   = abs(((a % w) + w) % w - w / 2)
+let k    = [r * cos(af), r * sin(af)]
+let q    = rotate(k * (0.975 - 0.02 * low), 0.01 + 0.05 * hit)
+let old  = feedback(q) * (0.84 + 0.06 * level) - 0.006
+let ink  = palette(r * 0.6 - t * 0.07 + 0.3 * mid, 0.1) * beam(p) * 0.9
+old + ink

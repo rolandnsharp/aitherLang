@@ -1,13 +1,12 @@
 ## aither engine — audio callback + socket CLI for live coding
 
-import std/[os, net, strutils, math, locks, tables]
-import parser, voice, miniaudio, midi, dsp, render
+import std/[os, net, strutils, math, locks, tables, sets]
+import parser, voice, miniaudio, midi, dsp, render, imports
 import engine_types, cli_output, analysis
 export engine_types
 
 const
   SampleRate    = 48000'u32
-  Channels      = 2'u32
   MaxVoices     = 16
   DefaultFadeMs = 20.0
   # A voice that blows up this soon after a hot-swap is rolled back to
@@ -29,6 +28,14 @@ let SocketPath = getEnv("AITHER_SOCK", "/tmp/aither.sock")
 # streaming engine, where latency is free, wants 2048 or more so a slow
 # period doesn't underrun the sink (heard as a click per hole).
 let BufferFrames = uint32(envFloat("AITHER_BUFFER", 512.0))
+# AITHER_SCOPE=1 opens five output channels: the mix (L, R), then the
+# oscilloscope's beam (X, Y) and intensity (Z), for a streaming engine
+# whose viewers draw it. A voice's `play scope:` part is the beam's
+# (x, y) and `play beam:` its intensity (default 1 while a scope part
+# plays); neither is in the mix. With no scope part anywhere the beam
+# draws the mix itself, L against R.
+let ScopeOut = getEnv("AITHER_SCOPE") == "1"
+let Channels = if ScopeOut: 5'u32 else: 2'u32
 
 const EnvBinSamples = 2400  # 50ms per bin at 48 kHz
 
@@ -126,6 +133,17 @@ proc audioCallback(output: ptr UncheckedArray[cfloat],
     return
 
   let sc = slotCount
+  # Where each voice's scope and beam parts sit, looked up once per
+  # period (a hot-swap can't land mid-period: it needs this lock).
+  var scopeIdx, beamIdx: array[MaxVoices, int]
+  if ScopeOut:
+    for v in 0 ..< sc:
+      scopeIdx[v] = -1; beamIdx[v] = -1
+      if slots[v].active:
+        for p, name in slots[v].voice.partNames:
+          if name == "scope": scopeIdx[v] = p
+          elif name == "beam": beamIdx[v] = p
+  let nch = int(Channels)
   for i in 0 ..< frames:
     timeFrac += dt
     if timeFrac >= 1.0:
@@ -139,6 +157,8 @@ proc audioCallback(output: ptr UncheckedArray[cfloat],
 
     var lMix = 0.0
     var rMix = 0.0
+    var sx, sy, sz = 0.0
+    var scoped = false
     for v in 0 ..< sc:
       # A runaway mute lifts by itself after a gap, with a fade-in, so
       # one bad moment in a long patch doesn't end the voice.
@@ -213,6 +233,11 @@ proc audioCallback(output: ptr UncheckedArray[cfloat],
           if (d > 0.0 and newG >= target) or (d < 0.0 and newG <= target):
             voice.partGains[p] = target
             voice.partFadeDeltas[p] = 0.0
+            # A `park` lands once the fade-out does: from here the
+            # part's body is skipped.
+            if voice.partParkPending[p] and target <= 0.0:
+              voice.partParked[p] = 1.0
+              voice.partParkPending[p] = false
           else:
             voice.partGains[p] = clamp(newG, 0.0, 1.0)
       let gl = l * slots[v].fadeGain
@@ -231,13 +256,25 @@ proc audioCallback(output: ptr UncheckedArray[cfloat],
       slots[v].recent.idx = (slots[v].recent.idx + 1) mod RecentSamples
       lMix += gl
       rMix += gr
+      if ScopeOut and scopeIdx[v] >= 0:
+        let g = slots[v].fadeGain
+        scoped = true
+        sx += voice.partOut[2*scopeIdx[v]] * g
+        sy += voice.partOut[2*scopeIdx[v] + 1] * g
+        sz += (if beamIdx[v] >= 0: max(0.0, voice.partOut[2*beamIdx[v]]) else: 1.0) * g
 
     update(master, lMix, rMix)
     masterRecent.l[masterRecent.idx] = float32(lMix)
     masterRecent.r[masterRecent.idx] = float32(rMix)
     masterRecent.idx = (masterRecent.idx + 1) mod RecentSamples
-    output[i * 2]     = cfloat(tanh(lMix))
-    output[i * 2 + 1] = cfloat(tanh(rMix))
+    output[i * nch]     = cfloat(tanh(lMix))
+    output[i * nch + 1] = cfloat(tanh(rMix))
+    if ScopeOut:
+      if not scoped:
+        sx = lMix; sy = rMix; sz = 1.0
+      output[i * nch + 2] = cfloat(clamp(sx, -1.0, 1.0))
+      output[i * nch + 3] = cfloat(clamp(sy, -1.0, 1.0))
+      output[i * nch + 4] = cfloat(clamp(sz, 0.0, 1.0))
 
   release(mtx)
 
@@ -383,6 +420,7 @@ proc annotateErr(msg, userSrc, userPath: string): string =
         let body =
           if src == "stdlib": Stdlib
           elif src == userPath: userSrc
+          elif fileExists(src): (try: readFile(src) except IOError: "")
           else: ""
         if body.len > 0:
           let lines = body.split('\n')
@@ -418,6 +456,16 @@ proc loadPatch*(filename: string; fadeIn: float64): string =
   # stdlib (or in their invocation of a stdlib def).
   setSource(stdlibAst, "stdlib")
   setSource(userAst, filename)
+  # Splice `import "lib/x.aither"` files in (re-read on every send, so an
+  # edited library lands with the next send of the patch).
+  try:
+    var files: seq[string]
+    var seen = initHashSet[string]()
+    seen.incl(try: expandFilename(filename) except OSError: filename)
+    userAst = expandImports(userAst, filename, files, seen)
+  except ImportError as e:
+    stderr.writeLine "import FAIL"
+    return "import error: " & e.msg
 
   # Merge: stdlib's top-level statements come first, then the user's.
   let program = parser.Node(
@@ -505,14 +553,20 @@ proc tryPatch*(filename: string; seconds, skip: float64): string =
   var prepared: Prepared
   try:
     let stdlibAst = parseProgram(Stdlib)
-    let userAst = parseProgram(userSrc)
+    var userAst = parseProgram(userSrc)
     setSource(stdlibAst, "stdlib")
     setSource(userAst, filename)
+    var files: seq[string]
+    var seen = initHashSet[string]()
+    seen.incl(try: expandFilename(filename) except OSError: filename)
+    userAst = expandImports(userAst, filename, files, seen)
     let program = parser.Node(kind: parser.nkBlock,
                               kids: stdlibAst.kids & userAst.kids, line: 1)
     prepared = prepare(program, float64(SampleRate), filename)
   except ParseError as e:
     return "ERR parse error: " & e.msg
+  except ImportError as e:
+    return "ERR import error: " & e.msg
   except CatchableError as e:
     return "ERR compile error: " & annotateErr(e.msg, userSrc, filename)
   let scratch = newVoice(float64(SampleRate))
@@ -661,8 +715,9 @@ proc voiceStateOf(s: Slot): VoiceState =
   elif s.fadeDelta > 0.0:    vsFadingIn
   else:                      vsPlaying
 
-proc partStateOf(g, d: float64): PartState =
-  if d > 0.0:    psFadingIn
+proc partStateOf(g, d: float64; parked: bool): PartState =
+  if parked:     psParked
+  elif d > 0.0:  psFadingIn
   elif d < 0.0:  psFadingOut
   elif g <= 0.0: psSilent
   else:          psPlaying
@@ -678,7 +733,8 @@ proc snapshotPartsOf(v: NativeVoice): seq[PartInfo] =
   for i, name in v.partNames:
     result.add PartInfo(
       name: name,
-      state: partStateOf(v.partGains[i], v.partFadeDeltas[i]),
+      state: partStateOf(v.partGains[i], v.partFadeDeltas[i],
+                         v.partParked[i] != 0.0),
       gain: v.partGains[i],
       rms: sqrt(v.partRmsSq[i]), peak: v.partPeak[i])
 
@@ -814,7 +870,40 @@ proc setPartMute(voiceName, partName: string;
     return "no play named " & partName & " in voice " & voiceName
   let target = if muted: 0.0 else: 1.0
   let f = if fade > 0.0: fade else: DefaultFadeMs / 1000.0
-  acquire(mtx); setPartGainTarget(voice, pIdx, target, f); release(mtx)
+  acquire(mtx)
+  if not muted:                              # unmute wakes a parked part too
+    voice.partParked[pIdx] = 0.0
+    voice.partParkPending[pIdx] = false
+  setPartGainTarget(voice, pIdx, target, f)
+  release(mtx)
+  ""
+
+proc setPartPark*(voiceName, partName: string;
+                  parked: bool; fade: float64): string =
+  ## `park`: fade the part out, then skip its body (no CPU, state frozen).
+  ## `unpark`: run it again from where it stopped and fade it in. A mute
+  ## keeps computing (its LFOs and sequencers stay in step); a park is
+  ## for parts that are out of the set for a while.
+  let vIdx = findSlot(voiceName)
+  if vIdx < 0: return "voice not found: " & voiceName
+  let voice = slots[vIdx].voice
+  let pIdx = findPart(voice, partName)
+  if pIdx < 0:
+    return "no play named " & partName & " in voice " & voiceName
+  let f = if fade > 0.0: fade else: DefaultFadeMs / 1000.0
+  acquire(mtx)
+  if parked:
+    if voice.partGains[pIdx] <= 0.0:
+      voice.partParked[pIdx] = 1.0
+      voice.partParkPending[pIdx] = false
+    else:
+      voice.partParkPending[pIdx] = true
+      setPartGainTarget(voice, pIdx, 0.0, f)
+  else:
+    voice.partParked[pIdx] = 0.0
+    voice.partParkPending[pIdx] = false
+    setPartGainTarget(voice, pIdx, 1.0, f)
+  release(mtx)
   ""
 
 proc soloPart(voiceName, partName: string; fade: float64): string =
@@ -874,6 +963,11 @@ proc handleCmd(line: string): string =
     else:
       let err = setMute(parts[1], false)
       if err.len > 0: "ERR " & err else: "OK"
+  of "park", "unpark":
+    if parts.len < 3: return "ERR usage: " & parts[0] & " <voice> <play> [fade-seconds]"
+    let fade = if parts.len >= 4: parseFloatArg(parts[3]) else: 0.0
+    let err = setPartPark(parts[1], parts[2], parts[0] == "park", fade)
+    if err.len > 0: "ERR " & err else: "OK"
   of "solo":
     if parts.len < 2: return "ERR usage: solo <voice> [play] [fade-seconds]"
     if parts.len >= 3 and not isNumeric(parts[2]):

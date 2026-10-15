@@ -73,7 +73,7 @@ play almuqabala:
 
   # Observer — envelope follower on the loop amplitude (the integrator-as-
   # cybernetic-regulator pattern from notes/cybernetics.md).
-  $obs = lp1(abs($loop), 3.0)
+  $obs = lp1(abs($loop), 0.47748)
   let pull = max(0.05, 1 - $obs * 4 * regulator)
 
   # Audio-rate excitation. Frequency drifts slowly with lfo1; AMPLITUDE
@@ -95,7 +95,7 @@ play almuqabala:
   $loop = driven * 0.93
 
   # Output cleanup — first-order low-pass (unconditionally stable).
-  let cut = 300 + toneCut * 5000
+  let cut = 48 + toneCut * 846                  # Hz
   let cleaned = $loop |> lp1(cut)
   let s = cleaned * 0.25
   [s, s]

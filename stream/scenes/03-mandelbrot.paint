@@ -1,0 +1,9 @@
+# Mandelbrot: a dive into Seahorse Valley, ~8000x in a minute, then again.
+#! res 1
+let zt   = (t * 0.15) % 9
+let s    = 1.4 * exp(-zt)
+let c    = [-0.743643887, 0.131825904] + rotate(p, t * 0.05) * s
+let e    = escape(120, [0, 0], z => cmul(z, z) + c)
+let body = if e >= 1 then 0 else 1
+let col  = palette(e * 5 - t * 0.12 + 0.2 * mid, 0.55) * body
+col * (0.55 + 0.6 * low) + hsv(0.55 + 0.3 * hit, 0.5, 1.0) * beam(p) * 0.8

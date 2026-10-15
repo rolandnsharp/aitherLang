@@ -1,0 +1,8 @@
+# Fire: noise warped by noise, rising; the beam throws sparks into it.
+let q    = p * 1.8
+let warp = [fbm(q + [t * 0.3, 0]), fbm(q + [0, t * 0.4])]
+let f    = fbm(q + warp * 2.2 - [0, t * 0.9])
+let heat = clamp(f * (1.15 - y * 0.45) + low * 0.35 - 0.25, 0, 1.5)
+let flame = rgb(heat * 1.7, heat * heat * 1.15, heat * heat * heat * 0.55)
+let rise = feedback(p * 0.995 + [0.002 * sin(t * 3 + y * 9), 0.006]) * 0.72
+flame + rise + beam(p) * rgb(1.0, 0.75, 0.35) * 0.9

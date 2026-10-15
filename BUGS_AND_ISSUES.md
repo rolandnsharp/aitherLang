@@ -10,6 +10,14 @@ toward sounds that have never existed before.
 The items below are the loose ends from that session, ordered by how
 much they block forward work.
 
+## Session log: 2026-10-12 parallel session (from notes/handoff-2026-10-11.md)
+
+Fractional `delay`, state arrays + `each`, `import` + `watch`, migration
+keyed by owning def, `park`, scope-aware meters, `render`, `status`,
+`%`, `1e-3`, stereo `haas`/`reverb`. Rows below marked RESOLVED
+2026-10-12; status table in the handoff. Open: lyrics in the language
+(by choice), server-side visuals.
+
 ## Session log: 2026-10-10 live set (bush doof on native title land)
 
 Two silences, slow iteration and inaudible layers during a streamed set.
@@ -27,11 +35,11 @@ Two silences, slow iteration and inaudible layers during a streamed set.
 | `$x = init` can't see lets | RESOLVED (vars init where declared) |
 | `max`/`min` take only two args | RESOLVED |
 | play-only file compiles to silence | RESOLVED (sums its plays) |
-| haas / reverb reject stereo input | open |
+| haas / reverb reject stereo input | RESOLVED 2026-10-12 (haas delays one side of a pair; reverb runs one per side) |
 | a def param named like a top-level stereo let (adsr's `s`) was read as that pair | RESOLVED (the nearest scope binding wins) |
-| no number exponents (`1e-3`) | open |
-| renamed statement inherits a vanished statement's state when only (type, perTypeIdx, size) match, even from a different def: replacing `stick` ($x,$dx x3) with `bar` ($bv,$bx x3) copied old displacement in, `try` showed +24 dBFS (2026-10-11) | open (workaround: send the old part as `0` first, then the new one; fix idea: also match the helper/def name) |
-| a set that grows to many muted parts renders near real time and the stream underruns (holes of exact zeros = crackle); mute doesn't skip computation | open (workaround: lean patches, remove dead parts; `AITHER_BUFFER=2048` helps a little) |
+| no number exponents (`1e-3`) | RESOLVED 2026-10-12 (`1e-3`, `2.5E6`; `%` is an alias of `mod` too) |
+| renamed statement inherits a vanished statement's state when only (type, perTypeIdx, size) match, even from a different def: replacing `stick` ($x,$dx x3) with `bar` ($bv,$bx x3) copied old displacement in, `try` showed +24 dBFS (2026-10-11) | RESOLVED 2026-10-12 (regions are also keyed by the def they sit in and the `$state` name: `bar/$bv`; another def in the same place starts clean) |
+| a set that grows to many muted parts renders near real time and the stream underruns (holes of exact zeros = crackle); mute doesn't skip computation | RESOLVED 2026-10-12 (`park <voice> <part>`: fades out, then the part's body is skipped and its state frozen; `unpark`/`unmute` resume. `mute` still computes, so clocks stay in step) |
 
 ## Session log: 2026-10-03 pipe chains + runaway guard
 
@@ -43,7 +51,7 @@ Found while writing patches on a Pinebook Pro.
 | `f(..) \|> lpf(..)` garbage when `f` has a filter | RESOLVED |
 | unstable patch drives the speakers at full scale | RESOLVED (runaway guard) |
 | `list` shows `fading-in` forever               | RESOLVED |
-| `reverb` won't take stereo                     | open     |
+| `reverb` won't take stereo                     | RESOLVED 2026-10-12 |
 
 The two pipe bugs were one bug. Each native call compiled to
 `(s->idx = off, n_lpf(s, sig, ...))`: s->idx was set *before* the

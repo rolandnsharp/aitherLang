@@ -29,6 +29,18 @@ static void data_callback(ma_device* dev, void* out, const void* in,
 
 /* Returns 1 with audio input (duplex device), 0 playback-only (no
    capture device, or the backend refused duplex), -1 on failure. */
+/* Five channels are data (mix L/R, scope X/Y/Z), not speakers: pin the
+   layout to the one PulseAudio's 5-channel sink uses and pass channels
+   straight through, so nothing is remixed or dropped by name. */
+static ma_channel g_map5[5] = { MA_CHANNEL_FRONT_LEFT, MA_CHANNEL_FRONT_RIGHT,
+    MA_CHANNEL_FRONT_CENTER, MA_CHANNEL_BACK_LEFT, MA_CHANNEL_BACK_RIGHT };
+static void pin_layout(ma_device_config* c, unsigned int ch) {
+    if (ch == 5) {
+        c->playback.pChannelMap = g_map5;
+        c->playback.channelMixMode = ma_channel_mix_mode_simple;
+    }
+}
+
 int aither_audio_init(unsigned int sr, unsigned int ch, unsigned int buf,
                        aither_callback_t cb, void* ud) {
     g_callback = cb;
@@ -43,6 +55,7 @@ int aither_audio_init(unsigned int sr, unsigned int ch, unsigned int buf,
         ma_device_config c = ma_device_config_init(ma_device_type_playback);
         c.playback.format = ma_format_f32;
         c.playback.channels = ch;
+        pin_layout(&c, ch);
         c.sampleRate = sr;
         c.dataCallback = data_callback;
         c.periodSizeInFrames = buf;
@@ -59,8 +72,9 @@ int aither_audio_init(unsigned int sr, unsigned int ch, unsigned int buf,
     ma_device_config cfg = ma_device_config_init(ma_device_type_duplex);
     cfg.playback.format = ma_format_f32;
     cfg.playback.channels = ch;
+    pin_layout(&cfg, ch);
     cfg.capture.format = ma_format_f32;
-    cfg.capture.channels = ch;
+    cfg.capture.channels = 2;           /* input() is always stereo */
     cfg.sampleRate = sr;
     cfg.dataCallback = data_callback;
     cfg.periodSizeInFrames = buf;
@@ -72,6 +86,7 @@ int aither_audio_init(unsigned int sr, unsigned int ch, unsigned int buf,
     cfg = ma_device_config_init(ma_device_type_playback);
     cfg.playback.format = ma_format_f32;
     cfg.playback.channels = ch;
+    pin_layout(&cfg, ch);
     cfg.sampleRate = sr;
     cfg.dataCallback = data_callback;
     cfg.periodSizeInFrames = buf;

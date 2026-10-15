@@ -120,10 +120,12 @@ def pan(signal, pos):
 # Haas effect: delay one channel by a few ms to create psychoacoustic width.
 # `ms` in roughly -30..30. Positive delays right channel, negative delays left.
 # Works because the ear localises by first-arrival time for short delays.
-def haas(signal, ms):
+# Takes a mono signal (both sides start equal) or a stereo pair.
+def haas(s, ms):
   let absMs = abs(ms)
-  let d = delay(signal, absMs * 0.001, 0.05)
-  if ms >= 0 then [signal, d] else [d, signal]
+  let dl = delay(s[0], absMs * 0.001, 0.05)
+  let dr = delay(s[1], absMs * 0.001, 0.05)
+  if ms >= 0 then [s[0], dr] else [dl, s[1]]
 
 # Mid-side width. Takes a stereo [L, R]; `amount` = 0 collapses to mono,
 # 1 is unchanged, >1 widens (diverges L and R). Classic tool for "spread."
@@ -269,12 +271,12 @@ def tuning_fork(strike, freq):
 # out. Additive with a global envelope decays all partials together
 # and sounds synthetic. The delay-line + LP-feedback loop captures
 # the darkening naturally because the LP runs every loop iteration.
-# `brightness` in 0..1: 0 = dark (LP cutoff ~1 kHz, fast decay),
-# 1 = bright (cutoff ~9 kHz, near-lossless feedback).
+# `brightness` in 0..1: 0 = dark (LP cutoff 160 Hz, fast decay),
+# 1 = bright (cutoff 1.6 kHz, near-lossless feedback).
 def pluck_string(strike, freq, brightness):
   $loop = 0.0
   let period = 1.0 / freq
-  let damped = lp1($loop, 1000 + brightness * 8000)
+  let damped = lp1($loop, 160 + brightness * 1425)
   $loop = strike + delay(damped, period, 0.05) * (0.99 - (1 - brightness) * 0.05)
   $loop
 
