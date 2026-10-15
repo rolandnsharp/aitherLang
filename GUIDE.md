@@ -9,7 +9,8 @@ make                                        # build the engine
 
 The engine never opens a sound card: it writes raw float pairs to
 standard output, and the program on the end of the pipe plays them
-(`aplay`, `tools/play plughw:<card>` on the uConsole), draws them,
+(`aplay`; on the uConsole `tools/play hw:rockchipes8388c 20` with
+`AITHER_RATE=44100`, the only rate its codec does), draws them,
 transmits them or saves them. Offline, `./aither set.aither 30 >
 take.raw` runs 30 seconds from `t = 0` and exits.
 

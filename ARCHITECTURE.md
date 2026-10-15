@@ -39,7 +39,7 @@ dependencies beyond libtcc, ALSA, and the system audio library.
         │                       + state migration (preserves per-region state
         │                         across hot-reloads, skips NaN-poisoned regions)
         ▼
-  engine.nim (pump)             per-voice tick → per-part gain → master sum → tanh
+  engine.nim (pump)             per-voice tick → per-part gain → master sum
         │                       + per-voice rolling stats / FFT buffer
         ▼
   stdout                        raw float32 pairs; a player / scope / SDR / file reads them
@@ -157,7 +157,7 @@ for i in 0 ..< frames:
       write to recent ring
       lMix += gl ; rMix += gr
   update master stats + master recent ring
-  output = (tanh(lMix), tanh(rMix))
+  output = (lMix, rMix)          # no limiter: the reader may be a scope or a radio
 ```
 
 Tanh is the master limiter. Per-voice peak/RMS, clip count, and

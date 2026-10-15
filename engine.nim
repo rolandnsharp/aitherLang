@@ -33,17 +33,18 @@ let BufferFrames = uint32(envFloat("AITHER_BUFFER", 512.0))
 # reader on the end of the pipe has to agree.
 let SampleRate = uint32(envFloat("AITHER_RATE", 48000.0))
 
-const EnvBinSamples = 2400  # 50ms per bin at 48 kHz
+let EnvBinSamples = int(SampleRate) div 20   # 50 ms per sparkline bin
 
 # Per-voice rolling buffer of the most recent ~0.5s of post-fade
 # stereo samples. Read by `aither spectrum` for offline-style FFT
 # analysis on the live engine state. float32 keeps the cost small
-# (~190 KB per voice, ~3 MB total at MaxVoices, plus the master).
-const RecentSamples = 24000
+# (~750 KB per voice, ~13 MB total at MaxVoices, plus the master).
+const MaxRecent = 96000                  # the array: 0.5 s at 192 kHz
+let RecentSamples = min(MaxRecent, int(SampleRate) div 2)   # the window used
 
 type
   RecentRing = object
-    l, r: array[RecentSamples, float32]
+    l, r: array[MaxRecent, float32]
     idx: int
 const PeakDecay = 0.99993   # ~300ms exponential decay
 const RmsAlpha  = 1.04e-4   # ~200ms smoothing
@@ -244,8 +245,11 @@ proc audioCallback(output: ptr UncheckedArray[cfloat],
     masterRecent.l[masterRecent.idx] = float32(lMix)
     masterRecent.r[masterRecent.idx] = float32(rMix)
     masterRecent.idx = (masterRecent.idx + 1) mod RecentSamples
-    output[i * 2]     = cfloat(tanh(lMix))
-    output[i * 2 + 1] = cfloat(tanh(rMix))
+    # The honest mix, nothing applied: a limiter here would be the
+    # engine deciding it is feeding a speaker. A player clamps; a patch
+    # that wants a safety net ends with `|> tanh`.
+    output[i * 2]     = cfloat(lMix)
+    output[i * 2 + 1] = cfloat(rMix)
 
   release(mtx)
 

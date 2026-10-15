@@ -15,7 +15,7 @@
 #
 # ▶ HOW TO PLAY THIS FILE (from ~/aitherLang)
 #
-#   ./aither | tools/play plughw:rockchipes8388c
+#   ./aither | tools/play hw:rockchipes8388c 20
 #                                     once per session, in its own
 #                                     terminal: the engine, piped
 #                                     into the uConsole's speaker

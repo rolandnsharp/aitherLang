@@ -110,7 +110,8 @@ TCC links into every patch it compiles.
 
 ```
 aither | aplay -f FLOAT_LE -c 2 -r 48000      the engine: pairs on stdout, a player on the end
-aither | tools/play plughw:rockchipes8388c    (the uConsole; build it with make tools/play)
+aither | tools/play hw:rockchipes8388c 20     (the uConsole, with AITHER_RATE=44100 in .bashrc:
+                                              its codec only does 44.1 kHz; make tools/play builds the player)
 aither set.aither 30 > take.raw               offline: 30 s from t=0, then exit (sox makes the WAV)
 AITHER_RATE=192000 aither fm.aither | sdr-tx  the rate is yours; the reader agrees
 arecord -f FLOAT_LE -c 2 -r 48000 | aither fx.aither | tools/play    input() reads stdin

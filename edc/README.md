@@ -11,7 +11,7 @@ puzzle that checks itself.
 From `~/aitherLang`:
 
 ```
-./aither | tools/play plughw:rockchipes8388c    # once per session, in its own terminal
+./aither | tools/play hw:rockchipes8388c 20    # once per session, in its own terminal
 edc/learn                 # the lessons, and which puzzles you've solved
 edc/learn play 1          # hear lesson 1
 edc/learn check 1         # check your answer to puzzle 1
@@ -21,7 +21,9 @@ edc/learn stop            # fade everything out
 
 The engine writes sound to its standard output; `tools/play` (built
 with `make tools/play`) is the uConsole's speaker on the end of the
-pipe. Elsewhere, `./aither | aplay -f FLOAT_LE -c 2 -r 48000`.
+pipe. The uConsole runs at 44.1 kHz (`AITHER_RATE=44100` in
+`.bashrc`), the only rate its codec does. Elsewhere, `./aither |
+aplay -f FLOAT_LE -c 2 -r 48000`.
 Headphones help: the built-in speaker can't play much below 200 Hz.
 
 ## The lessons
