@@ -13,6 +13,12 @@ tried and dropped; each doc says so near the top where that's the case.
 - [learnable_filters.md](learnable_filters.md) — filters trained from
   input/output pairs. Parked.
 
+**Decisions**
+- [pair-output-2026-10-15.md](pair-output-2026-10-15.md) — the output
+  is a pair: one language for sound, scope and radio; loops give the
+  numbers their meaning and rate; the beam is a program; raster
+  visuals belong to the display. What it means for the `scope` merge.
+
 **Design notebooks**
 - [cybernetics.md](cybernetics.md) — the cybernetic-synthesis tradition
   (Tudor, al-Mukabala) and what it means for aither.
