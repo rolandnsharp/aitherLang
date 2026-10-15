@@ -1,0 +1,15 @@
+# Solution to PUZZLE 4. Root 220, minor third 220 × 6/5 = 264,
+# fifth 220 × 3/2 = 330. Writing the ratios out works too:
+# osc(sin, 220 * 6 / 5) and osc(sin, 220 * 3 / 2).
+#
+#@ peak 220 3 -15 -- the root, 220 Hz
+#@ peak 264 3 -15 -- the minor third, 6/5 of the root
+#@ peak 330 3 -15 -- the fifth, 3/2 of the root
+#@ nopeak 275 4 -35 -- no major third (that would make it major)
+
+play chord:
+  (osc(sin, 220)
+   + osc(sin, 264)
+   + osc(sin, 330)) * 0.08
+
+chord

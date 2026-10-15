@@ -1,0 +1,71 @@
+# ┌──────────────────────────────────────────────────────┐
+# │ LESSON 3 · Waveforms and harmonics                   │
+# └──────────────────────────────────────────────────────┘
+#
+# Play this and listen: the same note (220 Hz) in four
+# different "colours", three seconds each, round and round:
+#
+#   sine → triangle → square → sawtooth
+#
+# The pitch never changes, yet each one sounds different.
+# That difference is called TIMBRE, and it comes from
+# HARMONICS: extra sine waves riding on top of the note at
+# 2×, 3×, 4×... its frequency.
+#
+#   sine      just the note (220). Pure, flute-like.
+#   triangle  odd harmonics only (660, 1100...), very quiet.
+#             Soft, a bit hollow.
+#   square    odd harmonics, louder (each 1/n). Hollow,
+#             clarinet-like, retro video game.
+#   sawtooth  ALL harmonics (440, 660, 880...), each 1/n.
+#             Buzzy and bright, like a bowed string or brass.
+#
+# The rule to remember: a waveform's shape IS its recipe of
+# harmonics. Sharp corners mean lots of high harmonics, so a
+# bright sound. Smooth curves mean few, so a mellow sound.
+#
+# ▶ NEW IDEAS IN THE CODE
+#
+#   t          seconds since the engine started
+#   start_t    the moment this file was first sent
+#   let pos    a name for a value. pos = seconds since send.
+#   int(x)     drops the fraction: int(4.7) = 4
+#   mod        remainder: 5 mod 4 = 1. So "which" counts
+#              0, 1, 2, 3, 0, 1... every 3 seconds.
+#   if/else    picks one value. Each else-if is a new line.
+
+play tour:
+  let pos   = t - start_t
+  let which = int(pos / 3) mod 4
+  if which == 0 then osc(sin, 220) * 0.2
+  else if which == 1 then osc(tri, 220) * 0.2
+  else if which == 2 then osc(sqr, 220) * 0.08
+  else osc(saw, 220) * 0.12
+
+tour
+
+# ▶ TRY THIS
+#
+#   1. See the harmonics. Make a copy that plays only the saw
+#      (replace the whole if/else with osc(saw, 220) * 0.12),
+#      then:   ./aither audit edc/03_waveforms.aither 2
+#      You'll see peaks at 220, 440, 660, 880... getting
+#      quieter. Try sqr: 440 and 880 disappear.
+#   2. Why are square and saw multiplied by less? They pack
+#      more energy into the same height. Try 0.2 on all four
+#      and hear the square jump out.
+#   3. Change 3 in pos / 3 to 0.5 for a fast colour strobe.
+#   4. Make your own waveform: any function works as a shape.
+#        def wobbly(x): sin(x) + sin(3 * x) * 0.3
+#      Put that line at the top of the file and use
+#      osc(wobbly, 220). That's a sine plus its 3rd harmonic.
+#
+# ▶ WORTH KNOWING
+#
+#   osc(saw, ...) and osc(sqr, ...) are "naive" waveforms:
+#   their harmonics never stop, so the ones above what the
+#   computer can represent fold back as faint wrong notes
+#   ("aliasing"). Great for chiptune grit. Lesson 5 shows
+#   the clean way: build the harmonics yourself.
+#
+# ▶ PUZZLE → edc/03_waveforms_puzzle.aither

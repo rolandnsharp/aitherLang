@@ -1,0 +1,33 @@
+# One possible answer to PUZZLE 13. The pulse gets two gates
+# with a gap between 40 and 48 s, and the drone dips by 40%
+# during that gap. The filter already starts opening at 48 s.
+#
+#@ ear
+
+def gate(pos, t0, t1): ease((pos - t0) / 4) * (1 - ease((pos - t1) / 4))
+
+let pos  = t - start_t
+let beat = 96 / 60
+let bar  = phasor(beat / 16)
+
+play drone:
+  let open = ease((pos - 48) / 12) * (1 - ease((pos - 66) / 8))
+  let tone = additive(110, saw_shape, 14) + additive(110.4, saw_shape, 14)
+  let dip  = 1 - gate(pos, 40, 48) * 0.4
+  let life = ease(pos / 8) * (1 - ease((pos - 72) / 14)) * dip
+  (tone |> lpf(250 + open * 2200, 0.4)) * life * 0.05 |> haas(12)
+
+play pulse:
+  let notes = [220, 330, 440, 330, 247, 330, 392, 330]
+  let idx   = int(phasor(beat / 4) * 8)
+  let drop  = if bar > 0.94 then 0 else 1
+  let env   = pluck(impulse(beat * 2), 0.18)
+  let tone  = additive(notes[idx], warm_shape, 6) * env * drop
+  tone * (gate(pos, 16, 40) + gate(pos, 48, 70)) * 0.3 |> pan(sin(TAU * pos / 20) * 0.6)
+
+play bells:
+  let env  = pluck(impulse(beat / 4), 3)
+  let ring = inharmonic(880, bar_partials, bell_decay, 5) * env
+  (ring |> reverb(3, 0.45)) * gate(pos, 32, 76) * 0.18 |> pan(-0.4)
+
+drone + pulse + bells

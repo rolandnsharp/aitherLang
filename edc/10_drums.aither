@@ -1,0 +1,96 @@
+# ┌──────────────────────────────────────────────────────┐
+# │ LESSON 10 · Drums, noise and groove                   │
+# └──────────────────────────────────────────────────────┘
+#
+# Drums are short sounds with sharp envelopes. Almost every
+# drum is two layers: a pitched BODY (the boom) and a burst
+# of NOISE (the crack or sizzle).
+#
+#   kick    a sine that sweeps fast from high to low pitch.
+#           That downward sweep is the "punch".
+#   snare   a short low body plus band-passed noise (the
+#           rattle of the wires under the drum).
+#   hi-hat  high-passed noise with a very short envelope.
+#
+# noise() is random numbers: every frequency at once, the
+# "shhh" of a detuned radio. Filters shape it into drums.
+#
+# ▶ THE GRID
+#
+#   A 16-step pattern (one bar of 16th notes). "idx" counts
+#   0..15 and each drum's array says how hard to hit on that
+#   step: 0 = rest. trig16 ticks once per step. Multiply
+#   them and you get a trigger whose size is the velocity.
+#
+# ▶ TWO PRO TRICKS IN HERE
+#
+#   Phase reset   the kick restarts its sine at zero on
+#                 every hit ($kph = 0.0). Starting a sine
+#                 mid-wave makes a click. Always reset
+#                 single-sine drums.
+#   Sidechain     "duck" dips the bass every time the kick
+#                 hits, so they don't fight. That pumping is
+#                 the sound of most dance music, and it's
+#                 one multiplication.
+#
+# ▶ HEADPHONES
+#
+#   The kick and bass are mostly below 200 Hz, which the
+#   uConsole speaker can't play. On the speaker you'll
+#   mainly hear the snare and hats.
+
+let bpm    = 124
+let beat   = bpm / 60
+let trig16 = impulse(beat * 4)
+let idx    = int(phasor(beat / 4) * 16)
+
+let kickPat  = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.7, 0]
+let snarePat = [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0.3]
+let hatPat   = [0.8, 0.3, 0.6, 0.3, 0.8, 0.3, 0.6, 0.4, 0.8, 0.3, 0.6, 0.3, 0.8, 0.3, 0.6, 0.5]
+let bassPat  = [110, 110, 0, 110, 0, 131, 0, 110, 98, 98, 0, 98, 0, 147, 131, 0]
+
+let kTrig = trig16 * kickPat[idx]
+let kEnv  = discharge(kTrig, 9)
+let duck  = 1 - kEnv * 0.7
+
+play kick:
+  let pitch = 48 + discharge(kTrig, 40) * 160
+  $kph = 0.0
+  $kph = if kTrig > 0 then 0.0 else ($kph + pitch * dt) mod 1.0
+  sin(TAU * $kph) * kEnv * 0.45
+
+play snare:
+  let sTrig = trig16 * snarePat[idx]
+  let body  = sin(TAU * phasor(185)) * discharge(sTrig, 30)
+  let rattle = (noise() |> bpf(2500, 0.4)) * discharge(sTrig, 18)
+  (body * 0.3 + rattle * 0.5) * 0.6
+
+play hat:
+  let hTrig = trig16 * hatPat[idx]
+  (noise() |> hpf(7500, 0.2)) * discharge(hTrig, 60) * 0.35
+
+play bass:
+  let note = bassPat[idx]
+  let gate = if note > 0 then 1 else 0
+  let env  = swell(gate, 0.005, 0.05)
+  let tone = additive(note, saw_shape, 12) |> lpf(500, 0.6)
+  tone * env * duck * 0.12
+
+kick + snare + hat + bass
+
+# ▶ TRY THIS
+#
+#   1. Mute layers to hear each one:
+#        ./aither mute 10_drums bass    (and unmute it)
+#   2. Change bpm to 90 for hip-hop, 170 for drum & bass.
+#   3. Edit the kick pattern into a breakbeat:
+#        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0]
+#   4. Turn the sidechain up: kEnv * 0.7 → kEnv * 0.95.
+#      Hear the bass pump.
+#   5. Make the kick deeper or punchier: 48 is where the
+#      pitch ends, 160 how far it sweeps, and 40 how fast.
+#   6. Add an open hi-hat on the off-beats: copy the hat
+#      play, give it its own pattern with hits on steps 3,
+#      7, 11 and 15, and a slower decay (60 → 12).
+#
+# ▶ PUZZLE → edc/10_drums_puzzle.aither

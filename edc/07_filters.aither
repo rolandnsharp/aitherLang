@@ -1,0 +1,69 @@
+# ┌──────────────────────────────────────────────────────┐
+# │ LESSON 7 · Filters (subtractive synthesis)           │
+# └──────────────────────────────────────────────────────┘
+#
+# Additive synthesis builds a sound up from sines.
+# Subtractive synthesis goes the other way: start with
+# something rich (a sawtooth, or noise, which has every
+# frequency at once) and carve away what you don't want.
+# It's how classic analogue synths work.
+#
+# ▶ THE FILTERS
+#
+#   lpf(sig, cutoff, res)  low-pass: keeps what's BELOW
+#                          cutoff Hz. Darker, muffled.
+#   hpf(sig, cutoff, res)  high-pass: keeps what's ABOVE.
+#                          Thinner, tinny.
+#   bpf(sig, cutoff, res)  band-pass: keeps a band around
+#                          cutoff. Telephone, wind, whistle.
+#
+#   res (resonance, 0..1) boosts the frequencies right at
+#   the cutoff. High res makes a filter "sing" — that's the
+#   squelchy acid-bass sound when the cutoff moves.
+#
+# ▶ THE PIPE |>
+#
+#   sig |> lpf(800, 0.5) means lpf(sig, 800, 0.5). It reads
+#   left to right like a signal flowing through cables:
+#     osc(saw, 110) |> lpf(800, 0.5) |> gain(0.3)
+#
+#   Careful: (sig |> lpf(800, 0.5)) * 0.3 needs the brackets.
+#   The pipe binds last, after * and +.
+#
+# ▶ THIS PATCH
+#
+#   wah    a sawtooth whose cutoff sweeps up and down every
+#          8 seconds, with high resonance so you hear it
+#          "talk".
+#   wind   white noise through a band-pass whose centre
+#          drifts slowly, like wind through a gap.
+
+play wah:
+  let pos    = t - start_t
+  let sweep  = (sin(TAU * pos / 8) + 1) * 0.5
+  let cutoff = 200 + sweep * 2800
+  (osc(saw, 110) |> lpf(cutoff, 0.8)) * 0.25
+
+play wind:
+  let drift = (sin(TAU * t * 0.07) + sin(TAU * t * 0.023)) * 0.5
+  (noise() |> bpf(900 + drift * 600, 0.9)) * 0.15
+
+wah + wind
+
+# ▶ TRY THIS
+#
+#   1. Change res 0.8 to 0.1 (smooth) and 0.95 (screaming).
+#   2. Swap lpf for hpf in "wah". Same sweep, opposite
+#      effect: the bass vanishes as the cutoff rises.
+#   3. A FILTER ENVELOPE, the most important trick in
+#      subtractive synthesis. Make each note open the
+#      filter and let it close again:
+#        let env    = pluck(impulse(4), 0.3)
+#        let cutoff = 150 + env * 3000
+#      Now it plucks, and you never touched the volume.
+#   4. Make the wind howl: raise res in "wind" to 0.97.
+#   5. Look at the difference. Audit it with the cutoff
+#      fixed at 300, then at 3000, and compare "Centroid":
+#      that's the sound's brightness in Hz.
+#
+# ▶ PUZZLE → edc/07_filters_puzzle.aither

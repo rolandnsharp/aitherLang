@@ -1,0 +1,83 @@
+# ┌──────────────────────────────────────────────────────┐
+# │ LESSON 9 · FM synthesis                              │
+# └──────────────────────────────────────────────────────┘
+#
+# Lesson 8's puzzle showed that wobbling the VOLUME fast
+# creates new tones. Wobbling the PITCH fast does it too,
+# much more dramatically. That's FM (frequency modulation),
+# the sound of 80s electric pianos, bells and basses
+# (the Yamaha DX7).
+#
+# ▶ THE RECIPE
+#
+#   sin(TAU * phasor(carrier) + sin(TAU * phasor(modHz)) * index)
+#
+#   carrier  the note you hear
+#   modHz    the modulator: how fast the pitch is pushed
+#   index    how hard it's pushed. 0 = a plain sine.
+#            Higher = brighter, more sidebands.
+#
+#   The new tones (sidebands) appear at
+#     carrier ± modHz, carrier ± 2×modHz, carrier ± 3×modHz ...
+#
+# ▶ RATIOS DECIDE THE CHARACTER
+#
+#   modHz = carrier × 1 or × 2  sidebands land on harmonics:
+#                               a musical, organ/piano tone.
+#   modHz = carrier × 1.41      sidebands land BETWEEN
+#                               harmonics: metallic, bell-like.
+#
+#   (Why modHz and not mod? "mod" is taken: it's the
+#   remainder operator, 7 mod 3 = 1. Names can't be words
+#   the language already uses.)
+#
+# ▶ THE DX7 TRICK
+#
+#   Make the index follow the envelope: loud means bright,
+#   and the sound mellows as it fades, just like a real
+#   struck object. One envelope, two jobs.
+#
+# ▶ FEEDBACK FM
+#
+#   A $ name remembers its value from the previous sample
+#   (more in lesson 11). Feeding a sine's own output back
+#   into its phase bends it towards a sawtooth: a growl
+#   from a single oscillator.
+
+play epiano:
+  let env = pluck(impulse(1.5), 1.2)
+  let push = sin(TAU * phasor(330)) * env * 2.5
+  sin(TAU * phasor(330) + push) * env * 0.2
+
+play bell:
+  let env = pluck(impulse(0.5), 3)
+  let push = sin(TAU * phasor(660 * 1.41)) * env * 4
+  sin(TAU * phasor(660) + push) * env * 0.1
+
+play growl:
+  let amount = (sin(TAU * t * 0.1) + 1) * 0.7
+  $fb = 0.0
+  $fb = sin(TAU * phasor(220) + $fb * amount)
+  $fb * 0.06
+
+epiano + bell + growl
+
+# ▶ TRY THIS
+#
+#   1. In "epiano", change the index 2.5 to 0.5 (glassy)
+#      and to 8 (harsh, brassy).
+#   2. In "bell", change 1.41 to 2. The bell turns into a
+#      clean organ-like tone: the ratio is everything.
+#   3. Try 1.41 → 3.5 or 0.5 and listen to new metals.
+#   4. Solo the growl and listen to it sweep from pure sine
+#      to rough saw every 10 seconds:
+#        ./aither solo 09_fm growl
+#      To undo, unmute the other two one at a time:
+#        ./aither unmute 09_fm epiano
+#        ./aither unmute 09_fm bell
+#   5. Stack it: modulate the modulator. Replace epiano's
+#      push line with
+#        let push2 = sin(TAU * phasor(660)) * env * 2
+#        let push  = sin(TAU * phasor(330) + push2) * env * 2.5
+#
+# ▶ PUZZLE → edc/09_fm_puzzle.aither

@@ -1,0 +1,50 @@
+# ┌──────────────────────────────────────────────────────┐
+# │ PUZZLE 9 · Find the modulator                        │
+# └──────────────────────────────────────────────────────┘
+#
+# The carrier is 500 Hz. Choose the modulator frequency so
+# that the two strongest sidebands land exactly on 300 Hz
+# and 700 Hz. Only change the "modHz" number.
+#
+# Check:  edc/learn check 9      Hear:  edc/learn puzzle 9
+#
+#@ top 500 3 -- the 500 Hz carrier is the loudest
+#@ peak 300 3 -12 -- a strong sideband at 300 Hz
+#@ peak 700 3 -12 -- a strong sideband at 700 Hz
+
+play fm:
+  let carrier = 500
+  let modHz   = 50
+  let index   = 1
+  sin(TAU * phasor(carrier) + sin(TAU * phasor(modHz)) * index) * 0.2
+
+fm
+
+#
+#
+#
+#
+#
+#
+#
+# ▶ HINTS
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#   The strongest sidebands sit at carrier - modHz and
+#   carrier + modHz.
+#
+#
+#
+#
+#
+#
+#
+#   500 - modHz = 300. Weaker sidebands also appear at
+#   carrier ± 2 × modHz, which is why 100 Hz isn't quite it.

@@ -1,0 +1,18 @@
+# One possible answer to PUZZLE 6 (there are many). Strong hits
+# on 1, 5, 9 and 13; ghost notes in between; rests on steps 7
+# and 15; and a phase-bent decay for swing.
+#
+#@ ear
+
+let bpm  = 110
+let step = bpm / 60 * 4
+
+play tick:
+  let vel  = [1, 0.3, 0.6, 0.3, 0.9, 0.3, 0, 0.4, 1, 0.3, 0.6, 0.3, 0.8, 0.4, 0, 0.5]
+  let idx  = int(phasor(step / 16) * 16)
+  let ph   = phasor(step)
+  let bent = ph + sin(ph * PI) * 0.2
+  let env  = exp(-bent * 30) * vel[idx]
+  (noise() |> hpf(6000, 0.3)) * env * 0.3
+
+tick

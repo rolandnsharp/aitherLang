@@ -1,0 +1,49 @@
+# ┌──────────────────────────────────────────────────────┐
+# │ PUZZLE 3 · The odd one out                           │
+# └──────────────────────────────────────────────────────┘
+#
+# A sound designer wants a hollow 110 Hz tone: it must have
+# a 3rd harmonic (330 Hz) but NO 2nd harmonic (220 Hz).
+# The sawtooth below has both. Swap it for a waveform that
+# keeps only the odd harmonics.
+#
+# Check:  edc/learn check 3      Hear:  edc/learn puzzle 3
+#
+#@ top 110 3 -- the note is still 110 Hz
+#@ peak 330 4 -40 -- the 3rd harmonic (330 Hz) is there
+#@ nopeak 220 6 -40 -- no 2nd harmonic (220 Hz)
+#@ nopeak 440 6 -40 -- no 4th harmonic (440 Hz)
+
+play hollow:
+  osc(saw, 110) * 0.15
+
+hollow
+
+#
+#
+#
+#
+#
+#
+#
+# ▶ HINTS
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#   Look back at the table at the top of lesson 3: which two
+#   waveforms have "odd harmonics only"?
+#
+#
+#
+#
+#
+#
+#
+#   Either one works. Keep the volume sensible: the square
+#   is much louder than the triangle at the same number.

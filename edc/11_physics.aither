@@ -1,0 +1,98 @@
+# ┌──────────────────────────────────────────────────────┐
+# │ LESSON 11 · Physical modelling                       │
+# └──────────────────────────────────────────────────────┘
+#
+# Instead of describing a sound, describe the OBJECT that
+# makes it, and let physics do the rest. A struck spring,
+# a plucked string. You never write an envelope: the decay
+# comes out of the equations, like in the real world.
+#
+# ▶ STATE: VALUES THAT REMEMBER
+#
+#   let x = ...    recalculated fresh every sample
+#   $x = 0.0       a $ name REMEMBERS its value from the
+#                  previous sample. The first line gives its
+#                  starting value; later lines update it.
+#
+#   With memory you can simulate things that move.
+#
+# ▶ A SPRING IN FOUR LINES (the "spring" part below)
+#
+#   $x is how far the spring is stretched, $v how fast it
+#   moves. Every sample (48,000 times a second):
+#
+#     force  = -k × x      the spring pulls back to centre
+#              - c × v     friction slows it down
+#              + strike    a hammer hit, now and then
+#     v = v + force × dt   force changes the speed
+#     x = x + v × dt       speed changes the position
+#
+#   (dt = 1/48000 s, the time between samples.) That's
+#   Newton's physics, and x IS the sound. A stiffer spring
+#   (bigger k) wobbles faster: higher pitch. The rule is
+#
+#     pitch = √k / TAU      so  k = (TAU × pitch)²
+#
+#   More friction (c) means a shorter ring.
+#
+# ▶ SHORTCUTS FROM THE STDLIB
+#
+#   dho(force, freq, damp)  the same damped spring, done
+#                           for you. Small damp = long ring.
+#                           The "marimba" part hits one with
+#                           a different stiffness per note.
+#                           Force is in acceleration units,
+#                           so hits need big numbers, like
+#                           40000000. (Write them out: aither
+#                           doesn't understand 4e7.)
+
+let beat = 100 / 60
+
+play spring:
+  let strike = impulse(beat / 2)
+  let k = 4299195
+  let c = 4
+  $x = 0.0
+  $v = 0.0
+  $v = $v + (-k * $x - c * $v + strike * k * 8) * dt
+  $x = $x + $v * dt
+  $x * 0.5
+
+play bar:
+  dho(impulse(beat / 4) * 40000000, 660, 0.002)
+
+play marimba:
+  let notes = [440, 523, 587, 659, 784, 659, 587, 523]
+  let idx   = int(phasor(beat * 2 / 8) * 8)
+  let f     = notes[idx]
+  dho(impulse(beat * 2) * 40000 * f, f, 0.006) * 1.5
+
+spring + bar + marimba
+
+# ▶ TRY THIS
+#
+#   1. Change the spring's friction c from 4 to 1 (rings
+#      for ages) and to 40 (a dull thunk).
+#   2. Retune the spring: what k gives 220 Hz? Work it out
+#      with the rule above, then check:
+#        ./aither audit edc/11_physics.aither 1
+#   3. In "bar", change damp 0.002 to 0.0003 (a long gong)
+#      and 0.05 (a wood block).
+#   4. In "marimba", damp 0.006 → 0.03 (dead wood) and
+#      0.0008 (glass). The hit force is 40000 × f so high
+#      and low notes come out equally loud: higher springs
+#      are stiffer and need a harder hit to move as far.
+#   5. Strike the spring with noise instead of a clean hit:
+#        let strike = noise() * discharge(impulse(beat / 2), 300) * 4
+#      Same object, different hammer.
+#   6. A plucked string (Karplus-Strong): a burst of noise
+#      circulating in a short delay loop that loses its top
+#      end each lap. Add a part:
+#        play string:
+#          let burst = (noise() |> lp1(3000)) * discharge(impulse(1), 300)
+#          pluck_string(burst, 262, 0.9) * 2
+#      The stdlib marks pluck_string as work in progress:
+#      it rings about 3% flat (the filter in the loop adds
+#      delay), so it won't be quite in tune with the rest.
+#
+# ▶ PUZZLE → edc/11_physics_puzzle.aither

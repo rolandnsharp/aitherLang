@@ -1,0 +1,71 @@
+# ┌──────────────────────────────────────────────────────┐
+# │ LESSON 4 · Mixing, chords and beating                │
+# └──────────────────────────────────────────────────────┘
+#
+# ADDING IS MIXING. Two oscillators added together play at
+# the same time. That's all a mixer does.
+#
+# ▶ CHORDS ARE RATIOS
+#
+#   Notes sound good together when their frequencies form
+#   simple ratios. Starting from a root note r:
+#
+#     octave        r × 2      (2:1)
+#     fifth         r × 3/2    (3:2)
+#     major third   r × 5/4    (5:4)   bright, happy
+#     minor third   r × 6/5    (6:5)   darker, sad
+#
+#   A major chord = root + major third + fifth. On 220 Hz:
+#   220 + 275 + 330. That's the "chord" part below.
+#
+# ▶ BEATING
+#
+#   Two notes that are ALMOST the same pitch drift in and
+#   out of step, so the volume swells and fades. The speed
+#   of that wobble is the difference between them:
+#   440 and 442 Hz → 2 wobbles per second. Musicians tune
+#   by listening for the beating to slow down and stop.
+#   The "shimmer" part plays exactly that.
+#
+# ▶ NEW IDEAS IN THE CODE
+#
+#   def           your own function. midi(n) turns a piano
+#                 key number into Hz (69 is A = 440 Hz;
+#                 each key up is one semitone).
+#   pow(a, b)     a to the power b.
+#   ( ... )       brackets let one expression span several
+#                 lines. Outside brackets, a new line ends
+#                 the expression.
+#   chord + ...   the last line mixes the two parts.
+
+def midi(n): 440 * pow(2, (n - 69) / 12)
+
+play chord:
+  (osc(sin, 220)
+   + osc(sin, 275)
+   + osc(sin, 330)) * 0.08
+
+play shimmer:
+  (osc(sin, midi(81)) + osc(sin, midi(81) + 2)) * 0.05
+
+chord + shimmer
+
+# ▶ TRY THIS
+#
+#   1. Mute a part while it plays, without editing:
+#        ./aither mute 04_mixing shimmer
+#        ./aither unmute 04_mixing shimmer
+#      Or solo one: ./aither solo 04_mixing chord
+#   2. Change + 2 to + 0.5 (slow beats), then + 8 (a fast
+#      flutter), then + 30 (a rough, sour buzz).
+#   3. Swap the chord's 275 for 264 (6/5 of 220). Major
+#      becomes minor: happy turns sad from one number.
+#   4. Equal temperament: pianos don't use exact ratios.
+#      Their major third is midi(61) when the root is
+#      midi(57) — 277.2 Hz, not 275. Try it and listen for
+#      a slow beating that the pure 275 doesn't have.
+#   5. Why * 0.08? Three sines at 0.08 add up to at most
+#      0.24. Mix too loud and the total goes past 1.0 and
+#      distorts. Keep the sum of your volumes under 1.
+#
+# ▶ PUZZLE → edc/04_mixing_puzzle.aither

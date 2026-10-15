@@ -1,0 +1,15 @@
+# Solution to PUZZLE 2. Spread the three dots evenly round the
+# circle, a third of a turn apart: head starts of TAU / 3 and
+# 2 * TAU / 3. Their heights always add up to zero, the way the
+# three wires of three-phase mains power balance out.
+#
+#@ rms< -60 -- silence: the three cancel completely
+
+let lap = phasor(220)
+
+play trio:
+  let b = TAU / 3
+  let c = 2 * TAU / 3
+  (sin(TAU * lap) + sin(TAU * lap + b) + sin(TAU * lap + c)) * 0.15
+
+trio

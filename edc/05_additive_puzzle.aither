@@ -1,0 +1,51 @@
+# ┌──────────────────────────────────────────────────────┐
+# │ PUZZLE 5 · Make the third harmonic sing              │
+# └──────────────────────────────────────────────────────┘
+#
+# Write a recipe (a shape function) where the 3rd harmonic
+# is the loudest part of the sound. The note stays at
+# 200 Hz, and the fundamental must still be audible.
+#
+# Only change the body of my_shape.
+#
+# Check:  edc/learn check 5      Hear:  edc/learn puzzle 5
+#
+#@ top 600 5 -- the 3rd harmonic (600 Hz) is the loudest
+#@ peak 200 4 -30 -- the 200 Hz fundamental is still there
+
+def my_shape(n, pf): 1.0 / n
+
+play singer:
+  additive(200, my_shape, 8) * 0.2
+
+singer
+
+#
+#
+#
+#
+#
+#
+#
+# ▶ HINTS
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#   A shape can use if/then/else on n, like the "hollow"
+#   shape in lesson 5's TRY THIS section.
+#
+#
+#
+#
+#
+#
+#
+#   Give n == 3 a big volume, and everything else a smaller
+#   one. Don't make the others zero, or the fundamental
+#   disappears.

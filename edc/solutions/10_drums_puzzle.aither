@@ -1,0 +1,11 @@
+# Solution to PUZZLE 10. A high-pass keeps only the top of the
+# noise: the sizzle. The cutoff sets how thin and bright it is.
+#
+#@ centroid> 7000 -- bright: brightness above 7000 Hz
+#@ rms> -45 -- still audible
+
+play hat:
+  let trig = impulse(8)
+  (noise() |> hpf(7500, 0.2)) * discharge(trig, 40) * 0.3
+
+hat

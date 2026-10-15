@@ -1,0 +1,82 @@
+# ┌──────────────────────────────────────────────────────┐
+# │ LESSON 12 · Bells, metal and spectral tricks         │
+# └──────────────────────────────────────────────────────┘
+#
+# Strings and voices have HARMONIC partials: exact whole
+# multiples of the note (×2, ×3, ×4...). That's why they
+# sound like one clear pitch.
+#
+# Struck metal is different. A bar rings at ×1, ×2.756,
+# ×5.404... These INHARMONIC partials are what makes a bell
+# sound like a bell: shimmering, a bit ambiguous in pitch.
+#
+# ▶ inharmonic(freq, ratio, amp, N)
+#
+#   Like additive, but YOU choose where each partial goes:
+#     ratio(n)   the multiplier for partial n
+#     amp(n, pf) how loud it is
+#
+#   Ready-made ratios:  bar_partials   (metal bar)
+#                       plate_partials (gong, cymbal)
+#                       stiff_string   (piano: almost
+#                                       harmonic, a little
+#                                       sharp up high)
+#                       phi_partials   (golden-ratio spacing)
+#   Ready-made amps:    bell_decay, soft_decay, bright_decay
+#
+# ▶ FREQUENCY SHIFTING
+#
+#   Doubling a sound's pitch multiplies every partial by 2,
+#   so harmonics stay harmonic. freq_shift(sig, hz) instead
+#   ADDS the same number of Hz to every partial:
+#
+#     200, 400, 600  shifted by +50  →  250, 450, 650
+#
+#   No longer whole multiples of anything, so a plain tone
+#   turns metallic and strange. No other kind of synthesis
+#   can do this, because they all work in ratios.
+#
+# ▶ THIS PATCH
+#
+#   bells  struck bar partials playing a slow pattern
+#   piano  a stiff-string tone, almost harmonic
+#   halo   a warm pad whose frequency shift drifts slowly
+#          between -40 and +40 Hz: listen to it turn from
+#          sweet to eerie and back
+
+let pos  = t - start_t
+let beat = 72 / 60
+
+play bells:
+  let notes = [880, 660, 784, 587]
+  let idx   = int(phasor(beat / 8) * 4)
+  let env   = pluck(impulse(beat / 2), 2.5)
+  inharmonic(notes[idx], bar_partials, bell_decay, 5) * env * 0.16
+
+play piano:
+  let env = pluck(impulse(beat), 1.2)
+  inharmonic(220, stiff_string, soft_decay, 16) * env * 0.05
+
+play halo:
+  let shift = sin(TAU * pos / 24) * 40
+  let pad   = additive(165, warm_shape, 8) + additive(247.5, warm_shape, 6)
+  freq_shift(pad, shift) * 0.045 * ease(pos / 4)
+
+bells + piano + halo
+
+# ▶ TRY THIS
+#
+#   1. Swap bar_partials for plate_partials (a gong) or
+#      phi_partials (glassy, alien).
+#   2. Change bell_decay to bright_decay: same metal, more
+#      clang.
+#   3. Turn the piano into a plain harmonic tone by swapping
+#      stiff_string for a ratio of your own:
+#        def harmonic(n): n
+#      Listen for what the stiffness was adding.
+#   4. Freeze the halo at +17 Hz (shift = 17) and leave it.
+#      Then try 0. The difference is the whole point.
+#   5. Make your own metal. Put this at the top and use it:
+#        def mymetal(n): pow(n, 1.3)
+#
+# ▶ PUZZLE → edc/12_bells_puzzle.aither

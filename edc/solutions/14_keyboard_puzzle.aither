@@ -1,0 +1,20 @@
+# One possible answer to PUZZLE 14. K3 crossfades from the plain
+# saw to an FM tone an octave up whose brightness also rises with
+# the knob, so one turn walks from warm synth to glassy bell.
+#
+#@ keys
+
+let bright  = 0.3 + midi_cc(74) * 1.7
+let release = 0.15 + midi_cc(71) * 2
+let char    = midi_cc(76)
+
+play keys:
+  midi_keyboard((freq, gate) =>
+    let env   = adsr(gate, 0.005, 0.4, 0.5, release)
+    let push  = sin(TAU * phasor(freq * 2.01)) * env * char * 3
+    let other = sin(TAU * phasor(freq * 2) + push) * 0.8
+    let mixed = osc(saw, freq) * (1 - char) + other * char
+    let tone  = mixed |> lpf(150 + env * bright * 3000, 0.5)
+    tone * env * 0.12) |> reverb(2, 0.2)
+
+keys

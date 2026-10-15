@@ -1,0 +1,73 @@
+# ┌──────────────────────────────────────────────────────┐
+# │ LESSON 8 · Modulation: making sounds alive           │
+# └──────────────────────────────────────────────────────┘
+#
+# A sound that never changes gets boring in seconds. Real
+# instruments wobble, breathe and drift. In aither, ANY
+# number can be replaced by a moving signal, and that's
+# called MODULATION.
+#
+# ▶ THE LFO
+#
+#   An LFO (low-frequency oscillator) is just an oscillator
+#   too slow to hear as a pitch: sin(TAU * phasor(0.2)) goes
+#   up and down once every 5 seconds. Instead of listening
+#   to it, you plug it into something else:
+#
+#     into pitch      → vibrato (a singer's wobble)
+#     into volume     → tremolo (a pulsing organ)
+#     into a filter   → a slow wah, a breathing pad
+#
+#   (sin(...) + 1) * 0.5 turns -1..1 into 0..1, handy for
+#   fades and amounts.
+#
+# ▶ THE COMPOSITION CLOCK
+#
+#   pos = t - start_t is seconds since you sent the file.
+#   ease(pos / 3) glides smoothly from 0 to 1 over the first
+#   3 seconds and stays at 1: a fade-in. Shape a whole piece
+#   as a function of pos and you're composing.
+#
+# ▶ NEVER-REPEATING MOTION
+#
+#   Add two LFOs at rates that don't divide evenly (0.13 and
+#   0.0717 Hz below) and their sum takes ages to repeat.
+#   That's how a drone stays interesting for an hour.
+#
+# ▶ THIS PATCH
+#
+#   singer  an "ah" voice that fades in; after 2 seconds its
+#           vibrato grows in, like a real singer's.
+#   drone   a low pad that breathes in volume and slowly,
+#           never-repeatingly, opens and closes its filter.
+
+let pos = t - start_t
+
+play singer:
+  let vibDepth = ease((pos - 2) / 4) * 5
+  let freq     = 330 + sin(TAU * phasor(5.5)) * vibDepth
+  additive(freq, vowel_ah, 16) * 0.07 * ease(pos / 3)
+
+play drone:
+  let breathe = (sin(TAU * pos / 9) + 1) * 0.5
+  let drift   = (sin(TAU * t * 0.13) + sin(TAU * t * 0.0717) + 2) * 0.25
+  let pad     = additive(165, saw_shape, 12) |> lpf(300 + drift * 1500, 0.3)
+  pad * (0.4 + breathe * 0.6) * 0.18 * ease(pos / 6)
+
+singer + drone
+
+# ▶ TRY THIS
+#
+#   1. Change the vibrato rate 5.5 to 1 (seasick) and to 12
+#      (nervous). Depth 5 → 20 for a siren.
+#   2. Add tremolo to the singer. Multiply its last line by
+#        (0.7 + 0.3 * sin(TAU * phasor(6)))
+#   3. Speed tremolo up: 6 → 30 → 60. Somewhere past 20 Hz
+#      it stops sounding like pulsing and becomes a new,
+#      rough tone. Why? See the puzzle.
+#   4. Replace 330 in the singer with 330 + pos * 2: a pitch
+#      that rises forever, 2 Hz every second.
+#   5. Give the drone a fade-out after 30 seconds:
+#        * (1 - ease((pos - 30) / 10))
+#
+# ▶ PUZZLE → edc/08_modulation_puzzle.aither

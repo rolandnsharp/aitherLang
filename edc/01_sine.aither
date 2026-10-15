@@ -1,0 +1,96 @@
+# ┌──────────────────────────────────────────────────────┐
+# │ LESSON 1 · The clock and the sine                    │
+# └──────────────────────────────────────────────────────┘
+#
+# Every sound in aither starts with a clock. phasor(220)
+# counts from 0 up to 1, over and over, 220 times a second.
+# That's all an oscillator is underneath: something that
+# counts laps. The shape you read the clock through (a sine,
+# a sawtooth...) is what gives the sound its colour.
+#
+# This file plays the clock on its own for three seconds,
+# then reads it through a sine: the purest tone there is,
+# one single frequency with no colour at all. A tuning
+# fork, a soft flute and a whistle are all close to a sine.
+#
+# ▶ HOW TO PLAY THIS FILE (from ~/aitherLang)
+#
+#   ./aither start                    once per session
+#   ./aither send edc/01_sine.aither  play it (or: edc/learn play 1)
+#   ./aither stop 01_sine 1           fade it out over 1 second
+#
+#   On the uConsole, start with a bigger buffer so busier
+#   lessons don't crackle:  AITHER_BUFFER=2048 ./aither start
+#
+#   Headphones help: the uConsole's speaker can't play much
+#   below ~200 Hz, so low notes will sound thin or vanish.
+#
+#   edc/learn lists every lesson and checks your puzzles.
+#
+# ▶ WHAT THE CODE SAYS
+#
+#   play clock:     a named part. You can mute it, solo it
+#                   and fade it by name from the command line.
+#   phasor(220)     the clock: 0 → 1, 220 times a second.
+#                   Sent to the speaker raw, it's a thin buzz:
+#                   a ramp that jumps back to 0 every lap.
+#   TAU * ...       one lap is one full turn of a circle, and
+#                   TAU (6.28...) is a full turn in the units
+#                   sin wants. Lesson 2 is all about it.
+#   sin(...)        the shape. The height of a dot going
+#                   round a circle: a smooth wave, no buzz.
+#   * 0.2           the volume. 1.0 is full scale. Keep the
+#                   total of everything under 1.
+#   the last line   is what you hear: the clock for the
+#                   first three seconds, then the tone.
+#
+#   sin(TAU * phasor(220)) is so common it has a shorthand,
+#   osc(sin, 220). That isn't a special feature: it's one
+#   line in stdlib.aither,
+#
+#     def osc(shape, freq): shape(TAU * phasor(freq))
+#
+#   and you'll write lines like it yourself from lesson 4.
+#   The long way is the real thing; the shorthand just saves
+#   typing. The lessons use both.
+#
+# ▶ FREQUENCY IS PITCH
+#
+#   220 Hz means the clock laps 220 times a second, so the
+#   speaker cone moves back and forth 220 times a second.
+#   Double it (440) and you hear the same note an octave
+#   higher. Halve it (110) and it drops an octave. Musicians
+#   call 440 Hz "A", the note orchestras tune to. 220 is
+#   the A below it.
+
+play clock:
+  phasor(220) * 0.2
+
+play tone:
+  sin(TAU * phasor(220)) * 0.2
+
+if t - start_t < 3 then clock else tone
+
+# ▶ TRY THIS (edit, save, send again)
+#
+#   1. Change both 220s to 440 and send. The pitch jumps up
+#      an octave, with no click: aither keeps the clock
+#      running and just changes its speed. That's live
+#      coding.
+#   2. Change 0.2 to 0.05. Quieter. Volume is multiplication.
+#   3. Try 330. That's a "perfect fifth" above 220, because
+#      330/220 = 3/2. Simple ratios sound related.
+#   4. Try 50. On the speaker you'll hear almost nothing;
+#      on headphones it's a deep hum you half-feel.
+#   5. Make the last line just `clock` and listen to the
+#      raw clock for a while. It's buzzy because of the
+#      jump from 1 back to 0 every lap: sharp corners mean
+#      bright sound. Lesson 3 explains why.
+#   6. Look at the sound instead of hearing it:
+#        ./aither audit edc/01_sine.aither 2 --from 3
+#      (--from 3 skips the clock.) One peak at 220 Hz and
+#      nothing else. That's what "pure" means. Now audit
+#      without --from 3: the clock has a peak at every
+#      multiple of 220.
+#
+# ▶ PUZZLE → edc/01_sine_puzzle.aither

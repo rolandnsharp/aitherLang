@@ -1,0 +1,12 @@
+# Solution to PUZZLE 1. Double the frequency (220 → 440) for
+# an octave up; halve the multiplier (0.2 → 0.1) for half the
+# volume, which is about 6 dB quieter.
+#
+#@ top 440 3 -- one octave above 220 Hz
+#@ rms< -20 -- half the volume (level below -20 dB)
+#@ rms> -26 -- ...but not much quieter than half
+
+play tone:
+  sin(TAU * phasor(440)) * 0.1
+
+tone

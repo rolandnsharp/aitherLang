@@ -1,0 +1,54 @@
+# ┌──────────────────────────────────────────────────────┐
+# │ PUZZLE 8 · Ghost notes from a wobble                 │
+# └──────────────────────────────────────────────────────┘
+#
+# Here's a strange fact: when tremolo gets fast, it creates
+# NEW notes. A 440 Hz tone pulsing r times a second also
+# contains two quieter "ghost" tones at 440 - r and
+# 440 + r. These are called SIDEBANDS, and this is how AM
+# radio works (AM = amplitude modulation).
+#
+# Make this tone grow sidebands at exactly 400 Hz and
+# 480 Hz, while 440 Hz stays the loudest.
+#
+# Check:  edc/learn check 8      Hear:  edc/learn puzzle 8
+#
+#@ top 440 3 -- 440 Hz is still the loudest
+#@ peak 400 3 -20 -- a sideband at 400 Hz
+#@ peak 480 3 -20 -- a sideband at 480 Hz
+
+play ghost:
+  let rate    = 4
+  let depth   = 0.8
+  let wobble  = 1 - depth * (0.5 + 0.5 * sin(TAU * phasor(rate)))
+  osc(sin, 440) * wobble * 0.3
+
+ghost
+
+#
+#
+#
+#
+#
+#
+#
+# ▶ HINTS
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#   Right now the sidebands are at 436 and 444 Hz. Where do
+#   those numbers come from?
+#
+#
+#
+#
+#
+#
+#
+#   440 - rate and 440 + rate. You need them 40 Hz away.

@@ -1,0 +1,49 @@
+# ┌──────────────────────────────────────────────────────┐
+# │ PUZZLE 1 · Up an octave, down in volume              │
+# └──────────────────────────────────────────────────────┘
+#
+# This tone is a bit loud and a bit low. Change it so it is
+# exactly one octave higher, and at half the volume.
+#
+# Check your answer:   edc/learn check 1
+# Hear your attempt:   edc/learn puzzle 1
+#
+#@ top 440 3 -- one octave above 220 Hz
+#@ rms< -20 -- half the volume (level below -20 dB)
+#@ rms> -26 -- ...but not much quieter than half
+
+play tone:
+  sin(TAU * phasor(220)) * 0.2
+
+tone
+
+#
+#
+#
+#
+#
+#
+#
+# ▶ HINTS (scroll down only if you're stuck)
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#   An octave up means doubling the frequency: the clock
+#   laps twice as often.
+#
+#
+#
+#
+#
+#
+#
+#
+#   Half the volume means halving the number you multiply
+#   by. (Every halving of a signal is about -6 dB.)

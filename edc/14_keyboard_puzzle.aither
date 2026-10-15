@@ -1,0 +1,63 @@
+# ┌──────────────────────────────────────────────────────┐
+# │ PUZZLE 14 · Design a knob  (♪ play it to judge)      │
+# └──────────────────────────────────────────────────────┘
+#
+# A good performance knob changes the sound a LOT while
+# staying musical all the way round. Add a third knob to
+# this instrument:
+#
+#   K3 (CC 76) "character": at 0 it's the plain sawtooth;
+#   turned up, it blends towards a second, different sound
+#   of your choice. Ideas: a square wave, a detuned saw an
+#   octave up, an FM tone (lesson 9), noise through a bpf
+#   at the key's pitch (lesson 7).
+#
+# The checker can't press keys, so it only checks that your
+# patch compiles. Play it to judge the rest: sweep K3 while
+# holding a chord.
+#
+# Check:  edc/learn check 14     Hear:  edc/learn puzzle 14
+#
+#@ keys
+
+let bright  = 0.3 + midi_cc(74) * 1.7
+let release = 0.15 + midi_cc(71) * 2
+
+play keys:
+  midi_keyboard((freq, gate) =>
+    let env  = adsr(gate, 0.005, 0.4, 0.5, release)
+    let tone = osc(saw, freq) |> lpf(150 + env * bright * 3000, 0.5)
+    tone * env * 0.12) |> reverb(2, 0.2)
+
+keys
+
+#
+#
+#
+#
+#
+#
+#
+# ▶ HINTS
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#   Read the knob outside the lambda:
+#     let char = midi_cc(76)
+#
+#
+#
+#
+#
+#
+#
+#   Inside, make the second sound and crossfade:
+#     let other = osc(sqr, freq * 2) * 0.6
+#     let mixed = osc(saw, freq) * (1 - char) + other * char
+#   then filter "mixed" instead of the plain saw.

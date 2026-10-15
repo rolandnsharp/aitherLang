@@ -1,0 +1,55 @@
+# ┌──────────────────────────────────────────────────────┐
+# │ PUZZLE 11 · Tune the spring                          │
+# └──────────────────────────────────────────────────────┘
+#
+# This spring rings at 440 Hz (an A). Make it ring at
+# 523.25 Hz instead: C, the "do" of the C major scale.
+#
+# The catch: there's no frequency setting. A spring only
+# has a stiffness, k. Work out the k that gives 523.25 Hz.
+#
+# Check:  edc/learn check 11     Hear:  edc/learn puzzle 11
+#
+#@ top 523.25 4 -- rings at C (523.25 Hz)
+
+play fork:
+  let strike = impulse(1)
+  let k = 7643000
+  let c = 3
+  $x = 0.0
+  $v = 0.0
+  $v = $v + (-k * $x - c * $v + strike * k * 8) * dt
+  $x = $x + $v * dt
+  $x * 0.5
+
+fork
+
+#
+#
+#
+#
+#
+#
+#
+# ▶ HINTS
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#   Lesson 11 has the rule: k = (TAU × pitch)².
+#   TAU is about 6.2832.
+#
+#
+#
+#
+#
+#
+#
+#   You can let aither do the maths:
+#     let k = pow(TAU * 523.25, 2)
+#   ...but try it by hand first: 6.2832 × 523.25, squared.

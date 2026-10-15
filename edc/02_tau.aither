@@ -1,0 +1,110 @@
+# ┌──────────────────────────────────────────────────────┐
+# │ LESSON 2 · TAU: the circle inside every sound        │
+# └──────────────────────────────────────────────────────┘
+#
+# Open any aither patch and you'll see TAU everywhere:
+# sin(TAU * phasor(f)), k = (TAU × pitch)², pan angles.
+# It's the most important number in the language, so it
+# gets a lesson of its own.
+#
+# ▶ WHAT TAU IS
+#
+#   TAU = 6.2832... = one full turn of a circle, measured
+#   in "radians" (the natural unit for angles in maths).
+#
+#     a quarter turn  = TAU / 4
+#     half a turn     = TAU / 2
+#     a full turn     = TAU
+#
+#   You might know π (pi, 3.1416). π is HALF a turn, which
+#   is why old formulas are full of 2π. TAU is just 2π with
+#   its own name, because a full turn is what you almost
+#   always mean.
+#
+# ▶ A SINE WAVE IS A CIRCLE SEEN FROM THE SIDE
+#
+#   Imagine a dot riding round a circle. Watch only its
+#   height: it rises, falls, rises... That height, drawn
+#   over time, IS a sine wave. sin(angle) gives the height
+#   of the dot at that angle.
+#
+#   So a 220 Hz tone is a dot going round a circle 220
+#   times every second.
+#
+# ▶ PHASOR: HOW FAR ROUND THE CIRCLE
+#
+#   phasor(220) counts 0 → 1 over and over, 220 times a
+#   second. It's "what fraction of the lap are we on":
+#     0.25 = a quarter of the way round, 0.5 = halfway.
+#
+#   TAU * phasor(220) turns that fraction into an angle,
+#   and sin(...) turns the angle into the height:
+#
+#     sin(TAU * phasor(220))      ← this IS osc(sin, 220)
+#
+#   Every oscillator in aither is these three steps:
+#   count laps (phasor), make an angle (× TAU), read the
+#   shape (sin, saw, tri, sqr...).
+#
+# ▶ PHASE: WHERE ON THE CIRCLE YOU START
+#
+#   Two dots on the same circle, going the same speed,
+#   one half a turn ahead: when one is at the top, the
+#   other is at the bottom. Add their heights and you get
+#   zero, forever. Sounds can CANCEL. Noise-cancelling
+#   headphones work exactly like that. (That's the puzzle.)
+#
+# ▶ THIS PATCH: one part per idea, three seconds each
+#
+#   1. osc(sin, 220), written out the long way
+#   2. the same sine, plus a copy a quarter turn ahead:
+#      same note, about 1.4 times louder: the two
+#      heights partly add up
+#   3. a copy HALF a turn ahead: ...silence. Not a bug!
+#   4. a circle in stereo: cos in the left ear and sin in
+#      the right. The two ears hear the dot's left-right
+#      and up-down, so the sound seems to spin.
+
+let pos = t - start_t
+let lap = phasor(220)
+
+play longway:
+  sin(TAU * lap) * 0.2
+
+play quarter:
+  (sin(TAU * lap) + sin(TAU * lap + TAU / 4)) * 0.2
+
+play half:
+  (sin(TAU * lap) + sin(TAU * lap + TAU / 2)) * 0.2
+
+play spin:
+  let angle = TAU * phasor(0.5)
+  let tone  = sin(TAU * lap) * 0.2
+  [tone * (0.5 + 0.5 * cos(angle)), tone * (0.5 + 0.5 * sin(angle))]
+
+let which = int(pos / 3) mod 4
+let w1 = if which == 0 then 1 else 0
+let w2 = if which == 1 then 1 else 0
+let w3 = if which == 2 then 1 else 0
+let w4 = if which == 3 then 1 else 0
+
+longway * w1 + quarter * w2 + half * w3 + spin * w4
+
+# ▶ TRY THIS
+#
+#   1. In "half", change TAU / 2 to TAU / 2.1. Almost
+#      opposite, so almost silent: a ghost of the note.
+#   2. Two notes, one circle. sin(TAU * lap * 2) goes round
+#      twice per lap: an octave up, locked perfectly in step
+#      with the original.
+#   3. Spin faster: phasor(0.5) → phasor(4). At 4 laps a
+#      second the motion turns into a wobble.
+#   4. Physics uses TAU too. A spring that rings at f Hz
+#      has stiffness (TAU × f)²: TAU × f is "angles per
+#      second", the speed of the dot. Lesson 11 builds one.
+#   5. Draw it in numbers. Audit "half" alone (delete the
+#      other three from the last line):
+#        ./aither audit edc/02_tau.aither 1
+#      RMS is about -inf: true silence, from two sounds.
+#
+# ▶ PUZZLE → edc/02_tau_puzzle.aither

@@ -1,0 +1,78 @@
+# ┌──────────────────────────────────────────────────────┐
+# │ LESSON 5 · Additive synthesis                        │
+# └──────────────────────────────────────────────────────┘
+#
+# Lesson 3 showed that every waveform is a recipe of sine
+# waves. Additive synthesis turns that around: you write
+# the recipe, and the sound is built from it. Any timbre
+# can be made this way, including vowels and instruments.
+#
+# This file plays three sounds, five seconds each:
+#
+#   1. a sawtooth built by hand from 8 sine waves
+#   2. the same note with a "warm" recipe (1/n²)
+#   3. a voice singing "ah", which slowly turns into "ee"
+#
+# ▶ HOW AN OSCILLATOR REALLY WORKS
+#
+#   phasor(f) is a counter that goes 0 → 1 over and over,
+#   f times a second. sin(TAU * phasor(f)) turns each lap
+#   into one turn of a sine wave (TAU is a full circle,
+#   2π). osc(sin, f) is just a shortcut for exactly that.
+#
+# ▶ SUM: A LOOP THAT BUILDS SOUNDS
+#
+#   sum(8, n => ...) adds up 8 copies of "...", with n
+#   counting 1, 2, 3 ... 8. So
+#
+#     sum(8, n => sin(TAU * phasor(n * 110)) / n)
+#
+#   is harmonic n at n × 110 Hz with volume 1/n: the
+#   sawtooth recipe from lesson 3, made of real sines.
+#
+# ▶ additive(freq, shape, N)
+#
+#   The stdlib's ready-made version. "shape" is a function
+#   (n, pf) giving the volume of harmonic n (pf is its
+#   frequency in Hz). Ready-made shapes include saw_shape,
+#   sqr_shape, tri_shape, warm_shape, bright_shape,
+#   vowel_ah, vowel_ee and cello_shape.
+#
+#   Unlike osc(saw, ...), additive stops before the highest
+#   harmonics, so there's no aliasing: it's always clean.
+#
+# Vowels work because your mouth is a filter: "ah" boosts
+# harmonics near 700 and 1200 Hz, "ee" near 270 and
+# 2300 Hz. Those boosted regions are called FORMANTS.
+
+play tour:
+  let pos   = t - start_t
+  let which = int(pos / 5) mod 3
+  let m     = ease(((pos mod 15) - 10) / 5)
+  if which == 0 then sum(8, n => sin(TAU * phasor(n * 165)) / n) * 0.12
+  else if which == 1 then additive(165, warm_shape, 12) * 0.25
+  else (additive(165, vowel_ah, 16) * (1 - m) + additive(165, vowel_ee, 16) * m) * 0.07
+
+tour
+
+# ▶ TRY THIS
+#
+#   1. In the first sound, change / n to / (n * n). You've
+#      just written warm_shape yourself.
+#
+#   (Why is each sound written inside its own if-branch?
+#   Only the branch that's playing gets computed. Every
+#   sine costs CPU, and a small computer like the uConsole
+#   crackles if a patch asks for more than it can do.)
+#   2. Change sum(8 to sum(2, then sum(40. Few harmonics
+#      sound dull; many sound bright and buzzy.
+#   3. Write your own recipe. Add this above "play tour:"
+#        def hollow(n, pf): if n mod 2 == 1 then 1.0 / n else 0
+#      and use additive(165, hollow, 16) somewhere. Which
+#      waveform from lesson 3 did you just rebuild?
+#   4. Make a formant of your own: harmonics near 1000 Hz
+#      boosted. Copy this shape:
+#        def nasal(n, pf): (1 / n) * (1 + exp(-pow((pf - 1000) / 120, 2)) * 5)
+#      The exp(...) part is a bump centred on 1000 Hz.
+#
+# ▶ PUZZLE → edc/05_additive_puzzle.aither

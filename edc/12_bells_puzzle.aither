@@ -1,0 +1,50 @@
+# ┌──────────────────────────────────────────────────────┐
+# │ PUZZLE 12 · Slide the spectrum                       │
+# └──────────────────────────────────────────────────────┘
+#
+# This tone has three harmonics: 200, 400 and 600 Hz.
+# Move them so they land on 300, 500 and 700 Hz, with
+# nothing left at 200 or 400. Notice that 300, 500 and 700
+# are NOT the harmonics of any note you could play.
+#
+# Check:  edc/learn check 12     Hear:  edc/learn puzzle 12
+#
+#@ peak 300 3 -10 -- a partial at 300 Hz
+#@ peak 500 3 -12 -- a partial at 500 Hz
+#@ peak 700 3 -16 -- a partial at 700 Hz
+#@ nopeak 200 4 -30 -- nothing left at 200 Hz
+#@ nopeak 400 4 -30 -- nothing left at 400 Hz
+
+play slid:
+  freq_shift(additive(200, saw_shape, 3), 0) * 0.3
+
+slid
+
+#
+#
+#
+#
+#
+#
+#
+# ▶ HINTS
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#   Changing 200 to 300 won't work: that multiplies, giving
+#   300, 600, 900.
+#
+#
+#
+#
+#
+#
+#
+#   Every partial needs the same number of Hz added.
+#   freq_shift's second number is how many.

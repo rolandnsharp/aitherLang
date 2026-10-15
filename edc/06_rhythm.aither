@@ -1,0 +1,77 @@
+# ┌──────────────────────────────────────────────────────┐
+# │ LESSON 6 · Envelopes and rhythm                      │
+# └──────────────────────────────────────────────────────┘
+#
+# So far every sound has been on forever. Real notes start
+# and stop. The shape of a note's volume over time is its
+# ENVELOPE: a piano hits hard and fades; a violin swells.
+#
+# ▶ TRIGGERS AND ENVELOPES
+#
+#   impulse(4)            a "tick": 1 for a single sample,
+#                         4 times a second, 0 the rest.
+#   pluck(trig, 0.3)      on each tick, jump up and fade
+#                         away over 0.3 s. Percussive.
+#   swell(gate, a, r)     while gate is 1, rise over a
+#                         seconds; when it drops to 0, fall
+#                         over r seconds. Bowed, breathy.
+#   adsr(gate, a, d, s, r) the classic synth envelope:
+#                         attack, decay, sustain, release.
+#
+#   Multiply a sound by an envelope and it plays notes.
+#
+# ▶ RHYTHM IS A PHASOR
+#
+#   There's no sequencer in aither. phasor(rate) is a ramp
+#   from 0 to 1, and a ramp IS a clock: phasor(step / 8)
+#   goes 0 → 1 once every 8 steps, so int(it * 8) counts
+#   0, 1, 2 ... 7 and starts again. That count picks
+#   entries out of arrays: which note, and how hard.
+#
+#   The "vel" array is the drummer's hands: 1 is a strong
+#   hit, 0.4 a soft one, 0 a rest. Varying it is what makes
+#   a pattern sound played instead of programmed.
+#
+# ▶ THIS PATCH
+#
+#   pluck  an 8-step bass-line melody at 120 BPM (beats per
+#          minute), two steps per beat.
+#   pad    a soft chord that swells in for two beats and
+#          fades out for two, over and over.
+
+let bpm  = 120
+let beat = bpm / 60
+let step = beat * 2
+
+play pluck:
+  let notes = [220, 220, 330, 220, 294, 294, 330, 247]
+  let vel   = [1, 0.4, 0.8, 0, 0.9, 0.4, 0.7, 0.5]
+  let idx   = int(phasor(step / 8) * 8)
+  let env   = pluck(impulse(step) * vel[idx], 0.25)
+  additive(notes[idx], saw_shape, 10) * env * 0.25
+
+play pad:
+  let gate = if phasor(beat / 4) < 0.5 then 1 else 0
+  let env  = swell(gate, 0.6, 0.9)
+  (additive(330, warm_shape, 6)
+   + additive(440, warm_shape, 6)) * env * 0.08
+
+pluck + pad
+
+# ▶ TRY THIS
+#
+#   1. Change bpm to 90, then 160. Everything follows,
+#      because every part reads the same "beat".
+#   2. Change 0.25 in pluck(..., 0.25) to 0.05 (clipped,
+#      staccato) or 1.0 (long and ringing).
+#   3. Edit the vel array. Put 0 on steps to make rests;
+#      accent the off-beats (steps 2, 4, 6, 8) for a
+#      reggae skank.
+#   4. Swap swell for an ADSR and hear the difference:
+#        let env = adsr(gate, 0.05, 0.3, 0.4, 0.8)
+#      Fast attack, a drop to 40%, a long release.
+#   5. Make the pad breathe on its own clock: change
+#      beat / 4 to 0.13. It drifts in and out of time
+#      with the melody and never quite lines up again.
+#
+# ▶ PUZZLE → edc/06_rhythm_puzzle.aither (a listening puzzle)

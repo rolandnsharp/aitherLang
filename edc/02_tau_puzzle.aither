@@ -1,0 +1,55 @@
+# ┌──────────────────────────────────────────────────────┐
+# │ PUZZLE 2 · Three dots, no sound                      │
+# └──────────────────────────────────────────────────────┘
+#
+# Lesson 2 cancelled a sine with ONE copy half a turn ahead.
+# Here there are THREE copies of the same 220 Hz sine.
+# Choose the head starts (b and c, as angles) so the three
+# cancel each other out completely: total silence.
+#
+# Rules: keep all three sines, the same speed and the same
+# volume. Only change b and c. (b = 0 and c = TAU / 2 would
+# silence two of them, but leave the third playing.)
+#
+# Check:  edc/learn check 2      Hear:  edc/learn puzzle 2
+#
+#@ rms< -60 -- silence: the three cancel completely
+
+let lap = phasor(220)
+
+play trio:
+  let b = 0
+  let c = 0
+  (sin(TAU * lap) + sin(TAU * lap + b) + sin(TAU * lap + c)) * 0.15
+
+trio
+
+#
+#
+#
+#
+#
+#
+#
+# ▶ HINTS
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#   Picture three dots on the circle. When does their
+#   combined height stay at zero all the way round?
+#
+#
+#
+#
+#
+#
+#
+#   When they're spread evenly, like the three points of a
+#   triangle or a Mercedes badge: a third of a turn apart.
+#   (This is exactly how three-phase mains power works.)

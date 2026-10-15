@@ -1,0 +1,92 @@
+# ┌──────────────────────────────────────────────────────┐
+# │ LESSON 13 · Composing a piece                        │
+# └──────────────────────────────────────────────────────┘
+#
+# There's no timeline or score in aither. A whole piece is
+# ONE expression, and time is just another input: pos, the
+# seconds since you sent the file. Sections, entrances,
+# the climax and the ending are all functions of pos.
+#
+# This file is a 90-second piece. Send it and listen to
+# the whole arc before reading on:
+#
+#    0s   a low drone fades in
+#   16s   a pulse enters and starts drifting left and right
+#   32s   bells arrive, with reverb
+#   48s   the drone's filter slowly opens: the climax
+#   66s   everything recedes, one layer at a time
+#   90s   silence
+#
+# ▶ THE TOOLS
+#
+#   ease(x)              0 → 1 smoothly as x goes 0 → 1
+#   gate(pos, t0, t1)    our own helper below: fades IN
+#                        around t0 and OUT around t1. Each
+#                        layer's whole life is one line.
+#   pan(sig, p)          place a mono sound in stereo:
+#                        -1 left, 0 centre, 1 right
+#   haas(sig, ms)        delay one ear by a few ms: makes a
+#                        mono sound feel wide
+#   reverb(sig, rt60, wet)  a room. rt60 = seconds to die
+#                        away, wet = how much room vs dry.
+#
+# ▶ A SIGNAL THAT IS A BAR
+#
+#   bar = phasor(beat / 16) goes 0 → 1 across 16 beats.
+#   "if bar > 0.94" is true only during the last beat of
+#   every bar, so the pulse drops out there each time: a
+#   tiny breath that makes the loop feel phrased. No bar
+#   counter: the position in the bar is just a signal.
+#
+# ▶ BEFORE YOU WRITE YOUR OWN, ANSWER FIVE QUESTIONS
+#
+#   1. What's the arc, as a function of pos? (silent → rise
+#      → breathe → recede)
+#   2. What's the home note? (here: 110 Hz, an A)
+#   3. What are the layers? Each is one play.
+#   4. How do they relate? Enter, cross, duck, stack.
+#   5. One file, one final line that mixes it all.
+
+def gate(pos, t0, t1): ease((pos - t0) / 4) * (1 - ease((pos - t1) / 4))
+
+let pos  = t - start_t
+let beat = 96 / 60
+let bar  = phasor(beat / 16)
+
+play drone:
+  let open = ease((pos - 48) / 12) * (1 - ease((pos - 66) / 8))
+  let tone = additive(110, saw_shape, 14) + additive(110.4, saw_shape, 14)
+  let life = ease(pos / 8) * (1 - ease((pos - 72) / 14))
+  (tone |> lpf(250 + open * 2200, 0.4)) * life * 0.05 |> haas(12)
+
+play pulse:
+  let notes = [220, 330, 440, 330, 247, 330, 392, 330]
+  let idx   = int(phasor(beat / 4) * 8)
+  let drop  = if bar > 0.94 then 0 else 1
+  let env   = pluck(impulse(beat * 2), 0.18)
+  let tone  = additive(notes[idx], warm_shape, 6) * env * drop
+  tone * gate(pos, 16, 70) * 0.3 |> pan(sin(TAU * pos / 20) * 0.6)
+
+play bells:
+  let env  = pluck(impulse(beat / 4), 3)
+  let ring = inharmonic(880, bar_partials, bell_decay, 5) * env
+  (ring |> reverb(3, 0.45)) * gate(pos, 32, 76) * 0.18 |> pan(-0.4)
+
+drone + pulse + bells
+
+# ▶ TRY THIS
+#
+#   1. Restart the piece from the top without re-sending:
+#        ./aither retrigger 13_composing
+#   2. Skip ahead while editing: change "let pos = t -
+#      start_t" to "let pos = t - start_t + 40" to start at
+#      the 40-second mark. Remove it when you're done.
+#   3. Move the climax: change both 48s in "open" to 30.
+#   4. Make the pulse duck under each bell (a sidechain, as
+#      in lesson 10). Put this before "play drone":
+#        let bellHit = discharge(impulse(beat / 4), 3)
+#      and multiply the pulse's last line by
+#        (1 - bellHit * 0.6)
+#   5. Turn the reverb into a cathedral: rt60 3 → 8.
+#
+# ▶ PUZZLE → edc/13_composing_puzzle.aither (a listening puzzle)

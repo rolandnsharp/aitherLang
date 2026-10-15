@@ -1,0 +1,47 @@
+# ┌──────────────────────────────────────────────────────┐
+# │ PUZZLE 10 · Make it sizzle                            │
+# └──────────────────────────────────────────────────────┘
+#
+# This "hi-hat" sounds like a shaker wrapped in a sock. A
+# real hi-hat is all sizzle and no thud. Make it bright:
+# its brightness (centroid) must rise above 7000 Hz, and
+# it must still be audible.
+#
+# Check:  edc/learn check 10      Hear:  edc/learn puzzle 10
+#
+#@ centroid> 7000 -- bright: brightness above 7000 Hz
+#@ rms> -45 -- still audible
+
+play hat:
+  let trig = impulse(8)
+  (noise() |> lpf(1500, 0.2)) * discharge(trig, 40) * 0.3
+
+hat
+
+#
+#
+#
+#
+#
+#
+#
+# ▶ HINTS
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#   The filter is keeping the wrong end of the noise.
+#
+#
+#
+#
+#
+#
+#
+#   Swap the low-pass for a high-pass (hpf) and set its
+#   cutoff high, like the hat in lesson 10.

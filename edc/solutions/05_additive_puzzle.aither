@@ -1,0 +1,14 @@
+# Solution to PUZZLE 5. The 3rd harmonic gets volume 1 and the
+# rest keep a quieter saw-like 0.3/n, so the fundamental is
+# still there. A formant bump works too:
+#   def my_shape(n, pf): (1 / n) * (1 + exp(-pow((pf - 600) / 80, 2)) * 8)
+#
+#@ top 600 5 -- the 3rd harmonic (600 Hz) is the loudest
+#@ peak 200 4 -30 -- the 200 Hz fundamental is still there
+
+def my_shape(n, pf): if n == 3 then 1.0 else 0.3 / n
+
+play singer:
+  additive(200, my_shape, 8) * 0.2
+
+singer

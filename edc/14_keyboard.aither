@@ -1,0 +1,97 @@
+# ┌──────────────────────────────────────────────────────┐
+# │ LESSON 14 · Your instrument: playing from a keyboard │
+# └──────────────────────────────────────────────────────┘
+#
+# Everything so far played itself. aither's real purpose is
+# building INSTRUMENTS that a person plays: the patch makes
+# the sound, and you make the music.
+#
+# ▶ CONNECT A MIDI KEYBOARD
+#
+#   Plug it in before ./aither start and it connects by
+#   itself. Otherwise:
+#     ./aither midi list           find your keyboard's port
+#     ./aither midi connect 28:0   (use your port number)
+#
+# ▶ POLYPHONY
+#
+#   midi_keyboard((freq, gate) => ...) describes ONE key:
+#     freq   the key's pitch in Hz
+#     gate   how hard you pressed it (0..1) while held,
+#            0 once you let go
+#   aither runs a copy for every key you hold (up to 8)
+#   and adds them up. Chords just work.
+#
+#   (freq, gate) => ... is a LAMBDA: a small function
+#   written inline, without a name.
+#
+# ▶ KNOBS
+#
+#   midi_cc(74) reads controller 74 as 0..1. Which number
+#   a knob sends depends on your controller; these match
+#   the knobs used by the patches in patches/:
+#     K1 = CC 74    K2 = CC 71
+#
+#   Knobs read 0 until you first move them, so design the
+#   sound to be good at 0 too.
+#
+# ▶ THIS INSTRUMENT
+#
+#   A classic subtractive synth: a sawtooth per key, a
+#   filter that opens on each key press and closes as the
+#   note settles (lesson 7's filter envelope), and a
+#   little reverb.
+#
+#     K1  brightness: how far the filter opens
+#     K2  release: how long notes ring after you let go
+#
+#   It's deliberately cheap (one oscillator per key), so
+#   eight-note chords stay smooth on a small computer.
+#
+# ▶ NO KEYBOARD?
+#
+#   aither has no on-screen keyboard. Test the sound with a
+#   fake key that presses itself once a second: paste this
+#   part above the last line, and change the last line to
+#   keys + test.
+#
+#     play test:
+#       let gate = if phasor(0.5) < 0.5 then 1 else 0
+#       let env  = adsr(gate, 0.005, 0.4, 0.5, release)
+#       (osc(saw, 220) |> lpf(150 + env * bright * 3000, 0.5)) * env * 0.12
+
+let bright  = 0.3 + midi_cc(74) * 1.7
+let release = 0.15 + midi_cc(71) * 2
+
+play keys:
+  midi_keyboard((freq, gate) =>
+    let env  = adsr(gate, 0.005, 0.4, 0.5, release)
+    let tone = osc(saw, freq) |> lpf(150 + env * bright * 3000, 0.5)
+    tone * env * 0.12) |> reverb(2, 0.2)
+
+keys
+
+# ▶ TRY THIS
+#
+#   1. Swap osc(saw, freq) for osc(sqr, freq): hollow and
+#      woody. Then for (osc(saw, freq) + osc(saw, freq * 1.005)):
+#      two slightly detuned saws, the classic fat synth.
+#   2. Turn it into a pad: attack 0.005 → 0.8.
+#   3. Add vibrato from the mod wheel (CC 1):
+#        let wob = sin(TAU * phasor(5.5)) * midi_cc(1) * 6
+#      outside the lambda, and use freq + wob.
+#   4. Make velocity matter: multiply the last line by gate,
+#      so soft key presses play quietly.
+#   5. Bring back lesson 5's vowel: replace osc(saw, freq) with
+#      additive(freq, vowel_ah, 8). Lovely, but 8 sines per
+#      key: watch for crackle on big chords.
+#
+# ▶ PUZZLE → edc/14_keyboard_puzzle.aither
+#
+# ▶ WHERE NEXT
+#
+#   You've met every building block in aither. The patches/
+#   folder is full of real instruments and pieces made from
+#   exactly these ideas: open one, play it, and change
+#   things. COMPOSING.md has the deeper techniques, and
+#   stdlib.aither is short enough to read in one sitting.

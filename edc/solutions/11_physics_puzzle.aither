@@ -1,0 +1,16 @@
+# Solution to PUZZLE 11. k = (TAU × 523.25)² = 3287.66² ≈ 10,808,700.
+# Writing `let k = pow(TAU * 523.25, 2)` gives the same number.
+#
+#@ top 523.25 4 -- rings at C (523.25 Hz)
+
+play fork:
+  let strike = impulse(1)
+  let k = 10808700
+  let c = 3
+  $x = 0.0
+  $v = 0.0
+  $v = $v + (-k * $x - c * $v + strike * k * 8) * dt
+  $x = $x + $v * dt
+  $x * 0.5
+
+fork

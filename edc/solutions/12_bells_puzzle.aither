@@ -1,0 +1,14 @@
+# Solution to PUZZLE 12. A shift of +100 Hz moves 200, 400, 600
+# to 300, 500, 700. Changing the note to 300 would give 300,
+# 600, 900 instead, because a pitch change multiplies.
+#
+#@ peak 300 3 -10 -- a partial at 300 Hz
+#@ peak 500 3 -12 -- a partial at 500 Hz
+#@ peak 700 3 -16 -- a partial at 700 Hz
+#@ nopeak 200 4 -30 -- nothing left at 200 Hz
+#@ nopeak 400 4 -30 -- nothing left at 400 Hz
+
+play slid:
+  freq_shift(additive(200, saw_shape, 3), 100) * 0.3
+
+slid

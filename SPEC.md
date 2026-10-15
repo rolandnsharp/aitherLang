@@ -15,10 +15,12 @@ output.
 | function | `sin`, `saw`, `my_shape`   |
 | array    | `[220, 330, 440]`          |
 
-Float is the default. Function values exist for
-`osc(shape, freq)` (passing a shape function). Arrays exist
-for polyphony (input), stereo output (length-2 arrays), and
-delay/reverb/wavetable buffers.
+Float is the default. Function values exist so a shape can
+be passed to a def (`osc(shape, freq)`, `sum(N, fn)`).
+Arrays hold data: lookup tables, `wave` note lists,
+delay/reverb/wavetable buffers, and a returned `[L, R]`
+stereo pair. Nothing maps over an array — a function that
+wants a float gets a float.
 
 ## Globals
 
@@ -313,15 +315,21 @@ len($buf)                  # length
 
 Used for delay lines, reverb buffers, wavetables.
 
-### Polyphony (arrays as input to functions)
+### Arrays are data, not a map
 
-When a function receives an array where it expects a float,
-it runs once per element with independent state. Results
-are **summed**:
+An array never fans a function out over its elements.
+`osc(sin, [220, 330, 440])` is a compile error, not a
+chord. Write the repetition out — that is what `sum` and
+tables are for:
 
 ```
-osc(sin, [220, 330, 440]) * 0.3    # three oscillators → sum → mono
+let notes = [220, 330, 440]
+sum(3, n => osc(sin, notes[n - 1])) * 0.3
 ```
+
+So a two-element array means the same thing everywhere it
+can legally appear: a table of two, or a stereo pair when
+it is returned (below).
 
 ### Stereo (arrays as output)
 
@@ -332,6 +340,11 @@ two-element array (stereo).
 ```
 osc(sin, 440) |> pan(0.3)    # returns [L, R]
 ```
+
+A mono part should return its float, not `[s, s]`: the
+engine mirrors it, and the two spellings render
+identically. Reserve the brackets for the moment the
+channels actually differ.
 
 Binary ops on length-2 arrays are element-wise (see
 Operators). Mixing a stereo play with a mono play in the
@@ -455,23 +468,51 @@ per-mode physics state without delegating to a helper def.
 | `clamp(x, l, h)`| clamp to range  |
 | `int(x)`        | truncate to int |
 
-### Shapes (native)
+### Oscillators: a clock and a shape
+
+An oscillator is not a primitive. It is a clock read
+through a shape:
+
+```
+sin(TAU * phasor(220))
+```
+
+| Function      | Description                                  |
+|---------------|----------------------------------------------|
+| `phasor(freq)`| the clock: ramp 0→1 at freq Hz, with state   |
+| `noise()`     | white noise, stateless                       |
+
+`phasor` is the only stateful part. Its output is a
+*position in the cycle*, 0..1 — a fraction of time, not an
+angle. That is why the same value also serves as a
+wavetable index, a pulse-width comparator
+(`phasor(f) < width`) and a sequencer clock.
+
+`TAU * phasor(f)` converts the position to an angle in
+radians, which is what every shape takes:
 
 | Function | Description                |
 |----------|----------------------------|
+| `sin(x)` | sine (the C library one)   |
+| `cos(x)` |                            |
 | `saw(x)` | sawtooth: `-1 → 1`         |
 | `tri(x)` | triangle: `-1 → 1 → -1`    |
 | `sqr(x)` | square: `-1 / 1`           |
 
-`x` is a phase in radians (0..TAU). Also usable as osc
-shapes via `osc(shape, freq)`.
+`x` is an angle in radians; shapes wrap, so any angle is
+legal. Radians are kept on purpose: phase modulation reads
+exactly as the literature writes it
+(`sin(TAU * phasor(f) + I * sin(TAU * phasor(fm)))`, with
+`I` the modulation index), and the angle unit is the same
+one `rotate`, `phase` and the other complex-number
+operations use.
 
-### Stateful primitives (native)
-
-| Function      | Description                     |
-|---------------|---------------------------------|
-| `phasor(freq)`| ramp 0→1 at freq Hz, with state |
-| `noise()`     | white noise, stateless          |
+`osc(shape, freq)` is not a builtin — it is a one-line def
+in the stdlib, `shape(TAU * phasor(freq))`, and any
+one-argument function (including a user def) is a valid
+shape. Anything that needs the phase itself — PM, hard
+sync, a wavetable read, two shapes on one clock — spells
+the clock out.
 
 ### Compile-time fold
 

@@ -1,0 +1,47 @@
+# ┌──────────────────────────────────────────────────────┐
+# │ PUZZLE 4 · A minor chord                             │
+# └──────────────────────────────────────────────────────┘
+#
+# Only the root note is here. Build a pure (just) A minor
+# chord on top of it: root, minor third, and fifth, using
+# the ratios from lesson 4. No major third allowed.
+#
+# Check:  edc/learn check 4      Hear:  edc/learn puzzle 4
+#
+#@ peak 220 3 -15 -- the root, 220 Hz
+#@ peak 264 3 -15 -- the minor third, 6/5 of the root
+#@ peak 330 3 -15 -- the fifth, 3/2 of the root
+#@ nopeak 275 4 -35 -- no major third (that would make it major)
+
+play chord:
+  osc(sin, 220) * 0.08
+
+chord
+
+#
+#
+#
+#
+#
+#
+#
+# ▶ HINTS
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#   Add more oscillators with +, one per note, the way the
+#   chord in lesson 4 does. Brackets let it span lines.
+#
+#
+#
+#
+#
+#
+#
+#   220 × 6/5 = 264 and 220 × 3/2 = 330.

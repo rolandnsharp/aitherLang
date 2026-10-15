@@ -1,0 +1,49 @@
+# ┌──────────────────────────────────────────────────────┐
+# │ PUZZLE 7 · Under a blanket                           │
+# └──────────────────────────────────────────────────────┘
+#
+# This buzzy sawtooth is too bright. Make it dark and
+# muffled, as if heard through a wall, so its brightness
+# (the centroid) drops below 400 Hz.
+#
+# But don't cheat by swapping in a sine wave: it must still
+# be a sawtooth, with its 2nd harmonic (440 Hz) audible.
+#
+# Check:  edc/learn check 7      Hear:  edc/learn puzzle 7
+#
+#@ top 220 4 -- still a 220 Hz note
+#@ centroid< 400 -- dark: brightness below 400 Hz
+#@ peak 440 4 -24 -- still buzzy: the 2nd harmonic is audible
+
+play muffled:
+  (osc(saw, 220) |> lpf(6000, 0.2)) * 0.25
+
+muffled
+
+#
+#
+#
+#
+#
+#
+#
+# ▶ HINTS
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#   One number controls how much of the top end gets through.
+#
+#
+#
+#
+#
+#
+#
+#   Lower the cutoff a lot, to a few hundred Hz. Too low and
+#   the 440 Hz harmonic disappears too.

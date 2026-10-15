@@ -1,0 +1,68 @@
+# ┌──────────────────────────────────────────────────────┐
+# │ PUZZLE 6 · Teach the robot to swing  (♪ listening)   │
+# └──────────────────────────────────────────────────────┘
+#
+# This hi-hat-like tick hits every step at exactly the same
+# strength. It sounds like a machine. Make it groove:
+#
+#   1. Accent the first step of every group of four
+#      (steps 1, 5, 9, 13 the loudest).
+#   2. Make every other step a soft "ghost" hit.
+#   3. Put at least two rests somewhere you like.
+#   4. Bonus: add swing. Late off-beats make a beat bounce.
+#      Look at the hint at the very bottom.
+#
+# This one is judged by your ears. The checker only makes
+# sure it still compiles and isn't silent.
+#
+# Check:  edc/learn check 6      Hear:  edc/learn puzzle 6
+#
+#@ ear
+
+let bpm  = 110
+let step = bpm / 60 * 4
+
+play tick:
+  let vel = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+  let idx = int(phasor(step / 16) * 16)
+  let env = pluck(impulse(step) * vel[idx], 0.06)
+  (noise() |> hpf(6000, 0.3)) * env * 0.3
+
+tick
+
+#
+#
+#
+#
+#
+#
+#
+# ▶ HINTS
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#   Only the vel array needs to change for steps 1-3. Index 0
+#   in the array is step 1.
+#
+#
+#
+#
+#
+#
+#
+#   Swing: instead of impulse(step), make the hits from a
+#   phasor whose time is bent. Replace the "env" line with:
+#
+#     let ph    = phasor(step)
+#     let bent  = ph + sin(ph * PI) * 0.2
+#     let env   = exp(-bent * 30) * vel[idx]
+#
+#   exp(-bent * 30) is a decay that restarts every step;
+#   sin(ph * PI) stretches the middle of each step so the
+#   hits feel pushed and pulled. Try 0.1 to 0.3.

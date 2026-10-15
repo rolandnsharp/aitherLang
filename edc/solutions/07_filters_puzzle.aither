@@ -1,0 +1,12 @@
+# Solution to PUZZLE 7. A low cutoff (anything from about 80 to
+# 300 Hz works) leaves the 220 Hz note and a little of 440 Hz,
+# and removes the bright upper harmonics.
+#
+#@ top 220 4 -- still a 220 Hz note
+#@ centroid< 400 -- dark: brightness below 400 Hz
+#@ peak 440 4 -24 -- still buzzy: the 2nd harmonic is audible
+
+play muffled:
+  (osc(saw, 220) |> lpf(250, 0.2)) * 0.25
+
+muffled
