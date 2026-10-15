@@ -20,13 +20,15 @@ type
     nkVar, nkLet, nkDef, nkAssign, nkArr, nkIdx, nkIdxAssign, nkBlock,
     nkPlay, nkLambda,
     nkImport,                   # `import "lib/voice.aither"`; str = the path
-    nkStr                       # a string literal; str = its text
+    nkStr,                      # a string literal; str = its text
+    nkNamedArg                  # `name = expr` in a call; str = name, kids = [expr]
 
   Node* = ref object
     kind*: NodeKind
     str*: string                # name / op
     num*: float64               # literal value
     params*: seq[string]        # def parameters
+    defaults*: seq[Node]        # def parameter defaults, parallel to params (nil: none)
     kids*: seq[Node]            # children (interpretation per kind)
     line*: int
     source*: string             # origin (e.g. "stdlib" or "patches/foo.aither")
@@ -332,7 +334,16 @@ proc parseArgList(p: var Parser): seq[Node] =
   discard p.expect(tkLParen)
   if p.peek().kind != tkRParen:
     while true:
-      result.add p.parseExpr()
+      # `name = expr`: a named argument (codegen matches it to a def
+      # parameter). Inside parentheses it can't be an assignment.
+      if p.peek().kind == tkIdent and p.idx + 1 < p.toks.len and
+         p.toks[p.idx + 1].kind == tkAssign:
+        let nameTok = p.advance()
+        discard p.advance()
+        result.add Node(kind: nkNamedArg, str: nameTok.str,
+                        kids: @[p.parseExpr()], line: nameTok.line)
+      else:
+        result.add p.parseExpr()
       if not p.match(tkComma): break
   discard p.expect(tkRParen)
 
@@ -622,9 +633,13 @@ proc parseDef(p: var Parser): Node =
   let name = p.expect(tkIdent, "function name").str
   discard p.expect(tkLParen)
   var params: seq[string]
+  var defaults: seq[Node]
   if p.peek().kind != tkRParen:
     while true:
       params.add p.expect(tkIdent, "parameter name").str
+      # `knob = expr`: a default, used when a call leaves it out.
+      if p.match(tkAssign): defaults.add p.parseExpr()
+      else: defaults.add nil
       if not p.match(tkComma): break
   discard p.expect(tkRParen)
   discard p.expect(tkColon)
@@ -654,7 +669,8 @@ proc parseDef(p: var Parser): Node =
 
   let body = if stmts.len == 1: stmts[0]
              else: Node(kind: nkBlock, kids: stmts, line: line)
-  Node(kind: nkDef, str: name, params: params, kids: @[body], line: line)
+  Node(kind: nkDef, str: name, params: params, defaults: defaults,
+       kids: @[body], line: line)
 
 proc parsePlay(p: var Parser): Node =
   let line = p.peek().line

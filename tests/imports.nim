@@ -65,9 +65,13 @@ writeFile(dir / "usesbroken.aither", "import \"lib/broken.aither\"\nbad(1)\n")
 let e4 = errOf(dir / "usesbroken.aither")
 doAssert "unknown identifier: nothing" in e4 and "broken.aither:1" in e4, e4
 
-# Inline source resolves imports against the current directory.
+# Inline source resolves imports against the current directory. Go
+# back afterwards: in the one-binary harness the next test would
+# otherwise run from a directory that no longer exists.
+let back = getCurrentDir()
 setCurrentDir(dir)
 let (l, _) = renderPatchSrc("import \"lib/voice.aither\"\nthird(2)", 0.001)
 doAssert l[0] == 6.0, $l[0]
+setCurrentDir(back)
 removeDir(dir)
 echo "imports ok"

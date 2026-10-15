@@ -152,7 +152,7 @@ const NativeArities = {
 }.toTable
 
 # Libm 1-arg pass-throughs.
-const Libm1 = ["sin", "cos", "tan", "exp", "log", "log2",
+const Libm1 = ["sin", "cos", "tan", "tanh", "exp", "log", "log2",
                "floor", "ceil", "sqrt"]
 
 # ---- small helpers -----------------------------------------------------
@@ -259,6 +259,46 @@ proc lookupLarray(c: Ctx; sc: Scope; name: string):
     let a = c.topLarrays[name]
     return (a.sym, a.n, true)
   ("", 0, false)
+
+# A compile-time number: a literal, a name bound to one, `len(array)`,
+# or arithmetic over those. What `sum`, `each`, `array(N)` and the
+# literal propagation through lets and params accept, so a def can say
+# `let n = len(areas)` and size its state by its argument.
+proc constValue(c: Ctx; sc: Scope; n: Node): tuple[val: float64; ok: bool] =
+  if n == nil: return (0.0, false)
+  case n.kind
+  of nkNum: (n.num, true)
+  of nkIdent:
+    if sc != nil:
+      let v = sc.lookupNumLit(n.str)
+      if v.ok: return (v.val, true)
+    (0.0, false)
+  of nkCall:
+    if n.str == "len" and n.kids.len == 1 and n.kids[0].kind == nkIdent:
+      let a = n.kids[0].str
+      let sa = c.lookupSarray(sc, a)
+      if sa.ok: return (float64(sa.n), true)
+      let la = c.lookupLarray(sc, a)
+      if la.ok: return (float64(la.n), true)
+      let ca = c.lookupArray(sc, a)
+      if ca.ok: return (float64(ca.length), true)
+    (0.0, false)
+  of nkBinOp:
+    let a = c.constValue(sc, n.kids[0])
+    let b = c.constValue(sc, n.kids[1])
+    if not (a.ok and b.ok): return (0.0, false)
+    case n.str
+    of "+": (a.val + b.val, true)
+    of "-": (a.val - b.val, true)
+    of "*": (a.val * b.val, true)
+    of "/": (if b.val != 0.0: (a.val / b.val, true) else: (0.0, false))
+    else: (0.0, false)
+  of nkUnary:
+    if n.str == "-":
+      let a = c.constValue(sc, n.kids[0])
+      if a.ok: return (-a.val, true)
+    (0.0, false)
+  else: (0.0, false)
 
 # `array(N)` / `array(N, init)`: the right side of a state or local
 # array declaration.
@@ -594,23 +634,56 @@ proc emitDefInline(c: Ctx; sc: Scope; def: Node; call: Node): string =
                      else: a.str
       inner.fns[p] = resolved
       continue
+    # Array arg: bound by name, never copied. A def that indexes its
+    # param or takes len(param) sees the caller's array (a table, this
+    # sample's local array, or a state array), and len() folds at this
+    # call site, so one def serves any length and sizes its own state
+    # by its argument. Writes land in the caller's array.
+    if a.kind == nkIdent and sc.lookup(a.str).len == 0 and
+       not sc.lookupStereo(a.str).ok:
+      let sa = c.lookupSarray(sc, a.str)
+      if sa.ok:
+        inner.sarrays[p] = (sa.base, sa.n)
+        continue
+      let la = c.lookupLarray(sc, a.str)
+      if la.ok:
+        inner.larrays[p] = (la.sym, la.n)
+        continue
+      let ca = c.lookupArray(sc, a.str)
+      if ca.ok:
+        inner.arrays[p] = (ca.sym, ca.length)
+        continue
+    if a.kind == nkArr and a.kids.len != 2:
+      # An array written at the call: a table when it is all numbers,
+      # else this sample's values, built in the caller's scope. (Two
+      # numbers are a pair; a two-entry table goes through a let.)
+      if a.kids.len > 0 and a.kids.allIt(it.kind == nkNum):
+        let sym = c.fresh("arr_arg_" & p)
+        var items: seq[string] = @[]
+        for k in a.kids: items.add numLit(k.num)
+        c.arrayDecls.add &"static const double {sym}[{a.kids.len}] = {{" &
+          items.join(", ") & "};\n"
+        inner.arrays[p] = (sym, a.kids.len)
+      else:
+        let tmp = c.fresh("arg_" & p)
+        var sub = ""
+        c.declareLocalArray(sc, tmp, a, sub)
+        preface.add sub
+        inner.larrays[p] = sc.larrays[tmp]
+      continue
     # Scalar arg: evaluate in caller scope, bind to fresh local.
     let argC = c.emitExpr(sc, a)
     let tmp = c.fresh("p_" & p)
     preface.add &"double {tmp} = ({argC}); "
     inner.names[p] = tmp
-    # Literal propagation: if the arg is a numeric literal (either an
-    # nkNum directly, or an ident that already resolves to a numLit in
-    # the caller's scope), remember the numeric value alongside the
-    # scalar-double binding so builtins that require compile-time
-    # constants (e.g. sum(N, fn)) can see through one or more def-param
-    # hops. The scalar-double binding above remains authoritative for
-    # every other use.
-    if a.kind == nkNum:
-      inner.numLits[p] = a.num
-    elif a.kind == nkIdent:
-      let v = sc.lookupNumLit(a.str)
-      if v.ok: inner.numLits[p] = v.val
+    # Literal propagation: if the arg is a compile-time number (a
+    # literal, a name that resolves to one, len(array), arithmetic over
+    # those), remember the value alongside the scalar-double binding so
+    # builtins that require compile-time constants (sum, each, array)
+    # can see through one or more def-param hops. The scalar-double
+    # binding above remains authoritative for every other use.
+    let cv = c.constValue(sc, a)
+    if cv.ok: inner.numLits[p] = cv.val
   # def.kids[0] is the body (single expression or nkBlock of stmts).
   # The def's name owns every state region its body claims.
   let body = def.kids[0]
@@ -695,13 +768,11 @@ proc assignPairSide(c: Ctx; sc: Scope; st: Node): string =
 # The size of `array(N, init)`: N must be a compile-time integer.
 proc arrayMakeSize(c: Ctx; sc: Scope; call: Node): int =
   let nArg = call.kids[0]
-  var nVal = 0.0
-  if nArg.kind == nkNum: nVal = nArg.num
-  elif nArg.kind == nkIdent and sc.lookupNumLit(nArg.str).ok:
-    nVal = sc.lookupNumLit(nArg.str).val
-  else:
+  let cv = c.constValue(sc, nArg)
+  if not cv.ok:
     raise newException(ValueError,
       "array: the size must be a compile-time integer " & errLoc(nArg))
+  let nVal = cv.val
   let n = int(nVal)
   if float64(n) != nVal or n < 1 or n > 1_000_000:
     raise newException(ValueError,
@@ -839,11 +910,8 @@ proc emitLocalStmt(c: Ctx; sc: Scope; st: Node; pre: var string) =
       pre.add &"  double {tmp} = ({v});\n"
       sc.names[st.str] = tmp
       # Literal propagation: see the matching comment in emitDefInline.
-      if rhs.kind == nkNum:
-        sc.numLits[st.str] = rhs.num
-      elif rhs.kind == nkIdent:
-        let nv = sc.lookupNumLit(rhs.str)
-        if nv.ok: sc.numLits[st.str] = nv.val
+      let cv = c.constValue(sc, rhs)
+      if cv.ok: sc.numLits[st.str] = cv.val
   of nkVar:
     if isArrayMake(st.kids[0]):
       c.declareStateArray(sc, st, pre)
@@ -1060,12 +1128,8 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
         # Literal propagation through lambda params — same logic as
         # emitDefInline. Lets a lambda body call sum(p, ...) when p is
         # bound to a numeric literal at the call site.
-        let argN = n.kids[i]
-        if argN.kind == nkNum:
-          inner.numLits[p] = argN.num
-        elif argN.kind == nkIdent:
-          let v = sc.lookupNumLit(argN.str)
-          if v.ok: inner.numLits[p] = v.val
+        let cv = c.constValue(sc, n.kids[i])
+        if cv.ok: inner.numLits[p] = cv.val
       let body = lamNode.kids[0]
       let bodyC =
         if body.kind == nkBlock: c.emitBlockExpr(inner, body)
@@ -1084,20 +1148,12 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
           "sum takes 2 args: sum(N, fn) " & errLoc(n))
       let nArg = n.kids[0]
       let lamArg = n.kids[1]
-      var nVal: float64
-      if nArg.kind == nkNum:
-        nVal = nArg.num
-      elif nArg.kind == nkIdent:
-        let v = sc.lookupNumLit(nArg.str)
-        if not v.ok:
-          raise newException(ValueError,
-            "sum: first arg must be a compile-time-constant integer; " &
-            "'" & nArg.str & "' is not a numeric literal " & errLoc(nArg))
-        nVal = v.val
-      else:
+      let cv = c.constValue(sc, nArg)
+      if not cv.ok:
         raise newException(ValueError,
           "sum: first arg must be a compile-time-constant integer " &
-          errLoc(nArg))
+          "(a literal, a name bound to one, or len(array)) " & errLoc(nArg))
+      var nVal = cv.val
       let N = int(nVal)
       if float64(N) != nVal:
         raise newException(ValueError,
@@ -1150,13 +1206,12 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
           "each takes a count and a one-parameter lambda: " &
           "each(N, i => ...) " & errLoc(n))
       let nArg = n.kids[0]
-      var nVal: float64
-      if nArg.kind == nkNum: nVal = nArg.num
-      elif nArg.kind == nkIdent and sc.lookupNumLit(nArg.str).ok:
-        nVal = sc.lookupNumLit(nArg.str).val
-      else:
+      let cv = c.constValue(sc, nArg)
+      if not cv.ok:
         raise newException(ValueError,
-          "each: the count must be a compile-time integer " & errLoc(nArg))
+          "each: the count must be a compile-time integer " &
+          "(a literal, a name bound to one, or len(array)) " & errLoc(nArg))
+      var nVal = cv.val
       let N = int(nVal)
       if float64(N) != nVal or N < 0:
         raise newException(ValueError,
@@ -2271,11 +2326,8 @@ proc emit*(c: Ctx; program: Node): string =
               body.add &"    double {tmp} = ({v});\n"
               inner.names[st.str] = tmp
               # Literal propagation (play-local lets).
-              if st.kids[0].kind == nkNum:
-                inner.numLits[st.str] = st.kids[0].num
-              elif st.kids[0].kind == nkIdent:
-                let nv = inner.lookupNumLit(st.kids[0].str)
-                if nv.ok: inner.numLits[st.str] = nv.val
+              let cv = c.constValue(inner, st.kids[0])
+              if cv.ok: inner.numLits[st.str] = cv.val
           of nkVar:
             body.add c.varInit(inner, st)
           of nkAssign:
@@ -2355,6 +2407,78 @@ proc finaliseLayout(c: Ctx; src: var string) =
   for rid, r in c.regions:
     src = src.replace(offsetPlaceholder(rid), $r.offset)
 
+# A default stands on its own: numbers, PI/TAU, operators and calls,
+# never a name from some scope (whose scope would it be?).
+proc checkDefault(c: Ctx; def: Node; e: Node) =
+  case e.kind
+  of nkNum: discard
+  of nkIdent:
+    if e.str notin ["PI", "TAU"]:
+      raise newException(ValueError,
+        "default for a parameter of " & def.str & " can't use the name '" &
+        e.str & "': a default is numbers, PI/TAU, operators and calls " &
+        errLoc(e))
+  of nkCall, nkBinOp, nkUnary, nkIf:
+    for k in e.kids: c.checkDefault(def, k)
+  else:
+    raise newException(ValueError,
+      "default for a parameter of " & def.str & " must be an expression " &
+      errLoc(e))
+
+# Named arguments and defaults are resolved here, once, so the rest of
+# codegen only ever sees a call with one positional argument per
+# parameter: `sing(220, g, vibrato = 0.3)` becomes the full list, each
+# missing argument filled with the def's default expression.
+proc normalizeCalls(c: Ctx; n: Node) =
+  if n == nil: return
+  for k in n.kids: c.normalizeCalls(k)
+  if n.kind == nkDef:
+    for d in n.defaults:
+      if d != nil: c.checkDefault(n, d)
+  if n.kind != nkCall: return
+  var anyNamed = false
+  for k in n.kids:
+    if k.kind == nkNamedArg: anyNamed = true
+  if n.str notin c.userDefs:
+    if anyNamed:
+      raise newException(ValueError,
+        n.str & " is a builtin: it takes its arguments by position " & errLoc(n))
+    return
+  let def = c.userDefs[n.str]
+  if not anyNamed and n.kids.len == def.params.len: return
+  var args = newSeq[Node](def.params.len)
+  var pos = 0
+  var seenNamed = false
+  for k in n.kids:
+    if k.kind == nkNamedArg:
+      seenNamed = true
+      let i = def.params.find(k.str)
+      if i < 0:
+        raise newException(ValueError,
+          def.str & " has no parameter '" & k.str & "' " & errLoc(k))
+      if args[i] != nil:
+        raise newException(ValueError,
+          def.str & ": '" & k.str & "' given twice " & errLoc(k))
+      args[i] = k.kids[0]
+    else:
+      if seenNamed:
+        raise newException(ValueError,
+          def.str & ": positional arguments go before named ones " & errLoc(k))
+      if pos >= def.params.len:
+        raise newException(ValueError,
+          "wrong arg count for " & def.str & ": expected " &
+          $def.params.len & " got " & $n.kids.len & " " & errLoc(n))
+      args[pos] = k
+      inc pos
+  for i, a in args:
+    if a == nil:
+      let d = if i < def.defaults.len: def.defaults[i] else: nil
+      if d == nil:
+        raise newException(ValueError,
+          def.str & ": missing '" & def.params[i] & "' " & errLoc(n))
+      args[i] = d
+  n.kids = args
+
 proc generate*(program: Node; patchPath: string = "";
                sr: float64 = 48000.0):
     tuple[csrc: string; varNames, partNames: seq[string];
@@ -2362,6 +2486,7 @@ proc generate*(program: Node; patchPath: string = "";
   let c = newCtx(program)
   c.patchPath = patchPath
   c.sr = sr
+  c.normalizeCalls(program)
   var src = c.emit(program)
   finaliseLayout(c, src)
   (src, c.topVarNames, c.playNames, c.regions)

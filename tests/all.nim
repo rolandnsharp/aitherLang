@@ -13,7 +13,8 @@
 
 import additive_inharmonic, analysis, array_multiline, array_state,
        array_values, audit, backing_compiles, choir_block_compiles,
-       codegen_kick, cutoff_clamp, delay_fractional, dho, each_top_level,
+       codegen_kick, cutoff_clamp, def_params, delay_fractional, dho,
+       each_top_level,
        elif_chain, error_source_line, guide_string, imports, lambdas,
        linemap, live_pain_points, lp1_hertz, midi_codegen,
        midi_hotreload, midi_keyboard_compiles, midi_polyphony,

@@ -159,6 +159,57 @@ Functions have their own local scope — they cannot see
 file-level `let` bindings. File-level `$state` slots,
 other `def`s, and globals are visible.
 
+### Defaults and named arguments
+
+A parameter can carry a default, and a call can name its
+arguments, so a def with many knobs is usable without
+spelling all of them:
+
+```
+def sing(freq, gate, tract = 1, register = 0.5, breath = 0.2,
+         press = 0.4, vibrato = 0.1, robot = 0):
+  ...
+
+sing(220, g)                       # the defaults
+sing(220, g, vibrato = 0.3)        # one knob by name
+sing(220, g, 1.2, robot = 1)       # positional first, then named
+```
+
+A default is an expression of numbers, `PI`/`TAU`, operators
+and calls (`decay = 1 / 4`, `q = sqrt(2)`); it may not name
+a variable or another parameter. Named arguments are for
+`def`s only; builtins take theirs by position.
+
+### Array parameters
+
+An array argument is bound by name, never copied. Inside
+the def the parameter indexes the caller's array (a constant
+table, this sample's local array, or a `$state` array), and
+`len(param)` is a compile-time number at each call site, so
+one def serves any length and can size its own state by its
+argument:
+
+```
+def tube(src, areas):
+  let n = len(areas)
+  $f = array(n)                    # per call site, sized by the argument
+  $b = array(n)
+  each(n - 1, j => ...)
+  $f[n - 1]
+
+tube(glottis, [3.5, 3.4, 3.1, 2.9, 2.7, 2.6, 2.5])
+tube(glottis, mouth)               # a table or array declared outside
+```
+
+Writes to the parameter land in the caller's array. Two
+numbers at a call are a pair, not a table: a two-entry table
+goes through a `let`. Defs don't return arrays; the pair is
+the only multi-value return.
+
+`sum`, `each` and `array(N)` accept any compile-time number:
+a literal, a name bound to one, `len(array)`, or arithmetic
+over those (`each(n - 1, …)`).
+
 ## First-class functions
 
 Functions are values; pass as arguments:
@@ -355,8 +406,9 @@ Stores happen at once, in order, like `$x = ...` does, except inside
 each(N, i => stmts)
 ```
 
-Unrolls like `sum` (so `N` must be a compile-time integer), but the
-body is statements — element stores, `let`s, `$state` — and the
+Unrolls like `sum` (so `N` must be a compile-time integer), with
+`i` running from 0 to N−1 (an index; `sum`'s `n` runs from 1 to N,
+a harmonic number), but the body is statements — element stores, `let`s, `$state` — and the
 value is 0. Every store to a **state array** inside an `each` is
 held back and lands when the `each` ends, so each body reads the
 arrays as they were before the step: section `i + 1` sees section
