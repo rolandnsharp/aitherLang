@@ -790,7 +790,15 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
     of "TAU":     "(2.0 * 3.14159265358979323846)"
     else:
       let scoped = sc.lookup(n.str)
+      let table = c.lookupArray(sc, n.str)
       if scoped.len > 0: scoped
+      elif table.ok and table.length != 2:
+        # A hoisted table has no scalar C symbol; without this the C
+        # compile failed with "'l_name' undeclared".
+        raise newException(ValueError,
+          n.str & " is a table of " & $table.length & " numbers, but one " &
+          "number is needed here — index it (" & n.str & "[i]) or hand " &
+          "it to wave " & errLoc(n))
       elif sc.lookupStereo(n.str).ok or n.str in c.stereoLets or
            n.str in c.pairVars or n.str in c.playSet:
         raise newException(ValueError,
@@ -1514,9 +1522,15 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
       name in TransparentHelpers or
       (name in c.userDefs and isPureForStereo(c, c.userDefs[name].kids[0]))
     if not canSplit:
+      var who = "x"
+      for i, k in n.kids:
+        if argVals[i].stereo and k.kind == nkIdent:
+          who = k.str
+          break
       raise newException(ValueError,
         "stateful call '" & name & "' receives a stereo value " &
-        errLoc(n) & " — split L/R first via bass[0]/bass[1]")
+        errLoc(n) & " — split L/R first via " & who & "[0] / " & who &
+        "[1], or collapse it with mono(" & who & ")")
     # Substitute per-channel stereo args via fresh scope-bound names,
     # then emit two scalar calls via emitExpr. Synthesised nodes inherit
     # n's line/source so any error raised during the split emission still
@@ -1627,6 +1641,10 @@ proc refsStereo(c: Ctx; sc: Scope; n: Node): bool =
   of nkCall:
     if n.str in PairCalls: return true
     if n.str in PairReaders: return false    # a pair in, one number out
+    if n.str == "wave":
+      # wave's table is data whatever its length: a two-step sequence
+      # is not an [L, R] pair. Only the freq arg can carry stereo.
+      return n.kids.len > 0 and c.refsStereo(sc, n.kids[0])
     if n.str in c.userDefs:
       let def = c.userDefs[n.str]
       if isStereoDef(c, def): return true
@@ -1915,20 +1933,23 @@ proc emit*(c: Ctx; program: Node): string =
               raise newException(ValueError,
                 "'" & st.str & "' is the name of a play block — " &
                 "choose a different local variable name " & errLoc(st))
-            # Numeric-literal array of length != 2: auto-hoist so wave()
-            # (and indexing) can treat it like a top-level array. Pre-fix
-            # the user had to move the array above the play block; now it
-            # can live next to the play that uses it. Length 2 keeps its
-            # stereo-pair semantics (see `[L, R]` lets).
+            # Numeric-literal array: auto-hoist so wave() (and indexing)
+            # can treat it like a top-level array. Pre-fix the user had to
+            # move the array above the play block; now it can live next to
+            # the play that uses it. Length 2 is also a stereo pair (see
+            # `[L, R]` lets), so it goes on to the stereo branch as well.
             let rhs = st.kids[0]
-            if rhs.kind == nkArr and rhs.kids.len != 2 and
-               rhs.kids.len > 0 and rhs.kids.allIt(it.kind == nkNum):
+            let numericArr = rhs.kind == nkArr and rhs.kids.len > 0 and
+                             rhs.kids.allIt(it.kind == nkNum)
+            if numericArr:
               let sym = c.fresh("arr_" & s.str & "_" & st.str)
               var items: seq[string] = @[]
               for k in rhs.kids: items.add numLit(k.num)
               c.arrayDecls.add &"static const double {sym}[{rhs.kids.len}] = {{" &
                 items.join(", ") & "};\n"
               inner.arrays[st.str] = (sym, rhs.kids.len)
+            if numericArr and rhs.kids.len != 2:
+              discard
             # A non-numeric array with length != 2 has no legal interpretation
             # (not a wave() data arg, not a stereo pair). Catch it here with a
             # message that points the user at the numeric-literal requirement

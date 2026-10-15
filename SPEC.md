@@ -90,7 +90,8 @@ Arithmetic is polymorphic for length-2 arrays (stereo pairs):
 - `float + float → float`
 - `float + [L, R] → [float+L, float+R]` (broadcast)
 - `[L, R] + [L, R] → [L+L, R+R]` (element-wise)
-- Other array shapes collapse to first element (legacy polyphony)
+- Any other array in arithmetic is a compile error: index it, or
+  hand it to `wave`
 
 Same for `-`, `*`, `/`.
 
