@@ -1,0 +1,90 @@
+# ecology — a bush that plays itself.
+#
+# Wind, insects, frogs and birds. Nothing is sequenced: every voice is a
+# small system with its own state, and the frogs are coupled (Kuramoto:
+# each frog's clock is pulled toward the others'), so they drift into
+# chorus and out of it on their own. Three knobs at the top; the rest
+# is the place. Sits under the didge at about -29 dB.
+#
+# Written for the live engine (the scope branch): no defaults, no named
+# arguments; tables, state arrays and each.
+
+let density  = 1.0      # insects and birds: 0.3 a quiet night .. 2 teeming
+# frogs: the lock sets in between 0.4 and 0.5 (measured: 0.3 scattered,
+# 0.4 some grouping, 0.5 one chorus). The coupling breathes across that
+# edge over four minutes, so the chorus forms and dissolves by itself.
+let coupling = 0.42 + 0.12 * sin(TAU * phasor(1 / 240))
+let wind_amt = 1.0
+
+# ---------------------------------------------------------------- wind
+# Two slow, incommensurate gusts; noise through a band that wanders
+# with them, and a low rumble underneath. Left and right are different
+# noise, so the wind has width.
+let gust = 0.55 + 0.3 * sin(TAU * phasor(0.031)) + 0.15 * sin(TAU * phasor(0.077) + 1.3)
+
+play wind:
+  let hl = bpf(noise(), 260 + 900 * gust, 0.25) * gust
+  let hr = bpf(noise(), 300 + 800 * gust, 0.25) * gust
+  let low = lp1(noise(), 70) * gust * 3
+  [hl + low * 0.3, hr + low * 0.3] * 0.3 * wind_amt
+
+# ------------------------------------------------------------- insects
+# A chirp: a buzzed tone with a short envelope, fired at random (Poisson)
+# at `rate` per second. Each insect is its own call site, so its own
+# clock, noise and envelope.
+def insect(n, rate):
+  let hit  = if noise() > 1 - 2 * rate / sr then 1 else 0
+  let env  = discharge(hit, 9)
+  let buzz = 0.5 + 0.5 * sqr(TAU * phasor(19 + 6 * n))
+  let tone = sin(TAU * phasor(3100 + 650 * n + 400 * env))
+  tone * buzz * env * env
+
+play insects:
+  [sum(5, n => insect(n, 0.4 * density) * (0.35 + 0.13 * n)),
+   sum(5, n => insect(n, 0.4 * density) * (1 - 0.13 * n))] * 0.2
+
+# --------------------------------------------------------------- frogs
+# Six frogs, each with a natural croak rate (a clock 0..1). Kuramoto
+# coupling: each clock is pulled toward the others by the sine of the
+# phase difference; above a certain coupling they lock into a chorus,
+# below it they wander. The clocks advance all at once (each), then
+# each frog that completed a lap fires.
+let w = [0.62, 0.71, 0.83, 0.95, 1.07, 1.19]
+$ph = array(6)
+let fire = array(6)
+
+each(6, i =>
+  let pull = sum(6, j => sin(TAU * ($ph[j - 1] - $ph[i]))) / 6
+  let np = $ph[i] + (w[i] + coupling * pull) / sr
+  fire[i] = if np >= 1 then 1 else 0
+  $ph[i] = np - floor(np))
+
+# A croak: a short envelope on a low tone whose pitch drops as it
+# decays, with a breath of noise through a formant on top. Frog n
+# has its own pitch and its own place in the stereo field.
+def frog(n):
+  let env = discharge(fire[n - 1], 16)
+  let tone = sin(TAU * phasor(90 + 18 * n + 70 * env)) * env * env
+  let breath = bpf(noise(), 1000 + 140 * n, 0.8) * env * 0.5
+  tone + breath
+
+play frogs:
+  [sum(6, n => frog(n) * (0.3 + 0.12 * n)),
+   sum(6, n => frog(n) * (1 - 0.12 * n))] * 0.12
+
+# --------------------------------------------------------------- birds
+# A call every so often: a sine that sweeps up and trills, under a
+# bump-shaped envelope. Four birds, two each side.
+def bird(n, rate):
+  let hit   = if noise() > 1 - 2 * rate / sr then 1 else 0
+  let env   = discharge(hit, 2.5)
+  let shape = env * (1 - env) * 4
+  let trill = sin(TAU * phasor(11 + 3 * n)) * 250 * env
+  let f     = 1900 + 500 * n + 1400 * env * env + trill
+  sin(TAU * phasor(f)) * shape
+
+play birds:
+  [bird(0, 0.08 * density) * 0.7 + bird(2, 0.05 * density) * 0.4,
+   bird(1, 0.07 * density) * 0.7 + bird(3, 0.04 * density) * 0.4] * 0.15
+
+wind + insects + frogs + birds
