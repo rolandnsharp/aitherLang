@@ -1,56 +1,41 @@
 # Drawing with the beam
 
-**Status: design, being built.** This describes the scope loop decided
-in [notes/pair-output-2026-10-15.md](notes/pair-output-2026-10-15.md).
-Until it lands, the live stream draws with `play scope:` parts (branch
-`scope`), which this replaces.
+**Status: design, being built.** This follows the decision in
+[notes/pair-output-2026-10-15.md](notes/pair-output-2026-10-15.md).
+Until the visualiser exists, the live stream draws with `play scope:`
+parts (branch `scope`), which this replaces.
 
-A scope program is an ordinary aither program sent to the scope loop:
+A patch's final expression is a pair. Pipe the engine into a scope
+program instead of a player and the pair is read as **x, y**: a
+point on the screen, −1..1 each way, one point per sample.
 
 ```
-./aither scope trace.aither        # start drawing (hot-swaps like send)
-./aither stop trace 1              # fade the beam out
+./aither trace.aither | <any scope program>   # see instead of hear
+./aither send trace.aither                    # hot-swaps as always
 ```
 
-Its final expression is a pair, read as **x, y**: a point on the
-screen, −1..1 each way, one point per sample. The display joins the
-points and fades them, so a slow motion is bright and a fast one is
-faint, as on a phosphor tube. A float is read as a real number: the
-point `[s, 0]`, on the horizontal axis.
+The display joins the points and fades them, so a slow motion is
+bright and a fast one faint, as on a phosphor tube. Brightness is
+dwell; a jump to a point off-screen blanks the beam. A float is
+`[s, s]`: the 45° line.
 
-The scope loop runs at the sound rate, in the same tick as the sound
-programs, after them. So a trace reads *this sample's* values of
-anything the music has a name for:
-
-| name                 | what it is                                    |
-|----------------------|-----------------------------------------------|
-| `didge`              | a voice's output (a pair; `didge[0]` is left)  |
-| `didge.drone`        | one of its `play` parts                        |
-| `didge.bar_phase`    | a top-level `let` in it                        |
-| `didge.lip_pos`      | a `let` or `$state` inside its model           |
-| `didge.sticks.rms`   | the engine's meter for a part                  |
-| `master.low`         | band energy of the mix (one filter, engine-side)|
-
-Names are sample-accurate. Nothing is analysed or guessed from the
-mix: the trace reads the pitch, the phase, the envelope the sound
-actually uses. That is what makes the figures below possible; a
-hardware scope, which only ever sees the mix, can draw just the first.
-
-Brightness and blanking are not a third channel. The display reads a
-named signal for brightness if you give it one, and a jump to a point
-off-screen blanks the beam, as it does on a real scope.
+A trace is just the last line of the patch, so it can use every name
+the music has: the pitch, the bar phase, an envelope, the state inside
+a physical model. Nothing is analysed or guessed from the mix. That is
+what makes the figures below possible; a hardware scope, which only
+ever sees the mix, can draw just the first.
 
 ## What to draw
 
 ### The audio itself
 
 ```
-[didge[0], didge[1]]
+drone + sticks
 ```
 
-Mono is a 45° line. Stereo width opens it into an ellipse; a phase
-difference tilts it; clipping flattens the ends. This is the classic
-vector scope, and it is free.
+The patch as it is. Mono is a 45° line. Stereo width opens it into an
+ellipse; a phase difference tilts it; clipping flattens the ends. This
+is the classic vector scope, and it is free.
 
 ### A waveform that holds still
 
@@ -58,8 +43,8 @@ A scope needs a trigger to freeze a waveform. Here the trigger is a
 name: sweep once per period of the note being played.
 
 ```
-let x = phasor(didge.f0) * 2 - 1
-[x, didge.drone]
+let x = phasor(f0) * 2 - 1
+[x, drone]
 ```
 
 The waveform stands still whatever the pitch does. Sweep on the bar
@@ -73,7 +58,7 @@ velocity. Plot one against the other and the instrument draws its own
 phase portrait, a limit cycle that breathes with the player.
 
 ```
-[didge.lip_pos * 4, didge.lip_vel * 0.1]
+[lip_pos * 4, lip_vel * 0.1]
 ```
 
 For a plucked string, displacement against velocity; for a cybernetic
@@ -88,7 +73,7 @@ of the sound as a spirograph: change a partial in the sound and a loop
 in the picture changes.
 
 ```
-sum(8, n => rotate([didge.amp(n), 0], TAU * phasor(n * didge.f0)))
+sum(8, n => rotate([amp(n), 0], TAU * phasor(n * f0)))
 ```
 
 ### Complex dynamics
@@ -99,7 +84,7 @@ the player's breath.
 
 ```
 $z = [0, 0]
-let c = [didge.breath * 0.6 - 0.4, didge.lip_pressure * 0.5]
+let c = [breath * 0.6 - 0.4, lip_pressure * 0.5]
 $z = if magnitude($z) > 2 then [0, 0] else cmul($z, $z) + c
 $z
 ```
@@ -114,8 +99,8 @@ music.
 
 ```
 let a = TAU * phasor(60)
-let r = 0.4 + 0.3 * didge.sticks               # radius breathes with the hit
-rotate([r * cos(3 * a), r * sin(2 * a)], TAU * didge.bar_phase)
+let r = 0.4 + 0.3 * sticks               # radius breathes with the hit
+rotate([r * cos(3 * a), r * sin(2 * a)], TAU * bar_phase)
 ```
 
 Polygons from `wave` over a table of angles; letters and logos from a
@@ -126,26 +111,28 @@ phosphor shows both.
 ## The layer on top
 
 Trails, feedback, the kaleidoscope fold, colour: these are the
-display's business, not the language's. The display keeps an effect
-chain whose knobs are live and read named signals (`didge.sticks.rms`,
-`didge.bar_phase`), with presets in `stream/scenes/`. That is where the
-Winamp look lives, and it sits on top of any trace above. The trace
-stays a pair; the effects never feed back into the language.
+visualiser's business, not the language's. The visualiser keeps an
+effect chain with live knobs and presets (the `.paint` scenes from the
+stream), driven by its own analysis of the pairs it receives. That is
+where the Winamp look lives, and it sits on top of any trace above.
+The trace stays a pair; the effects never feed back into the language.
 
 ## Practicalities
 
+- A session is heard or seen, not both: the output goes to one
+  program. To make a video with sound, run the music and the trace
+  offline to two files and combine them.
 - 48 000 points a second is 800 per frame at 60 fps. Enough for any
   figure here; a closed curve needs its period to divide into that.
 - A beam draws lines, so a jump between two points draws a retrace
   line. Keep curves continuous, or blank the jump off-screen.
-- Everything in a trace costs the same CPU as in a sound program and
-  runs on the same core. On the uConsole keep traces as lean as
-  patches.
-- `aither render trace.aither out.wav` renders the beam as a 2-channel
-  file: a WAV of x and y, playable through any XY display or an
-  oscilloscope's audio input.
+- A trace costs the same CPU as sound and runs on the same core. On
+  the uConsole keep traces as lean as patches.
+- `aither trace.aither 30 > trace.raw` gives 30 s of x and y as raw
+  float pairs; `sox` turns that into a WAV playable through any XY
+  display or an oscilloscope's audio input.
 
 ## What a beam cannot do
 
 Filled areas, raster fields, textures, much text. Those are the
-display's job if they are wanted at all.
+visualiser's job if they are wanted at all.
