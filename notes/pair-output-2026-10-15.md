@@ -72,7 +72,8 @@ Two kinds of reader, both the engine's business, outside the language:
 
 ## Visuals
 
-The beam is the visual. `trace.aither`, sent to the scope loop, emits
+The beam is the visual ([SCOPE.md](../SCOPE.md) is the guide to what
+it can draw). `trace.aither`, sent to the scope loop, emits
 a pair and reads the music by name:
 
 ```

@@ -341,6 +341,8 @@ high-quality reverb tails simultaneously, use a DAW.
 - [COMPOSING.md](COMPOSING.md) — composition idioms, common patterns,
   what to reach for and when
 - [GUIDE.md](GUIDE.md) — hands-on how-to for writing and performing
+- [SCOPE.md](SCOPE.md) — drawing with the beam: the scope loop and
+  what a trace can show (design, being built)
 - [ARCHITECTURE.md](ARCHITECTURE.md) — implementation overview
 - [BUGS_AND_ISSUES.md](BUGS_AND_ISSUES.md) — known issues + session logs
 - [stdlib.aither](stdlib.aither) — the starter kits, in aither
