@@ -110,6 +110,7 @@ proc renderVoice*(v: NativeVoice; seconds: float64; sr: int;
     inputR = 0.0
   for p in 0 ..< np:
     result.parts.add PartLevel(name: v.partNames[p], gain: v.partGains[p],
+      unheard: v.partNames[p] in v.unheard,
       rms: (if n > 0: sqrt(sumSq[p] / float64(n)) else: 0.0), peak: peak[p],
       low: (if sumSq[p] > 0.0: min(1.0, lowSq[p] / sumSq[p]) else: 0.0))
 

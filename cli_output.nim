@@ -97,7 +97,8 @@ proc formatParts*(q: PartsQuery): string =
     lines.add "  " & p.name.alignLeft(w) & "  [" & partStateWord(p.state) &
               "]  gain=" & formatFloat(p.gain, ffDecimal, 2) &
               "  rms=" & fmtDb(p.rms).strip() & "dB peak=" &
-              fmtDb(p.peak).strip() & "dB"
+              fmtDb(p.peak).strip() & "dB" &
+              (if p.unheard: "  NOT IN THE FINAL EXPRESSION" else: "")
   q.voiceName & "\n" & lines.join("\n")
 
 # A part this far below the loudest one is flagged QUIET. Taste, so it
@@ -129,6 +130,24 @@ proc formatCheck*(q: CheckQuery): string =
   if quiet.len > 0:
     lines.add "  quiet parts (>" & $int(-QuietPartDb) & " dB under the loudest): " &
               quiet.join(", ")
+  # Parts that play and aren't heard. Static first: names the final
+  # expression never reaches (a certainty). Then the rest: the loudest
+  # heard part is healthy but the voice's output sits far below it, so
+  # the final expression is scaling it down (a fade at 0, a stray `* 0`).
+  var unheard: seq[string]
+  var loudestHeard = 0.0
+  for p in q.parts:
+    if p.unheard: unheard.add p.name
+    elif p.gain > 0.0: loudestHeard = max(loudestHeard, p.rms)
+  if unheard.len > 0:
+    lines.add "  NOT IN THE FINAL EXPRESSION (computed, never heard): " &
+              unheard.join(", ")
+  let vrms = max(q.voice.stats.rmsL, q.voice.stats.rmsR)
+  if loudestHeard > 1e-3 and q.voice.state in {vsPlaying, vsFadingIn} and
+     dBOf(vrms) - dBOf(loudestHeard) < -30.0:
+    lines.add "  QUIET VOICE: the loudest part is at " & fmtDb(loudestHeard).strip() &
+              " dB but the voice puts out " & fmtDb(vrms).strip() &
+              " dB: the final expression is scaling it down"
   let mrms = max(q.master.rmsL, q.master.rmsR)
   let mpeak = max(q.master.peakL, q.master.peakR)
   lines.add "master  rms=" & fmtDb(mrms).strip() & "dB peak=" &
@@ -195,6 +214,7 @@ proc formatPartLevels*(parts: seq[PartLevel]): string =
   var lines = @["parts (rms / peak / share below " & $int(LowSplitHz) & " Hz):"]
   for p in ps:
     var notes: seq[string]
+    if p.unheard: notes.add "NOT IN THE FINAL EXPRESSION"
     if p.gain <= 0.0: notes.add "muted"
     elif p.rms < 1e-6: notes.add "SILENT"
     else:

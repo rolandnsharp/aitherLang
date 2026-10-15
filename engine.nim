@@ -711,7 +711,8 @@ proc snapshotPartsOf(v: NativeVoice): seq[PartInfo] =
       state: partStateOf(v.partGains[i], v.partFadeDeltas[i],
                          v.partParked[i] != 0.0),
       gain: v.partGains[i],
-      rms: sqrt(v.partRmsSq[i]), peak: v.partPeak[i])
+      rms: sqrt(v.partRmsSq[i]), peak: v.partPeak[i],
+      unheard: name in v.unheard)
 
 proc voiceInfoList*(): seq[VoiceInfo] =
   ## Snapshot of all voices + their parts. Used by `list`.

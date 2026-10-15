@@ -98,6 +98,7 @@ type
     letsDone: HashSet[string]   # top-level lets emitted so far
     letLines: Table[string, int] # top-level let name -> its line
     playNames*: seq[string]     # play blocks in definition order
+    unheard*: seq[string]       # play blocks the final expression never reaches
     playSet: HashSet[string]
     stereoLets: HashSet[string] # top-level let names whose RHS is stereo
     # name -> (C array symbol, length). Populated when a top-level let
@@ -2379,6 +2380,26 @@ proc emit*(c: Ctx; program: Node): string =
         else:
           let v = c.emitExpr(topSc, s)
           body.add &"  (void)({v});\n"
+  # Which parts the final expression reaches: the names it mentions,
+  # and the names those parts' bodies mention, and so on. A part it
+  # never reaches computes every sample and is never heard; `check`
+  # and `audit` say so by name, since forgetting to add a new part to
+  # the last line is the commonest silent mistake in a set.
+  c.unheard = @[]
+  if finalIdx >= 0 and c.playNames.len > 0:
+    var plays = initTable[string, Node]()
+    for s in program.kids:
+      if s.kind == nkPlay: plays[s.str] = s
+    var reached = initHashSet[string]()
+    proc mention(n: Node) =
+      if n == nil: return
+      if n.kind == nkIdent and n.str in plays and n.str notin reached:
+        reached.incl n.str
+        mention(plays[n.str].kids[0])
+      for k in n.kids: mention(k)
+    mention(program.kids[finalIdx])
+    for name in c.playNames:
+      if name notin reached: c.unheard.add name
   # No final expression: a file of play blocks plays all of them, rather
   # than compiling to silence.
   let heard = c.playNames
@@ -2479,9 +2500,9 @@ proc normalizeCalls(c: Ctx; n: Node) =
       args[i] = d
   n.kids = args
 
-proc generate*(program: Node; patchPath: string = "";
-               sr: float64 = 48000.0):
-    tuple[csrc: string; varNames, partNames: seq[string];
+proc generateFull*(program: Node; patchPath: string = "";
+                   sr: float64 = 48000.0):
+    tuple[csrc: string; varNames, partNames, unheard: seq[string];
           regions: seq[Region]] =
   let c = newCtx(program)
   c.patchPath = patchPath
@@ -2489,4 +2510,12 @@ proc generate*(program: Node; patchPath: string = "";
   c.normalizeCalls(program)
   var src = c.emit(program)
   finaliseLayout(c, src)
-  (src, c.topVarNames, c.playNames, c.regions)
+  (src, c.topVarNames, c.playNames, c.unheard, c.regions)
+
+proc generate*(program: Node; patchPath: string = "";
+               sr: float64 = 48000.0):
+    tuple[csrc: string; varNames, partNames: seq[string];
+          regions: seq[Region]] =
+  ## generateFull without the unheard list (what the tests destructure).
+  let r = generateFull(program, patchPath, sr)
+  (r.csrc, r.varNames, r.partNames, r.regions)

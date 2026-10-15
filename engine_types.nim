@@ -39,6 +39,7 @@ type
     state*: PartState
     gain*: float64
     rms*, peak*: float64         # linear, the louder channel's level
+    unheard*: bool               # the final expression never reaches it
 
   VoiceInfo* = object
     name*: string
@@ -87,6 +88,7 @@ type
     name*: string
     rms*, peak*, low*: float64
     gain*: float64               # its part gain (0 = muted)
+    unheard*: bool               # the final expression never reaches it
 
   MidiStatus* = object
     portInfo*: string            # "" if never connected

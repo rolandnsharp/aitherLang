@@ -365,6 +365,40 @@ set.aither 30 > take.raw` renders 30 seconds offline as raw float
 pairs; `sox -t raw -r 48000 -e float -b 32 -c 2 take.raw take.wav`
 makes the WAV.
 
+### Spectra and analysis through pipes
+
+`audit` is the built-in instrument panel (fundamental, centroid,
+peaks, per-part levels). Because the engine's output is a plain
+stream of float pairs, anything that reads raw audio is an analyser
+too, with no file in between:
+
+```
+# a spectrogram image of 10 seconds of the patch
+./aither set.aither 10 | sox -t raw -r 48000 -e float -b 32 -c 2 - -n spectrogram -o set.png
+
+# the strongest frequencies, one line
+./aither set.aither 2 | sox -t raw -r 48000 -e float -b 32 -c 2 - -n stat -freq 2>&1 | sort -k2 -nr | head
+
+# level, peak and DC offset
+./aither set.aither 2 | sox -t raw -r 48000 -e float -b 32 -c 2 - -n stats
+
+# an FFT in Python, for anything sox doesn't do
+./aither set.aither 1 | python3 -c '
+import sys, numpy as np
+x = np.frombuffer(sys.stdin.buffer.read(), dtype=np.float32).reshape(-1, 2).mean(axis=1)
+f = np.fft.rfftfreq(x.size, 1 / 48000); s = np.abs(np.fft.rfft(x))
+for i in s.argsort()[-5:][::-1]: print(f"{f[i]:8.1f} Hz  {20 * np.log10(s[i] / s.max()):6.1f} dB")'
+
+# a null test: do two versions of a patch produce the same sound?
+./aither old.aither 5 > a.raw; ./aither new.aither 5 > b.raw; cmp a.raw b.raw && echo identical
+```
+
+The live engine streams the same bytes, so `./aither | tee >(sox …
+-n stats) | tools/play` analyses what you're hearing while you hear
+it. On the uConsole the rate is 44100 (`AITHER_RATE`); put the same
+number after `-r`. Nothing here is aither: it's the pipe doing what
+pipes do.
+
 ```
 ./aither levels                  # stats for master + all voices
 ./aither levels master           # master bus only

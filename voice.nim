@@ -40,6 +40,7 @@ type
     # Play-block support (unused in phase 1; present so engine.nim's
     # per-sample gain loop is a zero-iter no-op without special cases).
     partNames*:       seq[string]
+    unheard*:         seq[string]   # parts the final expression never reaches
     partGains*:       seq[float64]
     partFadeDeltas*:  seq[float64]
     partFadeTargets*: seq[float64]
@@ -75,6 +76,7 @@ type
     varNames*:  seq[string]
     regions*:   seq[Region]
     partNames*: seq[string]
+    unheard*:   seq[string]
     csrc*:      string
     optimized*: bool
 
@@ -129,8 +131,9 @@ const SizeHelper = "\nint voice_state_size(void) { return sizeof(VoiceState); }\
 
 proc compileProgram(program: Node; patchPath: string; sr: float64):
     tuple[lib: TccState; tickFn: TickFn; size: int; csrc: string;
-          varNames, partNames: seq[string]; regions: seq[Region]] =
-  let (csrc, varNames, partNames, regions) = generate(program, patchPath, sr)
+          varNames, partNames, unheard: seq[string]; regions: seq[Region]] =
+  let (csrc, varNames, partNames, unheard, regions) =
+    generateFull(program, patchPath, sr)
   acquire(tccLock)
   defer: release(tccLock)
   let lib = tccNew()
@@ -160,7 +163,7 @@ proc compileProgram(program: Node; patchPath: string; sr: float64):
   if fn == nil or sizeFn == nil:
     lib.delete()
     raise newException(ValueError, "TCC symbol lookup failed")
-  (lib, fn, int(sizeFn()), withSize, varNames, partNames, regions)
+  (lib, fn, int(sizeFn()), withSize, varNames, partNames, unheard, regions)
 
 proc compileOptimized*(csrc: string; stateSize: int):
     tuple[lib: TccState; tickFn: TickFn] =
@@ -229,7 +232,7 @@ type
     tickFn*: TickFn
     state*: pointer
     stateSize*: int
-    varNames*, partNames*: seq[string]
+    varNames*, partNames*, unheard*: seq[string]
     regions*: seq[Region]
     csrc*: string                # the C that was compiled, for compileOptimized
 
@@ -237,7 +240,7 @@ proc prepare*(program: Node; sr: float64; patchPath: string = ""): Prepared =
   ## Compile + allocate the new state buffer. Slow (TCC compile is 5-20 ms
   ## on big patches, state zero-init is another ms for 4 MB). Caller must
   ## hand the result to `commit` to actually swap it in.
-  let (lib, fn, size, csrc, varNames, partNames, regions) =
+  let (lib, fn, size, csrc, varNames, partNames, unheard, regions) =
     compileProgram(program, patchPath, sr)
   let newState = alloc0(size)
   cast[ptr VoiceHeader](newState).sr = sr
@@ -250,7 +253,8 @@ proc prepare*(program: Node; sr: float64; patchPath: string = ""): Prepared =
     for k, v in r.init:
       pool[r.offset + k] = v
   Prepared(lib: lib, tickFn: fn, state: newState, stateSize: size, csrc: csrc,
-           varNames: varNames, partNames: partNames, regions: regions)
+           varNames: varNames, partNames: partNames, unheard: unheard,
+           regions: regions)
 
 # Defense 1: a region is "poisoned" if any of its slots is NaN, ±Inf,
 # or absurdly large (a near-blow-up that hasn't tipped to Inf yet).
@@ -360,6 +364,7 @@ proc rollback*(v: NativeVoice): bool =
   v.csrc = move v.prev.csrc
   v.optimized = v.prev.optimized
   v.setPartNames(move v.prev.partNames)
+  v.unheard = v.prev.unheard
   v.pointPartGains()
   v.prev = PrevVersion()
   inc v.gen
@@ -433,10 +438,12 @@ proc commit*(v: NativeVoice; p: Prepared) =
   # here, so it's a snapshot of the moment of the swap).
   let outgoing = PrevVersion(state: v.state, stateSize: v.stateSize,
     tickFn: v.tickFn, varNames: v.varNames, regions: v.regions,
-    partNames: v.partNames, csrc: v.csrc, optimized: v.optimized)
+    partNames: v.partNames, unheard: v.unheard, csrc: v.csrc,
+    optimized: v.optimized)
 
   # Diff old partNames vs new; preserve gain/fade state by name.
   v.setPartNames(p.partNames)
+  v.unheard = p.unheard
 
   # Swap. The audio callback is guaranteed to see a consistent pair
   # (tickFn + matching state) because we hold the mutex.
@@ -487,6 +494,7 @@ proc snapshotInto*(src: NativeVoice; dst: NativeVoice; buf: pointer) =
   dst.varNames = src.varNames
   dst.regions = src.regions
   dst.partNames = src.partNames
+  dst.unheard = src.unheard
   dst.partGains = src.partGains
   dst.partFadeTargets = src.partFadeTargets
   dst.partFadeDeltas = src.partFadeDeltas

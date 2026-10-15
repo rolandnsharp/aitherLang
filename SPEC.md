@@ -970,7 +970,7 @@ heard; `patches/didge_scope.aither` is written for that engine.
 
 | Command                          | Description                                         |
 |----------------------------------|-----------------------------------------------------|
-| `check <voice>`                  | level, quiet parts, rollbacks and guard trips       |
+| `check <voice>`                  | level, quiet parts, rollbacks and guard trips; parts the final expression never reaches (NOT IN THE FINAL EXPRESSION, a compile-time fact, also shown by `parts` and `audit`); QUIET VOICE when the loudest heard part is healthy but the voice's output is 30 dB or more below it |
 | `levels [voice]`                 | per-voice RMS / peak / clips / envelope sparkline   |
 | `levels master`                  | master-bus stats (the mix as written to the pipe)   |
 | `spectrum [voice]`               | FFT analysis of voice's recent buffer (or master)   |
