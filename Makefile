@@ -5,10 +5,22 @@ FLAGS := --mm:arc --threads:on --opt:speed -d:danger \
 
 all: aither
 
-aither: aither.nim engine.nim engine_types.nim cli_output.nim analysis.nim render.nim voice.nim codegen.nim tcc.nim parser.nim imports.nim dsp.nim midi.nim alsa_midi.c stdlib.aither miniaudio.nim miniaudio_wrapper.c miniaudio.h
+aither: aither.nim engine.nim engine_types.nim cli_output.nim analysis.nim render.nim voice.nim codegen.nim tcc.nim parser.nim imports.nim dsp.nim midi.nim alsa_midi.c stdlib.aither
 	$(NIM) c $(FLAGS) --out:aither aither.nim
 
-clean:
-	rm -rf aither nimcache/ test_parser test_eval test_stdlib
+tools/play: tools/play.c
+	cc -O2 tools/play.c -o tools/play -lasound
 
-.PHONY: all clean
+# One binary for every test that doesn't touch the engine's voice
+# table (tests/all.nim), then the four that do, each on its own.
+TESTFLAGS := --mm:arc --threads:on --hints:off --warnings:off \
+             --nimcache:nimcache/tests --passL:"-ltcc -ldl -lasound"
+test:
+	$(NIM) c -r $(TESTFLAGS) --out:tests/all tests/all.nim
+	for t in cli_output_format midi_resilience slot_sweep solo_mutes; do \
+	  $(NIM) c -r $(TESTFLAGS) --out:tests/$$t tests/$$t.nim || exit 1; done
+
+clean:
+	rm -rf aither nimcache/ test_parser test_eval test_stdlib tools/play
+
+.PHONY: all clean test

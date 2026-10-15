@@ -555,6 +555,7 @@ per-mode physics state without delegating to a helper def.
 | `sqrt(x)`       | square root     |
 | `clamp(x, l, h)`| clamp to range  |
 | `int(x)`        | truncate to int |
+| `tanh(x)`       | soft-clip to ±1 (the limiter, when you want one) |
 
 ### Oscillators: a clock and a shape
 
@@ -871,8 +872,15 @@ the way physics expects.
 
 ## CLI
 
-The engine runs in a background process (`./aither start`)
-and accepts commands over a UNIX socket.
+The bare command is the engine: `./aither [patch ...] [seconds]`
+runs the voices it is given (and any sent later) and writes the mix
+to standard output as raw interleaved float32 pairs, no header, at
+`AITHER_RATE` (48000). It refuses a terminal on stdout; pipe it into
+a player, a scope, an SDR or a file. With `seconds` it runs that
+long from `t = 0` and exits, offline, with no socket; without, it
+runs until `kill` and accepts the commands below over a UNIX socket
+(`AITHER_SOCK`, default `/tmp/aither.sock`). `input()` reads the
+same format from standard input when it is a pipe.
 
 ### Voice-level
 
@@ -899,25 +907,23 @@ and accepts commands over a UNIX socket.
 | `park <voice> <part> [fade]`              | fade out, then skip the part's body: no CPU, state frozen where it was |
 | `unpark <voice> <part> [fade]`            | run a parked part again from where it stopped, fading in (`unmute` does this too) |
 
-`scope` and `beam` parts draw the oscilloscope and are never heard;
-the meters leave them out of the level comparison. This is the
-live stream's interim mechanism: the output is becoming one pair
-read by whatever sink is attached, with the trace as the patch's
-final expression ([SCOPE.md](SCOPE.md),
-[notes/pair-output-2026-10-15.md](notes/pair-output-2026-10-15.md)).
-Don't build on the magic names.
+There are no special part names: a part called `scope` is a part
+like any other and is heard. The oscilloscope is a patch whose final
+expression is the trace, piped into a scope program
+([SCOPE.md](SCOPE.md)). The live stream's container still runs the
+`scope` branch, where `play scope:` / `play beam:` were drawn and not
+heard; `patches/didge_scope.aither` is written for that engine.
 
 ### Observability
 
 | Command                          | Description                                         |
 |----------------------------------|-----------------------------------------------------|
 | `check <voice>`                  | level, quiet parts, rollbacks and guard trips       |
-| `scope [voice]`                  | per-voice RMS / peak / clips / envelope sparkline   |
-| `scope master`                   | master-bus stats (pre-tanh mix)                     |
+| `levels [voice]`                 | per-voice RMS / peak / clips / envelope sparkline   |
+| `levels master`                  | master-bus stats (the mix as written to the pipe)   |
 | `spectrum [voice]`               | FFT analysis of voice's recent buffer (or master)   |
 | `try <patch> [seconds] [--from S]` | render the patch as a send would land it now: the live voice's state and time |
-| `audit <patch> [seconds] [--from S] [in.wav]` | render offline from t=0: spectrum + per-part levels |
-| `render <patch> <out.wav> [seconds] [--from S] [--scope] [in.wav]` | render offline to a 32-bit float WAV; `--scope` adds the beam X/Y/Z as channels 3-5 |
+| `audit <patch> [seconds] [--from S]` | render offline from t=0: spectrum + per-part levels; raw pairs on stdin feed `input()` |
 
 Clips counters clear on read. `spectrum` runs against the
 engine's last ~0.5 s of audio per voice; `audit` is fully
@@ -967,11 +973,14 @@ safe slot rather than segfaulting.
 
 ### Engine (`engine.nim`, ~735 lines)
 
-Audio callback via miniaudio. UNIX socket server. Voice table
+The mix, a period at a time, to standard output on its own thread;
+`input()` from standard input. UNIX socket server. Voice table
 with per-part gain fades. Per-voice and master-bus rolling stats
 (RMS, peak, clips, 50 ms envelope bins for sparklines, plus a
-0.5 s float32 ring per voice for `spectrum`'s FFT). Tanh
-soft-clip on the master. Voice slots sweep on `send` so stopped
+0.5 s float32 ring per voice for `spectrum`'s FFT). No limiter on
+the master: the mix goes out as it is, because a scope or a radio
+would read a `tanh` as distortion; a player clamps at ±1 for the
+speaker's sake. Voice slots sweep on `send` so stopped
 voices don't leak the table.
 
 ### MIDI (`midi.nim`, ~235 lines)

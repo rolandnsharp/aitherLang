@@ -91,8 +91,10 @@ function and plays the result. Use any. Mix any. Invent new ones.
 make
 ```
 
-One binary, ~970 KB. Linux-only for now (system audio via miniaudio,
-MIDI via ALSA seq).
+One binary, ~800 KB, and it never touches a sound card: the engine
+writes raw float pairs to standard output and whatever is on the end
+of the pipe (a player, a scope, an SDR, a file) gives them their
+meaning. Linux-only for now (MIDI via ALSA seq).
 
 Needs Nim, a C compiler, libtcc and the ALSA headers. On
 Alpine/postmarketOS:
@@ -107,7 +109,12 @@ TCC links into every patch it compiles.
 ## Use
 
 ```
-aither start                          launch engine
+aither | aplay -f FLOAT_LE -c 2 -r 48000      the engine: pairs on stdout, a player on the end
+aither | tools/play plughw:rockchipes8388c    (the uConsole; build it with make tools/play)
+aither set.aither 30 > take.raw               offline: 30 s from t=0, then exit (sox makes the WAV)
+AITHER_RATE=192000 aither fm.aither | sdr-tx  the rate is yours; the reader agrees
+arecord -f FLOAT_LE -c 2 -r 48000 | aither fx.aither | tools/play    input() reads stdin
+
 aither send piano.aither              load & play
 aither send piano.aither 2            ...with 2-second fade in
 aither stop piano 1                   fade out over 1 second
@@ -115,7 +122,7 @@ aither mute piano                     silence whole voice (state keeps running)
 aither solo piano                     fade other voices to muted
 aither list                           show active voices + per-play gains
 aither parts piano                    focused per-play view for one voice
-aither scope master                   master-bus RMS / peak / clips / envelope
+aither levels master                  master-bus RMS / peak / clips / envelope
 aither spectrum [voice]               FFT of voice's recent buffer (or master)
 aither audit piano.aither 2           offline render + spectral analysis
 aither retrigger piano                reset start_t so the piece plays from top
@@ -127,7 +134,7 @@ aither kill                           shut down
 
 ## MIDI input
 
-On `aither start` the engine auto-connects to the first ALSA seq
+When the engine starts it auto-connects to the first ALSA seq
 input port it finds. The polyphonic front door is `midi_keyboard`:
 
 ```

@@ -16,8 +16,8 @@ analysis.nim       ~250 lines   pure FFT + spectral feature extraction
 render.nim          ~65 lines   offline patch render to in-memory buffer
 aither.nim         ~105 lines   CLI dispatch (entry point — `nim c aither.nim`)
 stdlib.aither      ~225 lines   composition layer (pure aither defs)
-miniaudio.h/c                   audio backend (upstream, unchanged)
 alsa_midi.c                     ALSA seq client (small wrapper)
+tools/play.c                    a speaker on the end of the pipe (ALSA, not part of aither)
 ```
 
 About 4250 lines Nim total. One binary, ~970 KB. No runtime
@@ -39,10 +39,10 @@ dependencies beyond libtcc, ALSA, and the system audio library.
         │                       + state migration (preserves per-region state
         │                         across hot-reloads, skips NaN-poisoned regions)
         ▼
-  engine.nim (callback)         per-voice tick → per-part gain → master sum → tanh
+  engine.nim (pump)             per-voice tick → per-part gain → master sum → tanh
         │                       + per-voice rolling stats / FFT buffer
         ▼
-  miniaudio                     OS audio
+  stdout                        raw float32 pairs; a player / scope / SDR / file reads them
 ```
 
 The engine accepts CLI commands over a UNIX socket; `aither.nim`
@@ -167,7 +167,8 @@ brief mutex).
 
 ### Threading
 
-- Audio callback on miniaudio's thread.
+- The pump (tick every voice, write a period to stdout) on its own
+  thread; a blocking write is how a real-time reader paces the engine.
 - ALSA MIDI input on its own thread (auto-resubscribes if the
   port is dropped — see `midi.nim`).
 - Main thread accepts socket commands.
@@ -208,7 +209,8 @@ Per-voice + master both use the same `Stats` struct:
 
 `aither.nim` is the entry point (`nim c aither.nim`). It dispatches:
 
-- `start` — call `engine.startEngine` in-process.
+- no verb (or patch files and a duration) — call `engine.runEngine`
+  in-process: the engine itself.
 - `audit <patch> [seconds]` — call `render.renderPatch` then
   `analysis.analyze` then `cli_output.formatAudit` and print.
   Pure offline, no engine connection.

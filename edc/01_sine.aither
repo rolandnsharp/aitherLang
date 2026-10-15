@@ -15,12 +15,12 @@
 #
 # ▶ HOW TO PLAY THIS FILE (from ~/aitherLang)
 #
-#   ./aither start                    once per session
+#   ./aither | tools/play plughw:rockchipes8388c
+#                                     once per session, in its own
+#                                     terminal: the engine, piped
+#                                     into the uConsole's speaker
 #   ./aither send edc/01_sine.aither  play it (or: edc/learn play 1)
 #   ./aither stop 01_sine 1           fade it out over 1 second
-#
-#   On the uConsole, start with a bigger buffer so busier
-#   lessons don't crackle:  AITHER_BUFFER=2048 ./aither start
 #
 #   Headphones help: the uConsole's speaker can't play much
 #   below ~200 Hz, so low notes will sound thin or vanish.

@@ -3,9 +3,29 @@
 ## Getting started
 
 ```bash
-make                    # build the engine
-./aither start          # start audio, listen on socket
+make                                        # build the engine
+./aither | aplay -f FLOAT_LE -c 2 -r 48000  # run it into a player; it listens on a socket
 ```
+
+The engine never opens a sound card: it writes raw float pairs to
+standard output, and the program on the end of the pipe plays them
+(`aplay`, `tools/play plughw:<card>` on the uConsole), draws them,
+transmits them or saves them. Offline, `./aither set.aither 30 >
+take.raw` runs 30 seconds from `t = 0` and exits.
+
+**Nothing limits the mix.** What the voices add up to is what goes
+out, past ±1 if that's what you wrote: a scope or a radio needs the
+true numbers, and a soft-clip there would be distortion. A player
+clamps hard at ±1 to protect the speaker, which sounds bad, so if
+you want a safety net, write it, where you can hear what it does:
+
+```
+drone + sticks |> tanh          # the classic soft limiter, last thing in the file
+drone + sticks |> drive(1.2)    # or the stdlib's algebraic one, with some colour
+```
+
+Keep the sum under 1 by ear and by `./aither levels master`, and
+treat the `tanh` as insurance rather than gain.
 
 In another terminal:
 
@@ -141,8 +161,8 @@ play voice:
   tube24(flow, hiss, 5, 0.3, 7.5, 0.2, 3.6, 3.5, 3.4, 3.1, 2.9, 2.7, 2.6, 2.5)
 ```
 
-Every `send` re-reads the imports. `./aither watch set.aither`
-sends for you whenever the patch or a file it imports changes.
+Every `send` re-reads the imports. Sending on save is your
+editor's job (a `:w` hook), not the engine's.
 
 ## Play blocks
 
@@ -340,15 +360,14 @@ and the per-part table, or `WOULD BREAK` and which part did it.
 ## Observability
 
 `./aither status` is `list` plus the master level. `./aither
-render set.aither take.wav 30` renders 30 seconds offline to a
-32-bit float WAV (`--scope` adds the oscilloscope beam as
-channels 3-5; interim, see [SCOPE.md](SCOPE.md) for where the beam
-is going).
+set.aither 30 > take.raw` renders 30 seconds offline as raw float
+pairs; `sox -t raw -r 48000 -e float -b 32 -c 2 take.raw take.wav`
+makes the WAV.
 
 ```
-./aither scope                   # stats for master + all voices
-./aither scope master            # master bus only
-./aither scope bass              # one voice's stats
+./aither levels                  # stats for master + all voices
+./aither levels master           # master bus only
+./aither levels bass             # one voice's stats
 ```
 
 Shows RMS, peak, clip count, and a 20-bin envelope
@@ -855,13 +874,13 @@ osc(sin, 440) |> saw              # transfer function
 `saw` as a waveshaper maps the signal through the sawtooth
 curve. Any math function is a waveshaper.
 
-### Scopes & parts for debugging
+### Levels & parts for debugging
 
-Silent patch? `./aither scope master` shows the mix RMS.
+Silent patch? `./aither levels master` shows the mix RMS.
 If it's `-inf`, you're outputting silence — check your
-fade multipliers. Peak clipping? `./aither scope master`
+fade multipliers. Peak clipping? `./aither levels master`
 shows clips-per-second. Per-voice breakdown?
-`./aither scope bass` for one, plain `./aither scope` for
+`./aither levels bass` for one, plain `./aither levels` for
 all voices including master.
 
 ## Read more

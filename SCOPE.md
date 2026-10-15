@@ -1,9 +1,10 @@
 # Drawing with the beam
 
-**Status: design, being built.** This follows the decision in
-[notes/pair-output-2026-10-15.md](notes/pair-output-2026-10-15.md).
-Until the visualiser exists, the live stream draws with `play scope:`
-parts (branch `scope`), which this replaces.
+**Status: the engine side is done** (the output is one pair on
+stdout; see [notes/pair-output-2026-10-15.md](notes/pair-output-2026-10-15.md)).
+What's missing is a scope program to pipe into. The live stream still
+draws with `play scope:` parts on the `scope` branch's engine, which
+this replaces.
 
 A patch's final expression is a pair. Pipe the engine into a scope
 program instead of a player and the pair is read as **x, y**: a

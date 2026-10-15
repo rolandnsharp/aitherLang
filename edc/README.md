@@ -11,7 +11,7 @@ puzzle that checks itself.
 From `~/aitherLang`:
 
 ```
-./aither start            # once per session
+./aither | tools/play plughw:rockchipes8388c    # once per session, in its own terminal
 edc/learn                 # the lessons, and which puzzles you've solved
 edc/learn play 1          # hear lesson 1
 edc/learn check 1         # check your answer to puzzle 1
@@ -19,10 +19,10 @@ edc/learn puzzle 1        # hear your puzzle attempt
 edc/learn stop            # fade everything out
 ```
 
-On the uConsole, start the engine with a bigger buffer so
-busy lessons don't crackle: `AITHER_BUFFER=2048 ./aither start`.
-Headphones help: the built-in speaker can't play much
-below 200 Hz.
+The engine writes sound to its standard output; `tools/play` (built
+with `make tools/play`) is the uConsole's speaker on the end of the
+pipe. Elsewhere, `./aither | aplay -f FLOAT_LE -c 2 -r 48000`.
+Headphones help: the built-in speaker can't play much below 200 Hz.
 
 ## The lessons
 

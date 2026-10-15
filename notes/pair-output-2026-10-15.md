@@ -122,6 +122,11 @@ arithmetic is a compile error that says to index it.
 
 ## What this means for the `scope` merge
 
+**Done 2026-10-15** (merge `67af016`, then the engine-as-filter
+commit): everything below except moving the live stream, which
+stays on the `scope` branch's image until it has a scope program to
+pipe into (see `stream/README.md`).
+
 Take the engine and language work on `scope` (state arrays, `each`,
 `len`, `import`, fractional `delay`, independent `noise()`, `park`,
 migration keyed by def, meters and `status`, `%`, negative literals,

@@ -27,11 +27,6 @@ let LowSplitHz* = envFloat("AITHER_LOW_HZ", 200.0)
 proc isRunaway*(l, r: float64): bool {.inline.} =
   abs(l) > RunawayLimit or abs(r) > RunawayLimit
 
-# `play scope:` and `play beam:` draw the oscilloscope and are never
-# heard, so the meters keep them out of the level comparison.
-proc isScopePart*(name: string): bool {.inline.} =
-  name == "scope" or name == "beam"
-
 type
   VoiceState* = enum
     vsStopped, vsMuted, vsFadingOut, vsFadingIn, vsPlaying, vsRunaway

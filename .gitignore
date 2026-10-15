@@ -1,5 +1,6 @@
 aither
 aither_dbg
+tools/play
 nimcache/
 *.so
 .DS_Store

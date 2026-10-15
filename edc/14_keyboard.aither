@@ -8,8 +8,8 @@
 #
 # ▶ CONNECT A MIDI KEYBOARD
 #
-#   Plug it in before ./aither start and it connects by
-#   itself. Otherwise:
+#   Plug it in before starting the engine and it connects
+#   by itself. Otherwise:
 #     ./aither midi list           find your keyboard's port
 #     ./aither midi connect 28:0   (use your port number)
 #
