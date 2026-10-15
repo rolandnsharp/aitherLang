@@ -47,6 +47,17 @@ doAssert s.addSymbol("shape_sqr",  cast[pointer](shapeSqr)) == 0
 # tick() (the one-sample entry) reads input() from the dsp globals.
 doAssert s.addSymbol("n_input_l",  cast[pointer](nInputL)) == 0
 doAssert s.addSymbol("n_input_r",  cast[pointer](nInputR)) == 0
+# Hoisted coefficient forms (hoist_init).
+doAssert s.addSymbol("n_lp1_coef", cast[pointer](nLp1Coef)) == 0
+doAssert s.addSymbol("n_lp1_c",    cast[pointer](nLp1C)) == 0
+doAssert s.addSymbol("n_hp1_c",    cast[pointer](nHp1C)) == 0
+doAssert s.addSymbol("n_svf_coef", cast[pointer](nSvfCoef)) == 0
+doAssert s.addSymbol("n_lpf_c",    cast[pointer](nLpfC)) == 0
+doAssert s.addSymbol("n_hpf_c",    cast[pointer](nHpfC)) == 0
+doAssert s.addSymbol("n_bpf_c",    cast[pointer](nBpfC)) == 0
+doAssert s.addSymbol("n_notch_c",  cast[pointer](nNotchC)) == 0
+doAssert s.addSymbol("n_reverb_coef", cast[pointer](nReverbCoef)) == 0
+doAssert s.addSymbol("n_reverb_c", cast[pointer](nReverbC)) == 0
 
 doAssert s.compileString(csrc) == 0, "compile failed"
 doAssert s.relocate() == 0

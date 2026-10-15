@@ -18,7 +18,7 @@
 ## Always emits a stereo tick. If the final expression is scalar, both
 ## outputs are set equal; if it's [L,R], they're set independently.
 
-import std/[strutils, tables, sets, strformat, sequtils]
+import std/[strutils, tables, sets, strformat, sequtils, os]
 import parser
 
 const PoolSize* = 524288
@@ -99,6 +99,12 @@ type
     letLines: Table[string, int] # top-level let name -> its line
     playNames*: seq[string]     # play blocks in definition order
     unheard*: seq[string]       # play blocks the final expression never reaches
+    # Hoisting: coefficients that can't change from sample to sample are
+    # computed once in hoist_init (see isInvariant). Each entry is a
+    # static's declaration and its init line; hoistSeen dedupes by text.
+    hoistOn: bool
+    hoists: seq[tuple[decl, init: string]]
+    hoistSeen: Table[string, string]
     playSet: HashSet[string]
     stereoLets: HashSet[string] # top-level let names whose RHS is stereo
     # name -> (C array symbol, length). Populated when a top-level let
@@ -175,12 +181,14 @@ extern double n_input_l(void);
 extern double n_input_r(void);
 
 void tick(VoiceState* s, double* outL, double* outR) {
+  hoist_init(s);
   s->in_l = n_input_l(); s->in_r = n_input_r();
   tick1(s, outL, outR);
 }
 
 void tick_block(VoiceState* s, long n, double* outL, double* outR) {
   const long np = s->n_parts;
+  hoist_init(s);
   s->bad = 0; s->peak_raw = 0.0;
   for (long i = 0; i < n; i++) {
     s->time_frac += s->dt;
@@ -238,6 +246,8 @@ proc newCtx*(program: Node): Ctx =
   for n in program.kids:
     if n.kind == nkDef:
       result.userDefs[n.str] = n
+  result.hoistOn = getEnv("AITHER_HOIST", "1") != "0"
+  result.hoistSeen = initTable[string, string]()
 
 # Fixed-width placeholder token so simple `replace` back-patching stays
 # unambiguous regardless of id length (avoids "__OFF_1__" matching a
@@ -290,9 +300,18 @@ proc push(parent: Scope): Scope =
         numLits: initTable[string, float64]())
 
 proc lookupNumLit(sc: Scope; name: string): tuple[val: float64; ok: bool] =
+  ## The compile-time number `name` is bound to, if the nearest binding
+  ## of that name is one. A nearer scope that binds the name to anything
+  ## else (a runtime let, a pair, an array, a function) shadows an outer
+  ## literal: `let hz = 800` outside, `let hz = 800 + lfo` inside is not
+  ## a constant, however the outer one is.
   var s = sc
   while s != nil:
     if name in s.numLits: return (s.numLits[name], true)
+    if name in s.names or name in s.stereoNames or name in s.fns or
+       name in s.lambdas or name in s.arrays or name in s.sarrays or
+       name in s.larrays:
+      return (0.0, false)
     s = s.parent
   (0.0, false)
 
@@ -651,6 +670,67 @@ proc callArgs(c: Ctx; sc: Scope; kids: openArray[Node]): string =
 # (`x |> bpf(..) |> hpf(..)`) that moves s->idx, so s->idx is pointed
 # at this site's region only after they have all run. `call` is the
 # native call with `$1`, `$2`, ... standing for the evaluated args.
+# ---- hoisting ----------------------------------------------------------
+# An expression that can't change from one sample to the next: a
+# number, PI/TAU/sr, a name bound to a compile-time number, arithmetic
+# and pure math over those. A native whose coefficient arguments are
+# invariant gets its coefficients computed once, in hoist_init, and
+# calls the `_c` step per sample (lp1's exp, the SVF's tan, reverb's
+# pows, phasor's division). Same arithmetic once instead of every
+# sample, so the same bits. AITHER_HOIST=0 turns it off.
+const PureMath = ["sin", "cos", "tan", "tanh", "exp", "log", "log2",
+                  "floor", "ceil", "sqrt", "pow", "min", "max", "clamp",
+                  "abs", "int"]
+
+proc isInvariant(c: Ctx; sc: Scope; n: Node): bool =
+  if n == nil: return false
+  case n.kind
+  of nkNum: true
+  of nkIdent:
+    n.str in ["PI", "TAU", "sr"] or (sc != nil and sc.lookupNumLit(n.str).ok)
+  of nkBinOp, nkUnary:
+    n.kids.allIt(c.isInvariant(sc, it))
+  of nkIf:
+    n.kids.len == 3 and n.kids.allIt(c.isInvariant(sc, it))
+  of nkCall:
+    n.str in PureMath and n.kids.len > 0 and n.kids.allIt(c.isInvariant(sc, it))
+  else: false
+
+# Emit an invariant expression for hoist_init, where no per-sample local
+# exists: every name bound to a compile-time number is spelled as that
+# number. Reuses emitExpr so operators mean the same.
+proc emitInvariant(c: Ctx; sc: Scope; n: Node): string =
+  let hsc = push(nil)
+  proc bindNums(sc, hsc: Scope; n: Node) =
+    if n == nil: return
+    if n.kind == nkIdent and n.str notin ["PI", "TAU", "sr"] and sc != nil:
+      let v = sc.lookupNumLit(n.str)
+      if v.ok:
+        hsc.names[n.str] = numLit(v.val)
+        hsc.numLits[n.str] = v.val
+    for k in n.kids: bindNums(sc, hsc, k)
+  bindNums(sc, hsc, n)
+  c.emitExpr(hsc, n)
+
+proc hoist(c: Ctx; cexpr: string): string =
+  ## A static double computed once from `cexpr`; its name.
+  if cexpr in c.hoistSeen: return c.hoistSeen[cexpr]
+  let name = "h_" & $c.hoists.len
+  c.hoists.add (decl: "static double " & name & ";\n",
+                init: "  " & name & " = (" & cexpr & ");\n")
+  c.hoistSeen[cexpr] = name
+  name
+
+proc hoistArr(c: Ctx; n: int; initCall: string): string =
+  ## A static array of n doubles filled once by `initCall`, in which $H
+  ## stands for the array; its name.
+  if initCall in c.hoistSeen: return c.hoistSeen[initCall]
+  let name = "h_" & $c.hoists.len
+  c.hoists.add (decl: "static double " & name & "[" & $n & "];\n",
+                init: "  " & initCall.replace("$H", name) & ";\n")
+  c.hoistSeen[initCall] = name
+  name
+
 proc nativeAt(c: Ctx; off: string; args: openArray[string]; call: string): string =
   var pre = ""
   var names: seq[string] = @[]
@@ -1057,12 +1137,18 @@ proc emitBlockExpr(c: Ctx; sc: Scope; blk: Node): string =
 
 # phasor(freq) inlined: one pool slot, advance, return wrapped value.
 proc emitPhasor(c: Ctx; sc: Scope; freqNode: Node): string =
-  let freq = c.emitExpr(sc, freqNode)
+  # The per-sample increment freq/sr is computed once when the frequency
+  # can't change (hoisted); the division's result is the same number.
+  let step =
+    if c.hoistOn and c.isInvariant(sc, freqNode):
+      c.hoist("(" & c.emitInvariant(sc, freqNode) & ") / s->sr")
+    else:
+      "(" & c.emitExpr(sc, freqNode) & ") / s->sr"
   let slot = c.fresh("ph")
   let off = c.registerRegion("phasor", 1)
   "(({ long " & slot & " = " & off & "; " &
-    "s->pool[" & slot & "] = fmod(s->pool[" & slot & "] + (" & freq &
-    ") / s->sr, 1.0); " &
+    "s->pool[" & slot & "] = fmod(s->pool[" & slot & "] + " & step &
+    ", 1.0); " &
     "if (s->pool[" & slot & "] < 0.0) s->pool[" & slot & "] += 1.0; " &
     "s->pool[" & slot & "]; }))"
 
@@ -1514,6 +1600,28 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
       let off = c.registerRegion("wave", size)
       return c.nativeAt(off, [freq],
                         &"n_wave((DspState*)s, $1, (double*){sym}, {length})")
+    # Hoisted natives: coefficients that can't change are computed once
+    # (hoist_init) and the per-sample `_c` step takes them ready-made.
+    if c.hoistOn and name in ["lp1", "hp1"] and n.kids.len == 2 and
+       c.isInvariant(sc, n.kids[1]):
+      let a = c.hoist("n_lp1_coef(" & c.emitInvariant(sc, n.kids[1]) & ", s->sr)")
+      let off = c.registerRegion(name, c.nativeSlotSize(name, n.kids))
+      return c.nativeAt(off, [c.emitExpr(sc, n.kids[0])],
+                        "n_" & name & "_c((DspState*)s, $1, " & a & ")")
+    if c.hoistOn and name in ["lpf", "hpf", "bpf", "notch"] and n.kids.len == 3 and
+       c.isInvariant(sc, n.kids[1]) and c.isInvariant(sc, n.kids[2]):
+      let h = c.hoistArr(4, "n_svf_coef(" & c.emitInvariant(sc, n.kids[1]) & ", " &
+                            c.emitInvariant(sc, n.kids[2]) & ", s->sr, $H)")
+      let off = c.registerRegion(name, c.nativeSlotSize(name, n.kids))
+      return c.nativeAt(off, [c.emitExpr(sc, n.kids[0])],
+                        "n_" & name & "_c((DspState*)s, $1, " & h & ")")
+    if c.hoistOn and name == "reverb" and n.kids.len == 3 and
+       c.isInvariant(sc, n.kids[1]):
+      let h = c.hoistArr(4, "n_reverb_coef(" & c.emitInvariant(sc, n.kids[1]) &
+                            ", s->sr, $H)")
+      let off = c.registerRegion(name, c.nativeSlotSize(name, n.kids))
+      return c.nativeAt(off, [c.emitExpr(sc, n.kids[0]), c.emitExpr(sc, n.kids[2])],
+                        "n_reverb_c((DspState*)s, $1, $2, " & h & ")")
     # Native dsp calls. Each call site has a baked region offset, and
     # nativeAt points s->idx at it after evaluating the args, so the
     # native's internal claim() writes into its dedicated region
@@ -2148,6 +2256,17 @@ proc emit*(c: Ctx; program: Node): string =
   pre.add "extern double n_notch(DspState*,double,double,double);\n"
   pre.add "extern double n_lp1(DspState*,double,double);\n"
   pre.add "extern double n_hp1(DspState*,double,double);\n"
+  # Hoisted forms (coefficient once, step per sample).
+  pre.add "extern double n_lp1_coef(double,double);\n"
+  pre.add "extern double n_lp1_c(DspState*,double,double);\n"
+  pre.add "extern double n_hp1_c(DspState*,double,double);\n"
+  pre.add "extern void n_svf_coef(double,double,double,double*);\n"
+  pre.add "extern double n_lpf_c(DspState*,double,const double*);\n"
+  pre.add "extern double n_hpf_c(DspState*,double,const double*);\n"
+  pre.add "extern double n_bpf_c(DspState*,double,const double*);\n"
+  pre.add "extern double n_notch_c(DspState*,double,const double*);\n"
+  pre.add "extern void n_reverb_coef(double,double,double*);\n"
+  pre.add "extern double n_reverb_c(DspState*,double,double,const double*);\n"
   pre.add "extern double n_delay(DspState*,double,double,double);\n"
   pre.add "extern double n_fbdelay(DspState*,double,double,double,double);\n"
   pre.add "extern double n_reverb(DspState*,double,double,double);\n"
@@ -2498,7 +2617,15 @@ proc emit*(c: Ctx; program: Node): string =
   body.add "}\n\n"
   body.add BlockTemplate
 
-  pre & c.arrayDecls & body
+  # The hoisted coefficients: statics, and the init both entry points
+  # call (once per block in tick_block, per call in tick).
+  var hoistC = ""
+  for h in c.hoists: hoistC.add h.decl
+  hoistC.add "static void hoist_init(VoiceState* s) {\n"
+  for h in c.hoists: hoistC.add h.init
+  hoistC.add "  (void)s;\n}\n\n"
+
+  pre & c.arrayDecls & hoistC & body
 
 # Assign per-type base offsets (in first-seen order), rewrite each
 # region's intra-offset into an absolute pool slot, and back-patch the

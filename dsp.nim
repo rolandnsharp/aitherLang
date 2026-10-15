@@ -62,35 +62,60 @@ proc nWave*(s: var DspState; freq: float64;
 proc onePoleCoef(cutoff, sr: float64): float64 {.inline.} =
   1.0 - exp(-TAU * max(cutoff, 0.0) / sr)
 
-proc nLp1*(s: var DspState; signal, cutoff: float64): float64 {.cdecl, exportc: "n_lp1".} =
+# Each stateful native with a coefficient comes in two halves: `coef`
+# (pure, from the parameters and the rate) and the `_c` step that takes
+# the coefficient ready-made. When a patch's parameters can't change
+# from sample to sample, codegen computes the coefficient once
+# (hoist_init) and calls the `_c` step; otherwise the plain native
+# does both every sample. The plain native is literally one calling
+# the other, so the two paths produce the same bits.
+
+proc nLp1Coef*(cutoff, sr: float64): float64 {.cdecl, exportc: "n_lp1_coef".} =
+  onePoleCoef(cutoff, sr)
+
+proc nLp1C*(s: var DspState; signal, a: float64): float64 {.cdecl, exportc: "n_lp1_c".} =
   let i = s.claim()
-  let a = onePoleCoef(cutoff, s.sr)
   s.pool[i] += a * (signal - s.pool[i])
   s.pool[i]
 
-proc nHp1*(s: var DspState; signal, cutoff: float64): float64 {.cdecl, exportc: "n_hp1".} =
+proc nHp1C*(s: var DspState; signal, a: float64): float64 {.cdecl, exportc: "n_hp1_c".} =
   let i = s.claim()
-  let a = onePoleCoef(cutoff, s.sr)
   s.pool[i] += a * (signal - s.pool[i])
   signal - s.pool[i]
+
+proc nLp1*(s: var DspState; signal, cutoff: float64): float64 {.cdecl, exportc: "n_lp1".} =
+  nLp1C(s, signal, onePoleCoef(cutoff, s.sr))
+
+proc nHp1*(s: var DspState; signal, cutoff: float64): float64 {.cdecl, exportc: "n_hp1".} =
+  nHp1C(s, signal, onePoleCoef(cutoff, s.sr))
 
 # ------------------------------------------------ SVF (Cytomic trapezoidal)
 
 type FilterMode* = enum fmLow, fmHigh, fmBand, fmNotch
 
-proc svf(s: var DspState; signal, cutoffArg, res: float64;
-         mode: FilterMode): float64 {.inline.} =
-  # Clamp cutoff to (1 Hz, just under Nyquist). A negative or zero cutoff
-  # would push tan() into the wrong quadrant and produce NaN/Inf that the
-  # filter would then accumulate into its pool slots forever; clamping
-  # here turns "WOOP and silence" into a quiet/audible degradation.
-  let cutoff = clamp(cutoffArg, 1.0, s.sr * 0.499)
-  let i = s.claim(2)
-  let g = tan(PI * cutoff / s.sr)
+# The SVF's coefficients: k, a1, a2, a3 from the cutoff, resonance and
+# rate. Clamp cutoff to (1 Hz, just under Nyquist). A negative or zero
+# cutoff would push tan() into the wrong quadrant and produce NaN/Inf
+# that the filter would then accumulate into its pool slots forever;
+# clamping here turns "WOOP and silence" into a quiet/audible
+# degradation.
+proc svfCoef(cutoffArg, res, sr: float64): array[4, float64] {.inline.} =
+  let cutoff = clamp(cutoffArg, 1.0, sr * 0.499)
+  let g = tan(PI * cutoff / sr)
   let k = 2.0 * (1.0 - res)
   let a1 = 1.0 / (1.0 + g * (g + k))
   let a2 = g * a1
   let a3 = g * a2
+  [k, a1, a2, a3]
+
+proc nSvfCoef*(cutoff, res, sr: float64;
+               o: ptr UncheckedArray[float64]) {.cdecl, exportc: "n_svf_coef".} =
+  let k = svfCoef(cutoff, res, sr)
+  for j in 0 .. 3: o[j] = k[j]
+
+proc svfC(s: var DspState; signal, k, a1, a2, a3: float64;
+          mode: FilterMode): float64 {.inline.} =
+  let i = s.claim(2)
   let v3 = signal - s.pool[i + 1]
   let v1 = a1 * s.pool[i] + a2 * v3
   let v2 = s.pool[i + 1] + a2 * s.pool[i] + a3 * v3
@@ -102,6 +127,11 @@ proc svf(s: var DspState; signal, cutoffArg, res: float64;
   of fmBand:  v1
   of fmNotch: signal - k * v1
 
+proc svf(s: var DspState; signal, cutoffArg, res: float64;
+         mode: FilterMode): float64 {.inline.} =
+  let k = svfCoef(cutoffArg, res, s.sr)
+  svfC(s, signal, k[0], k[1], k[2], k[3], mode)
+
 proc nLpf*(s: var DspState; signal, cutoff, res: float64): float64 {.cdecl, exportc: "n_lpf".} =
   svf(s, signal, cutoff, res, fmLow)
 proc nHpf*(s: var DspState; signal, cutoff, res: float64): float64 {.cdecl, exportc: "n_hpf".} =
@@ -110,6 +140,20 @@ proc nBpf*(s: var DspState; signal, cutoff, res: float64): float64 {.cdecl, expo
   svf(s, signal, cutoff, res, fmBand)
 proc nNotch*(s: var DspState; signal, cutoff, res: float64): float64 {.cdecl, exportc: "n_notch".} =
   svf(s, signal, cutoff, res, fmNotch)
+
+# The hoisted steps: coefficients from n_svf_coef, computed once.
+proc nLpfC*(s: var DspState; signal: float64;
+            c: ptr UncheckedArray[float64]): float64 {.cdecl, exportc: "n_lpf_c".} =
+  svfC(s, signal, c[0], c[1], c[2], c[3], fmLow)
+proc nHpfC*(s: var DspState; signal: float64;
+            c: ptr UncheckedArray[float64]): float64 {.cdecl, exportc: "n_hpf_c".} =
+  svfC(s, signal, c[0], c[1], c[2], c[3], fmHigh)
+proc nBpfC*(s: var DspState; signal: float64;
+            c: ptr UncheckedArray[float64]): float64 {.cdecl, exportc: "n_bpf_c".} =
+  svfC(s, signal, c[0], c[1], c[2], c[3], fmBand)
+proc nNotchC*(s: var DspState; signal: float64;
+              c: ptr UncheckedArray[float64]): float64 {.cdecl, exportc: "n_notch_c".} =
+  svfC(s, signal, c[0], c[1], c[2], c[3], fmNotch)
 
 # ------------------------------------------------------------------- delays
 # Buffer lives inline in the pool. Layout: [cursor, sample0, sample1, ...].
@@ -159,9 +203,22 @@ proc nFbdelay*(s: var DspState; signal, time, maxTime, fb: float64): float64 {.c
 # ------------------------------------------------------------------ reverb
 # Schroeder: 4 parallel comb filters into 2 series allpass.
 
-proc nReverb*(s: var DspState; signal, rt60, wet: float64): float64 {.cdecl, exportc: "n_reverb".} =
+const ReverbCombLens = [1557, 1617, 1491, 1422]
+
+# Each comb's feedback gain from the decay time: one pow per comb.
+proc reverbCoef(rt60, sr: float64): array[4, float64] {.inline.} =
+  for ci in 0 .. 3:
+    result[ci] = pow(10.0, -3.0 * float64(ReverbCombLens[ci]) / (rt60 * sr))
+
+proc nReverbCoef*(rt60, sr: float64;
+                  o: ptr UncheckedArray[float64]) {.cdecl, exportc: "n_reverb_coef".} =
+  let g = reverbCoef(rt60, sr)
+  for j in 0 .. 3: o[j] = g[j]
+
+proc reverbC(s: var DspState; signal, wet: float64;
+             gains: array[4, float64]): float64 {.inline.} =
   const
-    combLens = [1557, 1617, 1491, 1422]
+    combLens = ReverbCombLens
     apLens   = [225, 556]
     apFb     = 0.5
     damp     = 0.3
@@ -181,7 +238,7 @@ proc nReverb*(s: var DspState; signal, rt60, wet: float64): float64 {.cdecl, exp
     let output = s.pool[bufStart + cur]
     let filt = output * (1.0 - damp) + s.pool[dampSlot] * damp
     s.pool[dampSlot] = filt
-    let g = pow(10.0, -3.0 * float64(blen) / (rt60 * s.sr))
+    let g = gains[ci]
     s.pool[bufStart + cur] = signal + filt * g
     s.pool[curSlot] = float64((cur + 1) mod blen)
     combSum += output
@@ -197,6 +254,13 @@ proc nReverb*(s: var DspState; signal, rt60, wet: float64): float64 {.cdecl, exp
     ap = bufOut - ap
     s.pool[curSlot] = float64((cur + 1) mod blen)
   signal * (1.0 - wet) + ap * wet
+
+proc nReverb*(s: var DspState; signal, rt60, wet: float64): float64 {.cdecl, exportc: "n_reverb".} =
+  reverbC(s, signal, wet, reverbCoef(rt60, s.sr))
+
+proc nReverbC*(s: var DspState; signal, wet: float64;
+               g: ptr UncheckedArray[float64]): float64 {.cdecl, exportc: "n_reverb_c".} =
+  reverbC(s, signal, wet, [g[0], g[1], g[2], g[3]])
 
 # ---------------------------------------------------------------- physics
 

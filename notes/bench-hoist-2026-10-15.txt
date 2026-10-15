@@ -1,0 +1,12 @@
+core    bin   patch     tcc ns   cc-O2 ns   (per sample; cc-O2 = t(120s)-t(60s))
+A53     old   b_sine       692      584
+A53     old   b_fm        1526     1119
+A53     new   b_sine       824      447
+A53     new   b_fm        1354      650
+A72     old   b_sine       177      148
+A72     old   b_fm         380      293
+A72     new   b_sine       210      122
+A72     new   b_fm         322      201
+A53     old   b_doof@48k  158924    66865
+A53     new   b_doof@48k  142154    53339
+(b_doof at 480 kHz does not fit the pool; measured at 48 kHz on core 2)

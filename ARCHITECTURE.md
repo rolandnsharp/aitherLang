@@ -172,6 +172,13 @@ brief mutex).
   is how a real-time reader paces the engine. The per-sample work
   (clock, input, parts, fade and gain ramps, part meters) is generated
   C; the engine does guards, stats, ring and mix per block.
+- Hoisting (codegen `isInvariant` / `hoist`): a native whose
+  coefficient arguments are compile-time invariant is emitted as its
+  `_c` step with the coefficient in a static computed by `hoist_init`,
+  called once per block (and per call in the one-sample `tick`). The
+  natives in `dsp.nim` are split into `coef` and `_c` halves, with the
+  plain native being one calling the other, so both paths are the
+  same bits. `AITHER_HOIST=0` disables it.
 - ALSA MIDI input on its own thread (auto-resubscribes if the
   port is dropped — see `midi.nim`).
 - Main thread accepts socket commands.

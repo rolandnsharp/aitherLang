@@ -1031,7 +1031,14 @@ inside its compiled code (`tick_block`: the clock, `input()`, the
 parts, the voice fade and part-gain ramps, park and the part meters
 all advance per sample in C); the engine's own work is per block,
 and the output is bit-identical to ticking one sample at a time
-(`tests/block_tick.nim`). UNIX socket server. Voice table
+(`tests/block_tick.nim`). Coefficients that can't change from sample
+to sample (a filter's cutoff that is a number, a let bound to one, a
+def parameter given one, or arithmetic and pure math over those) are
+computed once per block instead of every sample: `lp1`/`hp1`'s `exp`,
+the SVF's `tan`, `reverb`'s `pow`s, `phasor`'s division. Same
+arithmetic once, so the same bits (`tests/hoist.nim`); a modulated
+parameter keeps the per-sample path. `AITHER_HOIST=0` turns it off.
+UNIX socket server. Voice table
 with per-part gain fades. Per-voice and master-bus rolling stats
 (RMS, peak, clips, 50 ms envelope bins for sparklines, plus a
 0.5 s float32 ring per voice for `spectrum`'s FFT). No limiter on
