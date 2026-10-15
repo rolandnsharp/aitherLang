@@ -1,0 +1,13 @@
+core    bin  patch    tcc ns   cc-O2 ns   (ns per sample; cc-O2 from t(120s)-t(60s), compile excluded)
+A53     old  b_const     402      205
+A53     old  b_sine      483      432
+A53     old  b_fm       1069      827
+A53     new  b_const     411      169
+A53     new  b_sine      598      339
+A53     new  b_fm       1195      775
+A72     old  b_const     102       79
+A72     old  b_sine      174      148
+A72     old  b_fm        376      276
+A72     new  b_const     141       60
+A72     new  b_sine      208      125
+A72     new  b_fm        412      272

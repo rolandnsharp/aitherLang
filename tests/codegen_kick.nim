@@ -44,6 +44,9 @@ doAssert s.addSymbol("n_wave",     cast[pointer](nWave)) == 0
 doAssert s.addSymbol("shape_saw",  cast[pointer](shapeSaw)) == 0
 doAssert s.addSymbol("shape_tri",  cast[pointer](shapeTri)) == 0
 doAssert s.addSymbol("shape_sqr",  cast[pointer](shapeSqr)) == 0
+# tick() (the one-sample entry) reads input() from the dsp globals.
+doAssert s.addSymbol("n_input_l",  cast[pointer](nInputL)) == 0
+doAssert s.addSymbol("n_input_r",  cast[pointer](nInputR)) == 0
 
 doAssert s.compileString(csrc) == 0, "compile failed"
 doAssert s.relocate() == 0

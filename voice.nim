@@ -3,10 +3,11 @@
 ## its compiled tick() can run) and a malloc'd VoiceState buffer.
 
 import std/[strutils, tables, sets, os, osproc, locks]
-import parser, tcc, dsp, codegen, midi
+import parser, tcc, dsp, codegen, midi, engine_types
 
 type
   TickFn* = proc (s: pointer; outL, outR: ptr float64) {.cdecl.}
+  TickBlockFn* = proc (s: pointer; n: clong; outL, outR: ptr float64) {.cdecl.}
   SizeFn = proc (): cint {.cdecl.}
 
   # Mirrors the codegen's VoiceState prefix (through `start_t`). Writing
@@ -28,11 +29,25 @@ type
     # Points at NativeVoice.partParked: 1.0 where a part is parked, and
     # tick() skips that part's body (its state stays as it was).
     partParkPtr*:   pointer
+    # Block mode (tick_block, see codegen's BlockTemplate): the per-part
+    # ramps and meters C keeps, the block input, and the engine's clock
+    # and fade, read and written per block. Same order as the C struct.
+    partFadeDeltaPtr*, partFadeTargetPtr*, partParkPendingPtr*: pointer
+    partPeakPtr*, partSqPtr*: pointer
+    inBuf*:         pointer
+    inL*, inR*:     float64
+    fadeGain*, fadeDelta*: float64
+    timeSec*, timeFrac*:   float64
+    peakDecay*, rmsAlpha*: float64
+    peakRaw*:       float64
+    bad*:           int
+    nParts*:        int
 
   NativeVoice* = ref object
     state*:     pointer          # malloc'd VoiceState buffer
     stateSize*: int
     tickFn*:    TickFn
+    tickBlockFn*: TickBlockFn    # the same code's tick_block entry
     tccLib*:    TccState
     oldLibs*:   seq[TccState]    # kept alive across hot reloads (small leak)
     varNames*:  seq[string]
@@ -73,6 +88,7 @@ type
     state*:     pointer
     stateSize*: int
     tickFn*:    TickFn
+    tickBlockFn*: TickBlockFn
     varNames*:  seq[string]
     regions*:   seq[Region]
     partNames*: seq[string]
@@ -338,9 +354,19 @@ proc setPartNames(v: NativeVoice; names: seq[string]) =
 
 proc pointPartGains(v: NativeVoice) =
   let hdr = cast[ptr VoiceHeader](v.state)
-  hdr.partGainsPtr = if v.partGains.len > 0: v.partGains[0].addr else: nil
-  hdr.partOutPtr = if v.partOut.len > 0: v.partOut[0].addr else: nil
-  hdr.partParkPtr = if v.partParked.len > 0: v.partParked[0].addr else: nil
+  template at(s: seq[float64]): pointer = (if s.len > 0: s[0].addr else: nil)
+  hdr.partGainsPtr = at(v.partGains)
+  hdr.partOutPtr = at(v.partOut)
+  hdr.partParkPtr = at(v.partParked)
+  hdr.partFadeDeltaPtr = at(v.partFadeDeltas)
+  hdr.partFadeTargetPtr = at(v.partFadeTargets)
+  hdr.partParkPendingPtr =
+    if v.partParkPending.len > 0: v.partParkPending[0].addr else: nil
+  hdr.partPeakPtr = at(v.partPeak)
+  hdr.partSqPtr = at(v.partRmsSq)
+  hdr.nParts = v.partNames.len
+  hdr.peakDecay = PeakDecay
+  hdr.rmsAlpha = RmsAlpha
 
 proc dropPrev(v: NativeVoice) =
   if v.prev.state != nil: dealloc(v.prev.state)
@@ -359,6 +385,7 @@ proc rollback*(v: NativeVoice): bool =
   v.state = v.prev.state
   v.stateSize = v.prev.stateSize
   v.tickFn = v.prev.tickFn
+  v.tickBlockFn = v.prev.tickBlockFn
   v.varNames = move v.prev.varNames
   v.regions = move v.prev.regions
   v.csrc = move v.prev.csrc
@@ -437,7 +464,8 @@ proc commit*(v: NativeVoice; p: Prepared) =
   # Keep the outgoing version for rollback (its state stops changing
   # here, so it's a snapshot of the moment of the swap).
   let outgoing = PrevVersion(state: v.state, stateSize: v.stateSize,
-    tickFn: v.tickFn, varNames: v.varNames, regions: v.regions,
+    tickFn: v.tickFn, tickBlockFn: v.tickBlockFn,
+    varNames: v.varNames, regions: v.regions,
     partNames: v.partNames, unheard: v.unheard, csrc: v.csrc,
     optimized: v.optimized)
 
@@ -455,6 +483,7 @@ proc commit*(v: NativeVoice; p: Prepared) =
   v.pointPartGains()
   v.stateSize = p.stateSize
   v.tickFn = p.tickFn
+  v.tickBlockFn = cast[TickBlockFn](p.lib.getSymbol("tick_block"))
   v.tccLib = p.lib
   v.varNames = p.varNames
   v.regions = p.regions
@@ -471,6 +500,7 @@ proc upgrade*(v: NativeVoice; gen: int; lib: TccState; fn: TickFn): bool =
   v.oldLibs.add v.tccLib
   v.tccLib = lib
   v.tickFn = fn
+  v.tickBlockFn = cast[TickBlockFn](lib.getSymbol("tick_block"))
   v.optimized = true
   true
 
@@ -525,9 +555,20 @@ proc load*(v: NativeVoice; program: Node; sr: float64;
   v.commit(prepare(program, sr, patchPath))
 
 proc tick*(v: NativeVoice; t: float64): tuple[l, r: float64] {.inline.} =
+  ## One sample at engine time `t`, input() from the dsp globals: what
+  ## render, try and the tests use.
   let hdr = cast[ptr VoiceHeader](v.state)
   hdr.t = t
   hdr.start_t = v.startT
   var l, r: float64
   v.tickFn(v.state, addr l, addr r)
   (l, r)
+
+proc tickBlock*(v: NativeVoice; n: int; outL, outR: ptr float64) {.inline.} =
+  ## `n` samples from the clock in the header (timeSec/timeFrac), with
+  ## input() from hdr.inBuf and the fade and part ramps advanced per
+  ## sample in C: the engine's path. The caller reads the fade, the bad
+  ## count and the raw peak back from the header afterwards.
+  let hdr = cast[ptr VoiceHeader](v.state)
+  hdr.start_t = v.startT
+  v.tickBlockFn(v.state, clong(n), outL, outR)

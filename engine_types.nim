@@ -24,6 +24,12 @@ proc envFloat*(name: string; default: float64): float64 =
 # laptop speakers give up; studio monitors might want AITHER_LOW_HZ=40.
 let LowSplitHz* = envFloat("AITHER_LOW_HZ", 200.0)
 
+# The meters' time constants: the decaying peak and the smoothed mean
+# square, per sample. Applied in the generated C (tick_block) and, for
+# the voice's own stats, in the engine.
+const PeakDecay* = 0.99993   # ~300 ms exponential decay
+const RmsAlpha*  = 1.04e-4   # ~200 ms smoothing
+
 proc isRunaway*(l, r: float64): bool {.inline.} =
   abs(l) > RunawayLimit or abs(r) > RunawayLimit
 

@@ -167,8 +167,11 @@ brief mutex).
 
 ### Threading
 
-- The pump (tick every voice, write a period to stdout) on its own
-  thread; a blocking write is how a real-time reader paces the engine.
+- The pump (run every voice for a block via its compiled `tick_block`,
+  mix, write the period to stdout) on its own thread; a blocking write
+  is how a real-time reader paces the engine. The per-sample work
+  (clock, input, parts, fade and gain ramps, part meters) is generated
+  C; the engine does guards, stats, ring and mix per block.
 - ALSA MIDI input on its own thread (auto-resubscribes if the
   port is dropped — see `midi.nim`).
 - Main thread accepts socket commands.

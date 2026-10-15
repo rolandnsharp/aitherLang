@@ -12,7 +12,8 @@
 ## them after this. `temporal_audit` is a tool, not a test.
 
 import additive_inharmonic, analysis, array_multiline, array_state,
-       array_values, audit, backing_compiles, check_unheard, choir_block_compiles,
+       array_values, audit, backing_compiles, block_tick, check_unheard,
+       choir_block_compiles,
        codegen_kick, cutoff_clamp, def_params, delay_fractional, dho,
        each_top_level,
        elif_chain, error_source_line, guide_string, imports, lambdas,

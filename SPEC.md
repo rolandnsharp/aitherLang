@@ -1026,7 +1026,12 @@ safe slot rather than segfaulting.
 ### Engine (`engine.nim`, ~735 lines)
 
 The mix, a period at a time, to standard output on its own thread;
-`input()` from standard input. UNIX socket server. Voice table
+`input()` from standard input. Each voice runs a block at a time
+inside its compiled code (`tick_block`: the clock, `input()`, the
+parts, the voice fade and part-gain ramps, park and the part meters
+all advance per sample in C); the engine's own work is per block,
+and the output is bit-identical to ticking one sample at a time
+(`tests/block_tick.nim`). UNIX socket server. Voice table
 with per-part gain fades. Per-voice and master-bus rolling stats
 (RMS, peak, clips, 50 ms envelope bins for sparklines, plus a
 0.5 s float32 ring per voice for `spectrum`'s FFT). No limiter on

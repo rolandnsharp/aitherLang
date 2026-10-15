@@ -156,6 +156,80 @@ const NativeArities = {
 const Libm1 = ["sin", "cos", "tan", "tanh", "exp", "log", "log2",
                "floor", "ceil", "sqrt"]
 
+# The two entry points, appended after every patch's tick1 (the
+# per-sample body above):
+#
+#   tick(s, outL, outR)        one sample, with s->t set by the caller and
+#                              input() from the dsp globals: what render,
+#                              try and the tests use, unchanged.
+#   tick_block(s, n, outL, outR)   n samples: the engine's path. The whole
+#                              per-sample story lives here in C: the
+#                              clock (the same second/fraction split the
+#                              engine used, so t has the same bits), the
+#                              block input, the voice fade and part gain
+#                              ramps, park, the part meters, the output.
+#                              Non-finite samples are counted and zeroed;
+#                              the engine decides per block what to do.
+const BlockTemplate = """
+extern double n_input_l(void);
+extern double n_input_r(void);
+
+void tick(VoiceState* s, double* outL, double* outR) {
+  s->in_l = n_input_l(); s->in_r = n_input_r();
+  tick1(s, outL, outR);
+}
+
+void tick_block(VoiceState* s, long n, double* outL, double* outR) {
+  const long np = s->n_parts;
+  s->bad = 0; s->peak_raw = 0.0;
+  for (long i = 0; i < n; i++) {
+    s->time_frac += s->dt;
+    if (s->time_frac >= 1.0) { s->time_sec += 1.0; s->time_frac -= 1.0; }
+    s->t = s->time_sec + s->time_frac;
+    if (s->in_buf) { s->in_l = s->in_buf[2*i]; s->in_r = s->in_buf[2*i + 1]; }
+    else { s->in_l = 0.0; s->in_r = 0.0; }
+    double l, r;
+    tick1(s, &l, &r);
+    if (!(l == l) || !(r == r) || l > 1e6 || l < -1e6 || r > 1e6 || r < -1e6) {
+      s->bad++; l = 0.0; r = 0.0;
+    }
+    double al = fabs(l), ar = fabs(r);
+    if (al > s->peak_raw) s->peak_raw = al;
+    if (ar > s->peak_raw) s->peak_raw = ar;
+    /* the voice's fade, then the parts' gain ramps: for the next sample */
+    s->fade_gain += s->fade_delta;
+    if (s->fade_gain > 1.0) s->fade_gain = 1.0;
+    if (s->fade_gain < 0.0) s->fade_gain = 0.0;
+    if (s->fade_gain >= 1.0 && s->fade_delta > 0.0) s->fade_delta = 0.0;
+    for (long p = 0; p < np; p++) {
+      double d = s->part_fade_delta[p];
+      if (d != 0.0) {
+        double target = s->part_fade_target[p];
+        double g = s->part_gains[p] + d;
+        if ((d > 0.0 && g >= target) || (d < 0.0 && g <= target)) {
+          s->part_gains[p] = target; s->part_fade_delta[p] = 0.0;
+          if (s->part_park_pending[p] && target <= 0.0) {
+            s->part_park[p] = 1.0; s->part_park_pending[p] = 0;
+          }
+        } else {
+          s->part_gains[p] = g < 0.0 ? 0.0 : (g > 1.0 ? 1.0 : g);
+        }
+      }
+    }
+    const double g = s->fade_gain;
+    outL[i] = l * g; outR[i] = r * g;
+    /* per-part meters, after the voice fade like the voice's own */
+    for (long p = 0; p < np; p++) {
+      double a0 = fabs(s->part_out[2*p]), a1 = fabs(s->part_out[2*p + 1]);
+      double a = (a0 > a1 ? a0 : a1) * g;
+      double pk = s->part_peak[p] * s->peak_decay;
+      s->part_peak[p] = pk > a ? pk : a;
+      s->part_sq[p] = s->part_sq[p] * (1.0 - s->rms_alpha) + a * a * s->rms_alpha;
+    }
+  }
+}
+"""
+
 # ---- small helpers -----------------------------------------------------
 
 proc newCtx*(program: Node): Ctx =
@@ -1722,7 +1796,7 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
         # recording under `aither audit ... <input>`. Both sides are
         # plain reads, so referencing them twice is free.
         discard c.pairOperands(sc, n, pre, 0, "no arguments")
-        return ("n_input_l()", "n_input_r()", true)
+        return ("s->in_l", "s->in_r", true)
       else: discard       # exhaustive case below
     # Stereo-returning user def (e.g. haas, pan): inline once, capture
     # the two output channels into fresh temps via the `pre` preamble.
@@ -2116,6 +2190,21 @@ proc emit*(c: Ctx; program: Node): string =
   pre.add "  double* part_gains;\n"
   pre.add "  double* part_out;\n"
   pre.add "  double* part_park;\n"
+  # Block mode (tick_block): the engine hands the per-sample work over.
+  # Mirrored field for field by VoiceHeader in voice.nim.
+  pre.add "  double* part_fade_delta;\n"     # per-part gain ramp, per sample
+  pre.add "  double* part_fade_target;\n"
+  pre.add "  unsigned char* part_park_pending;\n"   # park once the fade-out lands (Nim bools)
+  pre.add "  double* part_peak;\n"           # per-part meters, kept in C
+  pre.add "  double* part_sq;\n"
+  pre.add "  double* in_buf;\n"              # block input, interleaved L R (NULL: silence)
+  pre.add "  double  in_l, in_r;\n"          # this sample's input()
+  pre.add "  double  fade_gain, fade_delta;\n"   # the voice's own fade ramp
+  pre.add "  double  time_sec, time_frac;\n"     # the engine clock, advanced per sample
+  pre.add "  double  peak_decay, rms_alpha;\n"   # meter constants
+  pre.add "  double  peak_raw;\n"            # loudest |sample| before the fade, this block
+  pre.add "  long    bad;\n"                 # non-finite samples this block (zeroed)
+  pre.add "  long    n_parts;\n"
   for vn in c.topVarNames:
     pre.add "  double v_" & vn & ";\n"
   pre.add "  unsigned char inited[" & $max(1, c.topVarNames.len) & "];\n"
@@ -2123,7 +2212,7 @@ proc emit*(c: Ctx; program: Node): string =
 
   # Body of tick()
   var body = ""
-  body.add "void tick(VoiceState* s, double* outL, double* outR) {\n"
+  body.add "static void tick1(VoiceState* s, double* outL, double* outR) {\n"
   body.add "  s->idx = 0;\n"
   let topSc = push(nil)
   # Lazy-init file-level state, top level and play bodies alike, in
@@ -2406,7 +2495,8 @@ proc emit*(c: Ctx; program: Node): string =
   if finalIdx < 0 and heard.len > 0:
     body.add "  *outL = " & heard.mapIt("p_" & it & "_l").join(" + ") & ";\n"
     body.add "  *outR = " & heard.mapIt("p_" & it & "_r").join(" + ") & ";\n"
-  body.add "}\n"
+  body.add "}\n\n"
+  body.add BlockTemplate
 
   pre & c.arrayDecls & body
 
@@ -2427,6 +2517,7 @@ proc finaliseLayout(c: Ctx; src: var string) =
     r.offset = bases[r.typeName] + r.offset
   for rid, r in c.regions:
     src = src.replace(offsetPlaceholder(rid), $r.offset)
+
 
 # A default stands on its own: numbers, PI/TAU, operators and calls,
 # never a name from some scope (whose scope would it be?).

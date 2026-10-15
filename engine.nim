@@ -46,8 +46,6 @@ type
   RecentRing = object
     l, r: array[MaxRecent, float32]
     idx: int
-const PeakDecay = 0.99993   # ~300ms exponential decay
-const RmsAlpha  = 1.04e-4   # ~200ms smoothing
 
 type
   Stats = object
@@ -118,139 +116,122 @@ proc fadeDeltaFor(seconds: float64): float64 =
 
 # --------------------------------------------------------------- audio callback
 
-proc audioCallback(output: ptr UncheckedArray[cfloat],
-                   input: ptr UncheckedArray[cfloat], frameCount: cuint,
-                   userData: pointer) {.cdecl.} =
+# ------------------------------------------------------------------ the block
+
+# One block of the mix. Every per-sample step runs in the generated C
+# (tick_block, see codegen's BlockTemplate): the clock, input(), the
+# parts, the voice fade and part-gain ramps, the part meters. What
+# happens here happens once per voice per block: the guards, the
+# voice's stats and ring, the mix. The engine never touches a sample
+# except to add a voice's block into the mix.
+var blkL, blkR: seq[float64]      # one voice's block
+var blkIn: seq[float64]           # the input block as doubles
+
+proc mixBlock(outL, outR: var seq[float64];
+              input: ptr UncheckedArray[cfloat]; frames: int) =
   let dt = 1.0 / float64(SampleRate)
-  let frames = int(frameCount)
-
-  if not tryAcquire(mtx):
-    for i in 0 ..< frames * 2:
-      output[i] = 0.cfloat
-    return
-
+  for i in 0 ..< frames:
+    outL[i] = 0.0
+    outR[i] = 0.0
+  if not tryAcquire(mtx): return
+  if blkL.len < frames:
+    blkL.setLen(frames)
+    blkR.setLen(frames)
+  var inPtr: pointer = nil
+  if input != nil:
+    if blkIn.len < frames * 2: blkIn.setLen(frames * 2)
+    for i in 0 ..< frames * 2: blkIn[i] = float64(input[i])
+    inPtr = blkIn[0].addr
+  # The engine clock at the block's start. Every voice runs the same
+  # samples from it, and the engine advances its own copy the same way
+  # afterwards, so t has the same bits everywhere.
+  let t0 = timeSec + timeFrac
   let sc = slotCount
+  for v in 0 ..< sc:
+    # A runaway mute lifts by itself after a gap, with a fade-in, so
+    # one bad moment in a long patch doesn't end the voice.
+    if slots[v].runaway and slots[v].retryAt > 0.0 and t0 >= slots[v].retryAt:
+      slots[v].runaway = false
+      slots[v].muted = false
+      slots[v].retryAt = 0.0
+      slots[v].fadeGain = 0.0
+      slots[v].fadeDelta = fadeDeltaFor(1.0)
+    if not slots[v].active or slots[v].muted or slots[v].wantRollback:
+      continue
+    let voice = slots[v].voice
+    let hdr = cast[ptr VoiceHeader](voice.state)
+    hdr.timeSec = timeSec
+    hdr.timeFrac = timeFrac
+    hdr.inBuf = inPtr
+    hdr.fadeGain = slots[v].fadeGain
+    hdr.fadeDelta = slots[v].fadeDelta
+    voice.tickBlock(frames, blkL[0].addr, blkR[0].addr)
+    slots[v].fadeGain = hdr.fadeGain
+    slots[v].fadeDelta = hdr.fadeDelta
+    let bad = hdr.bad > 0
+    let peak = hdr.peakRaw
+    if bad or peak > RollbackLimit:
+      # Blew up right after a hot-swap: the new code is the suspect.
+      # Hold the voice silent for the few ms until the doctor thread
+      # puts the previous version back.
+      if slots[v].swapAt > 0.0 and t0 - slots[v].swapAt < RollbackWindow and
+         voice.canRollback:
+        slots[v].wantRollback = true
+        continue
+    # NaN/Inf defense: the bad samples were zeroed in C; reset the pool,
+    # clear poisoned `$state`, and log once per voice. If it keeps
+    # happening for 100 ms, every def `$state` re-inits.
+    if bad:
+      let first = slots[v].badRun == 0
+      slots[v].badRun += hdr.bad
+      voice.resetPool()
+      voice.scrubState(hard = slots[v].badRun > int(SampleRate) div 10)
+      if first: inc slots[v].nanEvents
+      if not slots[v].nanLogged:
+        stderr.writeLine "[aither] voice " & slots[v].name &
+                         " produced NaN/Inf — pool reset"
+        slots[v].nanLogged = true
+    else:
+      slots[v].badRun = 0
+    # Runaway defense: finite but far too loud (an unstable filter
+    # chain climbing toward 1e6). Mute, wipe the state, and retry
+    # after a gap; after RunawayRetries it stays muted until resent.
+    if isRunaway(peak, peak):
+      voice.resetPool()
+      voice.scrubState(hard = true)
+      slots[v].muted = true
+      slots[v].runaway = true
+      inc slots[v].runawayEvents
+      let retry = slots[v].runawayEvents <= RunawayRetries
+      slots[v].retryAt = if retry: t0 + RunawayRetryGap else: 0.0
+      stderr.writeLine "[aither] voice " & slots[v].name &
+        " exceeded +18 dBFS — " &
+        (if retry: "muted, retrying in " & $RunawayRetryGap & "s"
+         else: "muted until resent")
+      continue
+    if slots[v].fadeGain <= 0.0 and slots[v].fadeDelta < 0.0:
+      slots[v].active = false           # fade-out done: the slot is free
+    # The voice's stats and rolling buffer, and its share of the mix.
+    for i in 0 ..< frames:
+      let gl = blkL[i]
+      let gr = blkR[i]
+      update(slots[v].stats, gl, gr)
+      slots[v].recent.l[slots[v].recent.idx] = float32(gl)
+      slots[v].recent.r[slots[v].recent.idx] = float32(gr)
+      slots[v].recent.idx = (slots[v].recent.idx + 1) mod RecentSamples
+      outL[i] += gl
+      outR[i] += gr
+  # Advance the engine clock the way every voice just did.
   for i in 0 ..< frames:
     timeFrac += dt
     if timeFrac >= 1.0:
       timeSec += 1.0
       timeFrac -= 1.0
-    let t = timeSec + timeFrac
-    # This frame's capture sample, read by `input()` in every voice.
-    if input != nil:
-      inputL = float64(input[i * 2])
-      inputR = float64(input[i * 2 + 1])
-
-    var lMix = 0.0
-    var rMix = 0.0
-    for v in 0 ..< sc:
-      # A runaway mute lifts by itself after a gap, with a fade-in, so
-      # one bad moment in a long patch doesn't end the voice.
-      if slots[v].runaway and slots[v].retryAt > 0.0 and t >= slots[v].retryAt:
-        slots[v].runaway = false
-        slots[v].muted = false
-        slots[v].retryAt = 0.0
-        slots[v].fadeGain = 0.0
-        slots[v].fadeDelta = fadeDeltaFor(1.0)
-      if not slots[v].active or slots[v].muted or slots[v].wantRollback:
-        continue
-      var l = 0.0
-      var r = 0.0
-      let s = slots[v].voice.tick(t)
-      l = s.l; r = s.r
-      let nan = l != l or r != r or l > 1e6 or r > 1e6 or l < -1e6 or r < -1e6
-      if nan or abs(l) > RollbackLimit or abs(r) > RollbackLimit:
-        # Blew up right after a hot-swap: the new code is the suspect.
-        # Hold the voice silent for the few ms until the doctor thread
-        # puts the previous version back.
-        if slots[v].swapAt > 0.0 and t - slots[v].swapAt < RollbackWindow and
-           slots[v].voice.canRollback:
-          slots[v].wantRollback = true
-          continue
-      # NaN/Inf defense: a single bad sample (unstable filter, runaway
-      # resonator, sqrt of a negative, etc.) would otherwise propagate
-      # forever through the voice's pool state. Reset the pool, clear
-      # poisoned `$state`, drop this sample's contribution, and log once
-      # per voice so the user learns about it without 48000 lines/sec.
-      # If it keeps happening for 100 ms, every def `$state` re-inits.
-      if nan:
-        inc slots[v].badRun
-        slots[v].voice.resetPool()
-        slots[v].voice.scrubState(hard = slots[v].badRun > int(SampleRate) div 10)
-        if slots[v].badRun == 1: inc slots[v].nanEvents
-        if not slots[v].nanLogged:
-          stderr.writeLine "[aither] voice " & slots[v].name &
-                           " produced NaN/Inf — pool reset"
-          slots[v].nanLogged = true
-        continue
-      slots[v].badRun = 0
-      # Runaway defense: finite but far too loud (an unstable filter
-      # chain climbing toward 1e6). Mute, wipe the state, and retry
-      # after a gap; after RunawayRetries it stays muted until resent.
-      if isRunaway(l, r):
-        slots[v].voice.resetPool()
-        slots[v].voice.scrubState(hard = true)
-        slots[v].muted = true
-        slots[v].runaway = true
-        inc slots[v].runawayEvents
-        let retry = slots[v].runawayEvents <= RunawayRetries
-        slots[v].retryAt = if retry: t + RunawayRetryGap else: 0.0
-        stderr.writeLine "[aither] voice " & slots[v].name &
-          " exceeded +18 dBFS — " &
-          (if retry: "muted, retrying in " & $RunawayRetryGap & "s"
-           else: "muted until resent")
-        continue
-      slots[v].fadeGain = clamp(
-        slots[v].fadeGain + slots[v].fadeDelta, 0.0, 1.0)
-      if slots[v].fadeGain >= 1.0 and slots[v].fadeDelta > 0.0:
-        slots[v].fadeDelta = 0.0          # fade-in done: report "playing"
-      if slots[v].fadeGain <= 0.0 and slots[v].fadeDelta < 0.0:
-        slots[v].active = false
-      # Advance per-part gains toward their targets (clamped 0..1). When
-      # a fade reaches its target, snap to it and clear the delta.
-      let voice = slots[v].voice
-      for p in 0 ..< voice.partGains.len:
-        let d = voice.partFadeDeltas[p]
-        if d != 0.0:
-          let target = voice.partFadeTargets[p]
-          let newG = voice.partGains[p] + d
-          if (d > 0.0 and newG >= target) or (d < 0.0 and newG <= target):
-            voice.partGains[p] = target
-            voice.partFadeDeltas[p] = 0.0
-            # A `park` lands once the fade-out does: from here the
-            # part's body is skipped.
-            if voice.partParkPending[p] and target <= 0.0:
-              voice.partParked[p] = 1.0
-              voice.partParkPending[p] = false
-          else:
-            voice.partGains[p] = clamp(newG, 0.0, 1.0)
-      let gl = l * slots[v].fadeGain
-      let gr = r * slots[v].fadeGain
-      # Per-part meters, after the voice fade like the voice's own.
-      for p in 0 ..< voice.partPeak.len:
-        let a = max(abs(voice.partOut[2*p]), abs(voice.partOut[2*p + 1])) *
-                slots[v].fadeGain
-        voice.partPeak[p] = max(voice.partPeak[p] * PeakDecay, a)
-        voice.partRmsSq[p] = voice.partRmsSq[p] * (1.0 - RmsAlpha) + a * a * RmsAlpha
-      update(slots[v].stats, gl, gr)
-      # Per-voice rolling buffer for `aither spectrum`. Wraps in place;
-      # snapshot reads from idx outward (oldest sample first).
-      slots[v].recent.l[slots[v].recent.idx] = float32(gl)
-      slots[v].recent.r[slots[v].recent.idx] = float32(gr)
-      slots[v].recent.idx = (slots[v].recent.idx + 1) mod RecentSamples
-      lMix += gl
-      rMix += gr
-
-    update(master, lMix, rMix)
-    masterRecent.l[masterRecent.idx] = float32(lMix)
-    masterRecent.r[masterRecent.idx] = float32(rMix)
+  for i in 0 ..< frames:
+    update(master, outL[i], outR[i])
+    masterRecent.l[masterRecent.idx] = float32(outL[i])
+    masterRecent.r[masterRecent.idx] = float32(outR[i])
     masterRecent.idx = (masterRecent.idx + 1) mod RecentSamples
-    # The honest mix, nothing applied: a limiter here would be the
-    # engine deciding it is feeding a speaker. A player clamps; a patch
-    # that wants a safety net ends with `|> tanh`.
-    output[i * 2]     = cfloat(lMix)
-    output[i * 2 + 1] = cfloat(rMix)
-
   release(mtx)
 
 # ------------------------------------------------------------- voice management
@@ -1032,6 +1013,8 @@ proc pumpPipe() =
   let frames = int(BufferFrames)
   var outBuf = newSeq[cfloat](frames * 2)
   var inBuf = newSeq[cfloat](frames * 2)
+  var mixL = newSeq[float64](frames)
+  var mixR = newSeq[float64](frames)
   let haveInput = not isatty(stdin)
   var inputOpen = haveInput
   while running and (pipeLimit == 0 or pipeFrames < pipeLimit):
@@ -1049,10 +1032,16 @@ proc pumpPipe() =
           break
         got += n
       for i in (got div sizeof(cfloat)) ..< want * 2: inBuf[i] = 0.cfloat
-    audioCallback(cast[ptr UncheckedArray[cfloat]](addr outBuf[0]),
-                  (if haveInput: cast[ptr UncheckedArray[cfloat]](addr inBuf[0])
-                   else: nil),
-                  cuint(want), nil)
+    mixBlock(mixL, mixR,
+             (if haveInput: cast[ptr UncheckedArray[cfloat]](addr inBuf[0])
+              else: nil),
+             want)
+    # The honest mix, nothing applied: a limiter here would be the
+    # engine deciding it is feeding a speaker. A player clamps; a patch
+    # that wants a safety net ends with `|> tanh`.
+    for i in 0 ..< want:
+      outBuf[2*i] = cfloat(mixL[i])
+      outBuf[2*i + 1] = cfloat(mixR[i])
     try:
       if stdout.writeBuffer(addr outBuf[0], bytes) < bytes: break
     except IOError:
