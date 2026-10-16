@@ -19,6 +19,10 @@ tried and dropped; each doc says so near the top where that's the case.
   (speaker, visualiser, radio, file) gives the numbers their meaning.
   One session is heard or seen or transmitted, not all at once. What
   it means for the `scope` merge.
+- [displays-2026-10-16.md](displays-2026-10-16.md) — `scope` (vector)
+  and `tv` (raster, domain colouring) as filters on the pair stream;
+  two live-coded engines, one for sound and one for visuals; no
+  effects in the displays. Not built yet.
 
 **Design notebooks**
 - [cybernetics.md](cybernetics.md) — the cybernetic-synthesis tradition
