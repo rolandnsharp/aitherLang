@@ -8,14 +8,17 @@
    `plughw:` device resamples when the card can't do the engine's rate
    (the uConsole's es8388 only does 44.1 kHz); `hw:` is exact and needs
    AITHER_RATE to match. Latency defaults to 50 ms (the plug layer
-   can't go much lower); 20 is fine on hw:. Soft-clips nothing: the
-   engine already keeps the mix inside ±1 (tanh), and anything past it
-   is clamped here. Exits when the pipe closes.
+   can't go much lower); 20 is fine on hw:. Anything past ±1 is clamped
+   here, hard: the engine doesn't limit the mix, so a patch that wants
+   a soft limiter ends with `|> tanh`. If the card ran dry while
+   playing, play says how often when it exits. Exits when the pipe
+   closes.
    Build: cc -O2 tools/play.c -o tools/play -lasound */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <time.h>
 #include <alsa/asoundlib.h>
 
 #define FRAMES 256   /* one write: 5.3 ms at 48 kHz */
@@ -37,6 +40,10 @@ int main(int argc, char **argv) {
 
     static float in[FRAMES * 2];
     static short out[FRAMES * 2];
+    struct timespec t0, t;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    long underruns = 0;
+    double first = 0, last = 0;                    /* when the card ran dry, s from the start */
     for (;;) {
         size_t want = sizeof in, got = 0;
         while (got < want) {                       /* a pipe delivers in pieces */
@@ -54,7 +61,13 @@ int main(int argc, char **argv) {
         }
         for (long done = 0; done < frames; ) {
             snd_pcm_sframes_t w = snd_pcm_writei(pcm, out + 2 * done, frames - done);
-            if (w == -EPIPE) { snd_pcm_prepare(pcm); continue; }   /* underrun: carry on */
+            if (w == -EPIPE) {                     /* underrun: count it, carry on */
+                clock_gettime(CLOCK_MONOTONIC, &t);
+                last = (double)(t.tv_sec - t0.tv_sec) + (t.tv_nsec - t0.tv_nsec) * 1e-9;
+                if (!underruns++) first = last;
+                snd_pcm_prepare(pcm);
+                continue;
+            }
             if (w < 0) { fprintf(stderr, "play: write: %s\n", snd_strerror((int)w)); goto end; }
             done += w;
         }
@@ -62,5 +75,8 @@ int main(int argc, char **argv) {
 end:
     snd_pcm_drain(pcm);
     snd_pcm_close(pcm);
+    if (underruns)
+        fprintf(stderr, "play: %ld underrun%s (the card ran dry), first at %.2f s, last at %.2f s\n",
+                underruns, underruns == 1 ? "" : "s", first, last);
     return 0;
 }
