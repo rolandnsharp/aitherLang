@@ -2,6 +2,7 @@ aither
 aither_dbg
 tools/play
 tools/pad
+tools/scope
 nimcache/
 *.so
 .DS_Store

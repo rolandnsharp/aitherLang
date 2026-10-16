@@ -226,6 +226,22 @@ be a parallel source of truth that drifts from the file.
 
 ## Live performance
 
+### Seeing it
+
+`tools/scope` (built with `make tools/scope`, needs `sdl3`) is a
+vector display on the pipe: each pair is a point, the beam joins them
+on a phosphor that fades, drawn on the GPU. It passes the stream on,
+so put it before the player and you see what you hear, in time:
+
+```
+./aither set.aither | tools/scope | tools/play hw:rockchipes8388c 20
+```
+
+The music shows as left against right: mono is the 45° line, width
+opens it out. A patch whose last line is a trace (SCOPE.md) draws
+figures instead. `--palette amber`, `--decay 0.9`; `f` full screen,
+`q` turns the tube off.
+
 ### Knobs from the uConsole's gamepad
 
 `tools/pad` (built with `make tools/pad`) turns the gamepad into eight

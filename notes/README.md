@@ -22,7 +22,7 @@ tried and dropped; each doc says so near the top where that's the case.
 - [displays-2026-10-16.md](displays-2026-10-16.md) — `scope` (vector)
   and `tv` (raster, domain colouring) as filters on the pair stream;
   two live-coded engines, one for sound and one for visuals; no
-  effects in the displays. Not built yet.
+  effects in the displays. `scope` built; `tv` not yet.
 
 **Design notebooks**
 - [cybernetics.md](cybernetics.md) — the cybernetic-synthesis tradition

@@ -18,6 +18,9 @@ aither.nim         ~105 lines   CLI dispatch (entry point — `nim c aither.nim`
 stdlib.aither      ~225 lines   composition layer (pure aither defs)
 alsa_midi.c                     ALSA seq client (small wrapper)
 tools/play.c                    a speaker on the end of the pipe (ALSA, not part of aither)
+tools/scope.c, tools/display.h  a vector display on the pipe (SDL3, OpenGL ES 3); display.h is
+                                the base tv will share (stdin, pass-through, GL, destinations)
+tools/pad.c                     the uConsole gamepad as MIDI knobs
 ```
 
 About 4250 lines Nim total. One binary, ~970 KB. No runtime

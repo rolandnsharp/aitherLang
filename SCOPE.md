@@ -1,19 +1,29 @@
 # Drawing with the beam
 
-**Status: the engine side is done** (the output is one pair on
-stdout; see [notes/pair-output-2026-10-15.md](notes/pair-output-2026-10-15.md)).
-What's missing is a scope program to pipe into. The live stream still
-draws with `play scope:` parts on the `scope` branch's engine, which
-this replaces.
+**Status:** the engine writes one pair to stdout
+([notes/pair-output-2026-10-15.md](notes/pair-output-2026-10-15.md)),
+and `tools/scope` draws it ([notes/displays-2026-10-16.md](notes/displays-2026-10-16.md)).
+The live stream still draws with `play scope:` parts on the `scope`
+branch's engine, which this replaces.
 
-A patch's final expression is a pair. Pipe the engine into a scope
-program instead of a player and the pair is read as **x, y**: a
-point on the screen, −1..1 each way, one point per sample.
+A patch's final expression is a pair. Pipe the engine into `scope`
+and the pair is read as **x, y**: a point on the screen, −1..1 each
+way, one point per sample.
 
 ```
-./aither trace.aither | <any scope program>   # see instead of hear
-./aither send trace.aither                    # hot-swaps as always
+make tools/scope                                        # needs sdl3
+./aither trace.aither | tools/scope                     # see it
+./aither set.aither | tools/scope | tools/play hw:rockchipes8388c 20   # see it and hear it
+./aither send trace.aither                              # hot-swaps as always
 ```
+
+`scope` passes the stream on unchanged, so it can sit anywhere in a
+chain, and it draws the sample being heard: with `play` after it, the
+picture keeps time with the sound. `--palette green|amber|cyan|blue|
+white|red` picks the phosphor, `--decay 0.85` how much of a trace is
+left after 1/60 s. `f` is full screen; `q` or Escape turns the tube
+off. `--term` draws in the terminal (over ssh), and `--frames FILE
+--size 720` writes raw RGB frames for `ffmpeg`.
 
 The display joins the points and fades them, so a slow motion is
 bright and a fast one faint, as on a phosphor tube. Brightness is
@@ -109,20 +119,30 @@ table of points; a torus knot from a 3D curve projected by hand. Two
 figures at once: alternate between them sample by sample and the
 phosphor shows both.
 
-## The layer on top
+## Beyond the beam
 
-Trails, feedback, the kaleidoscope fold, colour: these are the
-visualiser's business, not the language's. The visualiser keeps an
-effect chain with live knobs and presets (the `.paint` scenes from the
-stream), driven by its own analysis of the pairs it receives. That is
-where the Winamp look lives, and it sits on top of any trace above.
-The trace stays a pair; the effects never feed back into the language.
+`scope` has no effects, modes or presets: the phosphor, the palette
+and the decay are all it decides. Everything else that moves is aither
+code. Trails, feedback, the kaleidoscope fold and filled pictures
+(fractals that grow one step a frame) belong to `tv`, the raster
+display, driven by a second engine whose `input()` is the music:
+
+```
+aither sound.aither | scope | play | aither visuals.aither | tv
+```
+
+See [notes/displays-2026-10-16.md](notes/displays-2026-10-16.md). `tv`
+isn't built yet, and neither is `play` passing its input on.
 
 ## Practicalities
 
-- A session is heard or seen, not both: the output goes to one
-  program. To make a video with sound, run the music and the trace
-  offline to two files and combine them.
+- A session is heard and seen at once: `scope` passes the stream on to
+  `play`. A trace that isn't the music (a phase portrait, a figure)
+  is its own patch, so it is seen, not heard, or run beside the music
+  in a second engine.
+- How bright a figure is depends on how long its path is, as on a real
+  tube: a short figure that repeats is bright, music that never
+  repeats is fainter, and a beam that stands still burns white.
 - 48 000 points a second is 800 per frame at 60 fps. Enough for any
   figure here; a closed curve needs its period to divide into that.
 - A beam draws lines, so a jump between two points draws a retrace
@@ -131,9 +151,10 @@ The trace stays a pair; the effects never feed back into the language.
   the uConsole keep traces as lean as patches.
 - `aither trace.aither 30 > trace.raw` gives 30 s of x and y as raw
   float pairs; `sox` turns that into a WAV playable through any XY
-  display or an oscilloscope's audio input.
+  display or an oscilloscope's audio input. `scope --frames` turns it
+  into video.
 
 ## What a beam cannot do
 
-Filled areas, raster fields, textures, much text. Those are the
-visualiser's job if they are wanted at all.
+Filled areas, raster fields, textures, much text. Those are `tv`'s
+job.
