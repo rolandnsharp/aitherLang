@@ -242,6 +242,18 @@ opens it out. A patch whose last line is a trace (SCOPE.md) draws
 figures instead. `--palette amber`, `--decay 0.9`; `f` full screen,
 `q` turns the tube off.
 
+`tools/tv` (`make tools/tv`) is the raster display: a frame is w×h
+samples in scan order, each pair one pixel's complex value, its phase
+the hue and its magnitude the brightness. A patch finds its pixel with
+`pixel(w, h)` and runs at w × h × 60 samples a second for 60 frames:
+
+```
+AITHER_RATE=1152000 ./aither patches/mandelbrot.aither | AITHER_RATE=1152000 tools/tv --size 160x120 > /dev/null
+```
+
+TV.md has the details: the pixel helpers, what to draw, sizes and
+rates.
+
 ### Knobs from the uConsole's gamepad
 
 `tools/pad` (built with `make tools/pad`) turns the gamepad into eight

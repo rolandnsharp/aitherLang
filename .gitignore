@@ -3,6 +3,7 @@ aither_dbg
 tools/play
 tools/pad
 tools/scope
+tools/tv
 nimcache/
 *.so
 .DS_Store

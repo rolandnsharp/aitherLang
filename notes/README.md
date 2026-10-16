@@ -12,6 +12,12 @@ tried and dropped; each doc says so near the top where that's the case.
   procedural game-audio engine. Parked.
 - [learnable_filters.md](learnable_filters.md) — filters trained from
   input/output pairs. Parked.
+- [sensing-2026-10-16.md](sensing-2026-10-16.md) — aither between a
+  sensor and a display: EMF, natural radio and lightning, cosmic rays,
+  RF/5G, electrical work, video at audio rate. Brainstorm.
+- [card-2026-10-16.md](card-2026-10-16.md) — a duplex tool, one clock
+  for output and input: a fixed, known loop delay for lock-in, sweeps
+  and the metal detector. Proposed, not built; no engine change.
 
 **Decisions**
 - [pair-output-2026-10-15.md](pair-output-2026-10-15.md) — the output
@@ -22,7 +28,7 @@ tried and dropped; each doc says so near the top where that's the case.
 - [displays-2026-10-16.md](displays-2026-10-16.md) — `scope` (vector)
   and `tv` (raster, domain colouring) as filters on the pair stream;
   two live-coded engines, one for sound and one for visuals; no
-  effects in the displays. `scope` built; `tv` not yet.
+  effects in the displays. Both built.
 
 **Design notebooks**
 - [cybernetics.md](cybernetics.md) — the cybernetic-synthesis tradition

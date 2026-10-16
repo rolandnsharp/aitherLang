@@ -19,7 +19,9 @@ stdlib.aither      ~225 lines   composition layer (pure aither defs)
 alsa_midi.c                     ALSA seq client (small wrapper)
 tools/play.c                    a speaker on the end of the pipe (ALSA, not part of aither)
 tools/scope.c, tools/display.h  a vector display on the pipe (SDL3, OpenGL ES 3); display.h is
-                                the base tv will share (stdin, pass-through, GL, destinations)
+                                what scope and tv share (stdin, pass-through, the heard-sample
+                                clock, GL, the window, terminal and frames destinations)
+tools/tv.c                      a raster display on the pipe: w×h samples a frame, domain colouring
 tools/pad.c                     the uConsole gamepad as MIDI knobs
 ```
 

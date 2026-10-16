@@ -138,6 +138,28 @@ def width(s, amount):
 # to feed a single-channel signal into another process (e.g. sidechain).
 def mono(s): (s[0] + s[1]) * 0.5
 
+# ---------------------------------------------------------------- raster (tv)
+
+# Which pixel this sample is, for a patch drawn by tv (tools/tv): tv reads
+# w*h samples a frame, rows top to bottom, each row left to right, counting
+# from the first sample the engine wrote. These follow the engine clock,
+# not a counter in the voice, so a hot swap or a newly sent voice lands on
+# the grid tv is counting. The patch and tv must agree on w and h.
+def pixel_index(w, h): (floor(t * sr + 0.5) + w * h - 1) mod (w * h)
+
+# The pixel's centre as a pair: x across -1..1, y up, square pixels, so y
+# spans +-h/w. What the patch returns for it is the pixel's complex value:
+# tv shows its phase as hue and its magnitude as brightness.
+def pixel(w, h):
+  let k = pixel_index(w, h)
+  let col = k mod w
+  let row = floor(k / w)
+  [(2 * col + 1) / w - 1, (h - 2 * row - 1) / w]
+
+# Which frame the sample is in, from 0: for what changes once a frame (a
+# zoom, a morph, which of two state arrays is last frame's).
+def frame_number(w, h): floor((floor(t * sr + 0.5) - 1) / (w * h))
+
 # ---------------------------------------------------------------- spectrum
 # Timbre construction via sum-of-sines. Every physical resonant system
 # vibrates as a sum of sines (Fourier); additive synthesis writes that

@@ -36,8 +36,6 @@ static const struct { const char *name; float rgb[3]; } Palettes[] = {
 #define Q0     1.5e5        /* the beam's energy per second at 720 px: a figure that
                                repeats (a 220:330 Lissajous) sits mid-range */
 #define BLOOM  0.6f         /* how much of the blurred copy glows around the trace */
-#define BOOT   0.8          /* seconds the tube takes to turn on */
-#define SHUT   0.9          /* and off */
 
 /* The beam: each segment is one instance, a quad around the path from a
    (this sample) to b (the next), reaching four beam radii past it. */
@@ -167,28 +165,6 @@ static const char *CompFS =
     "  o = vec4(col + uPhos * 0.012, 1.0);\n"
     "}\n";
 
-static float ease(float x) {
-    x = x < 0 ? 0 : x > 1 ? 1 : x;
-    return x * x * (3 - 2 * x);
-}
-
-/* The tube turning on: a dot, a line opening sideways, the picture
-   opening up and down, and the flash fading. */
-static void crt_on(double t, float *cx, float *cy, float *flash) {
-    const float e = 0.004f;
-    *cx = t < 0.12 ? e : e + (1 - e) * ease((float)(t - 0.12) / 0.18f);
-    *cy = t < 0.3 ? e : e + (1 - e) * ease((float)(t - 0.3) / 0.3f);
-    *flash = 2.5f * (1 - ease((float)(t / BOOT)));
-}
-
-/* And off: the picture collapses to a line, the line to a dot, the dot fades. */
-static void crt_off(double t, float *cx, float *cy, float *flash) {
-    const float e = 0.004f;
-    *cy = 1 - (1 - e) * ease((float)t / 0.3f);
-    *cx = 1 - (1 - e) * ease((float)(t - 0.3) / 0.25f);
-    *flash = 2.5f * ease((float)t / 0.3f) * (1 - ease((float)(t - 0.55) / 0.35f));
-}
-
 static void usage(void) {
     fputs("usage: aither patch.aither | scope [--palette green|amber|cyan|blue|white|red]\n"
           "                                   [--decay 0.85] [--term | --frames FILE [--size 720]]\n"
@@ -220,8 +196,12 @@ int main(int argc, char **argv) {
     if (dest < 0) dest = (getenv("WAYLAND_DISPLAY") || getenv("DISPLAY")) ? DEST_WINDOW : DEST_TERM;
 
     stream_start();
-    Display d;
+    Display d = {0};
     if (display_open(&d, "scope", dest, path, size) < 0) return 1;
+    if (dest == DEST_FRAMES)
+        fprintf(stderr, "scope: %dx%d rgb24 frames at %d fps to %s\n"
+                "  ffmpeg -f rawvideo -pix_fmt rgb24 -s %dx%d -r %d -i %s out.mp4\n",
+                size, size, HEADLESS_FPS, path, size, size, HEADLESS_FPS, path);
 
     GLuint beam = gl_program(BeamVS, BeamFS), fade = gl_program(GL_FULLSCREEN_VS, FadeFS),
            down = gl_program(GL_FULLSCREEN_VS, DownFS), blur = gl_program(GL_FULLSCREEN_VS, BlurFS),
@@ -361,8 +341,8 @@ int main(int argc, char **argv) {
         /* 4. The picture, in the phosphor's colour, wherever it goes. */
         float cx = 1, cy = 1, flash = 0;
         if (off >= 0) crt_off(t - off, &cx, &cy, &flash);
-        else if (t - t0 < BOOT) crt_on(t - t0, &cx, &cy, &flash);
-        display_target(&d, S);
+        else if (t - t0 < CRT_ON) crt_on(t - t0, &cx, &cy, &flash);
+        display_target(&d, S, S);
         glUseProgram(comp);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, accT);
@@ -377,7 +357,7 @@ int main(int argc, char **argv) {
         glActiveTexture(GL_TEXTURE0);
         display_present(&d);
 
-        if (off >= 0 && t - off > SHUT) break;
+        if (off >= 0 && t - off > CRT_OFF) break;
     }
     display_close(&d);
     return 0;

@@ -51,7 +51,8 @@ static double env_rate(void) {
 
 /* ------------------------------------------------------------- the stream */
 
-#define RING (1 << 18)        /* the pairs the screen can still reach: 5 s at 48 kHz */
+#define RING (1 << 20)        /* the pairs the screen can still reach: 22 s at 48 kHz,
+                                 0.9 s at the 1.15 MHz a 160x120 tv takes */
 
 static struct {
     float xy[RING * 2];
@@ -172,9 +173,12 @@ static uint64_t stream_now(double dt) {
         double heard = ((double)stream.passed - queued) / 8;
         if (heard < limit) limit = heard > 0 ? heard : 0;
     }
+    double lag = stream.rate * 0.25, back = stream.rate * 0.05;
+    if (lag > RING / 2) lag = RING / 2;         /* at MHz rates the ring is the limit */
+    if (back > RING / 8) back = RING / 8;
     clock += stream.rate * dt;
     if (clock > limit) clock = limit;
-    if (clock < limit - stream.rate * 0.25) clock = limit - stream.rate * 0.05;
+    if (clock < limit - lag) clock = limit - back;
     return (uint64_t)clock;
 }
 
@@ -185,12 +189,15 @@ enum { DEST_WINDOW, DEST_TERM, DEST_FRAMES };
 
 typedef struct {
     int dest;
+    int halfblock;                /* terminal: half-blocks, two colours a cell (tv), not Braille */
+    int nopace;                   /* frames: each one as it is drawn, no frame rate (tv) */
     SDL_Window *win;              /* the window */
     SDL_GLContext ctx;
     EGLDisplay egl;               /* headless: EGL with no surface */
     EGLContext eglctx;
     GLuint fbo, tex;              /* headless: the finished frame */
-    int fs, size;                 /* its side now; --size for frames */
+    int fw, fh;                   /* its size now */
+    int size;                     /* --size for frames */
     int tty_in, tty_out;          /* the terminal we draw on */
     struct termios saved;
     int frames;                   /* where raw frames go */
@@ -202,8 +209,11 @@ static volatile sig_atomic_t display_quit;
 static void on_signal(int s) { (void)s; display_quit = 1; }
 
 static int display_open(Display *d, const char *title, int dest, const char *path, int size) {
+    int halfblock = d->halfblock, nopace = d->nopace;   /* the caller's choices survive */
     memset(d, 0, sizeof *d);
     d->dest = dest;
+    d->halfblock = halfblock;
+    d->nopace = nopace;
     d->size = size;
     d->tty_in = d->tty_out = d->frames = -1;
     if (dest == DEST_WINDOW) {
@@ -259,52 +269,51 @@ static int display_open(Display *d, const char *title, int dest, const char *pat
     } else {
         d->frames = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
         if (d->frames < 0) { fprintf(stderr, "%s: %s: %s\n", title, path, strerror(errno)); return -1; }
-        fprintf(stderr, "%s: %dx%d rgb24 frames at %d fps to %s\n"
-                "  ffmpeg -f rawvideo -pix_fmt rgb24 -s %dx%d -r %d -i %s out.mp4\n",
-                title, size, size, HEADLESS_FPS, path, size, size, HEADLESS_FPS, path);
     }
     return 0;
 }
 
-/* The space there is to draw in, in pixels (Braille dots for the terminal). */
+/* The room there is to draw in, in pixels: the window; the terminal in
+   Braille dots (2x4 a cell) or half-blocks (1x2); --size for frames. */
 static void display_size(Display *d, int *w, int *h) {
     if (d->dest == DEST_WINDOW) { SDL_GetWindowSizeInPixels(d->win, w, h); return; }
     if (d->dest == DEST_TERM) {
         struct winsize ws = {0};
         if (ioctl(d->tty_out, TIOCGWINSZ, &ws) < 0 || !ws.ws_col) { ws.ws_col = 80; ws.ws_row = 24; }
-        *w = ws.ws_col * 2;
-        *h = ws.ws_row * 4;
+        *w = ws.ws_col * (d->halfblock ? 1 : 2);
+        *h = ws.ws_row * (d->halfblock ? 2 : 4);
         return;
     }
     *w = *h = d->size;
 }
 
-/* Bind where the finished frame goes: a square of side s, centred. */
-static void display_target(Display *d, int s) {
+/* Bind where the finished frame goes: w by h pixels, centred. */
+static void display_target(Display *d, int w, int h) {
     if (d->dest == DEST_WINDOW) {
-        int w, h;
-        SDL_GetWindowSizeInPixels(d->win, &w, &h);
+        int ww, wh;
+        SDL_GetWindowSizeInPixels(d->win, &ww, &wh);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        glViewport(0, 0, w, h);
+        glViewport(0, 0, ww, wh);
         glClearColor(0, 0, 0, 1);
         glClear(GL_COLOR_BUFFER_BIT);
-        glViewport((w - s) / 2, (h - s) / 2, s, s);
+        glViewport((ww - w) / 2, (wh - h) / 2, w, h);
         return;
     }
-    if (s != d->fs) {
+    if (w != d->fw || h != d->fh) {
         if (d->fbo) { glDeleteFramebuffers(1, &d->fbo); glDeleteTextures(1, &d->tex); }
         glGenTextures(1, &d->tex);
         glBindTexture(GL_TEXTURE_2D, d->tex);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, s, s, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
         glGenFramebuffers(1, &d->fbo);
         glBindFramebuffer(GL_FRAMEBUFFER, d->fbo);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, d->tex, 0);
-        d->pix = realloc(d->pix, (size_t)s * s * 4);
-        d->fs = s;
+        d->pix = realloc(d->pix, (size_t)w * h * 4);
+        d->fw = w;
+        d->fh = h;
         if (d->dest == DEST_TERM && write(d->tty_out, "\x1b[2J", 4) < 0) {}
     }
     glBindFramebuffer(GL_FRAMEBUFFER, d->fbo);
-    glViewport(0, 0, s, s);
+    glViewport(0, 0, w, h);
 }
 
 static void write_all(int fd, const void *p, size_t n) {
@@ -318,17 +327,32 @@ static void write_all(int fd, const void *p, size_t n) {
     }
 }
 
-/* The frame as Braille: each character cell is 2x4 dots, lit where the
-   picture is, coloured by its brightest dot. */
-static void term_braille(Display *d) {
-    static char *out;
-    static size_t cap;
-    int s = d->fs, cw = s / 2, ch = s / 4;
+/* The frame's pixel at (x, y), y from the top (GL rows run bottom-up). */
+static const unsigned char *display_px(Display *d, int x, int y) {
+    return d->pix + ((size_t)(d->fh - 1 - y) * d->fw + x) * 4;
+}
+
+/* Centre a cw x ch block of cells in the terminal: where its rows start. */
+static void term_origin(Display *d, int cw, int ch, int *ox, int *oy) {
     struct winsize ws = {0};
     ioctl(d->tty_out, TIOCGWINSZ, &ws);
-    int ox = ws.ws_col > cw ? (ws.ws_col - cw) / 2 : 0, oy = ws.ws_row > ch ? (ws.ws_row - ch) / 2 : 0;
-    size_t need = (size_t)ch * ((size_t)cw * 24 + 16) + 16;
+    *ox = ws.ws_col > cw ? (ws.ws_col - cw) / 2 : 0;
+    *oy = ws.ws_row > ch ? (ws.ws_row - ch) / 2 : 0;
+}
+
+static char *term_buf(size_t need) {
+    static char *out;
+    static size_t cap;
     if (need > cap) { cap = need; out = realloc(out, cap); }
+    return out;
+}
+
+/* The frame as Braille: each character cell is 2x4 dots, lit where the
+   picture is, coloured by its brightest dot. For a beam. */
+static void term_braille(Display *d) {
+    int cw = d->fw / 2, ch = d->fh / 4, ox, oy;
+    term_origin(d, cw, ch, &ox, &oy);
+    char *out = term_buf((size_t)ch * ((size_t)cw * 24 + 16) + 16);
     size_t n = 0;
     static const int bit[4][2] = {{0x01, 0x08}, {0x02, 0x10}, {0x04, 0x20}, {0x40, 0x80}};
     for (int cy = 0; cy < ch; cy++) {
@@ -338,8 +362,7 @@ static void term_braille(Display *d) {
             int bits = 0, r = 0, g = 0, b = 0;
             for (int dy = 0; dy < 4; dy++)
                 for (int dx = 0; dx < 2; dx++) {
-                    int px = cx * 2 + dx, py = s - 1 - (cy * 4 + dy);   /* GL rows run bottom-up */
-                    const unsigned char *p = d->pix + ((size_t)py * s + px) * 4;
+                    const unsigned char *p = display_px(d, cx * 2 + dx, cy * 4 + dy);
                     if (p[0] * 3 + p[1] * 6 + p[2] > 240) {
                         bits |= bit[dy][dx];
                         if (p[0] > r) r = p[0];
@@ -361,19 +384,40 @@ static void term_braille(Display *d) {
     write_all(d->tty_out, out, n);
 }
 
+/* The frame as half-blocks: each cell is two pixels, the upper half
+   block in the top one's colour on the bottom one's. For a raster. */
+static void term_halfblock(Display *d) {
+    int cw = d->fw, ch = d->fh / 2, ox, oy;
+    term_origin(d, cw, ch, &ox, &oy);
+    char *out = term_buf((size_t)ch * ((size_t)cw * 44 + 16) + 16);
+    size_t n = 0;
+    for (int cy = 0; cy < ch; cy++) {
+        n += (size_t)sprintf(out + n, "\x1b[%d;%dH", oy + cy + 1, ox + 1);
+        for (int cx = 0; cx < cw; cx++) {
+            const unsigned char *t = display_px(d, cx, cy * 2), *u = display_px(d, cx, cy * 2 + 1);
+            n += (size_t)sprintf(out + n, "\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm\xe2\x96\x80",
+                                 t[0], t[1], t[2], u[0], u[1], u[2]);
+        }
+        n += (size_t)sprintf(out + n, "\x1b[0m");
+    }
+    write_all(d->tty_out, out, n);
+}
+
 /* Show the finished frame. */
 static void display_present(Display *d) {
     if (d->dest == DEST_WINDOW) { SDL_GL_SwapWindow(d->win); return; }
-    int s = d->fs;
-    glReadPixels(0, 0, s, s, GL_RGBA, GL_UNSIGNED_BYTE, d->pix);
-    if (d->dest == DEST_TERM) term_braille(d);
-    else {
+    glReadPixels(0, 0, d->fw, d->fh, GL_RGBA, GL_UNSIGNED_BYTE, d->pix);
+    if (d->dest == DEST_TERM) {
+        if (d->halfblock) term_halfblock(d);
+        else term_braille(d);
+    } else {
         static unsigned char *row;
-        row = realloc(row, (size_t)s * 3);
-        for (int y = s - 1; y >= 0; y--) {      /* top row first */
-            for (int x = 0; x < s; x++) memcpy(row + x * 3, d->pix + ((size_t)y * s + x) * 4, 3);
-            write_all(d->frames, row, (size_t)s * 3);
+        row = realloc(row, (size_t)d->fw * 3);
+        for (int y = 0; y < d->fh; y++) {         /* top row first */
+            for (int x = 0; x < d->fw; x++) memcpy(row + x * 3, display_px(d, x, y), 3);
+            write_all(d->frames, row, (size_t)d->fw * 3);
         }
+        if (d->nopace) return;
     }
     double t = now_s();                       /* headless: keep to the frame rate */
     if (d->next == 0 || d->next < t - 0.5) d->next = t;
@@ -416,7 +460,43 @@ static void display_close(Display *d) {
     } else close(d->frames);
 }
 
+/* ------------------------------------------------------------- the tube */
+
+#define CRT_ON  0.8           /* seconds the tube takes to turn on */
+#define CRT_OFF 0.9           /* and off */
+
+static float ease(float x) {
+    x = x < 0 ? 0 : x > 1 ? 1 : x;
+    return x * x * (3 - 2 * x);
+}
+
+/* Turning on: a dot, a line opening sideways, the picture opening up
+   and down, and the flash fading. cx, cy are how much of the picture's
+   width and height are open; flash is the glow of what is open. */
+static void crt_on(double t, float *cx, float *cy, float *flash) {
+    const float e = 0.004f;
+    *cx = t < 0.12 ? e : e + (1 - e) * ease((float)(t - 0.12) / 0.18f);
+    *cy = t < 0.3 ? e : e + (1 - e) * ease((float)(t - 0.3) / 0.3f);
+    *flash = 2.5f * (1 - ease((float)(t / CRT_ON)));
+}
+
+/* And off: the picture collapses to a line, the line to a dot, the dot fades. */
+static void crt_off(double t, float *cx, float *cy, float *flash) {
+    const float e = 0.004f;
+    *cy = 1 - (1 - e) * ease((float)t / 0.3f);
+    *cx = 1 - (1 - e) * ease((float)(t - 0.3) / 0.25f);
+    *flash = 2.5f * ease((float)t / 0.3f) * (1 - ease((float)(t - 0.55) / 0.35f));
+}
+
 /* ---------------------------------------------------------------- GL bits */
+
+static inline int gl_has(const char *ext) {
+    GLint n = 0;
+    glGetIntegerv(GL_NUM_EXTENSIONS, &n);
+    for (GLint i = 0; i < n; i++)
+        if (!strcmp((const char *)glGetStringi(GL_EXTENSIONS, (GLuint)i), ext)) return 1;
+    return 0;
+}
 
 static GLuint gl_shader(GLenum type, const char *src) {
     GLuint s = glCreateShader(type);
@@ -450,7 +530,7 @@ static GLuint gl_program(const char *vs, const char *fs) {
 }
 
 /* A texture to draw into, and its framebuffer. */
-static GLuint gl_target(GLuint *tex, int w, int h, GLenum ifmt, GLenum fmt, GLenum type, GLenum filter) {
+static inline GLuint gl_target(GLuint *tex, int w, int h, GLenum ifmt, GLenum fmt, GLenum type, GLenum filter) {
     glGenTextures(1, tex);
     glBindTexture(GL_TEXTURE_2D, *tex);
     glTexImage2D(GL_TEXTURE_2D, 0, (GLint)ifmt, w, h, 0, fmt, type, NULL);

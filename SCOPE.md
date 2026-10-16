@@ -131,8 +131,9 @@ display, driven by a second engine whose `input()` is the music:
 aither sound.aither | scope | play | aither visuals.aither | tv
 ```
 
-See [notes/displays-2026-10-16.md](notes/displays-2026-10-16.md). `tv`
-isn't built yet, and neither is `play` passing its input on.
+See [TV.md](TV.md) and
+[notes/displays-2026-10-16.md](notes/displays-2026-10-16.md). `play`
+passing its input on isn't built yet.
 
 ## Practicalities
 
@@ -157,4 +158,4 @@ isn't built yet, and neither is `play` passing its input on.
 ## What a beam cannot do
 
 Filled areas, raster fields, textures, much text. Those are `tv`'s
-job.
+job ([TV.md](TV.md)).

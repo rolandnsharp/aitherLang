@@ -863,6 +863,23 @@ def prev(x):                              # one-sample memory
 - `width(stereo_sig, amount)` — mid-side width (0 mono, 1 unchanged, >1 exaggerated)
 - `mono(stereo_sig)` — collapse to single channel
 
+### Raster (`tv`)
+
+- `pixel(w, h)` — the pixel the current sample fills on `tv --size WxH`,
+  as a pair: its centre, x across −1..1, y up, square pixels (y spans
+  ±h/w)
+- `pixel_index(w, h)` — its raster index, 0 .. w·h − 1 (rows top to
+  bottom, each left to right), for state arrays
+- `frame_number(w, h)` — the frame it is in, from 0: for what changes
+  once a frame (a zoom, a morph, which of two state arrays holds last
+  frame's values)
+
+All three follow the engine clock (`t`), so they line up with the samples
+`tv` counts whatever was sent when; the patch and `tv` must agree on
+the size. What the patch returns for a pixel is a complex number: `tv`
+shows its phase as hue and its magnitude as brightness, full at 1.
+See TV.md.
+
 ### Polyphony
 
 - `poly(n_voices, voice_fn)` — fan a per-key synth across N voices

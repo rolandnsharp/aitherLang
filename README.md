@@ -114,6 +114,8 @@ aither | tools/play hw:rockchipes8388c 20     (the uConsole, with AITHER_RATE=44
                                               its codec only does 44.1 kHz; make tools/play builds the player)
 aither set.aither | tools/scope | tools/play hw:rockchipes8388c 20
                                               see it as well: a vector scope on the GPU (make tools/scope, needs sdl3)
+AITHER_RATE=1152000 aither patches/mandelbrot.aither | AITHER_RATE=1152000 tools/tv --size 160x120 > /dev/null
+                                              a picture: each pair a pixel's complex value, as colour (make tools/tv)
 aither set.aither 30 > take.raw               offline: 30 s from t=0, then exit (sox makes the WAV)
 AITHER_RATE=192000 aither fm.aither | sdr-tx  the rate is yours; the reader agrees
 arecord -f FLOAT_LE -c 2 -r 48000 | aither fx.aither | tools/play    input() reads stdin
@@ -352,7 +354,9 @@ high-quality reverb tails simultaneously, use a DAW.
   what to reach for and when
 - [GUIDE.md](GUIDE.md) — hands-on how-to for writing and performing
 - [SCOPE.md](SCOPE.md) — drawing with the beam: the output as x, y and
-  what a trace can show (design, being built)
+  what a trace can show
+- [TV.md](TV.md) — drawing with pixels: the output as a raster of
+  complex values, and what a picture can show
 - [ARCHITECTURE.md](ARCHITECTURE.md) — implementation overview
 - [BUGS_AND_ISSUES.md](BUGS_AND_ISSUES.md) — known issues + session logs
 - [stdlib.aither](stdlib.aither) — the starter kits, in aither

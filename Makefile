@@ -17,6 +17,9 @@ tools/pad: tools/pad.c
 tools/scope: tools/scope.c tools/display.h
 	cc -O2 -Wall tools/scope.c -o tools/scope $$(pkg-config --cflags --libs sdl3) -lEGL -lGLESv2 -lpthread -lm
 
+tools/tv: tools/tv.c tools/display.h
+	cc -O2 -Wall tools/tv.c -o tools/tv $$(pkg-config --cflags --libs sdl3) -lEGL -lGLESv2 -lpthread -lm
+
 # One binary for every test that doesn't touch the engine's voice
 # table (tests/all.nim), then the four that do, each on its own.
 TESTFLAGS := --mm:arc --threads:on --hints:off --warnings:off \
@@ -27,6 +30,6 @@ test:
 	  $(NIM) c -r $(TESTFLAGS) --out:tests/$$t tests/$$t.nim || exit 1; done
 
 clean:
-	rm -rf aither nimcache/ test_parser test_eval test_stdlib tools/play tools/pad tools/scope
+	rm -rf aither nimcache/ test_parser test_eval test_stdlib tools/play tools/pad tools/scope tools/tv
 
 .PHONY: all clean test

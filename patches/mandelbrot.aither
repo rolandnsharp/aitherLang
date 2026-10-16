@@ -1,0 +1,24 @@
+# mandelbrot: the set as a system you watch run, on tv. Every pixel
+# keeps its own z and takes one step of z -> z^2 + c a frame, so the
+# picture grows in. What shows is z smoothed over about 20 frames, which
+# holds the bulbs' cycles still: hue is its phase, brightness how far it
+# has gone. Escaped points freeze, so nothing runs off to infinity.
+#
+#   AITHER_RATE=1152000 ./aither patches/mandelbrot.aither | AITHER_RATE=1152000 tools/tv --size 160x120 > /dev/null
+let w = 160
+let h = 120
+let k = pixel_index(w, h)
+let c = pixel(w, h) * 1.5 - [0.5, 0]
+
+$z = array(2 * w * h)                   # each pixel's z
+$m = array(2 * w * h)                   # ... and what is shown of it
+let z = [$z[2 * k], $z[2 * k + 1]]
+let next = if magnitude(z) > 2 then z else cmul(z, z) + c
+$z[2 * k] = next[0]
+$z[2 * k + 1] = next[1]
+
+let m = [$m[2 * k], $m[2 * k + 1]]
+let seen = m + (next - m) * 0.05
+$m[2 * k] = seen[0]
+$m[2 * k + 1] = seen[1]
+seen / (1 + magnitude(seen))
