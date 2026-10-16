@@ -1,0 +1,22 @@
+# seahorse: a zoom into Seahorse Valley, 60 times deep and back every
+# 20 s, on tv. Each pixel's escape time is worked out afresh every frame
+# by a def rec that stops as soon as the point leaves, smoothed, and
+# shown as hue; the inside of the set is black.
+#
+#   AITHER_RATE=737280 ./aither patches/seahorse.aither | AITHER_RATE=737280 tools/tv --size 128x96 > /dev/null
+#
+# 737 280 = 128 x 96 x 60 frames a second.
+let w = 128
+let h = 96
+let depth = 0.5 - 0.5 * cos(TAU * phasor(1 / 20))
+let c = [-0.743643887, 0.131825904] + pixel(w, h) * (1.5 * pow(1 / 60, depth))
+
+# z -> z^2 + c until it leaves or n runs out: the steps left, and |z|^2.
+# |z|^2 > 4 rather than magnitude(z) > 2: no square root every step.
+def rec escape(z, c, n):
+  if n == 0 or z[0] * z[0] + z[1] * z[1] > 4 then [n, z[0] * z[0] + z[1] * z[1]]
+  else escape(cmul(z, z) + c, c, n - 1)
+
+let e = escape([0, 0], c, 64)
+let smooth = 64 - e[0] + 1 - log2(max(log(e[1]) / 2, 0.0001))
+if e[0] == 0 then [0, 0] else rotate([0.9, 0], TAU * smooth / 16)

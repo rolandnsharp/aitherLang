@@ -206,9 +206,64 @@ numbers at a call are a pair, not a table: a two-entry table
 goes through a `let`. Defs don't return arrays; the pair is
 the only multi-value return.
 
+A def uses a parameter as a pair when it indexes it (`p[0]`),
+hands it to a pair operation (`cmul(p, q)`, `magnitude(p)`),
+passes it to a def that takes a pair there, or does
+arithmetic with it and a pair (`cmul(z, z) + c`); a `def rec`
+that passes itself a pair there counts too. Such a parameter
+takes a pair whole, and a number passed to it fills both
+sides. A def returns a pair when its result is one: a literal
+`[a, b]`, a pair call, a pair parameter, a `let` bound to a
+pair, or arithmetic on one (`def norm(z): z / magnitude(z)`).
+
 `sum`, `each` and `array(N)` accept any compile-time number:
 a literal, a name bound to one, `len(array)`, or arithmetic
 over those (`each(n - 1, …)`).
+
+### Recursion
+
+A def marked `rec` can call itself when the call is the whole
+result of a branch: the def's body, either branch of an `if` in
+that position, or the last line of a block. The call repeats the
+def instead of nesting it. The new arguments are all computed
+from the old values, the parameters take them, and the body runs
+again, so it is a loop that stops when the data says so:
+
+```
+# z -> z^2 + c until it leaves, or n runs out: the steps left
+def rec escape(z, c, n):
+  if n == 0 or magnitude(z) > 2 then n else escape(cmul(z, z) + c, c, n - 1)
+
+def rec fib(n, a = 0, b = 1): if n == 0 then a else fib(n - 1, b, a + b)
+fib(30)                            # 832040
+```
+
+- `rec` says the def loops, as OCaml's `let rec` does: a patch
+  without it always finishes each sample. A def that calls
+  itself without `rec` is a compile error. (A patch's def
+  replaces the stdlib's of the same name, so a wrapper that calls
+  the def it replaces needs a name of its own.) `rec` on a def
+  that never calls itself changes nothing.
+- A call to itself anywhere but a branch's whole result
+  (`fib(n - 1) + fib(n - 2)`) is a compile error: carry the rest
+  of the work in a parameter, as `fib` does. Defs that come back
+  to themselves through another def (`f` → `g` → `f`) are an
+  error too, for now.
+- Only the branch taken runs, so a base case costs nothing
+  until it is reached.
+- Numbers and pairs change from step to step; an array or
+  function parameter is passed on unchanged. A parameter that
+  every repeat passes on unchanged keeps its compile-time
+  number, so `each(n, …)` in the body still folds.
+- Each call site is its own loop, with its own state (see
+  State semantics). Stores to a state array land at once, even
+  when the call sits inside an `each`.
+- Nothing counts the steps. A recursion still running when its
+  voice's block has taken `AITHER_WATCHDOG` seconds (0.5 by
+  default; 0 turns the guard off) gives up, and the block is
+  silent. Within 20 s of a send the voice rolls back to the
+  previous version; otherwise it is muted until it is sent
+  again. The log names the def and its line.
 
 ## First-class functions
 
@@ -920,6 +975,15 @@ call order = same state slots = phase continuity.
 On hot-reload: same call order preserves state. Reordering
 calls may cause phase discontinuity (not a crash).
 
+### `$state` inside a `def rec`
+
+One slot per call site, as in any def, shared by every step of
+the recursion: state belongs to the code, not the iteration.
+`$k = $k + 1` counts every step, `noise()` gives a fresh number
+each step, and an `osc` advances each step, which is rarely
+what you want. `sum` and `each` are the opposite: they unroll
+into copies, and each copy owns its state.
+
 ### `$state` inside `play`
 
 File-level by name (same slot if two plays share a name).
@@ -1055,6 +1119,10 @@ computed once per block instead of every sample: `lp1`/`hp1`'s `exp`,
 the SVF's `tan`, `reverb`'s `pow`s, `phasor`'s division. Same
 arithmetic once, so the same bits (`tests/hoist.nim`); a modulated
 parameter keeps the per-sample path. `AITHER_HOIST=0` turns it off.
+Each voice's block has a deadline, `AITHER_WATCHDOG` seconds (0.5;
+0 for none), which only a recursion can overrun: it checks the clock
+every 65 536 steps, and past the deadline it gives up (see
+Recursion).
 UNIX socket server. Voice table
 with per-part gain fades. Per-voice and master-bus rolling stats
 (RMS, peak, clips, 50 ms envelope bins for sparklines, plus a

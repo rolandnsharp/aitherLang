@@ -84,6 +84,7 @@ type
     master*: StatsSnapshot
     parts*: seq[PartInfo]
     rolledBack*: bool
+    stuck*: bool                 # the guard fired for a recursion that didn't return
     nanEvents*, runawayEvents*: int
     retrying*: bool              # runaway-muted, will fade back in
 

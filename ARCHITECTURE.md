@@ -287,6 +287,14 @@ Single-pass emission from AST to C source:
   Each iteration's stateful primitives claim their own region
   in the state pool — that's why `sum(16, n => phasor(n*f))`
   produces 16 independent phasor states.
+- A `def rec` is the one def that isn't inlined: each call site
+  becomes a C `for (;;)` loop, a repeat in the def's body a
+  `continue` with the parameters reassigned, any other result a
+  `break`. One copy of the body runs again and again, so its state
+  regions are shared by every step. The loop checks the block's
+  deadline every 65 536 steps (`n_overrun`); past it, the voice is
+  flagged `stuck` and the engine rolls it back or mutes it
+  (notes/tail-recursion-2026-10-16.md).
 - Per-helper-type state region tracking. Each call to a stateful
   helper (`phasor`, `lpf`, `discharge`, …) is assigned a unique
   `perTypeIdx` so insertions/deletions migrate cleanly.

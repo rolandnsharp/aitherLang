@@ -28,6 +28,10 @@ let SocketPath = getEnv("AITHER_SOCK", "/tmp/aither.sock")
 # you play on; a streaming engine, where latency is free, can take 2048
 # or more so a slow period doesn't starve the reader.
 let BufferFrames = uint32(envFloat("AITHER_BUFFER", 512.0))
+# Seconds a voice's block may take before a recursion in it gives up
+# (see notes/tail-recursion-2026-10-16.md). 0 turns the guard off, for
+# an offline render whose every sample is legitimately slow.
+let Watchdog = envFloat("AITHER_WATCHDOG", 0.5)
 # The rate. Programs are written in seconds and hertz, never samples, so
 # the same text runs at 48 kHz for sound or 192 kHz for radio; only the
 # reader on the end of the pipe has to agree.
@@ -72,6 +76,8 @@ type
     # sets flags and counters; the doctor thread does the rollback.
     swapAt:       float64   # engine time of the last hot-swap (0 = none)
     wantRollback: bool      # blew up inside RollbackWindow: swap back
+    stuck:        bool      # the last guard to fire was for a recursion
+                            # that didn't return (for the log and `check`)
     rolledBack:   bool      # the last send was rolled back
     badRun:       int       # consecutive NaN samples
     nanEvents:    int
@@ -165,9 +171,31 @@ proc mixBlock(outL, outR: var seq[float64];
     hdr.inBuf = inPtr
     hdr.fadeGain = slots[v].fadeGain
     hdr.fadeDelta = slots[v].fadeDelta
+    hdr.deadline = if Watchdog > 0.0: monoNow() + Watchdog else: 0.0
     voice.tickBlock(frames, blkL[0].addr, blkR[0].addr)
     slots[v].fadeGain = hdr.fadeGain
     slots[v].fadeDelta = hdr.fadeDelta
+    # A recursion that hadn't returned by the deadline gave up, and its
+    # samples came out silent. It would get stuck again every block, so
+    # the voice goes: back to the previous version if this follows a
+    # send, else muted until it is sent again.
+    if hdr.stuck != 0:
+      let msg = "[aither] voice " & slots[v].name & ": " & $hdr.stuckAt &
+                " didn't return within " & $Watchdog & "s"
+      if slots[v].swapAt > 0.0 and t0 - slots[v].swapAt < RollbackWindow and
+         voice.canRollback:
+        stderr.writeLine msg
+        slots[v].stuck = true
+        slots[v].wantRollback = true
+        continue
+      voice.resetPool()
+      voice.scrubState(hard = true)
+      slots[v].stuck = true
+      slots[v].muted = true
+      slots[v].runaway = true
+      slots[v].retryAt = 0.0
+      stderr.writeLine msg & " — muted until resent"
+      continue
     let bad = hdr.bad > 0
     let peak = hdr.peakRaw
     if bad or peak > RollbackLimit:
@@ -176,6 +204,7 @@ proc mixBlock(outL, outR: var seq[float64];
       # puts the previous version back.
       if slots[v].swapAt > 0.0 and t0 - slots[v].swapAt < RollbackWindow and
          voice.canRollback:
+        slots[v].stuck = false
         slots[v].wantRollback = true
         continue
     # NaN/Inf defense: the bad samples were zeroed in C; reset the pool,
@@ -199,6 +228,7 @@ proc mixBlock(outL, outR: var seq[float64];
     if isRunaway(peak, peak):
       voice.resetPool()
       voice.scrubState(hard = true)
+      slots[v].stuck = false
       slots[v].muted = true
       slots[v].runaway = true
       inc slots[v].runawayEvents
@@ -340,7 +370,8 @@ proc doctor() {.thread.} =
         if v.rollback():
           slots[i].rolledBack = true
           slots[i].badRun = 0
-          stderr.writeLine "[aither] " & slots[i].name & " blew up " &
+          stderr.writeLine "[aither] " & slots[i].name &
+            (if slots[i].stuck: " got stuck " else: " blew up ") &
             formatFloat(after, ffDecimal, 1) &
             "s after the swap — rolled back to the previous version"
         slots[i].wantRollback = false
@@ -454,6 +485,7 @@ proc loadPatch*(filename: string; fadeIn: float64): string =
     slots[idx].nanLogged = false           # fresh diagnostics for the new code
     slots[idx].swapAt = now
     slots[idx].wantRollback = false
+    slots[idx].stuck = false
     slots[idx].rolledBack = false
     slots[idx].badRun = 0
     slots[idx].nanEvents = 0
@@ -789,6 +821,7 @@ proc checkSnapshot*(name: string): CheckQuery =
                               gain: s.fadeGain, stats: snapshotStats(s.stats))
     result.parts = snapshotPartsOf(s.voice)
     result.rolledBack = s.rolledBack
+    result.stuck = s.stuck
     result.nanEvents = s.nanEvents
     result.runawayEvents = s.runawayEvents
     result.retrying = s.runaway and s.retryAt > 0.0

@@ -2,7 +2,7 @@
 ## the old bytecode VM. Each voice owns a TCC state (kept alive while
 ## its compiled tick() can run) and a malloc'd VoiceState buffer.
 
-import std/[strutils, tables, sets, os, osproc, locks]
+import std/[strutils, tables, sets, os, osproc, locks, monotimes]
 import parser, tcc, dsp, codegen, midi, engine_types
 
 type
@@ -42,6 +42,13 @@ type
     peakRaw*:       float64
     bad*:           int
     nParts*:        int
+    # Recursion's guard (notes/tail-recursion-2026-10-16.md): the engine
+    # sets a deadline per block (monotonic seconds, 0 for none); a
+    # recursion still running past it gives up, sets `stuck` and leaves
+    # its def and line in `stuckAt`.
+    deadline*:      float64
+    stuck*:         int
+    stuckAt*:       cstring
 
   NativeVoice* = ref object
     state*:     pointer          # malloc'd VoiceState buffer
@@ -109,7 +116,21 @@ proc errHandler(opaque: pointer; msg: cstring) {.cdecl.} =
   lastTccError = $msg
   stderr.writeLine "TCC: ", $msg
 
+proc monoNow*(): float64 =
+  ## Monotonic seconds, for deadlines.
+  float64(getMonoTime().ticks) * 1e-9
+
+# A recursion asks every 65 536 steps whether its block is past the
+# deadline. Past it, the recursion gives up, and so does every later one
+# in the block: they see `stuck` before they start.
+proc nOverrun(s: ptr VoiceHeader; where: cstring): clong {.cdecl.} =
+  if s.deadline <= 0.0 or monoNow() < s.deadline: return 0
+  s.stuck = 1
+  s.stuckAt = where
+  1
+
 proc registerNatives(s: TccState) =
+  discard s.addSymbol("n_overrun",   cast[pointer](nOverrun))
   discard s.addSymbol("n_lpf",       cast[pointer](nLpf))
   discard s.addSymbol("n_hpf",       cast[pointer](nHpf))
   discard s.addSymbol("n_bpf",       cast[pointer](nBpf))

@@ -29,6 +29,11 @@ tried and dropped; each doc says so near the top where that's the case.
   and `tv` (raster, domain colouring) as filters on the pair stream;
   two live-coded engines, one for sound and one for visuals; no
   effects in the displays. Both built.
+- [tail-recursion-2026-10-16.md](tail-recursion-2026-10-16.md) — a
+  `def rec` may call itself as the whole result of a branch, and the
+  call compiles to a loop that can stop early. No count limit in the
+  language; the engine rolls back or mutes a recursion that doesn't
+  return.
 
 **Design notebooks**
 - [cybernetics.md](cybernetics.md) — the cybernetic-synthesis tradition

@@ -146,6 +146,15 @@ type
     # body reads the array as it was before the step.
     eachDepth: int
     deferred: string
+    # Recursion (notes/tail-recursion-2026-10-16.md): a def that calls
+    # itself compiles to a loop at each call site. `recursive` holds
+    # those defs; `tailChecked` the ones whose calls to themselves are
+    # all repeats. `stereoSeen` / `pureSeen` stop the def walks of
+    # isStereoDef / isPureForStereo from following a def into itself.
+    recursive: HashSet[string]
+    tailChecked: HashSet[string]
+    stereoSeen: HashSet[string]
+    pureSeen: HashSet[string]
 
 # Native dsp.nim primitives callable from generated C.
 # Name -> arity (not counting the state pointer).
@@ -189,7 +198,7 @@ void tick(VoiceState* s, double* outL, double* outR) {
 void tick_block(VoiceState* s, long n, double* outL, double* outR) {
   const long np = s->n_parts;
   hoist_init(s);
-  s->bad = 0; s->peak_raw = 0.0;
+  s->bad = 0; s->peak_raw = 0.0; s->stuck = 0;
   for (long i = 0; i < n; i++) {
     s->time_frac += s->dt;
     if (s->time_frac >= 1.0) { s->time_sec += 1.0; s->time_frac -= 1.0; }
@@ -542,16 +551,32 @@ proc pairVarRef(name: string; k: int): string = "s->v_" & pairVarField(name, k)
 
 # A def takes a param as a pair when its body reads it as one: indexes
 # it with a constant `p[0]` / `p[1]`, hands it straight to a pair
-# operation (`cmul(p, q)`, `magnitude(p)`), or passes it on to another
-# def that takes a pair there. Such a param is bound whole, so
-# `def mono(s): (s[0] + s[1]) * 0.5` sees both channels instead of
-# being run once per channel. A plain number passed to a pair param
-# fills both sides.
+# operation (`cmul(p, q)`, `magnitude(p)`), passes it on to another
+# def that takes a pair there, or does arithmetic with it and a pair
+# (`cmul(z, z) + c`). A `def rec` that passes a pair to itself takes a
+# pair there. Such a param is bound whole, so `def mono(s): (s[0] +
+# s[1]) * 0.5` sees both channels instead of being run once per
+# channel. A plain number passed to a pair param fills both sides.
 proc pairParams(c: Ctx; def: Node): seq[bool] =
   if def.str in c.pairParamCache: return c.pairParamCache[def.str]
   var res = newSeq[bool](def.params.len)
   c.pairParamCache[def.str] = res          # guard against call cycles
-  proc mark(c: Ctx; res: var seq[bool]; params: seq[string]; n: Node) =
+  # A pair, as far as the body shows so far: a param marked one, a
+  # literal pair, a pair operation, or arithmetic on one of those.
+  proc isPair(res: seq[bool]; params: seq[string]; n: Node): bool =
+    if n == nil: return false
+    case n.kind
+    of nkIdent:
+      let k = params.find(n.str)
+      k >= 0 and res[k]
+    of nkArr: n.kids.len == 2
+    of nkCall: n.str in PairCalls
+    of nkBinOp:
+      n.str in ["+", "-", "*", "/"] and n.kids.anyIt(isPair(res, params, it))
+    of nkUnary: n.str == "-" and isPair(res, params, n.kids[0])
+    else: false
+  proc mark(c: Ctx; res: var seq[bool]; params: seq[string]; self: string;
+            n: Node) =
     if n == nil: return
     case n.kind
     of nkIdx:
@@ -559,12 +584,20 @@ proc pairParams(c: Ctx; def: Node): seq[bool] =
       if a.kind == nkIdent and i.kind == nkNum and int(i.num) in {0, 1}:
         let k = params.find(a.str)
         if k >= 0: res[k] = true
+    of nkBinOp:
+      if n.str in ["+", "-", "*", "/"] and n.kids.anyIt(isPair(res, params, it)):
+        for x in n.kids:
+          if x.kind == nkIdent:
+            let k = params.find(x.str)
+            if k >= 0: res[k] = true
     of nkCall:
       let callee =
         if n.str in c.userDefs and n.str notin PairCalls and
            n.str notin PairReaders: c.pairParams(c.userDefs[n.str])
         else: @[]
       for j, arg in n.kids:
+        if n.str == self and j < res.len and isPair(res, params, arg):
+          res[j] = true
         if arg.kind != nkIdent: continue
         let k = params.find(arg.str)
         if k < 0: continue
@@ -572,9 +605,13 @@ proc pairParams(c: Ctx; def: Node): seq[bool] =
            (j < callee.len and callee[j]):
           res[k] = true
     else: discard
-    for k in n.kids: mark(c, res, params, k)
-  mark(c, res, def.params, def.kids[0])
-  c.pairParamCache[def.str] = res
+    for k in n.kids: mark(c, res, params, self, k)
+  # A mark can make more arithmetic a pair, so walk until nothing changes.
+  while true:
+    let before = res
+    mark(c, res, def.params, def.str, def.kids[0])
+    c.pairParamCache[def.str] = res
+    if res == before: break
   res
 
 proc hasPairParams(c: Ctx; name: string): bool =
@@ -619,8 +656,41 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal
 # final expression (all branches of nested ifs / blocks) is an nkArr of
 # length 2 or a call to another stereo-returning def.
 proc isStereoReturn(c: Ctx; n: Node): bool
+
+# Inside a def body, `names` are the names known to hold a pair: its
+# pair params (see pairParams) and the lets bound to a pair so far. A
+# result that is one of them, or arithmetic on one, is a pair too, so
+# `def norm(z): z / magnitude(z)` and a recursion's `then z` return
+# pairs.
+proc stereoIn(c: Ctx; n: Node; names: HashSet[string]): bool =
+  if n == nil: return false
+  case n.kind
+  of nkIdent: n.str in names
+  of nkBinOp, nkUnary: n.kids.anyIt(c.stereoIn(it, names))
+  of nkBlock:
+    var names = names
+    for i, k in n.kids:
+      if i == n.kids.len - 1: return c.stereoIn(k, names)
+      if k.kind == nkLet:
+        if c.stereoIn(k.kids[0], names): names.incl k.str
+        else: names.excl k.str
+    false
+  of nkIf:
+    c.stereoIn(n.kids[1], names) or c.stereoIn(n.kids[2], names)
+  else: c.isStereoReturn(n)
+
+# A def that calls itself is walked once: its repeat says nothing about
+# the result, its other branches decide.
 proc isStereoDef(c: Ctx; def: Node): bool =
-  isStereoReturn(c, def.kids[0])
+  if def.str in c.stereoSeen: return false
+  c.stereoSeen.incl def.str
+  defer: c.stereoSeen.excl def.str
+  var names = initHashSet[string]()
+  let pairs = c.pairParams(def)
+  for i, p in def.params:
+    if pairs[i]: names.incl p
+  c.stereoIn(def.kids[0], names)
+
 proc isStereoReturn(c: Ctx; n: Node): bool =
   if n == nil: return false
   case n.kind
@@ -652,8 +722,11 @@ proc isPureForStereo(c: Ctx; n: Node): bool =
     if n.str in ["sum", "each", "array"]: return false
     if n.str in ["phasor", "phasor_pair", "noise", "midi_trig"]: return false
     if NativeArities.hasKey(n.str): return false
-    if n.str in c.userDefs:
-      if not isPureForStereo(c, c.userDefs[n.str].kids[0]): return false
+    if n.str in c.userDefs and n.str notin c.pureSeen:
+      c.pureSeen.incl n.str
+      let pure = isPureForStereo(c, c.userDefs[n.str].kids[0])
+      c.pureSeen.excl n.str
+      if not pure: return false
   of nkLambda: return false      # conservative: lambda bodies may be stateful
   else: discard
   for k in n.kids:
@@ -740,6 +813,84 @@ proc nativeAt(c: Ctx; off: string; args: openArray[string]; call: string): strin
     names.add t
   "(({ " & pre & "s->idx = " & off & "; " & call % names & "; }))"
 
+# An argument bound at compile time rather than evaluated each sample:
+# a lambda, a function, or an array. Binds `p` in `inner` and says
+# so; false leaves `a` to be evaluated as a value.
+proc bindByName(c: Ctx; sc, inner: Scope; p: string; a: Node;
+                preface: var string): bool =
+  # Lambda-valued arg: either a literal `(a, b) => ...` at the call
+  # site, or an ident that already resolves to a lambda in scope (the
+  # def-of-def case where one def passes its own lambda param to
+  # another). Bind in inner.lambdas so callees of `p(...)` inline the
+  # body. Checked before isFnName because a lambda doesn't satisfy
+  # isFnName but must take the function-arg slot all the same.
+  if a.kind == nkLambda:
+    inner.lambdas[p] = a
+    return true
+  if a.kind == nkIdent:
+    let lam = sc.lookupLambda(a.str)
+    if lam != nil:
+      inner.lambdas[p] = lam
+      return true
+  # Function-valued arg: a bare ident naming a known builtin/def. Bind
+  # in inner.fns so calls to `p(...)` resolve to the concrete function.
+  # isFnName respects shadowing — a local `let saw = ...` (or any other
+  # value binding) wins over a same-named stdlib def, so this branch
+  # won't steal a scalar arg from the caller.
+  if a.kind == nkIdent and isFnName(c, sc, a.str):
+    let resolved = if sc.lookupFn(a.str).len > 0: sc.lookupFn(a.str)
+                   else: a.str
+    inner.fns[p] = resolved
+    return true
+  # Array arg: bound by name, never copied. A def that indexes its
+  # param or takes len(param) sees the caller's array (a table, this
+  # sample's local array, or a state array), and len() folds at this
+  # call site, so one def serves any length and sizes its own state
+  # by its argument. Writes land in the caller's array.
+  if a.kind == nkIdent and sc.lookup(a.str).len == 0 and
+     not sc.lookupStereo(a.str).ok:
+    let sa = c.lookupSarray(sc, a.str)
+    if sa.ok:
+      inner.sarrays[p] = (sa.base, sa.n)
+      return true
+    let la = c.lookupLarray(sc, a.str)
+    if la.ok:
+      inner.larrays[p] = (la.sym, la.n)
+      return true
+    let ca = c.lookupArray(sc, a.str)
+    if ca.ok:
+      inner.arrays[p] = (ca.sym, ca.length)
+      return true
+  if a.kind == nkArr and a.kids.len != 2:
+    # An array written at the call: a table when it is all numbers,
+    # else this sample's values, built in the caller's scope. (Two
+    # numbers are a pair; a two-entry table goes through a let.)
+    if a.kids.len > 0 and a.kids.allIt(it.kind == nkNum):
+      let sym = c.fresh("arr_arg_" & p)
+      var items: seq[string] = @[]
+      for k in a.kids: items.add numLit(k.num)
+      c.arrayDecls.add &"static const double {sym}[{a.kids.len}] = {{" &
+        items.join(", ") & "};\n"
+      inner.arrays[p] = (sym, a.kids.len)
+    else:
+      let tmp = c.fresh("arg_" & p)
+      var sub = ""
+      c.declareLocalArray(sc, tmp, a, sub)
+      preface.add sub
+      inner.larrays[p] = sc.larrays[tmp]
+    return true
+  false
+
+# A def reached again while it is still being inlined has come back to
+# itself through another def (f -> g -> f). Only a def calling itself
+# repeats, so this can't compile yet.
+proc cycleError(c: Ctx; def, call: Node): ref ValueError =
+  let chain = c.defStack[c.defStack.find(def.str) .. ^1] & @[def.str]
+  newException(ValueError,
+    chain.join(" -> ") & ": " & def.str & " comes back to itself " &
+    "through another def " & errLoc(call) & ". A def can repeat by " &
+    "calling itself, but a cycle through other defs can't repeat yet")
+
 # Inline a user def call. Substitute param names with the evaluated C
 # expressions (bound to fresh locals to avoid re-evaluating side effects),
 # emit let/var handling inside a statement expression.
@@ -749,6 +900,7 @@ proc emitDefInline(c: Ctx; sc: Scope; def: Node; call: Node): string =
     raise newException(ValueError,
       "wrong arg count for " & def.str & ": expected " &
       $def.params.len & " got " & $args.len & " " & errLoc(call))
+  if def.str in c.defStack: raise c.cycleError(def, call)
   let inner = push(sc)
   var preface = ""
   let pairs = c.pairParams(def)
@@ -765,67 +917,7 @@ proc emitDefInline(c: Ctx; sc: Scope; def: Node; call: Node): string =
       preface.add &"double {tmpL} = ({sv.l}); double {tmpR} = ({sv.r}); "
       inner.stereoNames[p] = (tmpL, tmpR)
       continue
-    # Lambda-valued arg: either a literal `(a, b) => ...` at the call
-    # site, or an ident that already resolves to a lambda in scope (the
-    # def-of-def case where one def passes its own lambda param to
-    # another). Bind in inner.lambdas so callees of `p(...)` inline the
-    # body. Checked before isFnName because a lambda doesn't satisfy
-    # isFnName but must take the function-arg slot all the same.
-    if a.kind == nkLambda:
-      inner.lambdas[p] = a
-      continue
-    if a.kind == nkIdent:
-      let lam = sc.lookupLambda(a.str)
-      if lam != nil:
-        inner.lambdas[p] = lam
-        continue
-    # Function-valued arg: a bare ident naming a known builtin/def. Bind
-    # in inner.fns so calls to `p(...)` resolve to the concrete function.
-    # isFnName respects shadowing — a local `let saw = ...` (or any other
-    # value binding) wins over a same-named stdlib def, so this branch
-    # won't steal a scalar arg from the caller.
-    if a.kind == nkIdent and isFnName(c, sc, a.str):
-      let resolved = if sc.lookupFn(a.str).len > 0: sc.lookupFn(a.str)
-                     else: a.str
-      inner.fns[p] = resolved
-      continue
-    # Array arg: bound by name, never copied. A def that indexes its
-    # param or takes len(param) sees the caller's array (a table, this
-    # sample's local array, or a state array), and len() folds at this
-    # call site, so one def serves any length and sizes its own state
-    # by its argument. Writes land in the caller's array.
-    if a.kind == nkIdent and sc.lookup(a.str).len == 0 and
-       not sc.lookupStereo(a.str).ok:
-      let sa = c.lookupSarray(sc, a.str)
-      if sa.ok:
-        inner.sarrays[p] = (sa.base, sa.n)
-        continue
-      let la = c.lookupLarray(sc, a.str)
-      if la.ok:
-        inner.larrays[p] = (la.sym, la.n)
-        continue
-      let ca = c.lookupArray(sc, a.str)
-      if ca.ok:
-        inner.arrays[p] = (ca.sym, ca.length)
-        continue
-    if a.kind == nkArr and a.kids.len != 2:
-      # An array written at the call: a table when it is all numbers,
-      # else this sample's values, built in the caller's scope. (Two
-      # numbers are a pair; a two-entry table goes through a let.)
-      if a.kids.len > 0 and a.kids.allIt(it.kind == nkNum):
-        let sym = c.fresh("arr_arg_" & p)
-        var items: seq[string] = @[]
-        for k in a.kids: items.add numLit(k.num)
-        c.arrayDecls.add &"static const double {sym}[{a.kids.len}] = {{" &
-          items.join(", ") & "};\n"
-        inner.arrays[p] = (sym, a.kids.len)
-      else:
-        let tmp = c.fresh("arg_" & p)
-        var sub = ""
-        c.declareLocalArray(sc, tmp, a, sub)
-        preface.add sub
-        inner.larrays[p] = sc.larrays[tmp]
-      continue
+    if c.bindByName(sc, inner, p, a, preface): continue
     # Scalar arg: evaluate in caller scope, bind to fresh local.
     let argC = c.emitExpr(sc, a)
     let tmp = c.fresh("p_" & p)
@@ -1134,6 +1226,234 @@ proc emitBlockExpr(c: Ctx; sc: Scope; blk: Node): string =
       return "({ " & pre & "double __r = (" & v & "); __r; })"
     c.emitLocalStmt(sc, s, pre)
   "0.0"   # empty block
+
+# ---- recursion ----------------------------------------------------------
+# A def that calls itself (notes/tail-recursion-2026-10-16.md) compiles
+# to a loop at each call site instead of being inlined. A call to itself
+# that is the whole result of a branch is a repeat: the new arguments are
+# computed from the old values, the parameters take them, and the body
+# runs again. Nothing counts the steps. A recursion still running at its
+# block's deadline gives up (n_overrun), and the engine rolls the voice
+# back or mutes it.
+
+type RecLoop = object
+  def: Node
+  vars: seq[tuple[l, r: string]]   # each parameter's loop variable(s); "" when bound by name
+  pairs: seq[bool]                 # parameters that hold a pair
+  pair: bool                       # the def returns a pair
+  rl, rr: string                   # where the result goes
+
+# The first call a def's body makes to the def itself, or nil.
+proc selfCall(def: Node): Node =
+  proc walk(name: string; n: Node): Node =
+    if n == nil: return nil
+    if n.kind == nkCall and n.str == name: return n
+    for k in n.kids:
+      let found = walk(name, k)
+      if found != nil: return found
+    nil
+  walk(def.str, def.kids[0])
+
+# The defs that repeat: those marked `def rec` that call themselves. A
+# def that calls itself without the mark is a mistake, often a wrapper
+# reaching for the stdlib def it replaces.
+proc markRecursion(c: Ctx) =
+  for name, def in c.userDefs:
+    let call = selfCall(def)
+    if call == nil: continue
+    if not def.isRec:
+      raise newException(ValueError,
+        name & " calls itself " & errLoc(call) & ". Write def rec " & name &
+        " to make it repeat. (A def can't call the one it replaces: a " &
+        "wrapper needs a name of its own.)")
+    c.recursive.incl name
+
+# A C string literal: a def's name and line, for the log.
+proc cLiteral(s: string): string =
+  result = "\""
+  for ch in s:
+    if ch in {'"', '\\'}: result.add '\\'
+    result.add ch
+  result.add '"'
+
+# Every call a def makes to itself has to be a repeat: the body, either
+# branch of an `if` that is one, or the last line of a block that is one.
+proc checkRepeats(c: Ctx; def: Node) =
+  if def.str in c.tailChecked: return
+  proc walk(def, n: Node; tail: bool) =
+    if n == nil: return
+    case n.kind
+    of nkCall:
+      if n.str == def.str and not tail:
+        raise newException(ValueError,
+          def.str & " calls itself inside an expression " & errLoc(n) &
+          ". A def repeats only when the call is the whole result of a " &
+          "branch: if done then x else " & def.str & "(...). Carry the " &
+          "rest of the work in a parameter instead, like def fib(n, " &
+          "a = 0, b = 1): if n == 0 then a else fib(n - 1, b, a + b)")
+      for k in n.kids: walk(def, k, false)
+    of nkIf:
+      walk(def, n.kids[0], false)
+      walk(def, n.kids[1], tail)
+      walk(def, n.kids[2], tail)
+    of nkBlock:
+      for i, k in n.kids: walk(def, k, tail and i == n.kids.len - 1)
+    else:
+      for k in n.kids: walk(def, k, false)
+  walk(def, def.kids[0], true)
+  c.tailChecked.incl def.str
+
+# The parameters some repeat changes: it passes something other than the
+# parameter itself. A name that a `let` or `$` in the body rebinds counts
+# as changed.
+proc changingParams(def: Node): seq[bool] =
+  result = newSeq[bool](def.params.len)
+  proc binds(n: Node; names: var HashSet[string]) =
+    if n == nil: return
+    if n.kind in {nkLet, nkVar}: names.incl n.str
+    for k in n.kids: binds(k, names)
+  var rebound = initHashSet[string]()
+  binds(def.kids[0], rebound)
+  proc walk(def, n: Node; rebound: HashSet[string]; res: var seq[bool]) =
+    if n == nil: return
+    if n.kind == nkCall and n.str == def.str:
+      for i, a in n.kids:
+        if i < res.len and not (a.kind == nkIdent and
+                                a.str == def.params[i] and
+                                a.str notin rebound):
+          res[i] = true
+    for k in n.kids: walk(def, k, rebound, res)
+  walk(def, def.kids[0], rebound, result)
+
+# The tail of a recursive def's body, as C statements inside the loop:
+# a real branch for each `if` (only the branch taken runs), `continue`
+# for a repeat, `break` with the result for anything else.
+proc emitTail(c: Ctx; sc: Scope; lp: RecLoop; n: Node; o: var string) =
+  case n.kind
+  of nkBlock:
+    let inner = push(sc)
+    for i, st in n.kids:
+      if i == n.kids.len - 1: c.emitTail(inner, lp, st, o)
+      else: c.emitLocalStmt(inner, st, o)
+    return
+  of nkIf:
+    let cond = c.scalarValue(sc, n.kids[0], o, "the condition")
+    o.add &"  if (({cond}) != 0.0) {{\n"
+    c.emitTail(sc, lp, n.kids[1], o)
+    o.add "  } else {\n"
+    let els = if n.kids[2] != nil: n.kids[2]
+              else: Node(kind: nkNum, num: 0.0, line: n.line, source: n.source)
+    c.emitTail(sc, lp, els, o)
+    o.add "  }\n"
+    return
+  of nkCall:
+    if n.str == lp.def.str:
+      let def = lp.def
+      if n.kids.len != def.params.len:
+        raise newException(ValueError,
+          "wrong arg count for " & def.str & ": expected " &
+          $def.params.len & " got " & $n.kids.len & " " & errLoc(n))
+      # Every new value first, from the old ones; then the parameters
+      # take them all at once.
+      var assigns = ""
+      for i, a in n.kids:
+        let p = def.params[i]
+        let v = lp.vars[i]
+        if v.l.len == 0:
+          if not (a.kind == nkIdent and a.str == p):
+            raise newException(ValueError,
+              def.str & " passes a different array or function as '" & p &
+              "' " & errLoc(n) & ": an array or function parameter is " &
+              "passed on unchanged when a def repeats")
+          continue
+        if lp.pairs[i]:
+          if a.kind == nkIdent and sc.lookupStereo(a.str).l == v.l: continue
+          let sv = c.emitStereo(sc, a, o)
+          let tl = c.fresh("next_" & p & "_l")
+          let tr = c.fresh("next_" & p & "_r")
+          o.add &"  double {tl} = ({sv.l}); double {tr} = ({sv.r});\n"
+          assigns.add &"  {v.l} = {tl}; {v.r} = {tr};\n"
+        else:
+          if a.kind == nkIdent and sc.lookup(a.str) == v.l: continue
+          let x = c.scalarValue(sc, a, o, def.str & "'s " & p)
+          let t = c.fresh("next_" & p)
+          o.add &"  double {t} = ({x});\n"
+          assigns.add &"  {v.l} = {t};\n"
+      o.add assigns
+      o.add "  continue;\n"
+      return
+  else: discard
+  if lp.pair:
+    let v = c.emitStereo(sc, n, o)
+    o.add &"  {lp.rl} = ({v.l}); {lp.rr} = ({v.r}); break;\n"
+  else:
+    let v = c.scalarValue(sc, n, o, "the result of " & lp.def.str)
+    o.add &"  {lp.rl} = ({v}); break;\n"
+
+# A call to a recursive def: C statements that run the loop, and the C
+# names of its result (`l` and `r` are the same name for a number).
+proc emitLoop(c: Ctx; sc: Scope; def, call: Node; pair: bool):
+    tuple[stmts, l, r: string] =
+  let args = call.kids
+  if args.len != def.params.len:
+    raise newException(ValueError,
+      "wrong arg count for " & def.str & ": expected " &
+      $def.params.len & " got " & $args.len & " " & errLoc(call))
+  if def.str in c.defStack: raise c.cycleError(def, call)
+  c.checkRepeats(def)
+  let changing = changingParams(def)
+  var lp = RecLoop(def: def, pairs: c.pairParams(def), pair: pair)
+  let inner = push(sc)
+  var o = ""
+  for i, p in def.params:
+    let a = args[i]
+    if lp.pairs[i]:
+      let sv = c.emitStereo(sc, a, o)
+      let vl = c.fresh("rec_" & p & "_l")
+      let vr = c.fresh("rec_" & p & "_r")
+      o.add &"  double {vl} = ({sv.l}); double {vr} = ({sv.r});\n"
+      inner.stereoNames[p] = (vl, vr)
+      lp.vars.add (vl, vr)
+      continue
+    var sub = ""
+    if c.bindByName(sc, inner, p, a, sub):
+      o.add sub
+      lp.vars.add ("", "")
+      continue
+    let v = c.scalarValue(sc, a, o, def.str & "'s " & p)
+    let vn = c.fresh("rec_" & p)
+    o.add &"  double {vn} = ({v});\n"
+    inner.names[p] = vn
+    # A parameter no repeat changes keeps its compile-time value, so
+    # each(n, ...) and array(n) in the body still see it.
+    if not changing[i]:
+      let cv = c.constValue(sc, a)
+      if cv.ok: inner.numLits[p] = cv.val
+    lp.vars.add (vn, "")
+  lp.rl = c.fresh("rec_" & def.str)
+  lp.rr = if pair: c.fresh("rec_" & def.str & "_r") else: lp.rl
+  let steps = c.fresh("steps")
+  let giveUp = if pair: &"{lp.rl} = {lp.rr} = 0.0 / 0.0;"
+               else: &"{lp.rl} = 0.0 / 0.0;"
+  let where = cLiteral(def.str & " " & errLoc(def))
+  o.add (if pair: &"  double {lp.rl}, {lp.rr};\n" else: &"  double {lp.rl};\n")
+  o.add &"  long {steps} = 0;\n"
+  o.add &"  if (s->stuck) {{ {giveUp} }} else for (;;) {{\n"
+  o.add &"  if ((++{steps} & 65535) == 0 && n_overrun((void*)s, {where})) " &
+        &"{{ {giveUp} break; }}\n"
+  # The body is the def's (its state regions are owned by it), and its
+  # stores land at once even when the call sits inside an `each`.
+  c.defStack.add def.str
+  let depth = c.eachDepth
+  let deferred = c.deferred
+  c.eachDepth = 0
+  c.deferred = ""
+  c.emitTail(inner, lp, def.kids[0], o)
+  c.eachDepth = depth
+  c.deferred = deferred
+  discard c.defStack.pop()
+  o.add "  }\n"
+  (o, lp.rl, lp.rr)
 
 # phasor(freq) inlined: one pool slot, advance, return wrapped value.
 proc emitPhasor(c: Ctx; sc: Scope; freqNode: Node): string =
@@ -1644,8 +1964,11 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
         slots.add "$" & $(i + 1)
       return c.nativeAt(off, args,
                         "n_" & name & "((DspState*)s, " & slots.join(", ") & ")")
-    # User def inline
+    # User def inline; a def that calls itself runs as a loop.
     if name in c.userDefs:
+      if name in c.recursive:
+        let lp = c.emitLoop(sc, c.userDefs[name], n, pair = false)
+        return "(({\n" & lp.stmts & "  " & lp.l & "; }))"
       return c.emitDefInline(sc, c.userDefs[name], n)
     raise newException(ValueError,
       "unknown function: " & name & " " & errLoc(n))
@@ -1925,6 +2248,11 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
         raise newException(ValueError,
           "wrong arg count for " & n.str & ": expected " &
           $def.params.len & " got " & $n.kids.len & " " & errLoc(n))
+      if n.str in c.recursive:
+        let lp = c.emitLoop(sc, def, n, pair = true)
+        pre.add lp.stmts
+        return (lp.l, lp.r, true)
+      if def.str in c.defStack: raise c.cycleError(def, n)
       let inner = push(sc)
       let tmpL = c.fresh("st_" & n.str & "_l")
       let tmpR = c.fresh("st_" & n.str & "_r")
@@ -2293,6 +2621,7 @@ proc emit*(c: Ctx; program: Node): string =
   pre.add "extern double n_midi_voice_gate(int);\n"
   pre.add "extern double n_input_l(void);\n"
   pre.add "extern double n_input_r(void);\n"
+  pre.add "extern long n_overrun(void*,const char*);\n"
   # VoiceState — DspState prefix is *exactly* the Nim layout; new fields
   # go after.
   # NOTE: voice.nim depends on this exact layout for state migration:
@@ -2324,6 +2653,12 @@ proc emit*(c: Ctx; program: Node): string =
   pre.add "  double  peak_raw;\n"            # loudest |sample| before the fade, this block
   pre.add "  long    bad;\n"                 # non-finite samples this block (zeroed)
   pre.add "  long    n_parts;\n"
+  # Recursion's guard: the engine's deadline for this block (monotonic
+  # seconds, 0 for none); a recursion that gives up sets `stuck` and
+  # leaves its name and line in `stuck_at`.
+  pre.add "  double  deadline;\n"
+  pre.add "  long    stuck;\n"
+  pre.add "  const char* stuck_at;\n"
   for vn in c.topVarNames:
     pre.add "  double v_" & vn & ";\n"
   pre.add "  unsigned char inited[" & $max(1, c.topVarNames.len) & "];\n"
@@ -2726,6 +3061,7 @@ proc generateFull*(program: Node; patchPath: string = "";
   c.patchPath = patchPath
   c.sr = sr
   c.normalizeCalls(program)
+  c.markRecursion()
   var src = c.emit(program)
   finaliseLayout(c, src)
   (src, c.topVarNames, c.playNames, c.unheard, c.regions)

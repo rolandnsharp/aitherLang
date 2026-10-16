@@ -111,12 +111,15 @@ proc formatCheck*(q: CheckQuery): string =
   var lines = @[formatMeterLine(q.voice.name, q.voice.stats) &
                 "  [" & voiceStateWord(q.voice.state) & "]"]
   if q.rolledBack:
-    lines.add "  ROLLED BACK: it blew up right after the swap; the previous " &
-              "version is playing. Fix the patch and send again."
+    lines.add "  ROLLED BACK: " &
+              (if q.stuck: "a recursion didn't return right after the swap"
+               else: "it blew up right after the swap") &
+              "; the previous version is playing. Fix the patch and send again."
   if q.retrying:
     lines.add "  RUNAWAY: muted, state wiped, fading back in shortly"
   elif q.voice.state == vsRunaway:
-    lines.add "  RUNAWAY: muted until resent"
+    lines.add (if q.stuck: "  STUCK: a recursion didn't return; muted until resent"
+               else: "  RUNAWAY: muted until resent")
   if q.nanEvents > 0:
     lines.add "  NaN: " & $q.nanEvents & " time(s) since the send (state reset)"
   var loudest = 0.0

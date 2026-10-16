@@ -71,11 +71,28 @@ frames, a second state array, and the picture holds still. Julia sets,
 the burning ship and Newton's method are the same patch with one line
 changed.
 
+### Escape time, with `def rec`
+
+A view that moves can't keep per-pixel state: z belongs to the point
+the pixel showed last frame. So a zoom works out each pixel afresh
+every frame, with a recursion that stops as soon as the point leaves
+(`patches/seahorse.aither`):
+
+```
+def rec escape(z, c, n):
+  if n == 0 or z[0] * z[0] + z[1] * z[1] > 4 then [n, z[0] * z[0] + z[1] * z[1]]
+  else escape(cmul(z, z) + c, c, n - 1)
+```
+
+Compare |z|² with 4 rather than `magnitude(z)` with 2: `magnitude`
+takes a square root every step.
+
 ## Practicalities
 
 - **Size against rate.** Frames a second = rate ÷ (w·h). On the
   uConsole, `patches/mandelbrot.aither` runs at 160×120 and 60 frames
-  a second (1.152 MHz).
+  a second (1.152 MHz), and the 64-step zoom at 128×96 (737 kHz) runs
+  at 2.1× real time on mains.
 - **Pictures that hear the music** run at the music's rate: a visuals
   engine whose `input()` is 48 kHz music makes 48 000 pixels a second,
   32×24 at 62.5 frames a second. A larger picture needs the engine to
@@ -91,9 +108,9 @@ changed.
   from the same frame (the Game of Life, a blur, a warp), keep two
   state arrays and swap them with `frame_number`.
 - **A moving view recomputes.** State that belongs to the view, like a
-  fractal's z, can't follow it: work each pixel out afresh every frame.
-  State that belongs to the world, like a simulation's field, can stay
-  put while the view moves over it.
+  fractal's z, can't follow it (escape time above). State that belongs
+  to the world, like a simulation's field, can stay put while the view
+  moves over it.
 - A picture costs CPU like sound, on the same core: a frame is w·h
   samples of the patch.
 

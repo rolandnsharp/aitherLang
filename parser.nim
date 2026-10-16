@@ -29,6 +29,7 @@ type
     num*: float64               # literal value
     params*: seq[string]        # def parameters
     defaults*: seq[Node]        # def parameter defaults, parallel to params (nil: none)
+    isRec*: bool                # `def rec`: the def may call itself, and repeats
     kids*: seq[Node]            # children (interpretation per kind)
     line*: int
     source*: string             # origin (e.g. "stdlib" or "patches/foo.aither")
@@ -41,7 +42,7 @@ type
 # would let it be parsed as a plain identifier, which is friendlier for
 # new code but loses the chance to redirect users running pre-sigil
 # patches with a clear message.
-const Keywords = ["var", "let", "def", "play", "if", "then", "else",
+const Keywords = ["var", "let", "def", "rec", "play", "if", "then", "else",
                   "mod", "and", "or", "not", "import"]
 
 # ----------------------------------------------------------------- tokenizer
@@ -630,6 +631,7 @@ proc parseExpr(p: var Parser): Node = p.parsePipe()
 proc parseDef(p: var Parser): Node =
   let line = p.peek().line
   discard p.expect(tkKeyword)               # 'def'
+  let isRec = p.matchKw("rec")              # 'def rec': it may call itself
   let name = p.expect(tkIdent, "function name").str
   discard p.expect(tkLParen)
   var params: seq[string]
@@ -670,7 +672,7 @@ proc parseDef(p: var Parser): Node =
   let body = if stmts.len == 1: stmts[0]
              else: Node(kind: nkBlock, kids: stmts, line: line)
   Node(kind: nkDef, str: name, params: params, defaults: defaults,
-       kids: @[body], line: line)
+       isRec: isRec, kids: @[body], line: line)
 
 proc parsePlay(p: var Parser): Node =
   let line = p.peek().line
