@@ -1053,6 +1053,81 @@ Three knobs per instrument, eight instruments worth of expressivity
 in one patch. See `patches/acid_complex.aither` for the full kick +
 bass + didge + flute + pads layout.
 
+## Spectral morph: moving the partials, not mixing sounds
+
+The paradigm crossfade above mixes finished sounds by volume, so half
+way through the knob you hear two instruments at once. A spectral
+morph moves every partial's **frequency** instead. One knob takes a
+note from the harmonic series (1, 2, 3, 4 ...) through a metal bar's
+modes (1, 2.778, 5.444, 9 ...) to golden-ratio steps (1, 1.618,
+2.618, 4.236 ...), and the note dissolves into metal as one sound.
+
+This is rare in live coding. Typical live-coding setups sequence notes
+and samples into fixed synths, where a knob reaches a filter or an
+envelope, not the position of each partial. Moving partials live
+needs per-partial frequency control at audio rate, a spectrum you can
+rewrite as a line of math, and a hot reload that keeps the phases
+running. aither has all three, so a MIDI knob (or the gamepad) can
+reshape what a note *is* while it sounds.
+
+`patches/spectra.aither` is the instrument: one held note, morph on
+A, plus stretch, jitter, brightness, pitch, strike, rate and space on
+the other seven gamepad knobs. The pattern:
+
+```
+# the ratio for partial n is a function; three of them to morph between
+#   string  n                 bar  ((2n + 1) / 3)^2       phi  1.618^(n - 1)
+let u = clamp(midi_cc(20) * 2, 0, 1)        # string -> bar, first half
+let w = clamp(midi_cc(20) * 2 - 1, 0, 1)    # bar -> phi, second half
+
+def partial(n, u, w):
+  exp(log(n) * (1 - u) + 2 * log((2 * n + 1) / 3) * (u - w)
+      + (n - 1) * log(1.618) * w)
+
+play tone:
+  sum(20, n =>
+    let pf = f0 * partial(n, u, w)
+    if pf >= sr * 0.45 then 0
+    else sin(TAU * phasor(pf)) / n)
+```
+
+Why it is written this way:
+
+- **Geometric, in logs.** `a^(1-u) * b^u` moves each partial at an
+  even rate in pitch (log frequency), the way the ear hears it; a
+  linear blend moves it at an even rate in hertz. Written as
+  `exp(...)` over logs, and since `sum` unrolls `n` as a literal,
+  every `log` of `n` is a constant: one `exp` per partial per sample.
+  The direct `pow` form cost 112% of an A53 core at 20 partials; this
+  costs 62% with all of spectra's knobs.
+- **Phase-continuous.** Each partial is its own `phasor`, so moving
+  its frequency bends it; nothing restarts or clicks.
+- **The band limit is per partial.** Bar and phi spectra climb fast;
+  `if pf >= sr * 0.45 then 0` drops a partial as it nears Nyquist
+  instead of letting it alias.
+- **Any ratio function works.** `stiff_string`, `plate_partials`, a
+  tuning from a table, or a fourth target: add a weight and a log.
+
+**On a keyboard.** The morph goes inside `midi_keyboard`, and the
+knob reshapes every held note together:
+
+```
+play keys:
+  midi_keyboard((freq, gate) =>
+    sum(8, n =>
+      let pf = freq * partial(n, u, w)
+      if pf >= sr * 0.45 then 0
+      else sin(TAU * phasor(pf)) / n)
+    * adsr(gate, 0.005, 0.3, 0.6, 1.2) * 0.1)
+
+keys |> reverb(2.5, 0.25)
+```
+
+Eight notes held at eight partials each costs 24% of an A53 core, so
+it plays on the uConsole. Play a chord, then sweep the knob: the chord
+stays a chord in rhythm and voicing while its timbre walks from organ
+to bells to something with no name.
+
 ## Drums that sound like a player, not a sequencer
 
 The trick: don't trigger drums at constant velocity from `impulse(rate)`.

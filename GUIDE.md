@@ -275,8 +275,12 @@ and a knob keeps its value when you let go. In a patch they are
 `patches/pad_didge.aither` puts the set's didge on them (lip tension,
 breath, the mouth's two resonances, flare, turbulence, drive, bore
 length); `patches/morph.aither` morphs its body from tube to string to
-bell on A. While a button is held the d-pad is taken from the
-keyboard, so your cursor stays where it is.
+bell on A. `patches/spectra.aither` is a spectral morph: A moves
+every partial of a held note from a string's harmonics to a metal
+bar's modes to golden-ratio steps, one sound throughout, not a
+crossfade (COMPOSING.md, "Spectral morph"). While a button is held
+the d-pad is taken from the keyboard, so your cursor stays where it
+is.
 
 ### Multiple voices
 
