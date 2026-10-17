@@ -60,4 +60,28 @@ for i in 0 ..< aOn.len:
   doAssert aOn[i] == aOff[i], "sample " & $i & ": " & $aOn[i] & " vs " & $aOff[i]
 doAssert peak > 0.001, "the patch made no sound"
 
+# Knobs: midi_cc is read once a block, so a name bound to one, a def
+# parameter given one, and costly pure math over them are invariant.
+# The per-partial exp of a knob-driven spectral morph moves to
+# hoist_init, and the bits stay the same.
+const Knobs = """
+let morph = midi_cc(20)
+let u = clamp(morph * 2, 0, 1)
+def partial(n, u): exp(log(n) * (1 - u) + log(n * n) * u)
+let cut = 400 + 3000 * midi_cc(21)
+sum(4, n => sin(TAU * phasor(110 * partial(n, u))) / n) * 0.1 |> lp1(cut)
+"""
+putEnv("AITHER_HOIST", "1")
+let kOn = csrcOf(Knobs)
+let at = kOn.find("static void hoist_init(")
+let hoistInit = kOn[at .. kOn.find("\n}", at)]
+doAssert hoistInit.count("exp(") >= 4 and "n_midi_cc" in hoistInit,
+  "the knob-driven exps are computed in hoist_init:\n" & hoistInit
+let k1 = render(Knobs)
+putEnv("AITHER_HOIST", "0")
+let k0 = render(Knobs)
+putEnv("AITHER_HOIST", "1")
+for i in 0 ..< k1.len:
+  doAssert k1[i] == k0[i], "knob sample " & $i & ": " & $k1[i] & " vs " & $k0[i]
+
 echo "hoist ok"

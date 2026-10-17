@@ -89,6 +89,12 @@ type
     # `names` preserves the normal scalar-double binding for every other
     # use site — the literal is an *additional* fact, not a replacement.
     numLits: Table[string, float64]
+    # name -> (expression, its scope) for a name bound to an expression
+    # that can't change within a block (see isInvariant): a knob, or
+    # arithmetic over knobs and numbers. Like numLits, an additional
+    # fact beside the `names` binding; it lets hoisting see through
+    # `let morph = midi_cc(20)` and a def param given one.
+    invs: Table[string, tuple[node: Node; sc: Scope]]
 
   Ctx = ref object
     userDefs: Table[string, Node]
@@ -105,6 +111,8 @@ type
     hoistOn: bool
     hoists: seq[tuple[decl, init: string]]
     hoistSeen: Table[string, string]
+    inHoist: bool              # emitting a hoist's init: hoist nothing inside
+    assigned: HashSet[string]  # names assigned somewhere: never invariant
     playSet: HashSet[string]
     stereoLets: HashSet[string] # top-level let names whose RHS is stereo
     # name -> (C array symbol, length). Populated when a top-level let
@@ -257,6 +265,11 @@ proc newCtx*(program: Node): Ctx =
       result.userDefs[n.str] = n
   result.hoistOn = getEnv("AITHER_HOIST", "1") != "0"
   result.hoistSeen = initTable[string, string]()
+  proc collectAssigned(n: Node; into: var HashSet[string]) =
+    if n == nil: return
+    if n.kind in {nkAssign, nkIdxAssign} and n.str.len > 0: into.incl n.str
+    for k in n.kids: collectAssigned(k, into)
+  collectAssigned(program, result.assigned)
 
 # Fixed-width placeholder token so simple `replace` back-patching stays
 # unambiguous regardless of id length (avoids "__OFF_1__" matching a
@@ -306,7 +319,21 @@ proc push(parent: Scope): Scope =
         arrays: initTable[string, tuple[sym: string; length: int]](),
         sarrays: initTable[string, tuple[base: string; n: int]](),
         larrays: initTable[string, tuple[sym: string; n: int]](),
-        numLits: initTable[string, float64]())
+        numLits: initTable[string, float64](),
+        invs: initTable[string, tuple[node: Node; sc: Scope]]())
+
+proc lookupInv(sc: Scope; name: string): tuple[node: Node; sc: Scope; ok: bool] =
+  ## The block-invariant expression `name` is bound to, if the nearest
+  ## binding of that name is one (shadowing as in lookupNumLit).
+  var s = sc
+  while s != nil:
+    if name in s.invs: return (s.invs[name].node, s.invs[name].sc, true)
+    if name in s.numLits or name in s.names or name in s.stereoNames or
+       name in s.fns or name in s.lambdas or name in s.arrays or
+       name in s.sarrays or name in s.larrays:
+      return (nil, nil, false)
+    s = s.parent
+  (nil, nil, false)
 
 proc lookupNumLit(sc: Scope; name: string): tuple[val: float64; ok: bool] =
   ## The compile-time number `name` is bound to, if the nearest binding
@@ -746,7 +773,10 @@ proc callArgs(c: Ctx; sc: Scope; kids: openArray[Node]): string =
 # native call with `$1`, `$2`, ... standing for the evaluated args.
 # ---- hoisting ----------------------------------------------------------
 # An expression that can't change from one sample to the next: a
-# number, PI/TAU/sr, a name bound to a compile-time number, arithmetic
+# number, PI/TAU/sr, a name bound to a compile-time number, a knob
+# (`midi_cc(k)`: hoist_init runs at the start of every block, so a knob
+# is read once a block, and a knob moved mid-block lands at the next,
+# within 11 ms at 512 frames), a name bound to any of these, arithmetic
 # and pure math over those. A native whose coefficient arguments are
 # invariant gets its coefficients computed once, in hoist_init, and
 # calls the `_c` step per sample (lp1's exp, the SVF's tan, reverb's
@@ -761,30 +791,53 @@ proc isInvariant(c: Ctx; sc: Scope; n: Node): bool =
   case n.kind
   of nkNum: true
   of nkIdent:
-    n.str in ["PI", "TAU", "sr"] or (sc != nil and sc.lookupNumLit(n.str).ok)
+    n.str in ["PI", "TAU", "sr"] or
+      (sc != nil and (sc.lookupNumLit(n.str).ok or
+                      (n.str notin c.assigned and sc.lookupInv(n.str).ok)))
   of nkBinOp, nkUnary:
     n.kids.allIt(c.isInvariant(sc, it))
   of nkIf:
     n.kids.len == 3 and n.kids.allIt(c.isInvariant(sc, it))
   of nkCall:
-    n.str in PureMath and n.kids.len > 0 and n.kids.allIt(c.isInvariant(sc, it))
+    (n.str in PureMath or n.str == "midi_cc") and n.kids.len > 0 and
+      n.kids.allIt(c.isInvariant(sc, it))
   else: false
+
+proc noteInvariant(c: Ctx; target: Scope; name: string; expr: Node; exprSc: Scope) =
+  ## Record that `name` is bound to a block-invariant expression, unless
+  ## it is a plain number (numLits has that) or hoisting is off.
+  proc mentions(n: Node): bool =
+    n != nil and ((n.kind == nkIdent and n.str == name) or n.kids.anyIt(mentions(it)))
+  # `let x = x * 2` reads an outer x; spelling it out would loop. Only a
+  # let can do that: a parameter's argument comes from the caller's scope
+  # (`def f(u)` called as `f(u)` is fine).
+  if c.hoistOn and expr != nil and expr.kind != nkNum and
+     not (target == exprSc and mentions(expr)) and
+     c.isInvariant(exprSc, expr) and not c.constValue(exprSc, expr).ok:
+    target.invs[name] = (expr, exprSc)
 
 # Emit an invariant expression for hoist_init, where no per-sample local
 # exists: every name bound to a compile-time number is spelled as that
 # number. Reuses emitExpr so operators mean the same.
 proc emitInvariant(c: Ctx; sc: Scope; n: Node): string =
-  let hsc = push(nil)
-  proc bindNums(sc, hsc: Scope; n: Node) =
-    if n == nil: return
+  # A copy of `n` in which every name is spelled out: a compile-time
+  # number as that number, a name bound to an invariant expression as
+  # that expression (from its own scope, recursively). What is left is
+  # numbers, PI/TAU/sr and midi_cc, which mean the same in hoist_init.
+  proc spell(sc: Scope; n: Node): Node =
+    if n == nil: return nil
     if n.kind == nkIdent and n.str notin ["PI", "TAU", "sr"] and sc != nil:
       let v = sc.lookupNumLit(n.str)
-      if v.ok:
-        hsc.names[n.str] = numLit(v.val)
-        hsc.numLits[n.str] = v.val
-    for k in n.kids: bindNums(sc, hsc, k)
-  bindNums(sc, hsc, n)
-  c.emitExpr(hsc, n)
+      if v.ok: return Node(kind: nkNum, num: v.val, line: n.line, source: n.source)
+      let inv = sc.lookupInv(n.str)
+      if inv.ok: return spell(inv.sc, inv.node)
+    result = Node(kind: n.kind, str: n.str, num: n.num, line: n.line,
+                  source: n.source, params: n.params, defaults: n.defaults)
+    for k in n.kids: result.kids.add spell(sc, k)
+  let was = c.inHoist
+  c.inHoist = true
+  defer: c.inHoist = was
+  c.emitExpr(push(nil), spell(sc, n))
 
 proc hoist(c: Ctx; cexpr: string): string =
   ## A static double computed once from `cexpr`; its name.
@@ -932,6 +985,7 @@ proc emitDefInline(c: Ctx; sc: Scope; def: Node; call: Node): string =
     # binding above remains authoritative for every other use.
     let cv = c.constValue(sc, a)
     if cv.ok: inner.numLits[p] = cv.val
+    else: c.noteInvariant(inner, p, a, sc)
   # def.kids[0] is the body (single expression or nkBlock of stmts).
   # The def's name owns every state region its body claims.
   let body = def.kids[0]
@@ -1160,6 +1214,7 @@ proc emitLocalStmt(c: Ctx; sc: Scope; st: Node; pre: var string) =
       # Literal propagation: see the matching comment in emitDefInline.
       let cv = c.constValue(sc, rhs)
       if cv.ok: sc.numLits[st.str] = cv.val
+      else: c.noteInvariant(sc, st.str, rhs, sc)
   of nkVar:
     if isArrayMake(st.kids[0]):
       c.declareStateArray(sc, st, pre)
@@ -1430,6 +1485,7 @@ proc emitLoop(c: Ctx; sc: Scope; def, call: Node; pair: bool):
     if not changing[i]:
       let cv = c.constValue(sc, a)
       if cv.ok: inner.numLits[p] = cv.val
+      else: c.noteInvariant(inner, p, a, sc)
     lp.vars.add (vn, "")
   lp.rl = c.fresh("rec_" & def.str)
   lp.rr = if pair: c.fresh("rec_" & def.str & "_r") else: lp.rl
@@ -1590,6 +1646,16 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
     let els  = if n.kids[2] != nil: c.emitExpr(sc, n.kids[2]) else: "0.0"
     &"(({cond}) != 0.0 ? ({thn}) : ({els}))"
   of nkCall:
+    # Pure math over invariant inputs (knobs, numbers, names bound to
+    # them) runs once a block in hoist_init instead of every sample:
+    # spectra's per-partial exp(log(n) * (1 - u) + ...) with u from a
+    # knob. Only the costly calls; a sum or a min isn't worth a static.
+    if c.hoistOn and not c.inHoist and
+       n.str in ["exp", "log", "log2", "pow", "sin", "cos", "tan", "tanh", "sqrt"] and
+       n.str notin c.userDefs and sc.lookupFn(n.str).len == 0 and
+       sc.lookupLambda(n.str) == nil and c.isInvariant(sc, n) and
+       not c.constValue(sc, n).ok:
+      return c.hoist(c.emitInvariant(sc, n))
     # Lambda-valued param? Inline the body, binding call args to lambda
     # params. Pre-empts the named-fn / builtin / native paths because a
     # lambda has no name to dispatch through. Powers `voice_fn(f, g)`
@@ -1616,6 +1682,7 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
         # bound to a numeric literal at the call site.
         let cv = c.constValue(sc, n.kids[i])
         if cv.ok: inner.numLits[p] = cv.val
+        else: c.noteInvariant(inner, p, n.kids[i], sc)
       let body = lamNode.kids[0]
       let bodyC =
         if body.kind == nkBlock: c.emitBlockExpr(inner, body)
@@ -2300,6 +2367,7 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
           elif a.kind == nkIdent:
             let nv = sc.lookupNumLit(a.str)
             if nv.ok: inner.numLits[p] = nv.val
+          if p notin inner.numLits: c.noteInvariant(inner, p, a, sc)
       # Emit body as a block, storing the stereo final value into tmpL/tmpR.
       let bodyNode = def.kids[0]
       let stmts: seq[Node] =
@@ -2787,6 +2855,7 @@ proc emit*(c: Ctx; program: Node): string =
         elif s.kids[0].kind == nkIdent:
           let nv = topSc.lookupNumLit(s.kids[0].str)
           if nv.ok: topSc.numLits[s.str] = nv.val
+        if s.str notin topSc.numLits: c.noteInvariant(topSc, s.str, s.kids[0], topSc)
     of nkAssign:
       if s.str in c.pairVars:
         body.add c.assignPair(topSc,
@@ -2887,6 +2956,7 @@ proc emit*(c: Ctx; program: Node): string =
               # Literal propagation (play-local lets).
               let cv = c.constValue(inner, st.kids[0])
               if cv.ok: inner.numLits[st.str] = cv.val
+              else: c.noteInvariant(inner, st.str, st.kids[0], inner)
           of nkVar:
             body.add c.varInit(inner, st)
           of nkAssign:

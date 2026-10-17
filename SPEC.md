@@ -1199,13 +1199,18 @@ inside its compiled code (`tick_block`: the clock, `input()`, the
 parts, the voice fade and part-gain ramps, park and the part meters
 all advance per sample in C); the engine's own work is per block,
 and the output is bit-identical to ticking one sample at a time
-(`tests/block_tick.nim`). Coefficients that can't change from sample
-to sample (a filter's cutoff that is a number, a let bound to one, a
-def parameter given one, or arithmetic and pure math over those) are
-computed once per block instead of every sample: `lp1`/`hp1`'s `exp`,
-the SVF's `tan`, `reverb`'s `pow`s, `phasor`'s division. Same
-arithmetic once, so the same bits (`tests/hoist.nim`); a modulated
-parameter keeps the per-sample path. `AITHER_HOIST=0` turns it off.
+(`tests/block_tick.nim`). Values that can't change within a block are
+computed once per block instead of every sample: a number, a knob
+(`midi_cc(k)`), a let or def parameter bound to one, and arithmetic
+and pure math over those. That covers `lp1`/`hp1`'s `exp`, the SVF's
+`tan`, `reverb`'s `pow`s and `phasor`'s division when their
+coefficients are invariant, and any `exp`/`log`/`pow`/`sin`/`sqrt`
+... over invariant inputs, such as a knob-driven spectral morph's
+per-partial `exp`. Same arithmetic once, so the same bits
+(`tests/hoist.nim`); a modulated value keeps the per-sample path. A
+knob is read at the start of each block, so a knob moved mid-block
+lands at the next one (11 ms at 512 frames). `AITHER_HOIST=0` turns
+it off.
 Each voice's block has a deadline, `AITHER_WATCHDOG` seconds (0.5;
 0 for none), which only a recursion can overrun: it checks the clock
 every 65 536 steps, and past the deadline it gives up (see
