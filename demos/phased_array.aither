@@ -1,0 +1,68 @@
+# phased_array: two antennas, one field. Maxwell's waves spread from two
+# sources a short way apart; the phase between them (a Steinmetz phasor)
+# slowly turns, and the interference swings the beam left and right with
+# nothing moving. That's how a phased-array radar or a satellite dish on a
+# roof steers.
+#
+# The field is a 32×24 membrane obeying the wave equation, what Maxwell's
+# equations give for a radio wave's electric field in a plane. Each pixel
+# shows its phasor, the field and how fast it's changing as one complex
+# number: hue is the phase of the oscillation, so wavefronts are bands of
+# colour running outward, and black is where the two waves cancel.
+#
+# The picture is the sound. At 44.1 kHz tv draws 32×24 pixels 57 times a
+# second, so what you hear is the field scanned row by row. The wavefronts
+# are 5 pixels apart, so a row crosses them at about 44100 / 5 ≈ 9 kHz:
+# a high, glassy buzz. When the beam leans, the wavefronts tilt and a row
+# crosses them at a different spacing, so you hear the beam's direction as
+# a shift in pitch: the scan is measuring the wave's sideways wavenumber.
+#
+#   ./aither demos/phased_array.aither | tools/tv --size 32x24 --smooth | tools/play hw:rockchipes8388c 20
+#
+# (AITHER_RATE=44100 from .bashrc, for both. Headphones help.)
+
+let w = 32
+let h = 24
+let k = pixel_index(w, h)
+let x = k % w
+let y = int(k / w)
+let f = frame_number(w, h)              # field time: one step a frame
+let even = f % 2 == 0
+let pos = t - start_t
+
+# The antennas: a period of 10 frames, so wavelength 5 pixels at speed
+# 0.5 pixels a frame; set 3 pixels apart, near the bottom, facing up.
+let period = 10
+let omega = TAU / period
+let k1 = (h - 5) * w + 14
+let k2 = (h - 5) * w + 17
+let phi = PI * sin(TAU * pos / 20)      # the phase between them: −π..π every 20 s
+
+# Two frames of the field, swapped each frame: this frame reads one and
+# writes the next into the other, where the frame before it was, since
+# only this pixel needs that value.
+$a = array(w * h)
+$b = array(w * h)
+let c  = if even then $a[k] else $b[k]
+let p  = if even then $b[k] else $a[k]
+let lt = if x > 0 then (if even then $a[k - 1] else $b[k - 1]) else 0
+let rt = if x < w - 1 then (if even then $a[k + 1] else $b[k + 1]) else 0
+let up = if even then $a[k - w] else $b[k - w]          # past the top or bottom reads 0
+let dn = if even then $a[k + w] else $b[k + w]
+
+# Leapfrog for u_tt = c² ∇²u, with c² = 0.25 (pixels per frame, squared).
+let lap = lt + rt + up + dn - 4 * c
+let edge = min(min(x, w - 1 - x), min(y, h - 1 - y))
+let soak = if edge < 4 then 0.8 + 0.05 * edge else 1    # a soft border that drinks the waves
+let drive = (if k == k1 then sin(omega * f) else 0) + (if k == k2 then sin(omega * f + phi) else 0)
+let next = (2 * c - p + 0.25 * lap) * soak + 0.4 * drive
+
+$b[k] = if even then next else $b[k]
+$a[k] = if even then $a[k] else next
+
+# The phasor: the field and its rate of change over ω. Brightness goes as
+# its square, the power a receiver there would pick up, so the beam shines
+# and the nulls go dark; full brightness is clipped near the antennas.
+let z = [next, (next - c) / omega]
+let shown = z * magnitude(z) * 8
+shown / max(1, magnitude(shown))

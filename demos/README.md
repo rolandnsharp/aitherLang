@@ -1,0 +1,20 @@
+# Demos
+
+Field theory you can watch and hear. Each demo is one patch whose output
+is drawn by `tv` and played at the same time: the picture is the sound.
+`tv` passes the stream on unchanged, so it sits between the engine and
+the speaker:
+
+```
+./aither demos/<demo>.aither | tools/tv --size WxH --smooth | tools/play hw:rockchipes8388c 20
+```
+
+At the uConsole's 44.1 kHz (`AITHER_RATE` in `.bashrc`), a W×H picture
+is drawn 44100 / (W·H) times a second, and every pixel steps its field
+once a frame, so a demo costs about one cell update per sample.
+`./aither send demos/<demo>.aither` hot-swaps an edited demo as usual.
+`f` in `tv` is full screen, `q` closes it. Headphones help.
+
+| Demo | Size | What it shows |
+|---|---|---|
+| `phased_array` | 32x24 | Two antennas, one wave field (Maxwell). The phase between them turns, and the beam swings with nothing moving: phased arrays, Steinmetz phasors. Hue is each pixel's phase, brightness its power. You hear the beam's angle as pitch. |
