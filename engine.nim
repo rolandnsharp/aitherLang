@@ -1164,7 +1164,7 @@ proc runEngine*(files: seq[string]; seconds: float64) =
   # Only the unix socket file at /tmp/aither.sock outlives the process
   # and needs explicit cleanup.
   try: removeFile(SocketPath) except CatchableError: discard
-  echo "bye"
+  stderr.writeLine "[aither] bye"
   quit(0)
 
 # ----------------------------------------------------------------------- client
