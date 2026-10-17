@@ -1,7 +1,7 @@
 ## aither engine — the voices, mixed to a pipe, with a socket for live coding
 
 import std/[os, net, strutils, math, locks, tables, sets, terminal]
-from std/posix import signal, SIGPIPE, SIG_IGN
+from std/posix import signal, SIGPIPE, SIG_IGN, EINTR, errno, read, write
 import parser, voice, midi, dsp, render, imports
 import engine_types, cli_output, analysis
 export engine_types
@@ -1038,7 +1038,9 @@ proc handleCmd(line: string): string =
 # a file) gives the numbers their meaning and, if it runs in real time,
 # paces the engine by blocking the write. `input()` reads the same
 # format from stdin when stdin is a pipe. A write that fails (the reader
-# went away) ends the engine.
+# went away) ends the engine. Both ends use read(2) and write(2), not
+# stdio: stdio reads ahead and holds writes back, and a program on both
+# ends of the engine (tools/card) needs one block out for each block in.
 var pipeFrames: int64   # frames written so far
 var pipeLimit: int64    # stop after this many (0: until killed)
 
@@ -1058,8 +1060,9 @@ proc pumpPipe() =
       # A pipe delivers in pieces; silence once the source has ended.
       var got = 0
       while got < bytes:
-        let n = stdin.readBuffer(cast[pointer](cast[uint](addr inBuf[0]) + uint(got)),
-                                 bytes - got)
+        let n = posix.read(0, cast[pointer](cast[uint](addr inBuf[0]) + uint(got)),
+                        bytes - got)
+        if n < 0 and errno == EINTR: continue
         if n <= 0:
           inputOpen = false
           break
@@ -1075,10 +1078,14 @@ proc pumpPipe() =
     for i in 0 ..< want:
       outBuf[2*i] = cfloat(mixL[i])
       outBuf[2*i + 1] = cfloat(mixR[i])
-    try:
-      if stdout.writeBuffer(addr outBuf[0], bytes) < bytes: break
-    except IOError:
-      break
+    var put = 0
+    while put < bytes:
+      let n = posix.write(1, cast[pointer](cast[uint](addr outBuf[0]) + uint(put)),
+                       bytes - put)
+      if n < 0 and errno == EINTR: continue
+      if n <= 0: break
+      put += n
+    if put < bytes: break
     pipeFrames += int64(want)
   running = false
 

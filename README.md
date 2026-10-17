@@ -119,6 +119,8 @@ AITHER_RATE=1152000 aither patches/mandelbrot.aither | AITHER_RATE=1152000 tools
 aither set.aither 30 > take.raw               offline: 30 s from t=0, then exit (sox makes the WAV)
 AITHER_RATE=192000 aither fm.aither | sdr-tx  the rate is yours; the reader agrees
 arecord -f FLOAT_LE -c 2 -r 48000 | aither fx.aither | tools/play    input() reads stdin
+tools/card -- aither fx.aither                the card on both ends: input() hears it, the output plays,
+                                              at a fixed loop delay; sets the rate itself (make tools/card)
 
 aither send piano.aither              load & play
 aither send piano.aither 2            ...with 2-second fade in

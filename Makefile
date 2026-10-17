@@ -11,6 +11,9 @@ aither: aither.nim engine.nim engine_types.nim cli_output.nim analysis.nim rende
 tools/play: tools/play.c
 	cc -O2 tools/play.c -o tools/play -lasound
 
+tools/card: tools/card.c
+	cc -O2 -Wall tools/card.c -o tools/card -lasound
+
 tools/pad: tools/pad.c
 	cc -O2 tools/pad.c -o tools/pad -lasound
 
@@ -30,6 +33,6 @@ test:
 	  $(NIM) c -r $(TESTFLAGS) --out:tests/$$t tests/$$t.nim || exit 1; done
 
 clean:
-	rm -rf aither nimcache/ test_parser test_eval test_stdlib tools/play tools/pad tools/scope tools/tv
+	rm -rf aither nimcache/ test_parser test_eval test_stdlib tools/play tools/card tools/pad tools/scope tools/tv
 
 .PHONY: all clean test

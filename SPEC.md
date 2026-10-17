@@ -1013,7 +1013,12 @@ a player, a scope, an SDR or a file. With `seconds` it runs that
 long from `t = 0` and exits, offline, with no socket; without, it
 runs until `kill` and accepts the commands below over a UNIX socket
 (`AITHER_SOCK`, default `/tmp/aither.sock`). `input()` reads the
-same format from standard input when it is a pipe.
+same format from standard input when it is a pipe. The engine is
+lockstep on the pipe: it reads one block of input, then writes one
+block of output, and holds nothing back, so a program on both ends
+(`tools/card`, which runs a command between a sound card's input and
+output) gets a fixed loop delay. A block is `AITHER_BUFFER` frames
+(512).
 
 ### Voice-level
 
