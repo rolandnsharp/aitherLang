@@ -87,11 +87,12 @@ array_set(arr, 3, 99.0)
 array_pop(arr)
 """)
   doAssert abs(popped - 99.0) < 1e-12, "pop should return last, got " & $popped
-  # And length is now 3.
+  # And length is now 3. A pop for its effect binds the value to `_`:
+  # a bare expression would be the block's value and end it.
   let lenAfter = evalAt("""
 let arr = array_make(4)
 array_set(arr, 3, 99.0)
-array_pop(arr)
+let _ = array_pop(arr)
 array_len(arr)
 """)
   doAssert abs(lenAfter - 3.0) < 1e-12,

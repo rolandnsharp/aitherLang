@@ -7,7 +7,7 @@ type
     tkNum, tkIdent, tkStateIdent, tkKeyword, tkOp, tkStr,
     tkLParen, tkRParen, tkLBracket, tkRBracket,
     tkComma, tkColon, tkSemi, tkAssign, tkAugAssign,
-    tkNewline, tkIndent, tkDedent, tkEof
+    tkNewline, tkEof
 
   Token* = object
     kind*: TokKind
@@ -66,13 +66,12 @@ proc startsClosed(s: string; i: int): bool =
   false
 
 proc tokenize*(source: string): seq[Token] =
-  var indents = @[0]
   var line = 1
   var col = 1
   var i = 0
   var atLineStart = true
   # groupDepth > 0 means we're inside a `(...)` call / grouping or a
-  # `[...]` literal. Newlines and indent changes are treated as
+  # `[...]` literal. Newlines are treated as
   # whitespace in that window so long expressions can split across
   # lines Python-style — matters for multi-line lambda bodies like
   # `sum(max_n, n => \n let pf = ... \n shape(n,pf) * ...)`.
@@ -86,7 +85,7 @@ proc tokenize*(source: string): seq[Token] =
     if atLineStart:
       if groupDepth > 0:
         # Inside a paren/bracket group: skip leading whitespace, skip
-        # comment-only lines, but emit no indent/dedent and no newline.
+        # comment-only lines, but emit no newline.
         while i < n and source[i] == ' ':
           i += 1; col += 1
         if i < n and source[i] == '#':
@@ -96,10 +95,11 @@ proc tokenize*(source: string): seq[Token] =
           continue
         atLineStart = false
       else:
-        var indent = 0
-        while i < n and source[i] == ' ':
-          indent += 1; i += 1; col += 1
-        # Skip blank or comment-only lines without changing indent stack
+        # Indentation means nothing: a block ends at its expression
+        # (parseBody), not where the indentation does.
+        while i < n and source[i] in {' ', '\t'}:
+          i += 1; col += 1
+        # Skip blank or comment-only lines
         if i >= n or source[i] == '\n' or source[i] == '#':
           if i < n and source[i] == '#':
             while i < n and source[i] != '\n': i += 1
@@ -109,21 +109,10 @@ proc tokenize*(source: string): seq[Token] =
         # A newline ends a statement unless the statement can't end
         # there (the line ended on an operator or `=`) or the next line
         # can't begin one (it starts with an infix operator, `then` or
-        # `else`). Then it's whitespace, and the indent stack is left
-        # alone: a continued line's indentation means nothing.
+        # `else`). Then it's whitespace.
         if result.len >= 2 and result[^1].kind == tkNewline and
            (endsOpen(result[^2]) or startsClosed(source, i)):
           result.setLen(result.len - 1)
-          atLineStart = false
-          continue
-        # Indent change
-        if indent > indents[^1]:
-          indents.add indent
-          emit(tkIndent)
-        else:
-          while indents.len > 1 and indent < indents[^1]:
-            discard indents.pop()
-            emit(tkDedent)
         atLineStart = false
 
     let c = source[i]
@@ -133,10 +122,9 @@ proc tokenize*(source: string): seq[Token] =
         emit(tkNewline)
         atLineStart = true
       else:
-        # Inside a group, newlines are whitespace. We still need
-        # atLineStart logic for the *next* line so leading whitespace
-        # gets eaten, so flip it here too — but the branch above won't
-        # emit indent/dedent while groupDepth > 0.
+        # Inside a group, newlines are whitespace. atLineStart still
+        # flips so the next line's leading whitespace and comment-only
+        # lines are eaten.
         atLineStart = true
       i += 1; line += 1; col = 1
     of ' ', '\t', '\r':
@@ -264,9 +252,6 @@ proc tokenize*(source: string): seq[Token] =
       raise newException(ParseError,
         "unexpected char '" & $c & "' at " & $line & ":" & $col)
 
-  while indents.len > 1:
-    discard indents.pop()
-    result.add Token(kind: tkDedent, line: line, col: col)
   result.add Token(kind: tkEof, line: line, col: col)
 
 # ------------------------------------------------------------------- parser
@@ -340,15 +325,8 @@ proc markSeenInCurrentScope(p: var Parser; name: string) =
   p.stateScopes[^1].incl name
 
 proc skipNewlines(p: var Parser) =
-  ## Used between top-level statements only. Tolerates stray
-  ## tkIndent/tkDedent. Continued lines (a trailing operator, or a
-  ## leading `else` or infix operator) no longer emit any, since the
-  ## tokenizer drops their newline, but an indented line that is a
-  ## statement of its own still does.
-  ## Safe at top level because aither has no indent-delimited blocks
-  ## there — def/play bodies parse their own tkIndent/tkDedent and
-  ## never call this helper.
-  while p.peek().kind in {tkNewline, tkSemi, tkIndent, tkDedent}:
+  ## Between statements: blank lines and `;`.
+  while p.peek().kind in {tkNewline, tkSemi}:
     discard p.advance()
 
 proc node(k: NodeKind; line: int = 0): Node =
@@ -397,7 +375,7 @@ proc parseIfExpr(p: var Parser): Node =
   let thn = p.parseExpr()
   # Look for an optional 'else' that may sit on the next line
   let save = p.idx
-  while p.peek().kind in {tkNewline, tkIndent, tkDedent}: discard p.advance()
+  while p.peek().kind == tkNewline: discard p.advance()
   if p.isKw("else"):
     discard p.advance()
     let els = p.parseExpr()
@@ -655,6 +633,37 @@ proc parsePipe(p: var Parser): Node =
 
 proc parseExpr(p: var Parser): Node = p.parsePipe()
 
+proc isBinding(n: Node): bool =
+  ## A statement made for its effect, not its value: a `let`, a `$state`
+  ## or element store, an `each` (statements unrolled, value 0), or an
+  ## array-handle update whose value only echoes what it did (the value
+  ## set, the new length). A block reads on past it. `array_pop` is an
+  ## expression: its value is the point.
+  n.kind in {nkLet, nkVar, nkAssign, nkIdxAssign} or
+    (n.kind == nkCall and n.str in ["each", "array_set", "array_push", "array_resize"])
+
+proc parseBody(p: var Parser; line: int; what: string): Node =
+  ## A def or play body: its bindings, ended by the expression that is
+  ## its value. The expression closes the block, so neither indentation
+  ## nor a terminator is needed:
+  ##   def half(x): x * 0.5
+  ##   play drums:
+  ##   let k = kick(2)
+  ##   k + hat(4)          <- drums ends here
+  inc p.bodyDepth
+  defer: dec p.bodyDepth
+  p.skipNewlines()
+  var stmts: seq[Node]
+  while true:
+    if p.peek().kind == tkEof or p.isKw("def") or p.isKw("play"):
+      p.fail(what & " has no expression: a body is its lets and $state, " &
+             "ended by the expression that is its value")
+    let s = p.parseStmt()
+    stmts.add s
+    if not s.isBinding: break
+  if stmts.len == 1: stmts[0]
+  else: Node(kind: nkBlock, kids: stmts, line: line)
+
 proc parseDef(p: var Parser): Node =
   let line = p.peek().line
   discard p.expect(tkKeyword)               # 'def'
@@ -679,25 +688,8 @@ proc parseDef(p: var Parser): Node =
   # write `$prev_g = 0.0; $prev_g = gate` and only the first line gets
   # the slot-allocation treatment.
   pushStateScope(p)
-  inc p.bodyDepth
-  defer: dec p.bodyDepth
-  var stmts: seq[Node]
-  if p.peek().kind == tkNewline:
-    discard p.advance()
-    if p.peek().kind != tkIndent: p.fail("expected indented body after 'def'")
-    discard p.advance()
-    while p.peek().kind notin {tkDedent, tkEof}:
-      stmts.add p.parseStmt()
-    if p.peek().kind == tkDedent: discard p.advance()
-  else:
-    while true:
-      stmts.add p.parseStmt()
-      if p.peek().kind == tkSemi: discard p.advance()
-      else: break
+  let body = p.parseBody(line, "def " & name)
   popStateScope(p)
-
-  let body = if stmts.len == 1: stmts[0]
-             else: Node(kind: nkBlock, kids: stmts, line: line)
   Node(kind: nkDef, str: name, params: params, defaults: defaults,
        isRec: isRec, kids: @[body], line: line)
 
@@ -713,24 +705,7 @@ proc parsePlay(p: var Parser): Node =
     mods.add p.advance().str
   discard p.expect(tkColon)
 
-  inc p.bodyDepth
-  defer: dec p.bodyDepth
-  var stmts: seq[Node]
-  if p.peek().kind == tkNewline:
-    discard p.advance()
-    if p.peek().kind != tkIndent: p.fail("expected indented body after 'play'")
-    discard p.advance()
-    while p.peek().kind notin {tkDedent, tkEof}:
-      stmts.add p.parseStmt()
-    if p.peek().kind == tkDedent: discard p.advance()
-  else:
-    while true:
-      stmts.add p.parseStmt()
-      if p.peek().kind == tkSemi: discard p.advance()
-      else: break
-
-  let body = if stmts.len == 1: stmts[0]
-             else: Node(kind: nkBlock, kids: stmts, line: line)
+  let body = p.parseBody(line, "play " & name)
   Node(kind: nkPlay, str: name, params: mods, kids: @[body], line: line)
 
 proc parseStmt(p: var Parser): Node =
@@ -812,9 +787,18 @@ proc parseProgram*(source: string): Node =
   # the same `s->v_x` as top-level `$x`).
   pushStateScope(p)
   var stmts: seq[Node]
+  var exprLine = 0          # the line of the top-level expression, once seen
   p.skipNewlines()
   while p.peek().kind != tkEof:
-    stmts.add p.parseStmt()
+    let s = p.parseStmt()
+    if s.kind notin {nkDef, nkPlay, nkImport} and not s.isBinding:
+      if exprLine > 0:
+        raise newException(ParseError,
+          "a second top-level expression at line " & $s.line & " (the first is at line " &
+          $exprLine & "). A def or play body ends at its expression, so a body " &
+          "with a second expression spills out here; a file has one expression, its output")
+      exprLine = s.line
+    stmts.add s
     p.skipNewlines()
   popStateScope(p)
   Node(kind: nkBlock, kids: stmts, line: 1)

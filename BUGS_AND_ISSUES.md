@@ -1,8 +1,7 @@
 # Bugs and issues
 
-**Open as of 2026-10-17:** issue 7 (blocks without meaningful
-whitespace, a design question) and issue 6 (a sound-design direction,
-not a bug). Every other numbered item is resolved; the write-ups stay
+**Open as of 2026-10-17:** issue 6 (a sound-design direction, not a
+bug). Every other numbered item is resolved; the write-ups stay
 below as a record of what went wrong and why.
 
 ## Session log: 2026-10-17
@@ -12,6 +11,7 @@ below as a record of what went wrong and why.
 | the engine's stdin went through stdio, which reads ahead: it answered only every second block, so a program on both ends (`tools/card`) deadlocked | RESOLVED cb0fd08 (read(2)/write(2); lockstep is in SPEC) |
 | `echo "bye"` on `kill` wrote text into the float stream on stdout | RESOLVED 3874713 (stderr) |
 | an expression can't continue onto the next line (issue 4) | RESOLVED 5bd77e1 |
+| blocks were delimited by indentation (issue 7) | RESOLVED (a block ends at its expression; indentation means nothing) |
 | an offline render or `audit` with an idle pipe on stdin (ssh, a script) waited forever | RESOLVED 43ec94c (offline reads stdin only for a patch that calls `input()`) |
 | the uConsole's es8388 capture reads a flat constant on every input, headset plugged in | open, hardware side; see notes/card-2026-10-16.md |
 
@@ -397,8 +397,18 @@ not realism.
 
 ## 7. Language: blocks without meaningful whitespace
 
-**Open, a design question; nothing decided.** Raised 2026-10-17 while
-settling issue 4. Roland wants aither to move away from meaningful
+**Resolved 2026-10-17: a block ends at its expression.** Roland's
+idea, that a new `let` or `def` could signal the end of a block,
+refined: a body is its bindings (`let`, `$state`, element stores,
+`each`, the array-handle updates), ended by the expression that is its
+value, as lambda bodies already were. No braces, no `end`, and
+indentation is skipped, never measured. All 514 bodies in the corpus
+already had that shape; the 163 files parse to identical trees. The
+top level keeps its one expression, which catches a body that ended
+early. SPEC "Blocks end at their expression"; tests/blocks.nim. The
+original write-up follows.
+
+Raised 2026-10-17 while settling issue 4. Roland wants aither to move away from meaningful
 whitespace (and from extra brackets), toward something more like JS.
 Line continuation now looks only at tokens, so indentation means
 nothing there. Blocks still do: `play x:` and `def f(x):` bodies are
@@ -423,5 +433,4 @@ check how the tail-recursion `def rec` and lambda bodies (`n => let
 
 ## Order to tackle
 
-1. Issue 7, when there's time for a design discussion.
-2. Issue 6 is open-ended: a sound-design session whenever it calls.
+1. Issue 6 is open-ended: a sound-design session whenever it calls.

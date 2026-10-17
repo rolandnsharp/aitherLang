@@ -154,7 +154,30 @@ def chord(root):
   osc(sin, root) + osc(sin, root * 5/4) + osc(sin, root * 3/2)
 ```
 
-The last expression in the body is the return value.
+### Blocks end at their expression
+
+A body is its bindings, ended by the expression that is its
+value. `let`, `$state = ...`, element stores (`a[i] = v`),
+`each(...)` and the array-handle updates (`array_set`,
+`array_push`, `array_resize`) are bindings: the block reads on
+past them. The first other expression is the return value, and
+it closes the block. There is no terminator, and indentation
+means nothing; indent for the reader:
+
+```
+def ease(x):                   def ease(x):
+  let c = clamp(x, 0, 1)       let c = clamp(x, 0, 1)
+  c * c * (3 - 2 * c)          c * c * (3 - 2 * c)    # the same block
+def half(x): x * 0.5           # one line
+```
+
+A body that reaches the next `def`, `play` or the end of the
+file without an expression is an error ("def f has no
+expression"). A body with a second expression ends at the first;
+the second spills out to the top level, which has room for one
+expression, so that is an error too. To call something for its
+effect and drop its value, bind it: `let _ = array_pop(a)`.
+
 Functions have their own local scope — they cannot see
 file-level `let` bindings. File-level `$state` slots,
 other `def`s, and globals are visible.
@@ -346,8 +369,10 @@ def/let from a literal.
 ## Play blocks
 
 `play name:` declares a named, independently-controllable
-part. Its body compiles inline into the main chunk (so it
-sees all file-level lets and `$state` slots). Its value is
+part. Its body is a block like a def's (its bindings, ended by
+its expression; see "Blocks end at their expression") and
+compiles inline into the main chunk (so it sees all file-level
+lets and `$state` slots). Its value is
 bound to a local named after the play, readable from the
 final expression and from later plays.
 
@@ -539,6 +564,11 @@ Separated by newlines or semicolons:
 ```
 $phase = 0.0; $phase = $phase + 440 / sr; sin(TAU * $phase)
 ```
+
+Whitespace carries no other meaning. A newline ends a statement
+where one can end (see below), and a block ends at its
+expression (see "Blocks end at their expression"), so neither
+indentation nor brackets delimit anything.
 
 ## Group-depth tokenization
 
@@ -1094,9 +1124,11 @@ offline (no engine connection required, ~100 ms turnaround).
 
 ### Parser (`parser.nim`, ~560 lines)
 
-Indentation-sensitive tokenizer with group-depth handling
-(newlines inside `(...)` and `[...]` are whitespace) +
-recursive-descent parser → AST. Handles: literals, identifiers,
+Tokenizer with group-depth handling (newlines inside `(...)`
+and `[...]` are whitespace) and line continuation (a newline
+ends a statement only where one can end); indentation is
+skipped, never measured. Recursive-descent parser → AST; a
+def or play body ends at its expression. Handles: literals, identifiers,
 operators, function calls, `$state`, `let`, `def`, `play`,
 `lambda`, `if/then/else`, `else if` chains, `|>`, arrays,
 array indexing, comments. Precedence climbing for expressions.
