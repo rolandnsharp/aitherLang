@@ -1,14 +1,19 @@
-# Bugs and issues — pick up next session
+# Bugs and issues
 
-Captured at the end of the additive synthesis push (commits 2adb710 →
-5df01c4). Phase 5 live verification confirmed `additive` and
-`inharmonic` produce instrument-grade sound — better than a $400 Casio,
-per the user's ears. Real direction unlocked: forget replicating
-acoustic instruments, push the sum-of-sines + inharmonic-ratio idiom
-toward sounds that have never existed before.
+**Open as of 2026-10-17:** issue 7 (blocks without meaningful
+whitespace, a design question) and issue 6 (a sound-design direction,
+not a bug). Every other numbered item is resolved; the write-ups stay
+below as a record of what went wrong and why.
 
-The items below are the loose ends from that session, ordered by how
-much they block forward work.
+## Session log: 2026-10-17
+
+| Issue | Status |
+|-------|--------|
+| the engine's stdin went through stdio, which reads ahead: it answered only every second block, so a program on both ends (`tools/card`) deadlocked | RESOLVED cb0fd08 (read(2)/write(2); lockstep is in SPEC) |
+| `echo "bye"` on `kill` wrote text into the float stream on stdout | RESOLVED 3874713 (stderr) |
+| an expression can't continue onto the next line (issue 4) | RESOLVED 5bd77e1 |
+| an offline render or `audit` with an idle pipe on stdin (ssh, a script) waited forever | RESOLVED 43ec94c (offline reads stdin only for a patch that calls `input()`) |
+| the uConsole's es8388 capture reads a flat constant on every input, headset plugged in | open, hardware side; see notes/card-2026-10-16.md |
 
 ## Session log: 2026-10-12 parallel session (from notes/handoff-2026-10-11.md)
 
@@ -78,7 +83,7 @@ human to play `fm_swarm` over.
 | 1 · solo stops voices                | RESOLVED   | 7a2c41d |
 | 2 · prev() doesn't sample-delay      | RESOLVED   | e763770 |
 | 3 · `else if` chaining               | not-a-bug  | c4dfa6b |
-| 4 · dangling-binop continuation      | open       | —       |
+| 4 · dangling-binop continuation      | RESOLVED 2026-10-17 | 5bd77e1 |
 | 4b · arrays second-class             | RESOLVED   | 6623f9d, 169d598 |
 | 4c · MIDI subscription drops silently | RESOLVED  | 0b24948 |
 | 5 · already-shipped enablers (docs)  | shipped    | (in 169d598) |
@@ -390,17 +395,33 @@ keyboard or in a hardware synth — rather than perfecting more
 acoustic-instrument emulations. The point of additive is freedom,
 not realism.
 
+## 7. Language: blocks without meaningful whitespace
+
+**Open, a design question; nothing decided.** Raised 2026-10-17 while
+settling issue 4. Roland wants aither to move away from meaningful
+whitespace (and from extra brackets), toward something more like JS.
+Line continuation now looks only at tokens, so indentation means
+nothing there. Blocks still do: `play x:` and `def f(x):` bodies are
+delimited by indentation (tkIndent/tkDedent).
+
+Options to discuss, none chosen:
+
+- **Braces**: `play x { ... }`, `def f(x) { ... }`. The JS look; every
+  block-using patch changes (514 `play`/`def` blocks across
+  the corpus), and `{` would be new syntax.
+- **An `end` keyword** (Lua, Ruby, Julia): `play x: ... end`. No
+  new bracket type; same corpus churn.
+- **Keep indentation for blocks only.** The rest of the language is
+  whitespace-free now; a block's body is the one place indentation
+  still counts.
+
+Whatever is chosen, the corpus check from issue 4 applies: parse all
+`.aither` files before and after and diff the trees. A migration that
+rewrites patches mechanically would be part of the change. Also
+check how the tail-recursion `def rec` and lambda bodies (`n => let
+...` lines inside parens) interact with the chosen block form.
+
 ## Order to tackle
 
-1. Solo bug fix (small, unblocks live A/B comparison).
-2. `prev` inline-call investigation + regression test (medium,
-   unblocks edge-triggered patches like the bell strike).
-3. `else if` chaining (small, cosmetic).
-4. Dangling-binop continuation (small-medium, quality of life).
-5. Stdlib cleanup pass — rewrite `bar_partials` / `plate_partials`
-   in the simpler `else if` form once (3) lands.
-6. Push everything that's been queued (currently 5 commits ahead of
-   origin: 2adb710, a0563ef, 28cbb75, f604143, 5df01c4).
-7. Open-ended sound design session — start from a non-acoustic
-   target and see how far the additive/inharmonic primitives can
-   take it.
+1. Issue 7, when there's time for a design discussion.
+2. Issue 6 is open-ended: a sound-design session whenever it calls.
