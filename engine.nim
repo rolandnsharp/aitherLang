@@ -139,7 +139,14 @@ proc mixBlock(outL, outR: var seq[float64];
   for i in 0 ..< frames:
     outL[i] = 0.0
     outR[i] = 0.0
-  if not tryAcquire(mtx): return
+  # Wait for the lock, never skip the block. The stream is gapless: every
+  # sample written is one tick of t, which is what tv and scope count
+  # pixels and points by. A skipped block (the old tryAcquire) wrote
+  # silence without advancing the clock, so any send or status that held
+  # the lock at the wrong moment sheared a tv picture for the rest of the
+  # session. Holds are short (a send's commit is the longest, a few ms)
+  # and the pipe ahead of the player holds far more than that.
+  acquire(mtx)
   if blkL.len < frames:
     blkL.setLen(frames)
     blkR.setLen(frames)

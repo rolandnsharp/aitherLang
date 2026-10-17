@@ -1199,7 +1199,11 @@ inside its compiled code (`tick_block`: the clock, `input()`, the
 parts, the voice fade and part-gain ramps, park and the part meters
 all advance per sample in C); the engine's own work is per block,
 and the output is bit-identical to ticking one sample at a time
-(`tests/block_tick.nim`). Values that can't change within a block are
+(`tests/block_tick.nim`). The stream is gapless: the mix waits for the
+voice table's lock rather than skipping a block, so every sample
+written is one tick of `t`, whatever the control socket is doing. `tv`
+and `scope` count pixels and points by the samples they receive, and
+rely on it (`tests/engine_live.nim`). Values that can't change within a block are
 computed once per block instead of every sample: a number, a knob
 (`midi_cc(k)`), a let or def parameter bound to one, and arithmetic
 and pure math over those. That covers `lp1`/`hp1`'s `exp`, the SVF's

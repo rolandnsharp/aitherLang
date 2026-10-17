@@ -6,7 +6,7 @@
 ## 60 s rather than let a regression hang it, since several of these
 ## bugs were hangs.
 
-import std/[os, osproc, strutils, net, streams, times, exitprocs]
+import std/[os, osproc, strutils, net, streams, times, exitprocs, math]
 from std/posix import Pid, SIGKILL
 
 const Exe = "./aither"
@@ -146,6 +146,44 @@ block offlineIdleStdin:
   e.close()
   doAssert code == 0 and epochTime() - t0 < 10, "offline render waited"
   doAssert bytes.len == 48000 * 8, "one second of pairs: " & $bytes.len
+
+# --- 8. The stream is gapless: every sample written is one tick of t,
+# however busy the control socket is. mixBlock used to tryAcquire the
+# lock and, when a command held it, write a block of silence without
+# advancing the clock; tv counts pixels by samples received and the
+# patch by t, so one such block sheared the picture for good.
+var spamDone: bool
+proc spam() {.thread.} =
+  {.cast(gcsafe).}:
+    for i in 0 ..< 400:
+      discard ask(["status", "levels", "list"][i mod 3])
+    spamDone = true
+
+block gapless:
+  writeFile(dir / "clock.aither", "[((t * sr) % 65536) / 65536, 0]\n")
+  let g = start("clock.aither")
+  g.inputStream.close()
+  waitUp()
+  var th: Thread[void]
+  createThread(th, spam)
+  const Chunk = 4096
+  var prev = -1
+  var samples, gaps = 0
+  while not spamDone or samples < 48000 * 4:
+    let got = g.outputStream.readStr(Chunk * 8)
+    doAssert got.len == Chunk * 8, "the stream ended early"
+    for i in 0 ..< Chunk:
+      var c: float32
+      copyMem(addr c, unsafeAddr got[i * 8], 4)
+      let tick = int(round(c * 65536))
+      if prev >= 0 and (tick - prev + 65536) mod 65536 != 1: inc gaps
+      prev = tick
+    samples += Chunk
+  joinThread(th)
+  doAssert gaps == 0, $gaps & " gaps in " & $samples & " samples while the socket was busy"
+  doAssert "OK" in ask("kill")
+  discard g.waitExit()
+  g.close()
 
 echo "engine_live ok"
 quit(0)       # through the exit procs: the watchdog thread is still alive
