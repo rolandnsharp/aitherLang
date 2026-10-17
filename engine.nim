@@ -1173,10 +1173,16 @@ proc runEngine*(files: seq[string]; seconds: float64) =
     try:
       var client: Socket
       server.accept(client)
-      let cmd = client.recvLine()
-      let resp = handleCmd(cmd)
-      client.send(resp & "\n")
-      client.close()
+      try:
+        let cmd = client.recvLine()
+        # A client that hung up without a command (a probe, a killed
+        # `aither list`) gets no reply. And send without SafeDisconn:
+        # with it, Nim's send loops forever on a closed peer (the error
+        # is "safe", so it neither raises nor advances), which froze
+        # this loop. Without it, the error raises and is caught below.
+        if cmd.len > 0: client.send(handleCmd(cmd) & "\n", flags = {})
+      finally:
+        client.close()
     except CatchableError:
       if running: discard
 
