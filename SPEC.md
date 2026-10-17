@@ -559,9 +559,25 @@ sum(16, n =>
   sin(TAU * phasor(pf)) / n)
 ```
 
-Outside brackets, newlines terminate statements as usual.
-There is no backslash continuation yet; wrap a multi-line
-expression in parens if you need to split it.
+Outside brackets, a newline ends a statement unless the
+statement can't end there or the next line can't begin one:
+
+- A line ending on an operator (`+ - * / |> == < mod and or not
+  =>`, and so on), `=`, `then` or `else` continues onto the next.
+- A line starting with an infix operator (`|> + * / == != < > <=
+  >= mod and or =>`), `then` or `else` continues the line above.
+
+```
+piano                          let y = a + b +
+|> lpf(800)                      c - d
+|> reverb(2.5, 0.2)
+```
+
+A continued line's indentation means nothing: indent it however
+reads best. `-`, `not`, `(` and `[` can begin a statement, so a line
+starting with one is a new statement (`-x` on its own line is a
+negation, and `(a)` is never a call on the line above); to split a
+difference, end the first line with the `-`.
 
 ## Program structure
 

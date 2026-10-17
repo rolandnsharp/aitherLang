@@ -47,6 +47,24 @@ const Keywords = ["var", "let", "def", "rec", "play", "if", "then", "else",
 
 # ----------------------------------------------------------------- tokenizer
 
+proc endsOpen(t: Token): bool =
+  ## A statement can't end on this token: it still needs a right-hand side.
+  t.kind in {tkOp, tkAssign, tkAugAssign} or
+    (t.kind == tkKeyword and t.str in ["mod", "and", "or", "not", "then", "else"])
+
+proc startsClosed(s: string; i: int): bool =
+  ## A statement can't begin at s[i]: an infix operator, `then` or
+  ## `else`. `-` (negation), `not`, `(` and `[` can begin one, so they
+  ## don't count; there is no unary `+`, so it does.
+  for op in ["|>", "==", "!=", "<", ">", "+", "*", "/", "%", "=>"]:
+    if s.continuesWith(op, i): return true
+  for word in ["mod", "and", "or", "then", "else"]:
+    let j = i + word.len
+    if s.continuesWith(word, i) and
+       (j >= s.len or not (s[j].isAlphaAscii() or s[j].isDigit() or s[j] == '_')):
+      return true
+  false
+
 proc tokenize*(source: string): seq[Token] =
   var indents = @[0]
   var line = 1
@@ -87,6 +105,16 @@ proc tokenize*(source: string): seq[Token] =
             while i < n and source[i] != '\n': i += 1
           if i < n and source[i] == '\n':
             i += 1; line += 1; col = 1
+          continue
+        # A newline ends a statement unless the statement can't end
+        # there (the line ended on an operator or `=`) or the next line
+        # can't begin one (it starts with an infix operator, `then` or
+        # `else`). Then it's whitespace, and the indent stack is left
+        # alone: a continued line's indentation means nothing.
+        if result.len >= 2 and result[^1].kind == tkNewline and
+           (endsOpen(result[^2]) or startsClosed(source, i)):
+          result.setLen(result.len - 1)
+          atLineStart = false
           continue
         # Indent change
         if indent > indents[^1]:
@@ -313,11 +341,10 @@ proc markSeenInCurrentScope(p: var Parser; name: string) =
 
 proc skipNewlines(p: var Parser) =
   ## Used between top-level statements only. Tolerates stray
-  ## tkIndent/tkDedent left over from multi-line continuation
-  ## expressions (e.g. an `if cond then x \n   else y` where the
-  ## else line is indented for readability — the leading whitespace
-  ## emits a tkIndent that the if-parser consumed, and the next
-  ## top-level line emits the matching tkDedent which lands here).
+  ## tkIndent/tkDedent. Continued lines (a trailing operator, or a
+  ## leading `else` or infix operator) no longer emit any, since the
+  ## tokenizer drops their newline, but an indented line that is a
+  ## statement of its own still does.
   ## Safe at top level because aither has no indent-delimited blocks
   ## there — def/play bodies parse their own tkIndent/tkDedent and
   ## never call this helper.

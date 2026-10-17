@@ -226,6 +226,14 @@ test covers conditionals.
 
 ## 4. Language: dangling-binop expression continuation
 
+**Fixed 2026-10-17.** A newline ends a statement unless the statement
+can't end there (trailing operator or `=`) or the next line can't
+begin one (leading infix operator, `then`, `else`). Token-based, so
+indentation means nothing; `- not ( [` still start a new line. It works
+in both directions, unlike the trailing-only fix proposed below. SPEC
+"Group-depth tokenization"; tests/continuation.nim. The original
+write-up follows.
+
 **Symptom**
 
 ```aither
