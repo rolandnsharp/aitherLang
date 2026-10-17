@@ -17,3 +17,4 @@ nimcache/
 tests/*
 !tests/*.nim
 !tests/*.aither
+!tests/corpus.golden

@@ -106,6 +106,19 @@ apk add nim build-base tcc-dev tcc-libs-static alsa-lib-dev
 `tcc-libs-static` provides TCC's runtime library (`libtcc1.a`), which
 TCC links into every patch it compiles.
 
+```
+make test            the test suite
+make corpus          does every patch still sound exactly as it did?
+make corpus-update   re-record that, after a change meant to alter some
+```
+
+`make corpus` renders every tracked `.aither` file for a second (knobs
+at half, a chord held) and compares each one's exact samples with
+`tests/corpus.golden`, naming every patch whose sound changed and by
+how much. A change to the language or the stdlib that touches a patch
+it wasn't meant to shows up there; one that was meant to shows up as
+the golden file's diff in its commit.
+
 ## Use
 
 ```

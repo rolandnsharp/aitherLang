@@ -32,7 +32,15 @@ test:
 	for t in cli_output_format midi_resilience slot_sweep solo_mutes; do \
 	  $(NIM) c -r $(TESTFLAGS) --out:tests/$$t tests/$$t.nim || exit 1; done
 
+# Every tracked patch rendered and fingerprinted against tests/corpus.golden
+# (tests/corpus.nim). After an intended change: make corpus-update.
+corpus:
+	$(NIM) c -r $(TESTFLAGS) --out:tests/corpus tests/corpus.nim
+
+corpus-update:
+	$(NIM) c -r $(TESTFLAGS) --out:tests/corpus tests/corpus.nim update
+
 clean:
 	rm -rf aither nimcache/ test_parser test_eval test_stdlib tools/play tools/card tools/pad tools/scope tools/tv
 
-.PHONY: all clean test
+.PHONY: all clean test corpus corpus-update
