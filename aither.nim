@@ -37,7 +37,7 @@ proc audit(path: string; secondsArg: float64; skip: float64) =
   var r: Rendered
   var seconds = secondsArg
   try:
-    let input = readRawStdin()
+    let input = if patchCallsInput(path): readRawStdin() else: (@[], @[])
     if input.left.len > 0 and seconds <= 0.0:
       seconds = float64(input.left.len) / 48000.0 - skip
     if seconds <= 0.0: seconds = 1.0

@@ -1029,7 +1029,12 @@ a player, a scope, an SDR or a file. With `seconds` it runs that
 long from `t = 0` and exits, offline, with no socket; without, it
 runs until `kill` and accepts the commands below over a UNIX socket
 (`AITHER_SOCK`, default `/tmp/aither.sock`). `input()` reads the
-same format from standard input when it is a pipe. The engine is
+same format from standard input when it is a pipe. Live, the engine
+reads that pipe whatever the patch does; offline (with `seconds`)
+and under `audit`, it reads standard input only if the patch calls
+`input()`, so a render started with an idle pipe on stdin (over
+`ssh`, from a script) doesn't wait. A live engine given an idle pipe
+waits for it: run it with `</dev/null`. The engine is
 lockstep on the pipe: it reads one block of input, then writes one
 block of output, and holds nothing back, so a program on both ends
 (`tools/card`, which runs a command between a sound card's input and

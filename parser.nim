@@ -819,6 +819,17 @@ proc parseProgram*(source: string): Node =
   popStateScope(p)
   Node(kind: nkBlock, kids: stmts, line: 1)
 
+proc callsInput*(n: Node): bool =
+  ## Does the program call `input()` anywhere? Offline runs read stdin
+  ## only then, so one started with an idle pipe on stdin doesn't wait.
+  if n == nil: return false
+  if n.kind == nkCall and n.str == "input": return true
+  for k in n.kids:
+    if callsInput(k): return true
+  for d in n.defaults:
+    if callsInput(d): return true
+  false
+
 proc setSource*(n: Node; source: string) =
   ## Stamp every node in `n`'s subtree with the given source origin,
   ## used by error messages so the reader can tell which file produced a

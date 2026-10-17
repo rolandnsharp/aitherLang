@@ -418,6 +418,8 @@ proc annotateErr(msg, userSrc, userPath: string): string =
     i = rp + 1
   msg
 
+var inputUsed: bool   # a loaded patch calls input(): offline runs read stdin
+
 proc loadPatch*(filename: string; fadeIn: float64): string =
   if not fileExists(filename): return "file not found: " & filename
   let userSrc = readFile(filename)
@@ -453,6 +455,7 @@ proc loadPatch*(filename: string; fadeIn: float64): string =
   except ImportError as e:
     stderr.writeLine "import FAIL"
     return "import error: " & e.msg
+  if callsInput(userAst): inputUsed = true
 
   # Merge: stdlib's top-level statements come first, then the user's.
   let program = parser.Node(
@@ -1050,7 +1053,11 @@ proc pumpPipe() =
   var inBuf = newSeq[cfloat](frames * 2)
   var mixL = newSeq[float64](frames)
   var mixR = newSeq[float64](frames)
-  let haveInput = not isatty(stdin)
+  # Live, the engine is a filter: it reads a pipe on stdin whatever the
+  # patch does, one block in for each block out (tools/card relies on
+  # that). Offline it reads only for a patch that calls input(), so a
+  # render started with an idle pipe on stdin (ssh, a script) can't wait.
+  let haveInput = not isatty(stdin) and (pipeLimit == 0 or inputUsed)
   var inputOpen = haveInput
   while running and (pipeLimit == 0 or pipeFrames < pipeLimit):
     let want = if pipeLimit > 0: int(min(int64(frames), pipeLimit - pipeFrames))

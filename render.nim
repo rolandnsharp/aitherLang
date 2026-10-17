@@ -141,6 +141,11 @@ proc renderPatchSrc*(src: string; seconds: float64;
   ## garbage.
   renderProgram(buildProgram(src, "<inline>"), seconds, sr, input).audio
 
+proc patchCallsInput*(srcPath: string): bool =
+  ## Does the patch (with its imports) call `input()`? `audit` reads
+  ## stdin only then.
+  callsInput(buildProgram(readFile(srcPath), srcPath))
+
 proc renderPatchFull*(srcPath: string; seconds: float64; sr: int = 48000;
                       input: Stereo = (@[], @[]); skip = 0.0): Rendered =
   ## Render a patch from disk, with per-part levels. `skip` seconds run
