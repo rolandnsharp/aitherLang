@@ -1149,7 +1149,20 @@ proc runEngine*(files: seq[string]; seconds: float64) =
   else:
     stderr.writeLine "[aither] MIDI unavailable (ALSA seq open failed)"
 
-  if fileExists(SocketPath): removeFile(SocketPath)
+  # A socket left by an engine that was killed blocks the bind. If an
+  # engine answers on it, it's live: say so and stop. Otherwise it's
+  # stale; remove it. (fileExists is false for a socket, so it can't
+  # tell.)
+  var probe = newSocket(AF_UNIX, SOCK_STREAM, IPPROTO_IP)
+  try:
+    probe.connectUnix(SocketPath)
+    probe.close()
+    stderr.writeLine "aither: an engine is already running on " & SocketPath &
+                     " (aither kill stops it; AITHER_SOCK runs a second one)"
+    quit 1
+  except OSError:
+    probe.close()
+    try: removeFile(SocketPath) except OSError: discard
   var server = newSocket(AF_UNIX, SOCK_STREAM, IPPROTO_IP)
   server.bindUnix(SocketPath)
   server.listen()

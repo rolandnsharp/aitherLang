@@ -13,6 +13,7 @@ below as a record of what went wrong and why.
 | an expression can't continue onto the next line (issue 4) | RESOLVED 5bd77e1 |
 | blocks were delimited by indentation (issue 7) | RESOLVED (a block ends at its expression; indentation means nothing) |
 | an offline render or `audit` with an idle pipe on stdin (ssh, a script) waited forever | RESOLVED 43ec94c (offline reads stdin only for a patch that calls `input()`) |
+| after an engine was killed (Ctrl-C), the next one died on "Address already in use": `fileExists` is false for a socket, so the stale one was never removed | RESOLVED (probe it: a live engine answers and the new one says so; a stale socket is removed) |
 | a top-level `def ratio(n, k)` breaks stdlib's `inharmonic`, whose *parameter* `ratio` is called as `ratio(n)`: "ratio: missing 'k' (stdlib:186)", even when `inharmonic` isn't called. A parameter should shadow a global def | open (found writing patches/spectra.aither, which renamed its def) |
 | `midi_cc(...)` isn't hoisted: a coefficient that depends only on knobs (spectra's per-partial `exp`s) runs every sample, though the knob can only change between blocks | open, an idea to discuss: treat `midi_cc` as constant within a block |
 | the uConsole's es8388 capture reads a flat constant on every input, headset plugged in | open, hardware side; see notes/card-2026-10-16.md |
