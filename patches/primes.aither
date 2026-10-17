@@ -26,8 +26,8 @@ let detune  = midi_cc(71) * 0.012                   # 0..1.2% drift
 let release = 0.5 + midi_cc(76) * 4.5               # 0.5..5.0 s
 
 # Polyphonic — each held key spreads across its own 9 prime partials.
-let voices = midi_keyboard((f, g) =>
-  let env = swell(g, 0.01, release)
+let voices = midi_keyboard((f, g, vel) =>
+  let env = swell(g, 0.01, release) * vel
   let voice = sum(9, n =>
     let r  = prime_ratio(n) * (1 + detune * sin(t * n / 5 + n * 0.7))
     let pf = f * r

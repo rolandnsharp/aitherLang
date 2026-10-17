@@ -202,7 +202,7 @@ play acid:
 # Every key is scale-locked to D minor pentatonic (D, F, G, A, C)
 # so anything you press matches the kick + bass + didge.
 play flute:
-  midi_keyboard((freq, gate) =>
+  midi_keyboard((freq, gate, vel) =>
     # SCALE LOCK — snap incoming pitch to nearest D-minor pentatonic
     # note. Every key (white or black) lands on a scale tone.
     let n   = 12 * log2(freq / 440) + 69
@@ -218,7 +218,7 @@ play flute:
 
     # Envelope: soft swell for sustained tone, plus a per-strike
     # impulse for the chiff (air-against-edge) at attack.
-    let env    = swell(gate, 0.05, 0.5)
+    let env    = swell(gate, 0.05, 0.5) * vel
     let strike = if gate > 0.5 and prev(gate) < 0.5 then 1.0 else 0.0
     let chiff  = (noise() |> hpf(2500, 0.5)) * pluck(strike, 0.06) * 0.18
 

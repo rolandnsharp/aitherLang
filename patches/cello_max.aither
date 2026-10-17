@@ -64,8 +64,8 @@ let bri_amp = midi_cc(85)
 let shi_amp = midi_cc(17)
 
 play cello_max:
-  midi_keyboard((freq, gate) =>
-    let env = swell(gate, 0.2, 0.6)
+  midi_keyboard((freq, gate, vel) =>
+    let env = swell(gate, 0.2, 0.6) * vel
     let vib = sin(TAU * t * vib_rate) * vib_depth
     let voice = sum(12, n =>
       let r       = pow(n, ratio_exp)

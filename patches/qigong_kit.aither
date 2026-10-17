@@ -274,7 +274,7 @@ play kalimba:
 # midi_keyboard, scale-locked to D minor pentatonic.
 play flute:
   let breath = midi_gate()
-  let breathEnv = swell(breath, 0.4, 1.4)
+  let breathEnv = swell(breath, 0.4, 1.4) * midi_vel()
   let dronePipe = sum(4, n =>
     let amp = (if n == 1 then 1.00
                else if n == 2 then 0.10
@@ -283,8 +283,8 @@ play flute:
     let drift = 1 + 0.0018 * sin(t * n / 19 + n * 0.6)
     amp * sin(TAU * phasor(n * 73.42 * drift))) * breathEnv * 0.16
 
-  let melody = midi_keyboard((freq, gate) =>
-    let n   = 12 * log2(freq / 440) + 69
+  let melody = midi_keyboard((freq, gate, vel, key) =>
+    let n   = key
     let oct = floor(n / 12)
     let pc  = n - oct * 12
     let q   = (if pc <= 1     then 0
@@ -294,7 +294,7 @@ play flute:
                else if pc <= 10.5 then 9
                else                    12)
     let qFreq = 440 * pow(2, (oct * 12 + q - 69) / 12)
-    let env = swell(gate, 0.20, 1.0)
+    let env = swell(gate, 0.20, 1.0) * vel
     let vib = sin(TAU * t * 4.5 + sin(TAU * t * 0.6) * 0.5) * 0.005
     let f   = qFreq * (1 + vib)
     let voice = sum(4, n =>

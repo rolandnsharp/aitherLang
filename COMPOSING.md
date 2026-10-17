@@ -198,13 +198,18 @@ play piano:
   poly(16, (freq, gate) => ...)        # 16 voices
 ```
 
-The mono primitives `midi_freq()` / `midi_gate()` still exist
-(they return the most-recent note) for monophonic synth-lead
-behaviour.
+The mono primitives `midi_freq()` / `midi_gate()` / `midi_vel()`
+still exist (they return the most-recent note) for monophonic
+synth-lead behaviour.
 
-The deepest layer is `midi_voice_freq(n)` / `midi_voice_gate(n)`
-— for hand-rolled allocation logic that doesn't fit `poly`'s
-shape.
+The voice function gets `(freq, gate, vel, key)` and names what it
+uses. `gate` is 1 while held, so it drives envelopes at any
+velocity; `vel` scales loudness or brightness: `swell(gate, a, r) *
+vel` is the velocity-sensitive envelope, release tail included.
+
+The deepest layer is `midi_voice_freq(n)` / `_gate` / `_vel` /
+`_key` — for hand-rolled allocation logic that doesn't fit
+`poly`'s shape.
 
 ### Smoothstep (ease 0→1)
 

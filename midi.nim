@@ -32,6 +32,7 @@ type
     ## while audio reads at 48 kHz, so the visibility is sub-perceptual.
     note*:     Atomic[int32]      # MIDI note 0..127, or -1 if never used
     velocity*: Atomic[float64]    # > 0 = held; 0 = released or empty
+    struck*:   Atomic[float64]    # the note-on velocity, kept after release
     onAt*:     Atomic[int64]      # global note-on counter at allocation
 
   MidiState* = object
@@ -41,6 +42,7 @@ type
     lastFreq*:  Atomic[float64]
     lastGate*:  Atomic[float64]
     lastNote*:  Atomic[int32]                # which note currently holds gate
+    lastVel*:   Atomic[float64]              # the latest note-on velocity, kept
     # Polyphonic held-notes table. Voice index n in 1..MaxPolyphony maps
     # to held[n-1]. Slot allocation policy: re-trigger on duplicate note,
     # else first slot with note==-1, else first slot with velocity==0
@@ -73,6 +75,7 @@ proc allocateSlot(note: int; vel: float64; onAt: int64) =
     if midiState.held[i].note.load() == n and
        midiState.held[i].velocity.load() > 0.0:
       midiState.held[i].onAt.store(onAt)
+      midiState.held[i].struck.store(vel)
       midiState.held[i].velocity.store(vel)
       return
   # 2. First empty slot (velocity == 0). Covers both never-used slots
@@ -82,6 +85,7 @@ proc allocateSlot(note: int; vel: float64; onAt: int64) =
   for i in 0 ..< MaxPolyphony:
     if midiState.held[i].velocity.load() == 0.0:
       midiState.held[i].onAt.store(onAt)
+      midiState.held[i].struck.store(vel)
       midiState.held[i].velocity.store(vel)
       midiState.held[i].note.store(n)
       return
@@ -96,6 +100,7 @@ proc allocateSlot(note: int; vel: float64; onAt: int64) =
       oldestAt = t
       oldestIdx = i
   midiState.held[oldestIdx].onAt.store(onAt)
+  midiState.held[oldestIdx].struck.store(vel)
   midiState.held[oldestIdx].velocity.store(vel)
   midiState.held[oldestIdx].note.store(n)
 
@@ -106,6 +111,7 @@ proc midiNoteOn*(note, velocity: int) =
   let hz = 440.0 * pow(2.0, (float64(note) - 69.0) / 12.0)
   midiState.lastFreq.store(hz)
   midiState.lastGate.store(vel)
+  midiState.lastVel.store(vel)
   midiState.lastNote.store(int32(note))
   discard midiState.trigs[note].fetchAdd(1'u32)
   let onAt = midiState.onCounter.fetchAdd(1'i64) + 1'i64
@@ -139,9 +145,11 @@ proc midiResetAll*() =
   midiState.lastFreq.store(0.0)
   midiState.lastGate.store(0.0)
   midiState.lastNote.store(-1'i32)
+  midiState.lastVel.store(0.0)
   for i in 0 ..< MaxPolyphony:
     midiState.held[i].note.store(-1'i32)
     midiState.held[i].velocity.store(0.0)
+    midiState.held[i].struck.store(0.0)
     midiState.held[i].onAt.store(0'i64)
   midiState.onCounter.store(0'i64)
 
@@ -159,7 +167,15 @@ proc nMidiFreq*(): cdouble {.cdecl, exportc: "n_midi_freq".} =
   midiState.lastFreq.load()
 
 proc nMidiGate*(): cdouble {.cdecl, exportc: "n_midi_gate".} =
-  midiState.lastGate.load()
+  ## 1 while the most recent note is held, 0 after its note-off. A gate,
+  ## not a level: `adsr(midi_gate(), ...)` sounds however softly the key
+  ## was played. The velocity is midi_vel().
+  if midiState.lastGate.load() > 0.0: 1.0 else: 0.0
+
+proc nMidiVel*(): cdouble {.cdecl, exportc: "n_midi_vel".} =
+  ## Velocity 0..1 of the most recent note-on. It stays after the
+  ## note-off, so a release tail scaled by it doesn't cut off.
+  midiState.lastVel.load()
 
 proc nMidiVoiceFreq*(n: cint): cdouble {.cdecl, exportc: "n_midi_voice_freq".} =
   ## Hz of the nth held voice (n in 1..MaxPolyphony, 1-based to match
@@ -172,10 +188,26 @@ proc nMidiVoiceFreq*(n: cint): cdouble {.cdecl, exportc: "n_midi_voice_freq".} =
   440.0 * pow(2.0, (float64(note) - 69.0) / 12.0)
 
 proc nMidiVoiceGate*(n: cint): cdouble {.cdecl, exportc: "n_midi_voice_gate".} =
-  ## Velocity of the nth held voice (1-based). 0 after release; 0 for
-  ## empty slots. Standard MIDI gate semantics — drives ADSR/swell.
+  ## 1 while the nth voice's key is held (1-based), 0 after release or
+  ## for an empty slot. A gate, not a level: it drives adsr/swell
+  ## however softly the key was played. The velocity is midi_voice_vel.
   if n < 1 or n > MaxPolyphony: return 0.0
-  midiState.held[n - 1].velocity.load()
+  if midiState.held[n - 1].velocity.load() > 0.0: 1.0 else: 0.0
+
+proc nMidiVoiceVel*(n: cint): cdouble {.cdecl, exportc: "n_midi_voice_vel".} =
+  ## Velocity 0..1 the nth voice's note was struck at. Like its freq it
+  ## stays after release, so `swell(gate, a, r) * vel` keeps its release
+  ## tail; 0 for a slot that has never held a note.
+  if n < 1 or n > MaxPolyphony: return 0.0
+  midiState.held[n - 1].struck.load()
+
+proc nMidiVoiceKey*(n: cint): cdouble {.cdecl, exportc: "n_midi_voice_key".} =
+  ## MIDI key number 0..127 of the nth voice; like midi_voice_freq it
+  ## stays after release (so a release tail keeps its key), and is 0
+  ## for a slot that has never held a note.
+  if n < 1 or n > MaxPolyphony: return 0.0
+  let note = midiState.held[n - 1].note.load()
+  if note < 0: 0.0 else: float64(note)
 
 # Per-voice edge detect. Pool slot holds the last-seen global counter for
 # note n; emit 1.0 on the sample when the counter advanced. Consume-once

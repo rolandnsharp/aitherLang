@@ -43,8 +43,8 @@ let peak_n  = 3 + walk * 18                       # formant centre walks 3..21
 # Polyphonic — every held note runs its own 24-partial swarm, each with
 # independent partial detuning so chord voices each have their own
 # internal life.
-let voices = midi_keyboard((f, g) =>
-  let env = swell(g, 0.6, 1.8)
+let voices = midi_keyboard((f, g, vel) =>
+  let env = swell(g, 0.6, 1.8) * vel
   let voice = sum(24, n =>
     let pf      = n * f * (1 + depth * sin(t * n / 7 + n * 0.41))
     let basis   = 1.0 / pow(n, 0.65)

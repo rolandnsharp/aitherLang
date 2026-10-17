@@ -26,13 +26,10 @@ let release = 0.1 * pow(40, midi_cc(25))
 let space   = midi_cc(26)
 let length  = 2 * pow(4, midi_cc(27))
 
-def note(key, gate):
-  $vel = 0.0
-  $vel = if gate > 0 then gate else $vel
-  let held = if gate > 0 then 1 else 0
-  let hit = if held > 0.5 and prev(held) < 0.5 then 1 else 0
-  let metal = pluck(hit, settle) * $vel * strike
-  let grow  = swell(held, 2.5, 0.3) * bloom
+def note(key, gate, vel):
+  let hit = if gate > 0.5 and prev(gate) < 0.5 then 1 else 0
+  let metal = pluck(hit, settle) * vel * strike
+  let grow  = swell(gate, 2.5, 0.3) * bloom
   let m = clamp(morph + metal + grow, 0, 1)
   let r = rolloff - 0.5 * metal
   let f = spectral_key(key, morph)               # 0 for a black key
@@ -40,7 +37,7 @@ def note(key, gate):
     let pf = f * partial(n, m)
     if pf <= 0 or pf >= sr * 0.45 then 0
     else sin(TAU * phasor(pf)) * exp(-r * log(n)))
-  * adsr(held, 0.003, 0.5, 0.55, release) * (0.3 + 0.7 * $vel) * 0.09
+  * adsr(gate, 0.003, 0.5, 0.55, release) * (0.3 + 0.7 * vel) * 0.09
 
 # The cycle: a clock in chords, so the length knob can move without a jump.
 $clock = 0.0
@@ -48,15 +45,14 @@ $clock = $clock + dt / length
 let chord = floor($clock) mod 4
 let pos = ($clock - floor($clock)) * length            # seconds into the chord
 let chords = [60, 64, 67, 65, 69, 72, 67, 71, 74, 69, 72, 76]   # MIDI keys
-def key_hz(k): 440 * pow(2, (k - 69) / 12)
-def held(pos, from, until, vel): if pos >= from and pos < until then vel else 0
+def held(pos, from, until): if pos >= from and pos < until then 1 else 0
 let hold = length - 0.35                               # a gap, so each chord strikes
 
 play keys:
-  note(key_hz(chords[chord * 3]), held(pos, 0.0, hold, 0.8))
-  + note(key_hz(chords[chord * 3 + 1]), held(pos, 0.05, hold, 0.6))
-  + note(key_hz(chords[chord * 3 + 2]), held(pos, 0.1, hold, 0.7))
-  + note(key_hz(chords[chord * 3] - 12), held(pos, 0.0, hold, 0.9))
+  note(chords[chord * 3], held(pos, 0.0, hold), 0.8)
+  + note(chords[chord * 3 + 1], held(pos, 0.05, hold), 0.6)
+  + note(chords[chord * 3 + 2], held(pos, 0.1, hold), 0.7)
+  + note(chords[chord * 3] - 12, held(pos, 0.0, hold), 0.9)
 
 keys
 |> tanh

@@ -94,14 +94,14 @@ let voiceGain = 0.025 + (bright - 1.0) * 0.025
 # voice per sample on top of 32 phasors and was the CPU bottleneck
 # producing buffer xruns at low octaves. Static stiffness produces the
 # same "non-integer-ratios shimmer" character without per-sample cost.
-let voices = midi_keyboard((f, g) =>
+let voices = midi_keyboard((f, g, vel) =>
   # 30ms attack instead of 10ms. Long enough to mask phase-coherent
   # transients on chord-press AND voice-stealing freq jumps when a
   # released slot gets reused for a new note (the previous owner's
   # phasor state carries over; new freq + old phase = sub-sample
   # discontinuity that reads as a pop). 30ms is still fast enough
   # to feel articulated under the fingers.
-  let env = swell(g, 0.03, release)
+  let env = swell(g, 0.03, release) * vel
   let voice = sum(16, n =>
     # Stiffness: stiff_string-like inharmonicity. At stiff=0.0008 it's
     # a subtle bell tilt; at stiff=0.004 (knob max) partial 16 sits at

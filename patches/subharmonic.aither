@@ -25,8 +25,8 @@ let release = 0.5 + midi_cc(76) * 4.5               # 0.5..5.0 s
 # Polyphonic — chords get their own subharmonic stacks. Stacking notes
 # C-E-G with depth = right makes each note bloom downwards into its
 # own bass region.
-let voices = midi_keyboard((f, g) =>
-  let env = swell(g, 0.01, release)
+let voices = midi_keyboard((f, g, vel) =>
+  let env = swell(g, 0.01, release) * vel
   let voice = sum(8, n =>
     let pf = f / pow(n, depth)
     let am = 0.5 / pow(n, tilt)

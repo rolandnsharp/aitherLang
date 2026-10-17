@@ -22,8 +22,8 @@ let bright  = 0.2 + midi_cc(71) * 1.2               # 0.2..1.4
 let release = 0.5 + midi_cc(76) * 4.5               # 0.5..5.0 s
 
 # Polyphonic — chord-friendly; each held key runs its own jagged stack.
-let voices = midi_keyboard((f, g) =>
-  let env = swell(g, 0.01, release)
+let voices = midi_keyboard((f, g, vel) =>
+  let env = swell(g, 0.01, release) * vel
   let voice = sum(16, n =>
     let r  = n + sin(n * 2.39) * n * chaos
     let pf = f * r

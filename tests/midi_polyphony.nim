@@ -1,7 +1,7 @@
 ## Phase 2: polyphonic held-notes table.
 ##
 ## The engine tracks up to MaxPolyphony (16) simultaneously-held notes.
-## midi_voice_freq(n) / midi_voice_gate(n) expose the nth slot, 1-based,
+## midi_voice_freq/gate/vel/key(n) expose the nth slot, 1-based,
 ## so the slot index pairs cleanly with sum's iteration counter.
 ##
 ## Allocator policy (re-trigger same note → fill empty → reuse released
@@ -35,13 +35,20 @@ doAssert l == 0.0 and r == 0.0,
 midiNoteOn(60, 100)              # C4 ≈ 261.63 Hz
 (l, r) = v1.tick(0.0)
 doAssert abs(l - hzOf(60)) < 1e-3, "voice 1 freq for C4: " & $l
-doAssert abs(r - 100.0/127.0) < 1e-9, "voice 1 gate for C4: " & $r
+doAssert r == 1.0, "voice 1 gate for C4 is 1 while held, whatever the velocity: " & $r
+let v1v = load("[midi_voice_vel(1), midi_voice_key(1)]")
+(l, r) = v1v.tick(0.0)
+doAssert abs(l - 100.0/127.0) < 1e-9, "voice 1 vel for C4: " & $l
+doAssert r == 60.0, "voice 1 key for C4: " & $r
 
 midiNoteOff(60)
 (l, r) = v1.tick(0.0)
 doAssert abs(l - hzOf(60)) < 1e-3,
   "voice 1 freq stays after release (synth release tail still reads it): " & $l
 doAssert r == 0.0, "voice 1 gate goes to 0 on release: " & $r
+(l, r) = v1v.tick(0.0)
+doAssert abs(l - 100.0/127.0) < 1e-9 and r == 60.0,
+  "vel and key stay after release, so a release tail scaled by vel rings on: " & $l & " " & $r
 
 # 2. Three-note chord — each held note maps to its own slot in held-order.
 midiResetAll()
@@ -79,18 +86,23 @@ midiNoteOn(72, 100)              # C5 — should land in slot 2 (released first)
 (l, _) = v3b.tick(0.0)
 doAssert abs(l - hzOf(72)) < 1e-3, "C5 takes the freed slot 2: " & $l
 
-# 5. midi_freq() / midi_gate() track the most recent note-on, unchanged.
+# 5. midi_freq() / midi_gate() / midi_vel() track the most recent note-on.
 let v5 = load("[midi_freq(), midi_gate()]")
+let v5v = load("midi_vel()")
 midiResetAll()
 midiNoteOn(60, 100)
 midiNoteOn(64, 90)
 midiNoteOn(67, 80)
 (l, r) = v5.tick(0.0)
 doAssert abs(l - hzOf(67)) < 1e-3, "midi_freq() = most recent: " & $l
-doAssert abs(r - 80.0/127.0) < 1e-9, "midi_gate() = most recent vel: " & $r
+doAssert r == 1.0, "midi_gate() is 1 while the most recent note is held: " & $r
+(l, _) = v5v.tick(0.0)
+doAssert abs(l - 80.0/127.0) < 1e-9, "midi_vel() = most recent velocity: " & $l
 midiNoteOff(67)
 (l, r) = v5.tick(0.0)
 doAssert r == 0.0, "midi_gate goes to 0 when most-recent releases: " & $r
+(l, _) = v5v.tick(0.0)
+doAssert abs(l - 80.0/127.0) < 1e-9, "midi_vel() stays after the note-off: " & $l
 
 # 6. Voice stealing: 17 distinct held notes evict the oldest.
 midiResetAll()
@@ -112,7 +124,7 @@ midiResetAll()
 midiNoteOn(60, 100)
 midiNoteOn(64, 100)
 let v7f = load("midi_voice_freq(1)")
-let v7g = load("midi_voice_gate(1)")
+let v7g = load("midi_voice_vel(1)")
 (l, _) = v7f.tick(0.0); doAssert abs(l - hzOf(60)) < 1e-3
 (l, _) = v7g.tick(0.0); doAssert abs(l - 100.0/127.0) < 1e-9
 midiNoteOn(60, 60)               # re-press at lower velocity → in-place update
@@ -120,6 +132,11 @@ midiNoteOn(60, 60)               # re-press at lower velocity → in-place updat
   "still slot 1 after re-press: " & $l
 (l, _) = v7g.tick(0.0); doAssert abs(l - 60.0/127.0) < 1e-9,
   "velocity refreshed in slot 1: " & $l
+# 7b. Soft notes are held notes: the gate is 1 at velocity 1 too.
+midiResetAll()
+midiNoteOn(60, 1)
+let v7s = load("midi_voice_gate(1)")
+(l, _) = v7s.tick(0.0); doAssert l == 1.0, "velocity 1 still gates: " & $l
 
 # 8. Out-of-range voice index returns 0 cleanly (no crash).
 let v8 = load("[midi_voice_freq(0), midi_voice_freq(99)]")

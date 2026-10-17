@@ -38,8 +38,8 @@ let widen   = midi_cc(16)
 let pos     = t - start_t
 
 play sculpt:
-  midi_keyboard((freq, gate) =>
-    let env = swell(gate, attack, release)
+  midi_keyboard((freq, gate, vel) =>
+    let env = swell(gate, attack, release) * vel
     let p1  = midi_cc(82) * sin(TAU * phasor(freq * 1))
     let p2  = midi_cc(83) * sin(TAU * phasor(freq * 2))
     let p3  = midi_cc(85) * sin(TAU * phasor(freq * 3))

@@ -47,8 +47,8 @@ let release    = 0.2  + midi_cc(19) * 3.0
 let revWet     = (1 - midi_cc(93)) * 0.5
 
 play chimera:
-  midi_keyboard((freq, gate) =>
-    let env = swell(gate, attack, release)
+  midi_keyboard((freq, gate, vel) =>
+    let env = swell(gate, attack, release) * vel
 
     # Spectrum A — saw (all integer harmonics, 1/n^bright_a)
     # Detune at rate t*n/7 — base spectrum drift.

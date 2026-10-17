@@ -99,9 +99,9 @@ play pad:
   pan(s, sin(TAU * pos * 0.04) * 0.3)
 
 play lead:
-  poly(4, (freq, gate) =>
+  poly(4, (freq, gate, vel) =>
     let qf  = scale_lock(freq)
-    let env = swell(gate, 0.005, 0.6)
+    let env = swell(gate, 0.005, 0.6) * vel
     let voice = sum(14, n =>
       let cf   = n * qf
       let modf = cf * 3.06 * (1 + 0.006 * sin(t * n / 11 + n * 0.3))

@@ -282,8 +282,8 @@ play organ:
   let modr    = 0.5 + midi_cc(71) * 3.5
   let release = 0.5 + midi_cc(76) * 4.5
   let motion  = midi_cc(77) * 0.018
-  let voices = midi_keyboard((f, g) =>
-    let env = swell(g, 0.01, release)
+  let voices = midi_keyboard((f, g, vel) =>
+    let env = swell(g, 0.01, release) * vel
     let voice = sum(16, n =>
       let cf   = n * f
       let modf = cf * modr * (1 + motion * sin(t * n / 11 + n * 0.3))

@@ -43,8 +43,8 @@ let release    = 0.68 + midi_cc(19) * 4.32
 let revWet     = midi_cc(16) * 0.6
 
 play tesla3:
-  midi_keyboard((freq, gate) =>
-    let env = swell(gate, 0.005, release)
+  midi_keyboard((freq, gate, vel) =>
+    let env = swell(gate, 0.005, release) * vel
     let voice = sum(16, n =>
       # Xenharmonic interpolation: partial ratio is a blend of integer
       # harmonic (n) and golden-ratio spacing (φ^(n-1)). The single

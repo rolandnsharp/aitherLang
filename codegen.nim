@@ -458,6 +458,7 @@ proc scalarShadows(sc: Scope; name: string): bool =
 const BuiltinFns = ["saw", "tri", "sqr", "phasor", "noise", "abs", "pow",
                     "midi_cc", "midi_note", "midi_freq", "midi_gate",
                     "midi_trig", "midi_voice_freq", "midi_voice_gate",
+                    "midi_voice_vel", "midi_voice_key", "midi_vel",
                     "magnitude", "phase", "freq_shift",
                     "array_make", "array_get", "array_set", "array_len",
                     "array_push", "array_pop", "array_resize"]
@@ -1595,7 +1596,11 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
     # inside `def poly(n_voices, voice_fn): ...`.
     let lamNode = sc.lookupLambda(n.str)
     if lamNode != nil:
-      if n.kids.len != lamNode.params.len:
+      # A lambda may take fewer arguments than it is called with; the
+      # extras aren't evaluated. So a caller can pass everything it
+      # knows (`voice_fn(freq, gate, vel, key)`) and each lambda names
+      # what it uses, and adding an argument later breaks nothing.
+      if n.kids.len < lamNode.params.len:
         raise newException(ValueError,
           "lambda '" & n.str & "' takes " & $lamNode.params.len &
           " args, got " & $n.kids.len & " " & errLoc(n))
@@ -1880,8 +1885,15 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
       return "n_midi_voice_freq((int)(" & c.emitExpr(sc, n.kids[0]) & "))"
     if name == "midi_voice_gate" and n.kids.len == 1:
       return "n_midi_voice_gate((int)(" & c.emitExpr(sc, n.kids[0]) & "))"
+    if name == "midi_voice_vel" and n.kids.len == 1:
+      return "n_midi_voice_vel((int)(" & c.emitExpr(sc, n.kids[0]) & "))"
+    if name == "midi_voice_key" and n.kids.len == 1:
+      return "n_midi_voice_key((int)(" & c.emitExpr(sc, n.kids[0]) & "))"
+    if name == "midi_vel" and n.kids.len == 0:
+      return "n_midi_vel()"
     if name in ["midi_cc", "midi_note", "midi_trig", "midi_freq",
-                "midi_gate", "midi_voice_freq", "midi_voice_gate"]:
+                "midi_gate", "midi_voice_freq", "midi_voice_gate",
+                "midi_voice_vel", "midi_voice_key", "midi_vel"]:
       raise newException(ValueError,
         name & ": wrong arg count " & errLoc(n))
     # wave(freq, array) — array must resolve to a compile-time constant.
@@ -2619,6 +2631,9 @@ proc emit*(c: Ctx; program: Node): string =
   pre.add "extern double n_midi_trig(DspState*,int);\n"
   pre.add "extern double n_midi_voice_freq(int);\n"
   pre.add "extern double n_midi_voice_gate(int);\n"
+  pre.add "extern double n_midi_voice_vel(int);\n"
+  pre.add "extern double n_midi_voice_key(int);\n"
+  pre.add "extern double n_midi_vel(void);\n"
   pre.add "extern double n_input_l(void);\n"
   pre.add "extern double n_input_r(void);\n"
   pre.add "extern long n_overrun(void*,const char*);\n"

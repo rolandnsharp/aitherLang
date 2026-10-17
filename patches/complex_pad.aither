@@ -33,8 +33,8 @@ let driveAmt  = 1.0 + midi_cc(19) * 1.5
 let revWet    = midi_cc(16) * 0.5
 
 play pad:
-  midi_keyboard((freq, gate) =>
-    let env  = swell(gate, 0.06, 1.0)
+  midi_keyboard((freq, gate, vel) =>
+    let env  = swell(gate, 0.06, 1.0) * vel
     let saw  = additive(freq,         vowel_ah, 8)
     let saw2 = additive(freq * 1.005, vowel_ah, 6) * 0.6
     let voice = (saw + saw2) * env * 0.08

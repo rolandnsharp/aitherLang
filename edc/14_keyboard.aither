@@ -17,8 +17,11 @@
 #
 #   midi_keyboard((freq, gate) => ...) describes ONE key:
 #     freq   the key's pitch in Hz
-#     gate   how hard you pressed it (0..1) while held,
-#            0 once you let go
+#     gate   1 while you hold it, 0 once you let go
+#   Name two more and you get them too:
+#   (freq, gate, vel, key) => ...
+#     vel    how hard you pressed it (0..1)
+#     key    which key it is (MIDI number, middle C = 60)
 #   aither runs a copy for every key you hold (up to 8)
 #   and adds them up. Chords just work.
 #
@@ -80,8 +83,9 @@ keys
 #   3. Add vibrato from the mod wheel (CC 1):
 #        let wob = sin(TAU * phasor(5.5)) * midi_cc(1) * 6
 #      outside the lambda, and use freq + wob.
-#   4. Make velocity matter: multiply the last line by gate,
-#      so soft key presses play quietly.
+#   4. Make velocity matter: write (freq, gate, vel) => and
+#      multiply the last line by vel, so soft presses play
+#      quietly.
 #   5. Bring back lesson 5's vowel: replace osc(saw, freq) with
 #      additive(freq, vowel_ah, 8). Lovely, but 8 sines per
 #      key: watch for crackle on big chords.

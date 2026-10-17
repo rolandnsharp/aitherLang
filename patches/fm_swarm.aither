@@ -46,8 +46,8 @@ let motion  = midi_cc(77) * 0.018                   # 0..1.8% drift
 # and its own modulator drift. Reverb is shared across the polyphony
 # so chord voices share a single cathedral space rather than each
 # voice carrying its own tail.
-let voices = midi_keyboard((f, g) =>
-  let env = swell(g, 0.01, release)
+let voices = midi_keyboard((f, g, vel) =>
+  let env = swell(g, 0.01, release) * vel
   let voice = sum(16, n =>
     let cf   = n * f
     let modf = cf * modr * (1 + motion * sin(t * n / 11 + n * 0.3))

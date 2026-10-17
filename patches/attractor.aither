@@ -39,8 +39,8 @@ let release     = 0.3  + midi_cc(19) * 3.0
 let driveAmt    = 1.0 + midi_cc(16) * 2.0
 
 play swarm:
-  midi_keyboard((freq, gate) =>
-    let env = swell(gate, attack, release)
+  midi_keyboard((freq, gate, vel) =>
+    let env = swell(gate, attack, release) * vel
     let voice = sum(16, n =>
       # Per-partial Lorenz attractor with seeded initial conditions
       # (different per partial so they don't all evolve identically).

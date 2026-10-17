@@ -333,9 +333,15 @@ are accepted but optional — newlines inside the enclosing
   parameter. A lambda stored in a `let` or returned from a `def`
   is a compile error.
 - `sum` requires a single-arg lambda (its iteration index).
+- A lambda may take **fewer** arguments than it is called with;
+  the extras are ignored, not evaluated. A caller passes all it
+  knows and each lambda names what it uses, so adding an argument
+  later breaks no lambda: `midi_keyboard((freq, gate) => ...)` and
+  `midi_keyboard((freq, gate, vel, key) => ...)` both work. Fewer
+  arguments than the lambda takes is an error.
 - A multi-arg lambda passed to a `def` is inlined at every call
   to that param: `def poly(n_voices, voice_fn): sum(n_voices, n =>
-  voice_fn(midi_voice_freq(n), midi_voice_gate(n)))` — `voice_fn`
+  voice_fn(midi_voice_freq(n), midi_voice_gate(n), ...))` — `voice_fn`
   is bound to the lambda the caller passed, not a runtime value.
 
 Lambdas capture any variable in their enclosing lexical
@@ -838,23 +844,33 @@ hot-reloading a patch preserves held notes and knob values.
 | `midi_cc(n)`          | CC `n` value, `0..1`. `n` in `0..127`.           |
 | `midi_note(n)`        | Velocity `0..1` while note `n` is held; 0 else. |
 | `midi_freq()`         | Hz of the most recent note-on (mono).            |
-| `midi_gate()`         | Velocity `0..1` of the most recent note-on; 0 after note-off. |
+| `midi_gate()`         | 1 while the most recent note is held, 0 after its note-off. |
+| `midi_vel()`          | Velocity `0..1` of the most recent note-on; stays after the note-off. |
 | `midi_trig(n)`        | 1.0 for a single sample on each note-on for `n`; 0 otherwise. Per-voice edge detect. |
 | `midi_voice_freq(n)`  | Hz of the nth held voice (1..16); 0 if slot empty. Stable per held note. |
-| `midi_voice_gate(n)`  | Velocity of the nth held voice (1..16); 0 after release or empty. |
+| `midi_voice_gate(n)`  | 1 while the nth voice's key is held (1..16), 0 after release or empty. |
+| `midi_voice_vel(n)`   | Velocity `0..1` the nth voice was struck at; stays after release, 0 if never used. |
+| `midi_voice_key(n)`   | MIDI key number of the nth voice, `0..127`; stays after release, 0 if never used. |
+
+**A gate is a gate; velocity is separate.** Gates are 1 or 0, so
+`adsr(gate, ...)` sounds however softly a key is played (`adsr`
+starts above 0.5, so a velocity used as a gate dropped every key
+softer than half). Velocity and key stay after release, the way
+freq does: `swell(gate, a, r) * vel` rings out its release tail
+instead of cutting off.
 
 If no MIDI device is connected, all return 0 and the
 patch still runs. There is no binding step — the patch IS
 the routing. Example:
 
 ```
-play bass: osc(saw, midi_freq()) * midi_gate() * 0.3
+play bass: osc(saw, midi_freq()) * swell(midi_gate(), 0.01, 0.2) * midi_vel() * 0.3
 play kick: discharge(midi_trig(36), 30) * sin(TAU * phasor(60))
 (bass + kick) * midi_cc(80)
 ```
 
 **Polyphony**. Use `midi_keyboard` (stdlib) — it wraps
-`midi_voice_freq` / `midi_voice_gate` over 8 voices via
+`midi_voice_freq` / `_gate` / `_vel` / `_key` over 8 voices via
 sum-unrolling. The raw primitives are for unusual cases
 (non-default voice counts via `poly(N, ...)`, or hand-rolled
 allocation logic).
@@ -991,14 +1007,22 @@ See TV.md.
 - `poly(n_voices, voice_fn)` — fan a per-key synth across N voices
 - `midi_keyboard(voice_fn)` — `poly(8, voice_fn)`, the front-door form
 
-`voice_fn` is a 2-arg lambda `(freq, gate) => synth_expr`. Each
-held key drives one voice independently; sums of phasor-based
-synthesis stack at codegen time.
+`voice_fn` is called with everything known about a key:
+`(freq, gate, vel, key)`, Hz, 1 while held, the velocity it was
+struck at, and the MIDI key number. A lambda names as many as it
+uses (a lambda may take fewer arguments than it's called with), so
+`(freq, gate) => ...` works and `(freq, gate, vel) => ...` is
+velocity-sensitive. Each held key drives one voice independently;
+sums of phasor-based synthesis stack at codegen time.
 
 ```
 play piano:
   midi_keyboard((freq, gate) =>
     additive(freq, warm_shape, 8) * adsr(gate, 0.01, 0.2, 0.7, 0.4))
+
+play pad:                              # louder the harder it's played
+  midi_keyboard((freq, gate, vel) =>
+    additive(freq, warm_shape, 8) * swell(gate, 0.3, 1.5) * vel)
 ```
 
 ---

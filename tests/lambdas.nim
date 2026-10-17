@@ -300,4 +300,17 @@ outer((a, b) => a + b)
   doAssert abs(s.l - 30.0) < 1e-9,
     "lambda forwarded through two defs should give 30.0, got " & $s.l
 
+# --- A lambda may take fewer arguments than it is called with: the
+# extras are ignored (not evaluated). Too few is still an error.
+block extraArgs:
+  let v = newVoice(48000.0)
+  v.load(parseProgram("def call3(f): f(2, 3, 4)\ncall3((a, b) => a * b)"), 48000.0)
+  doAssert abs(v.tick(0.0).l - 6.0) < 1e-12, "two of three args"
+  try:
+    let w = newVoice(48000.0)
+    w.load(parseProgram("def call1(f): f(2)\ncall1((a, b) => a * b)"), 48000.0)
+    doAssert false, "too few args should error"
+  except CatchableError as e:
+    doAssert "takes 2 args, got 1" in e.msg, e.msg
+
 echo "lambdas ok"

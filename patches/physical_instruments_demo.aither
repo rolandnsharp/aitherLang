@@ -33,10 +33,10 @@ play pluck:
 play bowed:
   # Bowed string — gate provides bow pressure; CC 71 mixes a tiny
   # vibrato sine in for a more violin-like attack.
-  midi_keyboard((freq, gate) =>
-    let pressure = gate * (0.6 + midi_cc(71) * 0.4)
+  midi_keyboard((freq, gate, vel) =>
+    let pressure = gate * vel * (0.6 + midi_cc(71) * 0.4)
     let bow = noise() * pressure + sin(TAU * phasor(freq * 0.001)) * pressure * 0.05
-    bowed_string(bow, freq) * gate * 0.04)
+    bowed_string(bow, freq) * gate * vel * 0.04)
 
 play bar:
   # Struck metal bar — bright transient mellowing to fundamental ring.

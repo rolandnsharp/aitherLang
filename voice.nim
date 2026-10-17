@@ -174,6 +174,9 @@ proc registerNatives(s: TccState) =
   discard s.addSymbol("n_midi_trig",       cast[pointer](nMidiTrig))
   discard s.addSymbol("n_midi_voice_freq", cast[pointer](nMidiVoiceFreq))
   discard s.addSymbol("n_midi_voice_gate", cast[pointer](nMidiVoiceGate))
+  discard s.addSymbol("n_midi_voice_vel",  cast[pointer](nMidiVoiceVel))
+  discard s.addSymbol("n_midi_voice_key",  cast[pointer](nMidiVoiceKey))
+  discard s.addSymbol("n_midi_vel",        cast[pointer](nMidiVel))
 
 const SizeHelper = "\nint voice_state_size(void) { return sizeof(VoiceState); }\n"
 

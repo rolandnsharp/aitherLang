@@ -65,7 +65,7 @@ let lat1 = sin(TAU * phasor(lat_rate * 0.137))
 let lat2 = sin(TAU * phasor(lat_rate * 0.211))
 
 play lattice:
-  midi_keyboard((freq, gate) =>
+  midi_keyboard((freq, gate, vel) =>
     # Per-voice age: integrate dt while gated, reset on release.
     # `dt` is the sample period — the most fundamental unit of
     # "now" the engine has. Integrating it gives a per-key clock
@@ -78,7 +78,7 @@ play lattice:
     $fb = 0.0
     let fbIn = $fb
 
-    let env = swell(gate, 0.005, release)
+    let env = swell(gate, 0.005, release) * vel
 
     let voice = sum(24, n =>
       # FREQUENCY: integer harmonic + lattice-driven warp.

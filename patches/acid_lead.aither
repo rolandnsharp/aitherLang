@@ -27,10 +27,10 @@ let driveAmt    = 1.0 + midi_cc(19) * 1.5
 let revWet      = midi_cc(16) * 0.5
 
 play lead:
-  midi_keyboard((freq, gate) =>
+  midi_keyboard((freq, gate, vel) =>
     # Sustained envelope — slow attack, slow release. Holds the note
     # while gate is high; tail decays gently on release.
-    let env = swell(gate, 0.06, 1.2)
+    let env = swell(gate, 0.06, 1.2) * vel
 
     # === Three SUSTAINED paradigms ===
 

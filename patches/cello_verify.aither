@@ -34,8 +34,8 @@
 let blend = midi_cc(74)
 
 # Polyphonic cello — pressing C-E-G plays a three-note chord.
-let voices = midi_keyboard((f, gate) =>
-  let env    = swell(gate, 0.25, 0.6)
+let voices = midi_keyboard((f, gate, vel) =>
+  let env    = swell(gate, 0.25, 0.6) * vel
   let bright = inharmonic(f, stiff_cello, cello_shape, 24)
   let warm   = additive(f, warm_shape, 24)
   let tone   = bright * (1 - blend) + warm * blend

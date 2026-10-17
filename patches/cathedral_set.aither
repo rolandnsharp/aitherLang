@@ -92,9 +92,9 @@ play shimmer:
 
 play lead:
   # Glass bell — integer harmonics + phi shimmer (K4). Always full vol.
-  midi_keyboard((freq, gate) =>
+  midi_keyboard((freq, gate, vel) =>
     let strike = if gate > 0.5 and prev(gate) < 0.5 then 1.0 else 0.0
-    let env  = pluck(strike, 4.0) + swell(gate, 0.01, 0.4) * 0.4
+    let env  = pluck(strike, 4.0) + swell(gate, 0.01, 0.4) * 0.4 * vel
     let harm = sum(8, n =>
       let pf = n * freq
       if pf >= 22000 then 0

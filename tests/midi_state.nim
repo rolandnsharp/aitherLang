@@ -40,7 +40,7 @@ doAssert l == 0.0
 
 # 3. midi_freq() & midi_gate() pair
 let v3 = load("midi_gate() * midi_freq()")
-midiNoteOn(69, 127)       # A4 = 440
+midiNoteOn(69, 40)        # A4 = 440; the gate is 1 however softly it's played
 (l, r) = v3.tick(0.0)
 doAssert abs(l - 440.0) < 1e-6, "gate*freq got " & $l
 midiNoteOff(69)

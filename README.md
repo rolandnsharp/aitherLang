@@ -152,14 +152,16 @@ play piano:
 
 Press multiple keys; hear multiple voices. 8-voice polyphony, oldest
 note evicted at the 9th held key. The lambda runs once per held key
-with that key's frequency and gate.
+with that key's frequency and gate (1 while held); name `vel` and `key`
+too, `(freq, gate, vel, key) =>`, for its velocity and MIDI key number.
 
 For controllers (knobs, sliders, pads) and monophonic synths:
 
 ```
 midi_cc(n)        # knob/slider n — 0..1
 midi_freq()       # Hz of most recent note (mono)
-midi_gate()       # velocity 0..1, 0 after release (mono)
+midi_gate()       # 1 while the most recent note is held (mono)
+midi_vel()        # its velocity 0..1, kept after release
 midi_trig(n)      # 1.0 for one sample on each note-on for note n
 midi_note(n)      # velocity while note n is held; 0 else
 ```
