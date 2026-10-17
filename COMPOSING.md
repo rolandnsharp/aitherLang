@@ -1137,6 +1137,31 @@ note struck at velocity 0.9 measures 220, 506, 846, 1233 Hz in its
 first 60 ms and 220, 440, 660, 880 Hz a second later. Eight notes
 sounding cost 36% of an A53 core.
 
+**A tuning that follows the spectrum.** Which intervals sound smooth
+depends on the partials (Sethares, *Tuning, Timbre, Spectrum, Scale*):
+two tones are rough where their partials sit about a quarter of a
+critical band apart. Harmonic partials make 5/4, 3/2 and the octave
+consonant. A metal bar's don't, so bar-spectrum chords in ordinary
+tuning clash, which is why gamelan tunes to its own metallophones.
+`tools/consonance.py` computes each spectrum's dissonance curve and
+prints its 7 most consonant degrees and the ratio it repeats at:
+
+| spectrum | degrees (cents) | repeats at |
+|---|---|---|
+| string | 0 386 498 583 702 884 969 | 2 (the octave) |
+| bar | 0 578 695 870 1165 1390 1565 | 2.778, its own 2nd partial: a bar has no consonant octave |
+| phi | 0 247* 493 833 1065* 1296 1481* | phi^2 (* even steps: phi has only three dips) |
+
+The string row comes out as just intervals (5/4, 4/3, 7/5, 3/2, 5/3,
+7/4), which is the check that the model is right. Because the tables
+line up degree by degree, `patches/tuned_keys.aither` morphs the
+tuning with the partials (`patches/lib/spectral.aither`,
+`spectral_key`): turn the knob and a held chord's intervals bend with
+its timbre, so it stays consonant as it turns to metal. White keys
+are the 7 degrees, C4 = degree 0. By the same roughness model, chords
+of bar-spectrum notes on the same keys are 38-56% smoother in the
+bar's tuning than in 12-note equal temperament.
+
 ## Drums that sound like a player, not a sequencer
 
 The trick: don't trigger drums at constant velocity from `impulse(rate)`.

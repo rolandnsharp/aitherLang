@@ -1,0 +1,42 @@
+# spectral — partials and a tuning that morph together, string -> bar -> phi.
+#
+#   import "lib/spectral.aither"
+#   partial(n, m)        where partial n sits at morph m, as a multiple of f0
+#   spectral_key(f, m)   the frequency a keyboard key should play at morph m
+#
+# m runs 0 string (harmonic, n), 0.5 metal bar ((2n + 1) / 3)^2, 1 phi
+# (1.618^(n - 1)), blended geometrically in logs: one exp per partial
+# (COMPOSING.md, "Spectral morph").
+#
+# The tuning comes from each spectrum's own dissonance curve (Sethares;
+# tools/consonance.py prints these tables). A harmonic spectrum's 7 most
+# consonant degrees are just intervals repeating at the octave; a bar's
+# are elsewhere and repeat at 2.778, its own 2nd partial, because a bar
+# has no consonant octave; phi has three dips and four even steps,
+# repeating at phi^2. The tables line up degree by degree, so the tuning
+# morphs with the partials and a chord stays consonant as it turns to
+# metal. White keys only, C4 = degree 0; a black key returns 0 (silent).
+
+def partial(n, m):
+  let u = clamp(m * 2, 0, 1)
+  let w = clamp(m * 2 - 1, 0, 1)
+  exp(log(n) * (1 - u) + 2 * log((2 * n + 1) / 3) * (u - w)
+      + (n - 1) * log(1.618) * w)
+
+def spectral_key(f, m):
+  # python3 tools/consonance.py
+  let string_scale = [1.0000, 1.2500, 1.3335, 1.4000, 1.5000, 1.6665, 1.7500]
+  let bar_scale = [1.0000, 1.3965, 1.4940, 1.6530, 1.9600, 2.2325, 2.4695]
+  let phi_scale = [1.0000, 1.1530, 1.3295, 1.6180, 1.8494, 2.1140, 2.3525]
+  let white = [0, -1, 1, -1, 2, 3, -1, 4, -1, 5, -1, 6]   # pitch class -> degree
+  let key = floor(69 + 12 * log2(f / 440) + 0.5)
+  let d = white[key mod 12]
+  let i = max(d, 0)                    # a table index can't be negative
+  let octave = floor((key - 60) / 12)
+  let u = clamp(m * 2, 0, 1)
+  let w = clamp(m * 2 - 1, 0, 1)
+  let lnStep = log(string_scale[i]) * (1 - u) + log(bar_scale[i]) * (u - w)
+             + log(phi_scale[i]) * w
+  let lnPeriod = log(2.0) * (1 - u) + log(2.7778) * (u - w) + log(2.6179) * w
+  if d < 0 then 0
+  else 261.63 * exp(lnStep + octave * lnPeriod)
