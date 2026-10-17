@@ -1128,6 +1128,15 @@ it plays on the uConsole. Play a chord, then sweep the knob: the chord
 stays a chord in rhythm and voicing while its timbre walks from organ
 to bells to something with no name.
 
+**Inside each note.** The morph can move during a note, too.
+`patches/metal_keys.aither` throws each strike toward metal, as far as
+its velocity says, and lets it settle back to the base knob, the way a
+hard blow on a real bar excites inharmonic modes that die first. A
+"bloom" knob does the reverse: a held note drifts toward metal. A
+note struck at velocity 0.9 measures 220, 506, 846, 1233 Hz in its
+first 60 ms and 220, 440, 660, 880 Hz a second later. Eight notes
+sounding cost 36% of an A53 core.
+
 ## Drums that sound like a player, not a sequencer
 
 The trick: don't trigger drums at constant velocity from `impulse(rate)`.
