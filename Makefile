@@ -24,12 +24,13 @@ tools/tv: tools/tv.c tools/display.h
 	cc -O2 -Wall tools/tv.c -o tools/tv $$(pkg-config --cflags --libs sdl3) -lEGL -lGLESv2 -lpthread -lm
 
 # One binary for every test that doesn't touch the engine's voice
-# table (tests/all.nim), then the four that do, each on its own.
+# table (tests/all.nim), then the ones that do, each on its own;
+# engine_live runs ./aither itself, so make builds it first.
 TESTFLAGS := --mm:arc --threads:on --hints:off --warnings:off \
              --nimcache:nimcache/tests --passL:"-ltcc -ldl -lasound"
-test:
+test: aither
 	$(NIM) c -r $(TESTFLAGS) --out:tests/all tests/all.nim
-	for t in cli_output_format midi_resilience slot_sweep solo_mutes; do \
+	for t in cli_output_format midi_resilience slot_sweep solo_mutes engine_live; do \
 	  $(NIM) c -r $(TESTFLAGS) --out:tests/$$t tests/$$t.nim || exit 1; done
 
 # Every tracked patch rendered and fingerprinted against tests/corpus.golden
