@@ -20,6 +20,11 @@ tried and dropped; each doc says so near the top where that's the case.
   and the metal detector. Proposed, not built; no engine change.
 
 **Decisions**
+- [midi-timing-2026-10-17.md](midi-timing-2026-10-17.md) — MIDI events
+  land up to one block late (11.6 ms at 512 frames). Parked: not
+  noticed in play. `AITHER_BUFFER=128` is the free workaround; the
+  timestamp-and-split-the-block fix is designed. Keep the ALSA
+  sequencer and the `midi_*` API; a text event protocol was rejected.
 - [pair-output-2026-10-15.md](pair-output-2026-10-15.md) — the output
   is a pair, a float is `[s, s]`, and the sink on the end of the pipe
   (speaker, visualiser, radio, file) gives the numbers their meaning.
