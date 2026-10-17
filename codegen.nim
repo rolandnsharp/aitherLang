@@ -3003,13 +3003,19 @@ proc checkDefault(c: Ctx; def: Node; e: Node) =
 # codegen only ever sees a call with one positional argument per
 # parameter: `sing(220, g, vibrato = 0.3)` becomes the full list, each
 # missing argument filled with the def's default expression.
-proc normalizeCalls(c: Ctx; n: Node) =
+proc normalizeCalls(c: Ctx; n: Node; shadow: HashSet[string]) =
+  ## `shadow`: parameter names in scope. Inside `def inharmonic(freq,
+  ## ratio, ...)`, `ratio(n)` calls the parameter, not a top-level def
+  ## that happens to be called ratio, so it isn't checked against one.
   if n == nil: return
-  for k in n.kids: c.normalizeCalls(k)
+  var inner = shadow
+  if n.kind in {nkDef, nkLambda}:
+    for p in n.params: inner.incl p
+  for k in n.kids: c.normalizeCalls(k, inner)
   if n.kind == nkDef:
     for d in n.defaults:
       if d != nil: c.checkDefault(n, d)
-  if n.kind != nkCall: return
+  if n.kind != nkCall or n.str in shadow: return
   var anyNamed = false
   for k in n.kids:
     if k.kind == nkNamedArg: anyNamed = true
@@ -3060,7 +3066,7 @@ proc generateFull*(program: Node; patchPath: string = "";
   let c = newCtx(program)
   c.patchPath = patchPath
   c.sr = sr
-  c.normalizeCalls(program)
+  c.normalizeCalls(program, initHashSet[string]())
   c.markRecursion()
   var src = c.emit(program)
   finaliseLayout(c, src)

@@ -669,6 +669,11 @@ functions that take what they need as parameters. **`play`
 can see file-level lets** — plays are inlined blocks that
 share the file's scope.
 
+**A parameter shadows a def of the same name.** Inside
+`def inharmonic(freq, ratio, amp, max_n)`, `ratio(n)` calls the
+function passed as `ratio`, even if the file also has its own
+`def ratio`.
+
 **`$state` inside a play is file-level by name.** If two plays
 both write `$count = 0`, they share the slot. Use explicit
 names (`$kick_count`, `$bass_count`) for independence.
