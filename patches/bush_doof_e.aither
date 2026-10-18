@@ -758,4 +758,25 @@ let roomT = reverb(mono(drums) |> hpf(160, 0.29), 0.9, 0.08)
 let roomS = reverb(mono(sticks) |> lpf(4000, 0.2), 0.6, 0.06)
 let doofM = (mono(kick) + mono(bass) + mono(swoosh) + mono(crash)) |> hpf(170, 0.29) |> lpf(7500, 0.2)
 let batsD = (bats |> drive(24)) * 0.25                         # gain 6, soft ceiling at -12 dB
-((haas(((roomD * 3.2) |> drive(1 + yz * 2.5)) * dGate * (1 - yz * 0.3), 8) + pan(roomM * 1.6, -0.35) + haas(roomT * 1.2, 4) + pan(roomS, 0.35) + haas(doofM * 0.5, -5)) * (1 - max(max(kDuck * 0.3 * oldFade, 0), max(max(dDuck * 0.37, bDuck * 0.2) * oldFade, ckDuck * 0.25))) + (kooka + pan(reverb(mono(kooka) |> hpf(300, 0.29), 2.2, 0.3) * 1.2, 0.5) + batsD + pan(reverb(mono(batsD), 1.8, 0.3), -0.2) + dingoes * 0.3 + haas(reverb(mono(dingoes), 3.2, 0.5) * 0.48, 12)) * oldFade + (frogs |> hpf(300, 0.29)) * 0.8 * (1 - yz) + (curlew + pan(reverb(mono(curlew), 2.8, 0.45) * 0.4, -0.3) + (cockatoo |> lpf(6000, 0.2)) * 0.6 * (1 - q)) * (1 - yz * 0.6) + (k808 |> hpf(120, 0.29)) * 0.35 + bigclap + haas(reverb(mono(bigclap), 1.6, 0.35) * 0.8, 9) + pan(reverb(mono(organ), 2.4, 0.3) * 1.0, -0.2) + haas(reverb(mono(chop), 1.4, 0.2) * 0.8, 6) + haas((mono(didgeChoir) |> hpf(200, 0.29)) * 1.0 + reverb(mono(didgeChoir), 2.0, 0.3) * 0.6, -7) + traphats + pan(fbdelay(mono(sticks), 0.326, 0.5, 0.35) * 0.3 * algo, -0.4) + pan(mono(flute) * 0.6 + reverb(mono(flute), 3.2, 0.45) * 0.9, 0.25)) * 0.78 + haas(d3voice(max(0.05, (0.92 + vTap * 0.3 + vToot * 0.25 - gulp * 0.4) * (1 - vStop * 0.3)), vVoice, vToot, vWah, vTap, vCroak, 110 - 38.5 * dD) * ms * x3 * 0.8 * 3.2 * 0.78, 8)
+# Shared reverbs (2026-10-18). The final line had nine reverbs of its
+# own; now they're two stereo buses, for ~11% less CPU (on an A72) and a
+# difference 35 dB below the music. reverb(x, rt, w) is
+# (1 - w)·x + w·R(x) with R linear, so each source keeps its dry share
+# where it was and sends its wet share into a bus; pan and haas come
+# first, which for this reverb is the same as after. What changes: decay
+# times round to two (long 2.8 s: kooka 2.2, organ 2.4, curlew 2.8,
+# dingoes and flute 3.2; short 1.6 s: chop 1.4, bigclap 1.6, bats 1.8,
+# didgeChoir 2.0), and fades act on the sends, so tails ring out.
+let yKooka = pan((mono(kooka) |> hpf(300, 0.29)) * (1.2 * oldFade), 0.5)
+let yBats  = pan(mono(batsD) * oldFade, -0.2)
+let yDingo = haas(mono(dingoes) * (0.48 * oldFade), 12)
+let yCurl  = pan(mono(curlew) * (0.4 * (1 - yz * 0.6)), -0.3)
+let yClap  = haas(mono(bigclap) * 0.8, 9)
+let yOrgan = pan(mono(organ), -0.2)
+let yChop  = haas(mono(chop) * 0.8, 6)
+let yChoir = haas(mono(didgeChoir) * 0.6, -7)
+let yFlute = pan(mono(flute) * 0.9, 0.25)
+let longBus  = reverb(yKooka * 0.3 + yDingo * 0.5 + yCurl * 0.45 + yOrgan * 0.3 + yFlute * 0.45, 2.8, 1)
+let shortBus = reverb(yBats * 0.3 + yClap * 0.35 + yChop * 0.2 + yChoir * 0.3, 1.6, 1)
+let busDry = yKooka * 0.7 + yBats * 0.7 + yDingo * 0.5 + yCurl * 0.55 + yClap * 0.65 + yOrgan * 0.7 + yChop * 0.8 + yChoir * 0.7 + yFlute * 0.55
+((haas(((roomD * 3.2) |> drive(1 + yz * 2.5)) * dGate * (1 - yz * 0.3), 8) + pan(roomM * 1.6, -0.35) + haas(roomT * 1.2, 4) + pan(roomS, 0.35) + haas(doofM * 0.5, -5)) * (1 - max(max(kDuck * 0.3 * oldFade, 0), max(max(dDuck * 0.37, bDuck * 0.2) * oldFade, ckDuck * 0.25))) + (kooka + batsD + dingoes * 0.3) * oldFade + (frogs |> hpf(300, 0.29)) * 0.8 * (1 - yz) + (curlew + (cockatoo |> lpf(6000, 0.2)) * 0.6 * (1 - q)) * (1 - yz * 0.6) + (k808 |> hpf(120, 0.29)) * 0.35 + bigclap + haas(mono(didgeChoir) |> hpf(200, 0.29), -7) + traphats + pan(fbdelay(mono(sticks), 0.326, 0.5, 0.35) * 0.3 * algo, -0.4) + pan(mono(flute) * 0.6, 0.25) + busDry + longBus + shortBus) * 0.78 + haas(d3voice(max(0.05, (0.92 + vTap * 0.3 + vToot * 0.25 - gulp * 0.4) * (1 - vStop * 0.3)), vVoice, vToot, vWah, vTap, vCroak, 110 - 38.5 * dD) * ms * x3 * 0.8 * 3.2 * 0.78, 8)
