@@ -733,7 +733,7 @@ sin(TAU * phasor(220))
 | Function      | Description                                  |
 |---------------|----------------------------------------------|
 | `phasor(freq)`| the clock: ramp 0→1 at freq Hz, with state   |
-| `noise()`     | white noise; each call its own stream, the same every run |
+| `noise()`     | white noise; each call its own stream, the same every run, seeded by where the call is (its statement, the defs it is inlined through, which `noise()` it is there), so editing other code leaves it unchanged |
 
 `phasor` is the only stateful part. Its output is a
 *position in the cycle*, 0..1 — a fraction of time, not an

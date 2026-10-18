@@ -1532,15 +1532,23 @@ proc emitPhasor(c: Ctx; sc: Scope; freqNode: Node): string =
     "s->pool[" & slot & "]; }))"
 
 # noise() inlined: xorshift32 on a pool slot interpreted as uint32.
-# A fresh slot (0) seeds from its own slot number, so every call site
-# is its own stream, and the same one on every run.
+# A fresh slot (0) seeds from where the call is: its statement, the defs
+# it's inlined through, and which noise() it is there. So every call
+# site is its own stream, the same on every run, and an edit elsewhere
+# leaves it alone. (It used to seed from its pool address, which moves
+# whenever anything earlier in the layout is added or removed: dropping
+# reverbs from a set's mix line reshuffled every bird and strike in it.)
 proc emitNoise(c: Ctx): string =
   let slot = c.fresh("nz")
   let off = c.registerRegion("noise", 1)
+  let r = c.regions[^1]
+  var seed = 2166136261'u32                    # FNV-1a over the call's identity
+  for ch in r.scope & "|" & r.owner & "|" & $r.scopeIdx:
+    seed = (seed xor uint32(ord(ch))) * 16777619'u32
+  if seed == 0: seed = 2463534242'u32
   "(({ long " & slot & " = " & off & "; " &
     "unsigned int r = (unsigned int)s->pool[" & slot & "]; " &
-    "if (r == 0) r = 2463534242u ^ ((unsigned int)" & slot & " * 2654435761u); " &
-    "if (r == 0) r = 2463534242u; " &
+    "if (r == 0) r = " & $seed & "u; " &
     "r ^= r << 13; r ^= r >> 17; r ^= r << 5; " &
     "s->pool[" & slot & "] = (double)r; " &
     "((double)r / 4294967295.0) * 2.0 - 1.0; }))"
