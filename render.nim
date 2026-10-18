@@ -120,7 +120,7 @@ proc renderProgram(prog: Node; seconds: float64; sr: int;
   v.load(prog, float64(sr))
   renderVoice(v, seconds, sr, input, skip)
 
-proc buildProgram(src, srcTag: string): Node =
+proc buildProgram*(src, srcTag: string): Node =
   let stdAst = parseProgram(Stdlib)
   setSource(stdAst, "stdlib")
   var userAst = parseProgram(src)

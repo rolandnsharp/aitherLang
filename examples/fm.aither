@@ -1,4 +1,7 @@
-var fb = 0.0
-
-fb = sin(TAU * phasor(440 + fb * 500))
-fb * 0.3
+# Feedback FM: the output bends its own pitch. Its phase obeys Adler's
+# equation, dφ/dt = 440 + 300·sin φ, so it sounds at √(440² − 300²) ≈ 322 Hz.
+# At a feedback of 440 or more the pitch reaches zero somewhere and the
+# oscillator locks to a standstill: a constant, no sound.
+$fb = 0.0
+$fb = sin(TAU * phasor(440 + $fb * 300))
+$fb * 0.3

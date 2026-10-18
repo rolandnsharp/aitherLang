@@ -232,7 +232,10 @@ proc compileOptimized*(csrc: string; stateSize: int):
   defer:
     removeFile(cfile)
     removeFile(ofile)
-  let (output, code) = execCmdEx("cc -O2 -march=native -fno-stack-protector " &
+  # -ffp-contract=off: no fused multiply-adds. TCC never fuses, so with
+  # them the two builds compute different bits and a voice jumps onto a
+  # slightly different trajectory when this one lands (tests/exact_builds).
+  let (output, code) = execCmdEx("cc -O2 -march=native -ffp-contract=off -fno-stack-protector " &
     "-fno-asynchronous-unwind-tables -c -o " & quoteShell(ofile) & " " &
     quoteShell(cfile))
   if code != 0:

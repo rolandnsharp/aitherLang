@@ -1199,7 +1199,11 @@ inside its compiled code (`tick_block`: the clock, `input()`, the
 parts, the voice fade and part-gain ramps, park and the part meters
 all advance per sample in C); the engine's own work is per block,
 and the output is bit-identical to ticking one sample at a time
-(`tests/block_tick.nim`). The stream is gapless: the mix waits for the
+(`tests/block_tick.nim`). Each voice starts on TCC's code and swaps to
+a `cc -O2` build of the same C when that's ready, keeping its state;
+the `-O2` build doesn't fuse multiply-adds (`-ffp-contract=off`), so
+both compute the same bits and the swap can't move a voice off its
+trajectory (`make exact` renders every patch both ways and compares). The stream is gapless: the mix waits for the
 voice table's lock rather than skipping a block, so every sample
 written is one tick of `t`, whatever the control socket is doing. `tv`
 and `scope` count pixels and points by the samples they receive, and
@@ -1302,11 +1306,17 @@ acid |> drive(1.1)
 ```
 play fm:
   $fb = 0.0
-  $fb = sin(TAU * phasor(440 + $fb * 500))
+  $fb = sin(TAU * phasor(440 + $fb * 300))
   $fb * 0.3
 
 fm
 ```
+
+The phase obeys Adler's equation, dφ/dt = 440 + 300·sin φ, so this
+sounds at √(440² − 300²) ≈ 322 Hz. With a feedback of 440 or more the
+pitch reaches zero at some phase and the oscillator locks there: a
+constant, no sound (the example used 500 until 2026-10-18 and was
+silent).
 
 ### Kick drum
 

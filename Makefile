@@ -41,7 +41,12 @@ corpus:
 corpus-update:
 	$(NIM) c -r $(TESTFLAGS) --out:tests/corpus tests/corpus.nim update
 
+# Every patch rendered with TCC's code and with the cc -O2 build: the bits
+# must match (tests/exact_builds.nim). About 10 minutes on the uConsole.
+exact:
+	$(NIM) c -r $(TESTFLAGS) --out:tests/exact_builds tests/exact_builds.nim
+
 clean:
 	rm -rf aither nimcache/ test_parser test_eval test_stdlib tools/play tools/card tools/pad tools/scope tools/tv
 
-.PHONY: all clean test corpus corpus-update
+.PHONY: all clean test corpus corpus-update exact

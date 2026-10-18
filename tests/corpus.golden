@@ -1,3 +1,4 @@
+demos/phased_array.aither  E36A57554D584B26  -16.6  -0.0
 edc/01_sine.aither  50D9B030594DB0F9  -18.8  -14.0
 edc/01_sine_puzzle.aither  4686A31673930299  -17.0  -14.0
 edc/02_tau.aither  4686A31673930299  -17.0  -14.0
@@ -44,7 +45,7 @@ examples/acid.aither  522215C1FB130EC5  -10.8  -1.1
 examples/bass.aither  BA7A0219BD0E8D61  -12.2  -2.7
 examples/drone.aither  914056E6A584EE25  -14.5  -5.3
 examples/fadein.aither  57F496AF75DD4F75  -32.2  -24.4
-examples/fm.aither  ERROR  'var' keyword removed; use `$name = ...` for state declarations at 1:4 (got tkKeyword 'var')
+examples/fm.aither  D86B6DA3F798C895  -12.8  -10.5
 examples/hat.aither  6F27E3D54DFB39ED  -33.8  -10.3
 examples/kick.aither  B6A5C27AE1D7BF29  -19.9  -3.2
 examples/lead.aither  914ADA55DD302085  -18.0  -15.1
@@ -106,7 +107,7 @@ patches/dusk.aither  E995DF4B7DACA18D  -59.8  -45.4
 patches/ecology.aither  547F94D0D84D8832  -30.1  -11.9
 patches/emergent.aither  4EEF0548634F2479  -48.4  -36.8
 patches/flute.aither  EF4E660FF36FBB68  -78.9  -63.1
-patches/flute_dm.aither  E1B47CA66C27B555  -39.9  -24.4
+patches/flute_dm.aither  6E3532DB305C0544  -51.7  -36.2
 patches/fm_swarm.aither  CCBBEF4FD38317E9  -26.4  -14.3
 patches/forms.aither  AFA1E4FD79F459B2  -37.6  -25.4
 patches/freq_shifter.aither  C77FFDFE9BC46349  -14.3  -6.4
