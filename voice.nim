@@ -49,10 +49,12 @@ type
     deadline*:      float64
     stuck*:         int
     stuckAt*:       cstring
-    # `aither profile`: seconds spent per part, then top-level code, then
-    # the final expression (nParts + 2), added up while `profiling` is 1.
+    # `aither profile`: seconds per top-level statement and play (slots
+    # in source order, named by the code's prof_names[]), added up while
+    # `profiling` is 1; `profTicks` counts the samples timed.
     profPtr*:       pointer
     profiling*:     int
+    profTicks*:     int
 
   NativeVoice* = ref object
     state*:     pointer          # malloc'd VoiceState buffer
@@ -74,7 +76,7 @@ type
     # meters over it: decaying peak and smoothed mean square.
     partOut*:         seq[float64]
     partPeak*:        seq[float64]
-    prof*:            seq[float64]   # `aither profile`: see VoiceHeader.profPtr
+    prof*:            seq[float64]   # `aither profile`: MaxProfSlots, see VoiceHeader.profPtr
     partRmsSq*:       seq[float64]
     # `park`: a part faded to silence whose body the tick skips, so it
     # costs nothing and its state is frozen until `unpark`. 1.0 = parked.
@@ -279,7 +281,25 @@ proc compileOptimized*(csrc: string; stateSize: int; background = false):
   (lib, fn)
 
 proc newVoice*(sr: float64): NativeVoice =
-  NativeVoice()
+  NativeVoice(prof: newSeq[float64](MaxProfSlots))
+
+proc profSlotNames*(v: NativeVoice): seq[string] =
+  ## `aither profile`'s slot names, as the voice's code lists them.
+  let names = cast[ptr UncheckedArray[cstring]](v.tccLib.getSymbol("prof_names"))
+  let count = cast[ptr clong](v.tccLib.getSymbol("prof_count"))
+  if names == nil or count == nil: return
+  for i in 0 ..< min(int(count[]), MaxProfSlots): result.add $names[i]
+
+proc clockReadCost*(): float64 =
+  ## What one of tick1's timing points costs, in seconds: `profile`
+  ## takes it off each slot per sample timed.
+  let f: proc (): float64 {.cdecl.} = nNow
+  const N = 20000
+  var sink = 0.0
+  let t0 = monoNow()
+  for _ in 0 ..< N: sink += f()
+  result = (monoNow() - t0) / N
+  if sink < 0: result = 0                # keep the calls
 
 # Layout constants mirror the codegen's emitted struct — see the NOTE in
 # codegen.nim near the VoiceState emission. Migration here writes directly
@@ -406,7 +426,6 @@ proc setPartNames(v: NativeVoice; names: seq[string]) =
   v.partParked = parked
   v.partParkPending = pending
   v.partOut = newSeq[float64](2 * names.len)
-  v.prof = newSeq[float64](names.len + 2)
 
 proc pointPartGains(v: NativeVoice) =
   let hdr = cast[ptr VoiceHeader](v.state)
@@ -589,7 +608,7 @@ proc snapshotInto*(src: NativeVoice; dst: NativeVoice; buf: pointer) =
   dst.partRmsSq = src.partRmsSq
   dst.partParked = src.partParked
   dst.partParkPending = src.partParkPending
-  dst.prof = newSeq[float64](src.prof.len)     # a preview isn't profiled
+  dst.prof = newSeq[float64](MaxProfSlots)     # a preview isn't profiled
   cast[ptr VoiceHeader](buf).profiling = 0
   dst.startT = src.startT
 

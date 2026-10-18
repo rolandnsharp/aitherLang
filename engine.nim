@@ -637,10 +637,11 @@ proc tryPatch*(filename: string; seconds, skip: float64): string =
   "OK\n" & lines.join("\n")
 
 proc profileVoice(name: string; seconds: float64): string =
-  ## `profile`: time the voice's code for `seconds` and report, per part
-  ## and for its top-level code and final expression, the share of one
-  ## core it took, heaviest first. Off the rest of the time: the code
-  ## checks a flag between parts and reads no clock.
+  ## `profile`: time the voice's code for `seconds` and report each play
+  ## and top-level statement's share of one core, heaviest first, the
+  ## cost of the timing itself taken off. Off the rest of the time: the
+  ## code checks a flag per statement and reads no clock.
+  let cost = clockReadCost()
   lockForCommand()
   var idx = findSlot(name)
   if idx < 0:
@@ -649,7 +650,9 @@ proc profileVoice(name: string; seconds: float64): string =
   let v = slots[idx].voice
   let gen = v.gen
   for x in v.prof.mitems: x = 0.0
-  cast[ptr VoiceHeader](v.state).profiling = 1
+  let hdr = cast[ptr VoiceHeader](v.state)
+  hdr.profTicks = 0
+  hdr.profiling = 1
   let t0 = monoNow()                   # the window as it really ran, not as asked
   release(mtx)
   sleep(int(seconds * 1000))
@@ -659,25 +662,31 @@ proc profileVoice(name: string; seconds: float64): string =
     if idx >= 0: cast[ptr VoiceHeader](slots[idx].voice.state).profiling = 0
     release(mtx)
     return "ERR " & name & " was sent again or stopped while profiling"
-  cast[ptr VoiceHeader](v.state).profiling = 0
+  hdr.profiling = 0
   let window = monoNow() - t0
-  let names = v.partNames & @["(top-level code)", "(final expression)"]
+  let ticks = float64(hdr.profTicks)
+  let names = v.profSlotNames()
   let times = v.prof
   release(mtx)
   var rows: seq[(float64, string)]
   var total = 0.0
   for i, n in names:
-    if i < times.len:
-      rows.add((times[i], n))
-      total += times[i]
+    let tm = max(0.0, times[i] - cost * ticks)
+    rows.add((tm, n))
+    total += tm
   rows.sort(proc (a, b: (float64, string)): int = cmp(b[0], a[0]))
-  var o = "OK " & name & ": " & formatFloat(100 * total / window, ffDecimal, 1) &
-          "% of one core over " & formatFloat(window, ffDecimal, 1) &
-          "s (clock reads included)\n"
-  for (tm, n) in rows:
-    o.add "  " & alignLeft(n, 22) & align(formatFloat(100 * tm / window, ffDecimal, 1), 6) &
-          "%   " & align($int(round(if total > 0: 100 * tm / total else: 0.0)), 3) &
-          "% of the voice\n"
+  proc pct(x, whole: float64): string = formatFloat(if whole > 0: 100 * x / whole else: 0.0, ffDecimal, 1)
+  var o = "OK " & name & ": " & pct(total, window) & "% of one core over " &
+          formatFloat(window, ffDecimal, 1) & "s\n"
+  var shown = 0.0
+  for k, (tm, n) in rows:
+    if k >= 25 or (k >= 8 and shown >= 0.95 * total):
+      o.add "  " & alignLeft("(" & $(rows.len - k) & " more)", 34) &
+            align(pct(total - shown, window), 6) & "%  " & align(pct(total - shown, total), 5) & "% of the voice\n"
+      break
+    o.add "  " & alignLeft(n, 34) & align(pct(tm, window), 6) & "%  " &
+          align(pct(tm, total), 5) & "% of the voice\n"
+    shown += tm
   o.strip(leading = false)
 
 proc retriggerVoice(name: string): string =

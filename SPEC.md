@@ -1137,7 +1137,7 @@ heard; `patches/didge_scope.aither` is written for that engine.
 | Command                          | Description                                         |
 |----------------------------------|-----------------------------------------------------|
 | `check <voice>`                  | level, quiet parts, rollbacks and guard trips; parts the final expression never reaches (NOT IN THE FINAL EXPRESSION, a compile-time fact, also shown by `parts` and `audit`); QUIET VOICE when the loudest heard part is healthy but the voice's output is 30 dB or more below it |
-| `profile <voice> [seconds]`     | CPU for `seconds` (2): each part, the top-level code and the final expression, as a share of one core and of the voice, heaviest first. Timing is on only while asked for; off, the code checks a flag between parts and reads no clock |
+| `profile <voice> [seconds]`     | CPU for `seconds` (2): every play and top-level statement, by line (`play organ (line 486)`, `let roomD (line 755)`, `out` for the final expression), as a share of one core and of the voice, heaviest first; the cost of the timing itself is measured and taken off. Timing is on only while asked for; off, the code checks a flag per statement and reads no clock |
 | `levels [voice]`                 | per-voice RMS / peak / clips / envelope sparkline   |
 | `levels master`                  | master-bus stats (the mix as written to the pipe)   |
 | `spectrum [voice]`               | FFT analysis of voice's recent buffer (or master)   |

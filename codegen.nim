@@ -482,6 +482,8 @@ proc scalarShadows(sc: Scope; name: string): bool =
 
 # Builtins callable by name from user code that aren't keywords or ops:
 # libm1, shape primitives, stateful inlined builtins, math helpers, MIDI.
+const MaxProfSlots* = 1024   # `aither profile`: top-level statements timed, at most
+
 const BuiltinFns = ["saw", "tri", "sqr", "phasor", "noise", "abs", "pow",
                     "midi_cc", "midi_note", "midi_freq", "midi_gate",
                     "midi_trig", "midi_voice_freq", "midi_voice_gate",
@@ -2744,10 +2746,11 @@ proc emit*(c: Ctx; program: Node): string =
   pre.add "  long    stuck;\n"
   pre.add "  const char* stuck_at;\n"
   # `aither profile`: while `profiling` is set, tick1 adds each top-level
-  # statement's time to `prof`: one slot per part, then everything else
-  # at top level, then the final expression (n_parts + 2 slots).
+  # statement's time to its slot in `prof` (slots in source order, named
+  # by prof_names[]) and counts its calls in `prof_ticks`.
   pre.add "  double* prof;\n"
   pre.add "  long    profiling;\n"
+  pre.add "  long    prof_ticks;\n"
   for vn in c.topVarNames:
     pre.add "  double v_" & vn & ";\n"
   pre.add "  unsigned char inited[" & $max(1, c.topVarNames.len) & "];\n"
@@ -2757,7 +2760,9 @@ proc emit*(c: Ctx; program: Node): string =
   var body = ""
   body.add "static void tick1(VoiceState* s, double* outL, double* outR) {\n"
   body.add "  s->idx = 0;\n"
-  body.add "  double prof_last = s->profiling ? n_now() : 0.0;\n"
+  body.add "  double prof_last = 0.0;\n"
+  body.add "  if (s->profiling) { prof_last = n_now(); s->prof_ticks++; }\n"
+  var profNames: seq[string]
   let topSc = push(nil)
   # Lazy-init file-level state, top level and play bodies alike, in
   # declaration order. (Play-body inits used to be skipped, so `$x = 0.1`
@@ -3016,26 +3021,14 @@ proc emit*(c: Ctx; program: Node): string =
           let v = c.emitExpr(topSc, s)
           body.add &"  (void)({v});\n"
     # `aither profile`: charge the time since the last statement to this
-    # one's slot: its part, top-level code, or the final expression.
-    # Only where the slot changes: a run of top-level statements is one
-    # slot, so it shares one clock read (fewer reads, less distortion).
+    # one's slot. Every top-level statement and play has its own, in
+    # source order, so `profile` can name the costly line.
     if s.kind notin {nkDef, nkImport}:
-      var nextKind = nkDef
-      var nextIsFinal = false
-      for j in i + 1 ..< program.kids.len:
-        if program.kids[j].kind notin {nkDef, nkImport}:
-          nextKind = program.kids[j].kind
-          nextIsFinal = j == finalIdx
-          break
-      let topRunGoesOn = s.kind != nkPlay and i != finalIdx and
-                         nextKind notin {nkPlay, nkDef} and not nextIsFinal
-      if not topRunGoesOn:
-        let slot =
-          if s.kind == nkPlay: $(c.playNames.len - 1)
-          elif i == finalIdx: "s->n_parts + 1"
-          else: "s->n_parts"
-        body.add &"  if (s->profiling) {{ double prof_now = n_now(); " &
-                 &"s->prof[{slot}] += prof_now - prof_last; prof_last = prof_now; }}\n"
+      let loc = (if s.source.len > 0 and s.source != c.patchPath: s.source & " " else: "line ") & $s.line
+      if profNames.len < MaxProfSlots:
+        profNames.add stmtScope(s, i == finalIdx) & " (" & loc & ")"
+      body.add &"  if (s->profiling) {{ double prof_now = n_now(); " &
+               &"s->prof[{profNames.len - 1}] += prof_now - prof_last; prof_last = prof_now; }}\n"
   # Which parts the final expression reaches: the names it mentions,
   # and the names those parts' bodies mention, and so on. A part it
   # never reaches computes every sample and is never heard; `check`
@@ -3063,6 +3056,11 @@ proc emit*(c: Ctx; program: Node): string =
     body.add "  *outL = " & heard.mapIt("p_" & it & "_l").join(" + ") & ";\n"
     body.add "  *outR = " & heard.mapIt("p_" & it & "_r").join(" + ") & ";\n"
   body.add "}\n\n"
+  # The slots' names, for `aither profile` (read with getSymbol).
+  body.add "const char* const prof_names[] = {" &
+           profNames.mapIt("\"" & it.multiReplace(("\\", "\\\\"), ("\"", "\\\"")) & "\"").join(", ") &
+           (if profNames.len == 0: "0" else: "") & "};\n"
+  body.add &"const long prof_count = {profNames.len};\n\n"
   body.add BlockTemplate
 
   # The hoisted coefficients: statics, and the init both entry points
