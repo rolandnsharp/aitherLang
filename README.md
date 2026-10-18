@@ -112,8 +112,10 @@ make corpus          does every patch still sound exactly as it did?
 make corpus-update   re-record that, after a change meant to alter some
 ```
 
-`make corpus` renders every tracked `.aither` file for a second (knobs
-at half, a chord held) and compares each one's exact samples with
+`make corpus` renders every tracked `.aither` file as committed (so
+uncommitted edits to a patch don't count) for a second, knobs at half
+and a chord held, with the working tree's engine and stdlib, and
+compares each one's exact samples with
 `tests/corpus.golden`, naming every patch whose sound changed and by
 how much. A change to the language or the stdlib that touches a patch
 it wasn't meant to shows up there; one that was meant to shows up as

@@ -11,11 +11,14 @@
 ## meant to touch fails here; one that was meant to shows up as a diff
 ## of tests/corpus.golden in the commit.
 ##
-## Only files tracked by git are rendered, so work in progress doesn't
-## trip it. Noise and all other state start fresh in each render, so the
-## result doesn't depend on file order.
+## Patches are rendered as committed at HEAD (extracted to a temporary
+## tree, so imports resolve as usual), so uncommitted edits to a patch
+## neither fail the check nor get recorded by an update. The engine and
+## stdlib are the working tree's: those are what the check is testing.
+## Noise and all other state start fresh in each render, so the result
+## doesn't depend on file order.
 
-import std/[os, osproc, strutils, math, tables, algorithm, sequtils]
+import std/[os, osproc, strutils, math, tables, algorithm, sequtils, exitprocs]
 import ../render, ../midi
 
 const Golden = "tests/corpus.golden"
@@ -49,10 +52,22 @@ proc parse(line: string): tuple[path, rest: string] =
   let i = line.find("  ")
   (line[0 ..< i], line[i + 2 .. ^1])
 
-let files = execProcess("git ls-files '*.aither'").splitLines()
-  .filterIt(it.len > 0 and "/lib/" notin it).sorted()
+let tracked = execProcess("git ls-files '*.aither'").splitLines().filterIt(it.len > 0)
+let files = tracked.filterIt("/lib/" notin it).sorted()
+# Every tracked patch, libraries included, as committed at HEAD.
+let head = getTempDir() / ("aither-corpus-" & $getCurrentProcessId())
+createDir(head)
+addExitProc(proc() = removeDir(head))
+if execCmd("git archive HEAD -- " & tracked.mapIt(quoteShell(it)).join(" ") &
+           " | tar -x -C " & quoteShell(head)) != 0:
+  quit "corpus: couldn't extract the committed patches"
+let dirty = execProcess("git diff --name-only HEAD -- '*.aither'").splitLines()
+  .filterIt(it.len > 0)
+if dirty.len > 0:
+  echo "corpus: rendering the committed version of ", dirty.len,
+       " patch(es) with uncommitted edits: ", dirty.join(", ")
 var now = initOrderedTable[string, string]()
-for f in files: now[f] = fingerprint(f)
+for f in files: now[f] = fingerprint(head / f)
 
 if paramCount() >= 1 and paramStr(1) == "update":
   var o = ""
@@ -84,3 +99,4 @@ if bad > 0:
        ". If intended: make corpus-update, and commit the golden file."
   quit 1
 echo "corpus ok (", now.len, " files)"
+quit 0          # through the exit procs, which remove the extracted tree
