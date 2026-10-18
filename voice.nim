@@ -216,13 +216,21 @@ proc compileProgram(program: Node; patchPath: string; sr: float64):
     raise newException(ValueError, "TCC symbol lookup failed")
   (lib, fn, int(sizeFn()), withSize, varNames, partNames, unheard, regions)
 
-proc compileOptimized*(csrc: string; stateSize: int):
+# A live engine builds -O2 code beside the playing voices, so the build
+# waits its turn (nice 19): when it and the audio want the same core, the
+# audio wins. It isn't pinned to the slow cores: the voice plays TCC's
+# slower code until the build lands, so a slow build is a long overload.
+# Offline renders build at normal priority: there the build is the job.
+let backgroundPrefix = if findExe("nice").len > 0: "nice -n 19 " else: ""
+
+proc compileOptimized*(csrc: string; stateSize: int; background = false):
     tuple[lib: TccState; tickFn: TickFn] =
   ## Build the same C that TCC just loaded with the system C compiler at
   ## -O2, then link the object in memory with TCC, so natives resolve
   ## exactly as they do for the fast path. Slow (seconds), so run it off
   ## the audio and server threads; the result is a drop-in tick() for
-  ## the same state layout (checked via voice_state_size).
+  ## the same state layout (checked via voice_state_size). `background`:
+  ## a live engine's build, at low priority.
   let dir = getTempDir() / "aither-" & $getCurrentProcessId()
   createDir(dir)
   let base = dir / "opt-" & $getThreadId()
@@ -235,7 +243,8 @@ proc compileOptimized*(csrc: string; stateSize: int):
   # -ffp-contract=off: no fused multiply-adds. TCC never fuses, so with
   # them the two builds compute different bits and a voice jumps onto a
   # slightly different trajectory when this one lands (tests/exact_builds).
-  let (output, code) = execCmdEx("cc -O2 -march=native -ffp-contract=off -fno-stack-protector " &
+  let (output, code) = execCmdEx((if background: backgroundPrefix else: "") &
+    "cc -O2 -march=native -ffp-contract=off -fno-stack-protector " &
     "-fno-asynchronous-unwind-tables -c -o " & quoteShell(ofile) & " " &
     quoteShell(cfile))
   if code != 0:

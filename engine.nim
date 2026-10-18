@@ -330,7 +330,7 @@ proc optWorker() {.thread.} =
       release(mtx)
       if not live: continue                # reloaded while queued
       try:
-        let (lib, fn) = compileOptimized(job.csrc, job.stateSize)
+        let (lib, fn) = compileOptimized(job.csrc, job.stateSize, background = true)
         acquire(mtx)
         let i = currentSlot(job)
         var ok = false

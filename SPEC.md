@@ -1200,7 +1200,9 @@ parts, the voice fade and part-gain ramps, park and the part meters
 all advance per sample in C); the engine's own work is per block,
 and the output is bit-identical to ticking one sample at a time
 (`tests/block_tick.nim`). Each voice starts on TCC's code and swaps to
-a `cc -O2` build of the same C when that's ready, keeping its state;
+a `cc -O2` build of the same C when that's ready, keeping its state
+(the live engine builds at `nice 19`, so the audio wins any core both
+want; offline renders build at normal priority);
 the `-O2` build doesn't fuse multiply-adds (`-ffp-contract=off`), so
 both compute the same bits and the swap can't move a voice off its
 trajectory (`make exact` renders every patch both ways and compares). The stream is gapless: the mix waits for the
