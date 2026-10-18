@@ -69,7 +69,7 @@ physical primitive `ẍ + 2γẋ + ω²x = F(t)`:
 ```
 $x = 0.0
 $dx = 0.0
-let w2 = 440 * 440
+let w2 = (TAU * 440) * (TAU * 440)
 $dx = $dx + (-2 * $dx - w2 * $x + impulse(2) * w2) * dt
 $x = $x + $dx * dt
 $x * 0.3
@@ -272,7 +272,7 @@ choir |> reverb(3.5, 0.3)
 play tuning_fork:
   $x = 0.0
   $dx = 0.0
-  let w2 = 440 * 440
+  let w2 = (TAU * 440) * (TAU * 440)
   $dx = $dx + (-2 * $dx - w2 * $x + impulse(2) * w2) * dt
   $x = $x + $dx * dt
   $x * 0.3
