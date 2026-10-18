@@ -1,6 +1,11 @@
 # aither issues: brackets for stereo and for arrays
 
-2026-10-15. This is item 1 in `lab:~/handover/HANDOVER-aither-sshmail-2026-10-14.md`. Nothing has been changed yet; it waits for Roland's decision.
+2026-10-15. This is item 1 in `lab:~/handover/HANDOVER-aither-sshmail-2026-10-14.md`.
+
+**Status, 2026-10-18: closed.** Option A, the operation decides, is how
+aither works now, and the last gap is fixed: a pair indexes like a
+two-entry table. Roland decided aither stays two channels, complex
+number first (below).
 
 ## The rule today
 
@@ -42,3 +47,46 @@ One case A doesn't cover is `t2 * 0.1` on a 2-element table, which would still a
 ## If A is chosen
 
 It's a small change in codegen: the table-taking functions skip the stereo check for their table argument. Make it on lab along with the two small fixes, add tests for each row of the table above, and leave the live container alone until Roland swaps it between sets.
+
+## Closed, 2026-10-18
+
+Re-tested on the current engine. Most of the table above had been fixed
+along the way:
+
+| Case | Now |
+|---|---|
+| `wave(1, [0.25, 0.75])`, inline or through a `let` | works: `wave` reads any array as a table |
+| the error hint naming `bass` | names your variable (`mine[0] / mine[1]`) |
+| `let t3 = [a, b, c]`, `t3 * 0.1` | a clear error: index it or hand it to `wave` |
+| `osc(sin, [220, 330])` | an error by design: arrays are data, not a map (SPEC); polyphony is `sum` |
+| a def indexing its parameter, given a two-entry table | **was** "indexing non-constant arrays not supported"; fixed |
+
+The fix: a pair indexes like a two-entry table. `p[i]` truncates and
+wraps at 2 (`p[-1]` is the right side, `p[2]` the left), with a constant
+or a running index, and a def that indexes a parameter takes a pair
+there whole instead of running once per channel (`takesPair` in
+codegen). So the two readings of `[a, b]` agree everywhere they meet:
+indexing, arithmetic (element by element), and `wave`. No new syntax, no
+patch changes meaning. tests/pair_index.nim.
+
+What's left: a two-entry array does arithmetic and a longer one doesn't.
+That's stereo's affordance, kept on purpose.
+
+## Two channels, complex first (Roland, 2026-10-18)
+
+Considered: generalising the pair to a vector of N, with the final
+expression's length as the channel count. It would remove the asymmetry
+above and allow RGB `tv`, a Z (brightness) channel for `scope`, surround,
+and many radio inputs. The cost is mostly outside the language: the
+stream, the pipes and every tool (`play`, `scope`, `tv`, `card`,
+`input()`) assume interleaved pairs.
+
+Decided: aither stays two channels, and the pair is a complex number
+first; stereo, scope's XY and tv's pixel are readings of it. Domain
+colouring (Farris; Wegert's phase portraits), colour TV's chroma (hue as
+the phase of a subcarrier, watched on a vectorscope) and phase-coloured
+wave functions are the precedents for tv. `scope` already blanks off the
+square and sets brightness by dwell, as XY oscilloscope music does.
+
+If a piece ever needs brightness independent of speed, silent blanking,
+or chosen colour, that is the concrete case to reopen this with.

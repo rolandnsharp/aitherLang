@@ -225,9 +225,11 @@ tube(glottis, mouth)               # a table or array declared outside
 ```
 
 Writes to the parameter land in the caller's array. Two
-numbers at a call are a pair, not a table: a two-entry table
-goes through a `let`. Defs don't return arrays; the pair is
-the only multi-value return.
+numbers at a call are a pair, and a pair indexes like a
+two-entry table (see Stereo below), so a def that indexes its
+parameter takes `[220, 330]` as it takes `[220, 330, 440]`.
+Defs don't return arrays; the pair is the only multi-value
+return.
 
 A def uses a parameter as a pair when it indexes it (`p[0]`),
 hands it to a pair operation (`cmul(p, q)`, `magnitude(p)`),
@@ -539,6 +541,14 @@ can legally appear: a table of two, or a stereo pair when
 it is returned (below).
 
 ### Stereo (arrays as output)
+
+A pair indexes like a two-entry table: `p[i]` truncates `i`
+and wraps at 2, so `p[0]` is the left side, `p[1]` the right,
+`p[-1]` the right and `p[2]` the left, whether `i` is a
+constant or worked out as it runs (`a[int(phasor(2) * 2)]`
+alternates a part's sides). So a pair and a two-entry table
+read alike wherever they meet: indexing, arithmetic (element
+by element), and `wave`, which reads any array as a table.
 
 Return `[L, R]` for stereo. Plays and the final expression
 may return a float (mono, mirrored to both channels) or a

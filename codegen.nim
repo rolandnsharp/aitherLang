@@ -950,6 +950,24 @@ proc cycleError(c: Ctx; def, call: Node): ref ValueError =
 # Inline a user def call. Substitute param names with the evaluated C
 # expressions (bound to fresh locals to avoid re-evaluating side effects),
 # emit let/var handling inside a statement expression.
+proc indexes(n: Node; name: string): bool =
+  ## Does `n` index `name` anywhere (`name[...]`)?
+  if n == nil: return false
+  if n.kind == nkIdx and n.kids[0].kind == nkIdent and n.kids[0].str == name:
+    return true
+  for k in n.kids:
+    if indexes(k, name): return true
+  false
+
+proc takesPair(c: Ctx; def: Node): seq[bool] =
+  ## Which params take a pair argument whole: those the body reads as a
+  ## pair (pairParams), and those it indexes, since a pair indexes like a
+  ## two-entry table. A pair handed to any other param makes the call
+  ## run once per channel.
+  result = c.pairParams(def)
+  for i, p in def.params:
+    if indexes(def.kids[0], p): result[i] = true
+
 proc emitDefInline(c: Ctx; sc: Scope; def: Node; call: Node): string =
   let args = call.kids
   if args.len != def.params.len:
@@ -964,7 +982,10 @@ proc emitDefInline(c: Ctx; sc: Scope; def: Node; call: Node): string =
     let a = args[i]
     # Pair param (see pairParams): bind both sides. emitStereo's
     # statements are C declarations, legal inside the `({ ... })` below.
-    if pairs[i]:
+    # So is a param the body indexes when this call hands it a pair: a
+    # pair indexes like a two-entry table (p[i] wraps at 2), so a def
+    # that reads `tbl[i]` takes `[220, 330]` as it takes `[220, 330, 440]`.
+    if pairs[i] or (indexes(def.kids[0], p) and c.refsStereo(sc, a)):
       var sub = ""
       let sv = c.emitStereo(sc, a, sub)
       let tmpL = c.fresh("p_" & p & "_l")
@@ -2117,6 +2138,24 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
         return pairVarRef(a.str, int(i.num))
       if a.str in c.playSet or a.str in c.stereoLets:
         return stereoRef(c, a.str, if int(i.num) == 0: "l" else: "r")
+    # Any other index on a pair: a number worked out as it runs, or a
+    # constant past 1. It's truncated and wraps at 2, as a table's index
+    # wraps at its length, so a pair and a two-entry table read alike:
+    # p[i] is the left side for even i, the right for odd (p[-1] is the
+    # right, like a table's last entry).
+    let bound = if a.kind == nkIdent: sc.lookupStereo(a.str)
+                else: (l: "", r: "", ok: false)
+    if bound.ok or c.refsStereo(sc, a):
+      var pre = ""
+      var l = bound.l
+      var r = bound.r
+      if not bound.ok:
+        let v = c.emitStereo(sc, a, pre)
+        l = v.l
+        r = v.r
+      let ix = c.emitExpr(sc, i)
+      return "(({\n" & pre & "  long _i = (long)(" & ix & ") % 2; " &
+             "double __pick = (_i == 0) ? (" & l & ") : (" & r & "); __pick; }))"
     # Inline constant array literal with constant index.
     if a.kind == nkArr and i.kind == nkNum:
       let k = int(i.num)
@@ -2404,7 +2443,7 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal =
     # so inline it once for one result — `mono(input())`. Otherwise the
     # split below runs it per channel and hands pair params the whole pair.
     let pairs =
-      if n.str in c.userDefs: c.pairParams(c.userDefs[n.str]) else: @[]
+      if n.str in c.userDefs: c.takesPair(c.userDefs[n.str]) else: @[]
     if pairs.anyIt(it):
       var perChannel = false
       for i, k in n.kids:
@@ -2578,9 +2617,9 @@ proc refsStereo(c: Ctx; sc: Scope; n: Node): bool =
     if n.str in c.userDefs:
       let def = c.userDefs[n.str]
       if isStereoDef(c, def): return true
-      # A pair arg on a pair param is consumed whole (see pairParams);
-      # only pair args elsewhere make the call per-channel.
-      let pairs = c.pairParams(def)
+      # A pair arg on a param that takes one whole (see takesPair) is
+      # consumed; only pair args elsewhere make the call per-channel.
+      let pairs = c.takesPair(def)
       for i, k in n.kids:
         if i < pairs.len and pairs[i]: continue
         if k != nil and c.refsStereo(sc, k): return true
