@@ -113,8 +113,10 @@ make corpus-update   re-record that, after a change meant to alter some
 ```
 
 `make corpus` renders every tracked `.aither` file as committed (so
-uncommitted edits to a patch don't count) for a second, knobs at half
-and a chord held, with the working tree's engine and stdlib, and
+uncommitted edits to a patch don't count), with the working tree's
+engine and stdlib and every knob at half, in three short windows: a
+chord held, a chord change (release tails, new attacks), and a fresh
+start at t = 150 s, so sections that fade in later are heard. It
 compares each one's exact samples with
 `tests/corpus.golden`, naming every patch whose sound changed and by
 how much. A change to the language or the stdlib that touches a patch

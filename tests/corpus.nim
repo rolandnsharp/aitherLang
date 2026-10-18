@@ -3,9 +3,20 @@
 ##   make corpus          compare every tracked .aither file with tests/corpus.golden
 ##   make corpus-update   re-record the golden file after an intended change
 ##
-## Each file is rendered offline for one second with every MIDI knob at
-## half and a C-E-G chord held at velocity 100, so keyboard and knob
-## driven patches sound too. Its fingerprint is a hash of every sample's
+## Each file is rendered offline with every MIDI knob at half, in three
+## windows, so keyboard and knob driven patches sound too and later
+## sections are reached:
+##   0-0.5 s    a C-E-G chord held at velocity 100
+##   0.5-1.5 s  the same voice on: the chord released, F-A-C struck at
+##              velocity 50 (note-offs, release tails, new attacks)
+##   150 s      a fresh voice started with its clock at 150 s, the C-E-G
+##              chord held, for 0.5 s: timeline pieces whose sections
+##              fade in on `t` (cathedral's bells, rhythm, lead) are heard
+## All on TCC (AITHER_OPT=0): no compile wait, and the same bits as the
+## cc -O2 build (tests/exact_builds). Switching heavy patches to cc was
+## tried and was slower: on the A53s a cc compile costs a minute or more
+## with the other workers running. Patches are split across one worker
+## process per core. Its fingerprint is a hash of every sample's
 ## exact bits, plus RMS and peak to make a change readable. A change to
 ## the language, the stdlib or the engine that alters a patch it wasn't
 ## meant to touch fails here; one that was meant to shows up as a diff
@@ -18,31 +29,51 @@
 ## Noise and all other state start fresh in each render, so the result
 ## doesn't depend on file order.
 
-import std/[os, osproc, strutils, math, tables, algorithm, sequtils, exitprocs]
-import ../render, ../midi
+import std/[os, osproc, strutils, math, tables, algorithm, sequtils, exitprocs, streams, times]
+import ../render, ../midi, ../voice
 
 const Golden = "tests/corpus.golden"
-const Seconds = 1.0
 
 proc db(x: float64): float64 = 20 * log10(max(x, 1e-12))
+
+const Late = 150.0            # where the third window's fresh voice starts
+
+proc chord(keys: openArray[int]; vel: int) =
+  for k in keys: midiNoteOn(k, vel)
 
 proc fingerprint(path: string): string =
   midiResetAll()
   for cc in 0 .. 127: midiCc(cc, 64)
-  for key in [60, 64, 67]: midiNoteOn(key, 100)
   try:
-    let a = renderPatch(path, Seconds)
+    let prog = buildProgram(readFile(path), path)
+    var windows: seq[Stereo]
+    chord([60, 64, 67], 100)
+    let v = newVoice(48000.0)
+    v.load(prog, 48000.0)
+    windows.add renderVoice(v, 0.5, 48000).audio
+    for k in [60, 64, 67]: midiNoteOff(k)
+    chord([65, 69, 72], 50)
+    windows.add renderVoice(v, 1.0, 48000, t0 = 0.5).audio
+    midiResetAll()
+    for cc in 0 .. 127: midiCc(cc, 64)
+    chord([60, 64, 67], 100)
+    let late = newVoice(48000.0)
+    late.load(prog, 48000.0)
+    windows.add renderVoice(late, 0.5, 48000, t0 = Late).audio
     var h = 0xcbf29ce484222325'u64          # FNV-1a over the samples' bits
     var sum, peak = 0.0
-    for i in 0 ..< a.left.len:
-      for x in [a.left[i], a.right[i]]:
-        var bits = cast[uint64](x)
-        for _ in 0 ..< 8:
-          h = (h xor (bits and 0xff)) * 0x100000001b3'u64
-          bits = bits shr 8
-        sum += x * x
-        peak = max(peak, abs(x))
-    let rms = sqrt(sum / float64(max(1, 2 * a.left.len)))
+    var count = 0
+    for a in windows:
+      for i in 0 ..< a.left.len:
+        for x in [a.left[i], a.right[i]]:
+          var bits = cast[uint64](x)
+          for _ in 0 ..< 8:
+            h = (h xor (bits and 0xff)) * 0x100000001b3'u64
+            bits = bits shr 8
+          sum += x * x
+          peak = max(peak, abs(x))
+          inc count
+    let rms = sqrt(sum / float64(max(1, count)))
     toHex(h) & "  " & formatFloat(db(rms), ffDecimal, 1) & "  " &
       formatFloat(db(peak), ffDecimal, 1)
   except CatchableError as e:
@@ -51,6 +82,24 @@ proc fingerprint(path: string): string =
 proc parse(line: string): tuple[path, rest: string] =
   let i = line.find("  ")
   (line[0 ..< i], line[i + 2 .. ^1])
+
+putEnv("AITHER_OPT", "0")    # TCC throughout: same bits as cc, no compile wait
+
+# A worker: `corpus shard K N DIR FILE...` fingerprints every Nth file
+# from the Kth, rendered from the extracted tree DIR, one
+# "path<TAB>print" line each. The main process runs one worker per core.
+if paramCount() >= 4 and paramStr(1) == "shard":
+  let k = parseInt(paramStr(2))
+  let n = parseInt(paramStr(3))
+  let dir = paramStr(4)
+  for i in 5 .. paramCount():
+    if (i - 5) mod n == k:
+      let f = paramStr(i)
+      let t0 = epochTime()
+      let print = fingerprint(dir / f)
+      stdout.write f & "\t" & print & "\t" & formatFloat(epochTime() - t0, ffDecimal, 1) & "\n"
+      stdout.flushFile()
+  quit 0
 
 let tracked = execProcess("git ls-files '*.aither'").splitLines().filterIt(it.len > 0)
 let files = tracked.filterIt("/lib/" notin it).sorted()
@@ -68,8 +117,28 @@ let dirty = execProcess("git diff --name-only HEAD -- '*.aither'").splitLines()
 if dirty.len > 0:
   echo "corpus: rendering the committed version of ", dirty.len,
        " patch(es) with uncommitted edits: ", dirty.join(", ")
+# One worker per core, each taking every Nth patch; then in path order.
+let workers = max(1, countProcessors())
+var procs: seq[Process]
+for k in 0 ..< workers:
+  procs.add startProcess(getAppFilename(),
+    args = @["shard", $k, $workers, head] & files, options = {})
+var got = initTable[string, string]()
+var took: seq[tuple[secs: float64; path: string]]
+for p in procs:
+  for line in p.outputStream.readAll().splitLines():
+    let f = line.split('\t')
+    if f.len == 3:
+      got[f[0]] = f[1]
+      took.add (parseFloat(f[2]), f[0])
+  discard p.waitForExit()
+  p.close()
+took.sort(proc(a, b: auto): int = cmp(b.secs, a.secs))
+stderr.writeLine "corpus: slowest: " &
+  took[0 ..< min(5, took.len)].mapIt(it.path & " " & $int(it.secs) & " s").join(", ")
 var now = initOrderedTable[string, string]()
-for f in files: now[f] = fingerprint(head / f)
+for f in files:
+  now[f] = got.getOrDefault(f, "ERROR  worker produced no fingerprint")
 
 if paramCount() >= 1 and paramStr(1) == "update":
   var o = ""
