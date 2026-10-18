@@ -2705,6 +2705,7 @@ proc emit*(c: Ctx; program: Node): string =
   pre.add "extern double n_input_l(void);\n"
   pre.add "extern double n_input_r(void);\n"
   pre.add "extern long n_overrun(void*,const char*);\n"
+  pre.add "extern double n_now(void);\n"
   # VoiceState — DspState prefix is *exactly* the Nim layout; new fields
   # go after.
   # NOTE: voice.nim depends on this exact layout for state migration:
@@ -2742,6 +2743,11 @@ proc emit*(c: Ctx; program: Node): string =
   pre.add "  double  deadline;\n"
   pre.add "  long    stuck;\n"
   pre.add "  const char* stuck_at;\n"
+  # `aither profile`: while `profiling` is set, tick1 adds each top-level
+  # statement's time to `prof`: one slot per part, then everything else
+  # at top level, then the final expression (n_parts + 2 slots).
+  pre.add "  double* prof;\n"
+  pre.add "  long    profiling;\n"
   for vn in c.topVarNames:
     pre.add "  double v_" & vn & ";\n"
   pre.add "  unsigned char inited[" & $max(1, c.topVarNames.len) & "];\n"
@@ -2751,6 +2757,7 @@ proc emit*(c: Ctx; program: Node): string =
   var body = ""
   body.add "static void tick1(VoiceState* s, double* outL, double* outR) {\n"
   body.add "  s->idx = 0;\n"
+  body.add "  double prof_last = s->profiling ? n_now() : 0.0;\n"
   let topSc = push(nil)
   # Lazy-init file-level state, top level and play bodies alike, in
   # declaration order. (Play-body inits used to be skipped, so `$x = 0.1`
@@ -3008,6 +3015,27 @@ proc emit*(c: Ctx; program: Node): string =
         else:
           let v = c.emitExpr(topSc, s)
           body.add &"  (void)({v});\n"
+    # `aither profile`: charge the time since the last statement to this
+    # one's slot: its part, top-level code, or the final expression.
+    # Only where the slot changes: a run of top-level statements is one
+    # slot, so it shares one clock read (fewer reads, less distortion).
+    if s.kind notin {nkDef, nkImport}:
+      var nextKind = nkDef
+      var nextIsFinal = false
+      for j in i + 1 ..< program.kids.len:
+        if program.kids[j].kind notin {nkDef, nkImport}:
+          nextKind = program.kids[j].kind
+          nextIsFinal = j == finalIdx
+          break
+      let topRunGoesOn = s.kind != nkPlay and i != finalIdx and
+                         nextKind notin {nkPlay, nkDef} and not nextIsFinal
+      if not topRunGoesOn:
+        let slot =
+          if s.kind == nkPlay: $(c.playNames.len - 1)
+          elif i == finalIdx: "s->n_parts + 1"
+          else: "s->n_parts"
+        body.add &"  if (s->profiling) {{ double prof_now = n_now(); " &
+                 &"s->prof[{slot}] += prof_now - prof_last; prof_last = prof_now; }}\n"
   # Which parts the final expression reaches: the names it mentions,
   # and the names those parts' bodies mention, and so on. A part it
   # never reaches computes every sample and is never heard; `check`

@@ -49,6 +49,10 @@ type
     deadline*:      float64
     stuck*:         int
     stuckAt*:       cstring
+    # `aither profile`: seconds spent per part, then top-level code, then
+    # the final expression (nParts + 2), added up while `profiling` is 1.
+    profPtr*:       pointer
+    profiling*:     int
 
   NativeVoice* = ref object
     state*:     pointer          # malloc'd VoiceState buffer
@@ -70,6 +74,7 @@ type
     # meters over it: decaying peak and smoothed mean square.
     partOut*:         seq[float64]
     partPeak*:        seq[float64]
+    prof*:            seq[float64]   # `aither profile`: see VoiceHeader.profPtr
     partRmsSq*:       seq[float64]
     # `park`: a part faded to silence whose body the tick skips, so it
     # costs nothing and its state is frozen until `unpark`. 1.0 = parked.
@@ -120,6 +125,8 @@ proc monoNow*(): float64 =
   ## Monotonic seconds, for deadlines.
   float64(getMonoTime().ticks) * 1e-9
 
+proc nNow(): float64 {.cdecl.} = monoNow()   # `aither profile`'s clock, for the C
+
 # A recursion asks every 65 536 steps whether its block is past the
 # deadline. Past it, the recursion gives up, and so does every later one
 # in the block: they see `stuck` before they start.
@@ -131,6 +138,7 @@ proc nOverrun(s: ptr VoiceHeader; where: cstring): clong {.cdecl.} =
 
 proc registerNatives(s: TccState) =
   discard s.addSymbol("n_overrun",   cast[pointer](nOverrun))
+  discard s.addSymbol("n_now",       cast[pointer](nNow))
   discard s.addSymbol("n_lpf",       cast[pointer](nLpf))
   discard s.addSymbol("n_hpf",       cast[pointer](nHpf))
   discard s.addSymbol("n_bpf",       cast[pointer](nBpf))
@@ -398,6 +406,7 @@ proc setPartNames(v: NativeVoice; names: seq[string]) =
   v.partParked = parked
   v.partParkPending = pending
   v.partOut = newSeq[float64](2 * names.len)
+  v.prof = newSeq[float64](names.len + 2)
 
 proc pointPartGains(v: NativeVoice) =
   let hdr = cast[ptr VoiceHeader](v.state)
@@ -411,6 +420,7 @@ proc pointPartGains(v: NativeVoice) =
     if v.partParkPending.len > 0: v.partParkPending[0].addr else: nil
   hdr.partPeakPtr = at(v.partPeak)
   hdr.partSqPtr = at(v.partRmsSq)
+  hdr.profPtr = at(v.prof)
   hdr.nParts = v.partNames.len
   hdr.peakDecay = PeakDecay
   hdr.rmsAlpha = RmsAlpha
@@ -579,6 +589,8 @@ proc snapshotInto*(src: NativeVoice; dst: NativeVoice; buf: pointer) =
   dst.partRmsSq = src.partRmsSq
   dst.partParked = src.partParked
   dst.partParkPending = src.partParkPending
+  dst.prof = newSeq[float64](src.prof.len)     # a preview isn't profiled
+  cast[ptr VoiceHeader](buf).profiling = 0
   dst.startT = src.startT
 
 proc dispose*(v: NativeVoice) =

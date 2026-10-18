@@ -1,7 +1,7 @@
 ## End-to-end: parse stdlib + kick.aither, generate C, compile via TCC,
 ## run tick() 48000 times, verify we get an audible impulse-driven tone.
 
-import std/[math, os]
+import std/[math, os, monotimes]
 import ../parser, ../dsp, ../tcc, ../codegen
 
 proc errHandler(opaque: pointer; msg: cstring) {.cdecl.} =
@@ -58,6 +58,9 @@ doAssert s.addSymbol("n_bpf_c",    cast[pointer](nBpfC)) == 0
 doAssert s.addSymbol("n_notch_c",  cast[pointer](nNotchC)) == 0
 doAssert s.addSymbol("n_reverb_coef", cast[pointer](nReverbCoef)) == 0
 doAssert s.addSymbol("n_reverb_c", cast[pointer](nReverbC)) == 0
+# `aither profile`'s clock: tick1 reads it only while profiling.
+proc nowSec(): float64 {.cdecl.} = float64(getMonoTime().ticks) * 1e-9
+doAssert s.addSymbol("n_now",      cast[pointer](nowSec)) == 0
 
 doAssert s.compileString(csrc) == 0, "compile failed"
 doAssert s.relocate() == 0

@@ -153,10 +153,13 @@ block offlineIdleStdin:
 # advancing the clock; tv counts pixels by samples received and the
 # patch by t, so one such block sheared the picture for good.
 var spamDone: bool
+var slowestMs: int                     # the slowest reply while the engine ran flat out
 proc spam() {.thread.} =
   {.cast(gcsafe).}:
     for i in 0 ..< 400:
+      let t0 = epochTime()
       discard ask(["status", "levels", "list"][i mod 3])
+      slowestMs = max(slowestMs, int((epochTime() - t0) * 1000))
     spamDone = true
 
 block gapless:
@@ -181,6 +184,11 @@ block gapless:
     samples += Chunk
   joinThread(th)
   doAssert gaps == 0, $gaps & " gaps in " & $samples & " samples while the socket was busy"
+  # --- 9. ...and commands still get in. This test reads as fast as it
+  # can, so the engine runs flat out, like an overloaded set: the audio
+  # thread took the lock back the moment it let go, and a command could
+  # wait seconds (lockForCommand lets it in first).
+  doAssert slowestMs < 500, "a command waited " & $slowestMs & " ms for the engine"
   doAssert "OK" in ask("kill")
   discard g.waitExit()
   g.close()

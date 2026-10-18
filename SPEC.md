@@ -1137,6 +1137,7 @@ heard; `patches/didge_scope.aither` is written for that engine.
 | Command                          | Description                                         |
 |----------------------------------|-----------------------------------------------------|
 | `check <voice>`                  | level, quiet parts, rollbacks and guard trips; parts the final expression never reaches (NOT IN THE FINAL EXPRESSION, a compile-time fact, also shown by `parts` and `audit`); QUIET VOICE when the loudest heard part is healthy but the voice's output is 30 dB or more below it |
+| `profile <voice> [seconds]`     | CPU for `seconds` (2): each part, the top-level code and the final expression, as a share of one core and of the voice, heaviest first. Timing is on only while asked for; off, the code checks a flag between parts and reads no clock |
 | `levels [voice]`                 | per-voice RMS / peak / clips / envelope sparkline   |
 | `levels master`                  | master-bus stats (the mix as written to the pipe)   |
 | `spectrum [voice]`               | FFT analysis of voice's recent buffer (or master)   |
@@ -1207,7 +1208,10 @@ the `-O2` build doesn't fuse multiply-adds (`-ffp-contract=off`), so
 both compute the same bits and the swap can't move a voice off its
 trajectory (`make exact` renders every patch both ways and compares). The stream is gapless: the mix waits for the
 voice table's lock rather than skipping a block, so every sample
-written is one tick of `t`, whatever the control socket is doing. `tv`
+written is one tick of `t`, whatever the control socket is doing. A
+command waiting for the lock goes first: the mix yields to it before
+its next block, so a `send` or `park` answers in milliseconds even
+when an overloaded voice keeps the mix running flat out. `tv`
 and `scope` count pixels and points by the samples they receive, and
 rely on it (`tests/engine_live.nim`). Values that can't change within a block are
 computed once per block instead of every sample: a number, a knob

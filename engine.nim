@@ -1,6 +1,6 @@
 ## aither engine — the voices, mixed to a pipe, with a socket for live coding
 
-import std/[os, net, strutils, math, locks, tables, sets, terminal]
+import std/[os, net, strutils, math, locks, tables, sets, terminal, algorithm, atomics]
 from std/posix import signal, SIGPIPE, SIG_IGN, EINTR, errno, read, write
 import parser, voice, midi, dsp, render, imports
 import engine_types, cli_output, analysis
@@ -116,6 +116,21 @@ var
 
 initLock(mtx)
 
+# The lock is the audio thread's most of the time: it takes it for every
+# block, lets go, and takes it straight back. Locks aren't fair, so a plain
+# acquire from another thread could wait seconds while the audio ran flat
+# out, which is what an overloaded set does, just when a `send` or `park`
+# is wanted. So every other thread takes it through lockForCommand, which
+# says it's waiting, and the audio thread lets it in before its next block.
+var commandsWaiting: Atomic[int]
+
+proc schedYield(): cint {.importc: "sched_yield", header: "<sched.h>".}
+
+proc lockForCommand() =
+  discard commandsWaiting.fetchAdd(1)
+  acquire(mtx)
+  discard commandsWaiting.fetchSub(1)
+
 proc fadeDeltaFor(seconds: float64): float64 =
   let s = if seconds <= 0.0: DefaultFadeMs / 1000.0 else: seconds
   1.0 / (s * float64(SampleRate))
@@ -145,7 +160,9 @@ proc mixBlock(outL, outR: var seq[float64];
   # silence without advancing the clock, so any send or status that held
   # the lock at the wrong moment sheared a tv picture for the rest of the
   # session. Holds are short (a send's commit is the longest, a few ms)
-  # and the pipe ahead of the player holds far more than that.
+  # and the pipe ahead of the player holds far more than that. A command
+  # waiting for the lock goes first (see lockForCommand).
+  while commandsWaiting.load(moRelaxed) > 0: discard schedYield()
   acquire(mtx)
   if blkL.len < frames:
     blkL.setLen(frames)
@@ -325,13 +342,13 @@ proc optWorker() {.thread.} =
   {.cast(gcsafe).}:
     while true:
       let job = optQueue.recv()
-      acquire(mtx)
+      lockForCommand()
       let live = currentSlot(job) >= 0
       release(mtx)
       if not live: continue                # reloaded while queued
       try:
         let (lib, fn) = compileOptimized(job.csrc, job.stateSize, background = true)
-        acquire(mtx)
+        lockForCommand()
         let i = currentSlot(job)
         var ok = false
         if i >= 0:
@@ -369,7 +386,11 @@ proc doctor() {.thread.} =
   {.cast(gcsafe).}:
     while true:
       sleep(10)
-      if not tryAcquire(mtx): continue
+      var wanted = false               # a peek without the lock: a bool
+      for i in 0 ..< slotCount:
+        if slots[i].wantRollback: wanted = true
+      if not wanted: continue
+      lockForCommand()
       for i in 0 ..< slotCount:
         if not slots[i].wantRollback: continue
         let v {.cursor.} = slots[i].voice
@@ -481,7 +502,7 @@ proc loadPatch*(filename: string; fadeIn: float64): string =
     stderr.writeLine "compile FAIL"
     return "compile error: " & annotateErr(e.msg, userSrc, filename)
 
-  acquire(mtx)
+  lockForCommand()
   # Drop slots whose fade-out completed before deciding hot-swap vs new
   # vs voice-limit-reached. Without this, a session that stopped 16
   # voices without re-sending still saw "voice limit reached" even
@@ -569,7 +590,7 @@ proc tryPatch*(filename: string; seconds, skip: float64): string =
     return "ERR compile error: " & annotateErr(e.msg, userSrc, filename)
   let scratch = newVoice(float64(SampleRate))
   defer: scratch.dispose()
-  acquire(mtx)
+  lockForCommand()
   let idx = findSlot(baseName)
   let now = timeSec + timeFrac
   var buf: pointer = nil
@@ -578,7 +599,7 @@ proc tryPatch*(filename: string; seconds, skip: float64): string =
     let size = live.stateSize
     release(mtx)                      # allocate outside the audio lock
     buf = alloc0(size)
-    acquire(mtx)
+    lockForCommand()
     if slots[idx].voice.state != nil and slots[idx].voice.stateSize == size:
       slots[idx].voice.snapshotInto(scratch, buf)
     else:
@@ -615,10 +636,54 @@ proc tryPatch*(filename: string; seconds, skip: float64): string =
   if parts.len > 0: lines.add parts
   "OK\n" & lines.join("\n")
 
+proc profileVoice(name: string; seconds: float64): string =
+  ## `profile`: time the voice's code for `seconds` and report, per part
+  ## and for its top-level code and final expression, the share of one
+  ## core it took, heaviest first. Off the rest of the time: the code
+  ## checks a flag between parts and reads no clock.
+  lockForCommand()
+  var idx = findSlot(name)
+  if idx < 0:
+    release(mtx)
+    return "ERR not found: " & name
+  let v = slots[idx].voice
+  let gen = v.gen
+  for x in v.prof.mitems: x = 0.0
+  cast[ptr VoiceHeader](v.state).profiling = 1
+  let t0 = monoNow()                   # the window as it really ran, not as asked
+  release(mtx)
+  sleep(int(seconds * 1000))
+  lockForCommand()
+  idx = findSlot(name)
+  if idx < 0 or slots[idx].voice != v or v.gen != gen:
+    if idx >= 0: cast[ptr VoiceHeader](slots[idx].voice.state).profiling = 0
+    release(mtx)
+    return "ERR " & name & " was sent again or stopped while profiling"
+  cast[ptr VoiceHeader](v.state).profiling = 0
+  let window = monoNow() - t0
+  let names = v.partNames & @["(top-level code)", "(final expression)"]
+  let times = v.prof
+  release(mtx)
+  var rows: seq[(float64, string)]
+  var total = 0.0
+  for i, n in names:
+    if i < times.len:
+      rows.add((times[i], n))
+      total += times[i]
+  rows.sort(proc (a, b: (float64, string)): int = cmp(b[0], a[0]))
+  var o = "OK " & name & ": " & formatFloat(100 * total / window, ffDecimal, 1) &
+          "% of one core over " & formatFloat(window, ffDecimal, 1) &
+          "s (clock reads included)\n"
+  for (tm, n) in rows:
+    o.add "  " & alignLeft(n, 22) & align(formatFloat(100 * tm / window, ffDecimal, 1), 6) &
+          "%   " & align($int(round(if total > 0: 100 * tm / total else: 0.0)), 3) &
+          "% of the voice\n"
+  o.strip(leading = false)
+
 proc retriggerVoice(name: string): string =
   let idx = findSlot(name)
   if idx < 0: return "not found: " & name
-  acquire(mtx)
+  lockForCommand()
   slots[idx].voice.startT = timeSec + timeFrac
   release(mtx)
   ""
@@ -629,7 +694,7 @@ proc markStoppedForTest*(name: string): bool =
   ## sweep logic without spinning up the audio thread.
   let idx = findSlot(name)
   if idx < 0: return false
-  acquire(mtx)
+  lockForCommand()
   slots[idx].active = false
   release(mtx)
   true
@@ -642,7 +707,7 @@ proc activeVoiceCount*(): int =
 proc stopVoice*(name: string; fade: float64): string =
   let idx = findSlot(name)
   if idx < 0: return "not found: " & name
-  acquire(mtx)
+  lockForCommand()
   if fade > 0.0:
     slots[idx].fadeDelta = -fadeDeltaFor(fade)
   else:
@@ -651,7 +716,7 @@ proc stopVoice*(name: string; fade: float64): string =
   ""
 
 proc clearAll(fade: float64): string =
-  acquire(mtx)
+  lockForCommand()
   for i in 0 ..< slotCount:
     if fade > 0.0:
       slots[i].fadeDelta = -fadeDeltaFor(fade)
@@ -663,7 +728,7 @@ proc clearAll(fade: float64): string =
 proc setMute*(name: string; muted: bool): string =
   let idx = findSlot(name)
   if idx < 0: return "not found: " & name
-  acquire(mtx)
+  lockForCommand()
   slots[idx].muted = muted
   if not muted:                              # user takes responsibility
     slots[idx].runaway = false
@@ -674,7 +739,7 @@ proc setMute*(name: string; muted: bool): string =
 proc soloVoice*(name: string; fade: float64): string =
   let idx = findSlot(name)
   if idx < 0: return "not found: " & name
-  acquire(mtx)
+  lockForCommand()
   for i in 0 ..< slotCount:
     if i == idx:
       # Targeted voice: ensure it's playing and unmuted. Fade in if it
@@ -739,7 +804,7 @@ proc snapshotPartsOf(v: NativeVoice): seq[PartInfo] =
 
 proc voiceInfoList*(): seq[VoiceInfo] =
   ## Snapshot of all voices + their parts. Used by `list`.
-  acquire(mtx)
+  lockForCommand()
   for i in 0 ..< slotCount:
     result.add VoiceInfo(
       name: slots[i].name,
@@ -754,7 +819,7 @@ proc midiStatus*(): MidiStatus =
 proc voiceStatsSnapshot*(name: string): ScopeQuery =
   ## "" or "*" → master + all voices. "master" → master only. Otherwise
   ## just the named voice (or empty if no such voice). Clears clips.
-  acquire(mtx)
+  lockForCommand()
   if name == "master":
     result.found = true
     result.snapshots.add VoiceStats(
@@ -783,7 +848,7 @@ proc voiceStatsSnapshot*(name: string): ScopeQuery =
   release(mtx)
 
 proc partsSnapshot*(voiceName: string): PartsQuery =
-  acquire(mtx)
+  lockForCommand()
   result.voiceName = voiceName
   let idx = findSlot(voiceName)
   if idx >= 0:
@@ -801,7 +866,7 @@ proc snapshotRecent(r: RecentRing): seq[float64] =
 proc voiceBufferSnapshot*(name: string): seq[float64] =
   ## Mono mix of the latest ~0.5s. "" or "master" → master; named voice
   ## → that voice. Empty seq if the named voice isn't found.
-  acquire(mtx)
+  lockForCommand()
   if name.len == 0 or name == "master":
     result = snapshotRecent(masterRecent)
   else:
@@ -814,7 +879,7 @@ proc voiceMeterAfterSend*(name: string):
     tuple[found: bool, stats: StatsSnapshot] =
   ## One-line meter snapshot tacked onto `send` responses. Does NOT
   ## clear clips (the OK is informational, not the official scope read).
-  acquire(mtx)
+  lockForCommand()
   let idx = findSlot(name)
   if idx >= 0:
     result.found = true
@@ -822,7 +887,7 @@ proc voiceMeterAfterSend*(name: string):
   release(mtx)
 
 proc checkSnapshot*(name: string): CheckQuery =
-  acquire(mtx)
+  lockForCommand()
   let idx = findSlot(name)
   if idx >= 0:
     let s = slots[idx]
@@ -870,7 +935,7 @@ proc setPartMute(voiceName, partName: string;
     return "no play named " & partName & " in voice " & voiceName
   let target = if muted: 0.0 else: 1.0
   let f = if fade > 0.0: fade else: DefaultFadeMs / 1000.0
-  acquire(mtx)
+  lockForCommand()
   if not muted:                              # unmute wakes a parked part too
     voice.partParked[pIdx] = 0.0
     voice.partParkPending[pIdx] = false
@@ -891,7 +956,7 @@ proc setPartPark*(voiceName, partName: string;
   if pIdx < 0:
     return "no play named " & partName & " in voice " & voiceName
   let f = if fade > 0.0: fade else: DefaultFadeMs / 1000.0
-  acquire(mtx)
+  lockForCommand()
   if parked:
     if voice.partGains[pIdx] <= 0.0:
       voice.partParked[pIdx] = 1.0
@@ -914,7 +979,7 @@ proc soloPart(voiceName, partName: string; fade: float64): string =
   if pIdx < 0:
     return "no play named " & partName & " in voice " & voiceName
   let f = if fade > 0.0: fade else: DefaultFadeMs / 1000.0
-  acquire(mtx)
+  lockForCommand()
   for i in 0 ..< voice.partNames.len:
     let target = if i == pIdx: 1.0 else: 0.0
     setPartGainTarget(voice, i, target, f)
@@ -1011,6 +1076,9 @@ proc handleCmd(line: string): string =
   of "parts":
     if parts.len < 2: return "ERR usage: parts <voice>"
     "OK\n" & formatParts(partsSnapshot(parts[1]))
+  of "profile":
+    if parts.len < 2: return "ERR usage: profile <voice> [seconds]"
+    profileVoice(parts[1], clamp(if parts.len >= 3: parseFloatArg(parts[2], 2.0) else: 2.0, 0.2, 30.0))
   of "midi":
     if parts.len < 2:
       return "ERR usage: midi list|connect <spec>|disconnect"

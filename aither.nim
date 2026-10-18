@@ -95,6 +95,7 @@ proc usage() =
   echo "  retrigger <name>            reset start_t so the composition plays from the top"
   echo "  parts <voice>               list parts (play blocks): state, gain, rms, peak"
   echo "  check <voice>               level, quiet parts, rollbacks and guard trips"
+  echo "  profile <voice> [seconds]   CPU per part, top-level code and final expression (2 s)"
   echo "  midi list                   show ALSA seq ports"
   echo "  midi connect <spec>         subscribe to a specific port (e.g. '28:0')"
   echo "  midi disconnect             drop MIDI and re-open the sequencer"
@@ -172,6 +173,9 @@ of "retrigger":
 of "parts":
   if args.len < 2: quit "usage: aither parts <voice>"
   sendCmd("parts " & args[1])
+of "profile":
+  if args.len < 2: quit "usage: aither profile <voice> [seconds]"
+  sendCmd("profile " & args[1] & (if args.len >= 3: " " & args[2] else: ""))
 of "check":
   if args.len < 2: quit "usage: aither check <voice>"
   sendCmd("check " & splitFile(args[1]).name)
