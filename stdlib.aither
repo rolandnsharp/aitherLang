@@ -274,7 +274,7 @@ def bright_decay(n, pf):  1.0 / pow(n, 0.3)
 # physical primitive. Why include it: simplest physics example,
 # perfect teaching reference. Single mode, fixed damping; you can
 # hear the equation directly. The `$x; $dx` integration here is what
-# `resonator(input, ω, decay)` does for each mode of the modal banks
+# `resonator(input, freq, decay)` does for each mode of the modal banks
 # below — same math, fewer keystrokes.
 def tuning_fork(strike, freq):
   let omega = TAU * freq

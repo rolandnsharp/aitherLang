@@ -272,8 +272,12 @@ proc nImpulse*(s: var DspState; freq: float64): float64 {.cdecl, exportc: "n_imp
   if s.pool[i] < prev: 1.0 else: 0.0
 
 proc nResonator*(s: var DspState; input, freq, decay: float64): float64 {.cdecl, exportc: "n_resonator".} =
+  ## A driven damped oscillator ringing at `freq` Hz; `decay` is the
+  ## damping rate (larger dies faster). It took freq in radians per
+  ## second until 2026-10-18, so resonator(x, 440, ...) rang at 70 Hz.
   let i = s.claim(2)
-  let omega2 = freq * freq
+  let omega = 2.0 * PI * freq
+  let omega2 = omega * omega
   let invSr = 1.0 / s.sr
   s.pool[i+1] += (-decay * s.pool[i+1] - omega2 * s.pool[i] + input * omega2) * invSr
   s.pool[i]   += s.pool[i+1] * invSr

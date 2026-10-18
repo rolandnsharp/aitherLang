@@ -822,7 +822,9 @@ under it.
 **Reverb**: `reverb(sig, rt60, wet)` (Schroeder); a pair in runs one
 reverb per side.
 
-**Physics**: `impulse(freq)`, `resonator(sig, freq, decay)`,
+**Physics**: `impulse(freq)`, `resonator(sig, freq, decay)` (a
+driven damped oscillator ringing at `freq` Hz, like every frequency in
+aither; `decay` is its damping rate, larger dies faster),
 `discharge(sig, rate)`.
 
 **Modulation**: `tremolo(sig, rate, depth)`,

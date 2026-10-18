@@ -61,8 +61,10 @@ addExitProc(proc() = removeDir(head))
 if execCmd("git archive HEAD -- " & tracked.mapIt(quoteShell(it)).join(" ") &
            " | tar -x -C " & quoteShell(head)) != 0:
   quit "corpus: couldn't extract the committed patches"
+# stdlib.aither is compiled into the engine from the working tree, as the
+# check intends, so its edits are tested, not ignored.
 let dirty = execProcess("git diff --name-only HEAD -- '*.aither'").splitLines()
-  .filterIt(it.len > 0)
+  .filterIt(it.len > 0 and it != "stdlib.aither")
 if dirty.len > 0:
   echo "corpus: rendering the committed version of ", dirty.len,
        " patch(es) with uncommitted edits: ", dirty.join(", ")
