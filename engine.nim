@@ -126,6 +126,12 @@ var commandsWaiting: Atomic[int]
 
 proc schedYield(): cint {.importc: "sched_yield", header: "<sched.h>".}
 
+# The live mix thread runs on the audio core at real-time priority
+# (realtime.c), and the doctor pins it again when cores come and go.
+{.compile: "realtime.c".}
+proc aitherRealtime(who: cstring): cint {.importc: "aither_realtime".}
+proc aitherRepin() {.importc: "aither_repin".}
+
 proc lockForCommand() =
   discard commandsWaiting.fetchAdd(1)
   acquire(mtx)
@@ -384,8 +390,11 @@ var doctorThread: Thread[void]
 
 proc doctor() {.thread.} =
   {.cast(gcsafe).}:
+    var ticks = 0
     while true:
       sleep(10)
+      inc ticks
+      if ticks mod 100 == 0: aitherRepin()   # once a second: cores come and go
       var wanted = false               # a peek without the lock: a bool
       for i in 0 ..< slotCount:
         if slots[i].wantRollback: wanted = true
@@ -1183,6 +1192,7 @@ proc pumpPipe() =
 var pipeThread: Thread[void]
 proc pipeWorker() {.thread.} =
   {.cast(gcsafe).}:
+    discard aitherRealtime("aither")
     pumpPipe()
     # The reader closed the pipe: that is the end of the session.
     try: removeFile(SocketPath) except CatchableError: discard

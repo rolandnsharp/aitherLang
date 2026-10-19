@@ -13,7 +13,8 @@
    a soft limiter ends with `|> tanh`. If the card ran dry while
    playing, play says how often when it exits. Exits when the pipe
    closes.
-   Build: cc -O2 tools/play.c -o tools/play -lasound */
+   It runs on the audio core at real-time priority when allowed
+   (realtime.c). Build: make tools/play */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,6 +23,8 @@
 #include <alsa/asoundlib.h>
 
 #define FRAMES 256   /* one write: 5.3 ms at 48 kHz */
+
+int aither_realtime(const char *who);   /* realtime.c: audio core, SCHED_FIFO */
 
 int main(int argc, char **argv) {
     const char *dev = argc > 1 ? argv[1] : "default";
@@ -37,6 +40,7 @@ int main(int argc, char **argv) {
     err = snd_pcm_set_params(pcm, SND_PCM_FORMAT_S16_LE, SND_PCM_ACCESS_RW_INTERLEAVED,
                              2, rate, 1, latency_ms * 1000);
     if (err < 0) { fprintf(stderr, "play: set_params %s: %s\n", dev, snd_strerror(err)); return 1; }
+    aither_realtime("play");
 
     static float in[FRAMES * 2];
     static short out[FRAMES * 2];

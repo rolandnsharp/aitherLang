@@ -1272,6 +1272,13 @@ per-partial `exp`. Same arithmetic once, so the same bits
 knob is read at the start of each block, so a knob moved mid-block
 lands at the next one (11 ms at 512 frames). `AITHER_HOIST=0` turns
 it off.
+The live mix thread runs on the audio core (the highest-numbered core
+online, `AITHER_RT_CPU` to choose) at `SCHED_FIFO` priority
+`AITHER_RT_PRIO` (70), with memory locked when `RLIMIT_MEMLOCK` is
+unlimited, and is pinned again about once a second as cores come and go;
+`tools/play` and `tools/card` do the same. Without the `rtprio` limit it
+says so and runs at normal priority; `AITHER_RT=0` turns it off. Offline
+renders don't. See notes/realtime-2026-10-19.md (`realtime.c`).
 Each voice's block has a deadline, `AITHER_WATCHDOG` seconds (0.5;
 0 for none), which only a recursion can overrun: it checks the clock
 every 65 536 steps, and past the deadline it gives up (see

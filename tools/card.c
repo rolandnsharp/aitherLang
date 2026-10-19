@@ -125,6 +125,8 @@ static void from_float(const float *in, snd_pcm_format_t f, void *out) {
     }
 }
 
+int aither_realtime(const char *who);   /* realtime.c: audio core, SCHED_FIFO */
+
 int main(int argc, char **argv) {
     int dash = 1;
     while (dash < argc && strcmp(argv[dash], "--") != 0) dash++;
@@ -183,6 +185,7 @@ int main(int argc, char **argv) {
     }
     close(to_child[0]);
     close(from_child[1]);
+    aither_realtime("card");            /* after the fork: the command chooses its own */
     int cin = to_child[1], cout = from_child[0];
     signal(SIGPIPE, SIG_IGN);
     signal(SIGINT, SIG_IGN);            /* Ctrl-C ends the command; card follows */
