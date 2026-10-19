@@ -27,7 +27,7 @@ import additive_inharmonic, analysis, array_multiline, array_state,
        param_shadow, pertype_keying, physical_instruments, pipe_chain, playblocks, resonator_hz,
        prev_edge, render, reset_preserves_var, rollback, runaway_guard,
        scope_keying, shadow_play_name, sigil_state, small_syntax,
-       state_arrays, stereo_haas_reverb, stereo_once, tail_recursion,
+       state_arrays, stepped_array, stereo_haas_reverb, stereo_once, tail_recursion,
        tcc_dsp, tcc_hello,
        tcc_tick, transparent_helpers_polymorphic, two_entry_tables,
        wave_autohoist

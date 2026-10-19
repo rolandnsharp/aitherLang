@@ -27,7 +27,6 @@ let k = pixel_index(w, h)
 let x = k % w
 let y = int(k / w)
 let f = frame_number(w, h)              # field time: one step a frame
-let even = f % 2 == 0
 let pos = t - start_t
 
 # The terrain: flat ground three pixels deep, and a hill 13 high and 19
@@ -44,15 +43,15 @@ $phase = 0.0
 $phase = if k == 0 then $phase + omega else $phase    # once a frame
 let mast = (h - 3 - 6) * w + 5
 
-# Two frames of the field, swapped each frame (as in phased_array).
-$a = array(w * h)
-$b = array(w * h)
-let c  = if even then $a[k] else $b[k]
-let p  = if even then $b[k] else $a[k]
-let lt = if x > 0 then (if even then $a[k - 1] else $b[k - 1]) else 0
-let rt = if x < w - 1 then (if even then $a[k + 1] else $b[k + 1]) else 0
-let up = if even then $a[k - w] else $b[k - w]
-let dn = if even then $a[k + w] else $b[k + w]
+# The field now and a frame ago, stepping once a frame (as in phased_array).
+$u = array(w * h, every = w * h)
+$v = array(w * h, every = w * h)
+let c  = $u[k]
+let p  = $v[k]
+let lt = if x > 0 then $u[k - 1] else 0
+let rt = if x < w - 1 then $u[k + 1] else 0
+let up = $u[k - w]
+let dn = $u[k + w]
 
 # Leapfrog for u_tt = c² ∇²u, c² = 0.25. The sky, left and right edges
 # soak the waves up; the earth holds the field at zero.
@@ -62,8 +61,8 @@ let soak = if edge < 4 then 0.8 + 0.05 * edge else 1
 let drive = if k == mast then sin($phase) else 0
 let next = if earth then 0 else (2 * c - p + 0.25 * lap) * soak + 0.5 * drive
 
-$b[k] = if even then next else $b[k]
-$a[k] = if even then $a[k] else next
+$u[k] = next
+$v[k] = c
 
 # The phasor, brightness as power; the terrain a dim brown.
 let z = [next, (next - c) / omega]

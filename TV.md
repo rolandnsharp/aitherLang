@@ -105,8 +105,10 @@ takes a square root every step.
 - **Pixels update in scan order, in place.** A pixel that reads its
   neighbours' state sees this frame's values above and to its left
   and last frame's below and to its right. When every pixel must step
-  from the same frame (the Game of Life, a blur, a warp), keep two
-  state arrays and swap them with `frame_number`.
+  from the same frame (a wave, the Game of Life, a blur, a warp),
+  declare the state stepped: `$u = array(w * h, every = w * h)` reads
+  last frame's values everywhere and lands its stores at the next
+  (SPEC, Stepped state arrays; demos/ridge and demos/phased_array).
 - **A moving view recomputes.** State that belongs to the view, like a
   fractal's z, can't follow it (escape time above). State that belongs
   to the world, like a simulation's field, can stay put while the view

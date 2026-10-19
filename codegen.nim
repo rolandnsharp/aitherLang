@@ -78,7 +78,7 @@ type
     arrays: Table[string, tuple[sym: string; length: int]]
     # name -> (C expression of the region's first slot, length). State
     # arrays declared in this scope with `$f = array(N)`.
-    sarrays: Table[string, tuple[base: string; n: int]]
+    sarrays: Table[string, tuple[base: string; n: int; wo: int]]
     # name -> (C array symbol, length). Per-sample local arrays:
     # `let a = [p, q, r]` with runtime values, or `let a = array(N)`.
     larrays: Table[string, tuple[sym: string; n: int]]
@@ -146,7 +146,7 @@ type
     # and file-level local arrays (`let a = [p, q, r]`), by name. The
     # state array's slots live in the pool; `base` is its offset
     # placeholder, so any later statement can read or store elements.
-    topSarrays: Table[string, tuple[base: string; n: int]]
+    topSarrays: Table[string, tuple[base: string; n: int; wo: int]]
     topLarrays: Table[string, tuple[sym: string; n: int]]
     topSarrayNames: HashSet[string]
     # Inside `each(N, i => ...)`: element stores to state arrays are held
@@ -317,7 +317,7 @@ proc push(parent: Scope): Scope =
         lambdas: initTable[string, Node](),
         stereoNames: initTable[string, tuple[l, r: string]](),
         arrays: initTable[string, tuple[sym: string; length: int]](),
-        sarrays: initTable[string, tuple[base: string; n: int]](),
+        sarrays: initTable[string, tuple[base: string; n: int; wo: int]](),
         larrays: initTable[string, tuple[sym: string; n: int]](),
         numLits: initTable[string, float64](),
         invs: initTable[string, tuple[node: Node; sc: Scope]]())
@@ -365,17 +365,19 @@ proc lookupArray(c: Ctx; sc: Scope; name: string):
   ("", 0, false)
 
 proc lookupSarray(c: Ctx; sc: Scope; name: string):
-    tuple[base: string; n: int; ok: bool] =
+    tuple[base: string; n: int; wo: int; ok: bool] =
+  ## `wo` is where stores go past the elements reads see: 0, or for a
+  ## stepped array (`every = N`) n, its next generation.
   var s = sc
   while s != nil:
     if name in s.sarrays:
       let a = s.sarrays[name]
-      return (a.base, a.n, true)
+      return (a.base, a.n, a.wo, true)
     s = s.parent
   if name in c.topSarrays:
     let a = c.topSarrays[name]
-    return (a.base, a.n, true)
-  ("", 0, false)
+    return (a.base, a.n, a.wo, true)
+  ("", 0, 0, false)
 
 proc lookupLarray(c: Ctx; sc: Scope; name: string):
     tuple[sym: string; n: int; ok: bool] =
@@ -432,8 +434,15 @@ proc constValue(c: Ctx; sc: Scope; n: Node): tuple[val: float64; ok: bool] =
 
 # `array(N)` / `array(N, init)`: the right side of a state or local
 # array declaration.
+proc arrayArgs(call: Node): tuple[pos: seq[Node]; every: Node] =
+  ## `array(N, init, every = M)`: the positional arguments, and `every`
+  ## (nil when absent), the one named argument a builtin takes.
+  for k in call.kids:
+    if k.kind == nkNamedArg: result.every = k.kids[0] else: result.pos.add k
+
 proc isArrayMake(n: Node): bool =
-  n != nil and n.kind == nkCall and n.str == "array" and n.kids.len in {1, 2}
+  n != nil and n.kind == nkCall and n.str == "array" and
+    arrayArgs(n).pos.len in {1, 2}
 
 proc lookupStereo(sc: Scope; name: string): tuple[l, r: string, ok: bool] =
   var s = sc
@@ -907,7 +916,7 @@ proc bindByName(c: Ctx; sc, inner: Scope; p: string; a: Node;
      not sc.lookupStereo(a.str).ok:
     let sa = c.lookupSarray(sc, a.str)
     if sa.ok:
-      inner.sarrays[p] = (sa.base, sa.n)
+      inner.sarrays[p] = (sa.base, sa.n, sa.wo)
       return true
     let la = c.lookupLarray(sc, a.str)
     if la.ok:
@@ -1111,27 +1120,51 @@ proc arrayMakeSize(c: Ctx; sc: Scope; call: Node): int =
 # their values across samples and hot reloads (same name, def and
 # size). Elements are read with `$f[i]` and stored with `$f[i] = v`;
 # see `each` for the simultaneous step.
+#
+# `$f = array(N, init, every = M)`: a stepped state array. Reads see the
+# elements as they were at the last step; stores go to the next
+# generation and land together every M samples of the engine clock,
+# aligned with tv's frames when M is w·h (a step begins where
+# pixel_index is 0). `each`'s held-back stores, held back for M samples.
+# The region holds the flag, then the elements reads see, then the next
+# generation, which starts each step as a copy, so an element nobody
+# stored keeps its value.
 proc declareStateArray(c: Ctx; sc: Scope; st: Node; pre: var string;
                        topLevel = false) =
   let call = st.kids[0]
+  let args = arrayArgs(call)
   let n = c.arrayMakeSize(sc, call)
-  let off = c.registerRegionInit("sarr", 1 + n, stateName = st.str)
+  var every = 0
+  if args.every != nil:
+    let cv = c.constValue(sc, args.every)
+    if not cv.ok or float64(int(cv.val)) != cv.val or cv.val < 1:
+      raise newException(ValueError,
+        "array: every = must be a whole number of samples, 1 or more, " &
+        "known when the patch compiles " & errLoc(args.every))
+    every = int(cv.val)
+  let gens = if every > 0: 2 else: 1
+  let off = c.registerRegionInit("sarr", 1 + gens * n, stateName = st.str)
   var initPre = ""
   let initC =
-    if call.kids.len == 2: c.scalarValue(sc, call.kids[1], initPre, "$" & st.str)
+    if args.pos.len == 2: c.scalarValue(sc, args.pos[1], initPre, "$" & st.str)
     else: "0.0"
+  let wo = if every > 0: n else: 0
   if topLevel:
     # Readable from every later statement through its offset placeholder.
-    c.topSarrays[st.str] = (off, n)
+    c.topSarrays[st.str] = (off, n, wo)
   else:
     let base = c.fresh("sa")
     pre.add &"  long {base} = {off};\n"
-    sc.sarrays[st.str] = (base, n)
+    sc.sarrays[st.str] = (base, n, wo)
   let base = if topLevel: off else: sc.sarrays[st.str].base
   pre.add &"  if (s->pool[{base}] == 0.0) {{\n" & initPre &
           &"    double _v = ({initC});\n" &
-          &"    for (long _k = 0; _k < {n}; ++_k) s->pool[{base} + 1 + _k] = _v;\n" &
+          &"    for (long _k = 0; _k < {gens * n}; ++_k) s->pool[{base} + 1 + _k] = _v;\n" &
           &"    s->pool[{base}] = 1.0;\n  }}\n"
+  if every > 0:
+    pre.add &"  if (((long)floor(s->t * s->sr + 0.5) - 1) % {every} == 0)\n" &
+            &"    for (long _k = 0; _k < {n}; ++_k) " &
+            &"s->pool[{base} + 1 + _k] = s->pool[{base} + 1 + {n} + _k];\n"
 
 # `let a = [e1, ..., eN]` with runtime values, or `let a = array(N, init)`:
 # a per-sample local array, a plain C array of this sample's numbers.
@@ -1146,9 +1179,14 @@ proc declareLocalArray(c: Ctx; sc: Scope; name: string; rhs: Node;
     if topLevel: c.topLarrays[name] = (sym, rhs.kids.len)
     else: sc.larrays[name] = (sym, rhs.kids.len)
   else:
+    let args = arrayArgs(rhs)
+    if args.every != nil:
+      raise newException(ValueError,
+        "every = steps a state array, which keeps its values: $" & name &
+        " = array(...), not let " & errLoc(rhs))
     let n = c.arrayMakeSize(sc, rhs)
     let initC =
-      if rhs.kids.len == 2: c.scalarValue(sc, rhs.kids[1], pre, name)
+      if args.pos.len == 2: c.scalarValue(sc, args.pos[1], pre, name)
       else: "0.0"
     pre.add &"  double {sym}[{n}];\n" &
             &"  {{ double _v = ({initC}); " &
@@ -1172,7 +1210,7 @@ proc emitIdxAssign(c: Ctx; sc: Scope; st: Node): string =
       let vt = c.fresh("av")
       pre.add &"  long {it} = (long)({ix}); double {vt} = ({v});\n"
       let store = &"  if ({it} >= 0 && {it} < {sa.n}) " &
-                  &"s->pool[{sa.base} + 1 + {it}] = {vt};\n"
+                  &"s->pool[{sa.base} + 1 + {sa.wo} + {it}] = {vt};\n"
       if c.eachDepth > 0:
         c.deferred.add store
         return pre
@@ -3179,8 +3217,16 @@ proc normalizeCalls(c: Ctx; n: Node; shadow: HashSet[string]) =
     if k.kind == nkNamedArg: anyNamed = true
   if n.str notin c.userDefs:
     if anyNamed:
-      raise newException(ValueError,
-        n.str & " is a builtin: it takes its arguments by position " & errLoc(n))
+      # `every` on array (a stepped state array) is the one exception.
+      var named = 0
+      for k in n.kids:
+        if k.kind == nkNamedArg:
+          inc named
+          if n.str != "array" or k.str != "every" or named > 1:
+            raise newException(ValueError,
+              n.str & " is a builtin: it takes its arguments by position" &
+              (if n.str == "array": " (and one named, every = N)" else: "") &
+              " " & errLoc(k))
     return
   let def = c.userDefs[n.str]
   if not anyNamed and n.kids.len == def.params.len: return

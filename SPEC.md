@@ -201,7 +201,9 @@ sing(220, g, 1.2, robot = 1)       # positional first, then named
 A default is an expression of numbers, `PI`/`TAU`, operators
 and calls (`decay = 1 / 4`, `q = sqrt(2)`); it may not name
 a variable or another parameter. Named arguments are for
-`def`s only; builtins take theirs by position.
+`def`s only; builtins take theirs by position, for now: `array`'s
+`every` is the first to take a name (see Stepped state arrays), and
+the others are to follow, with the parameter names SPEC uses.
 
 ### Array parameters
 
@@ -523,6 +525,39 @@ def tube(src, a1, a2, a3, a4):
 
 The 24-section vocal tract this replaces was 219 generated lines.
 See `tests/state_arrays.nim` for the full one.
+
+### Stepped state arrays (every)
+
+```
+$u = array(w * h, every = w * h)    # steps once a tv frame
+```
+
+`every = M` makes a state array step: reads see the elements as they
+were at the last step, and stores land together every M samples of the
+engine clock. It's `each`'s held-back stores, held back for M samples.
+A field that every element must advance from the same moment (a wave on
+a tv raster, where pixels are computed one after another) reads its
+neighbours and itself with no bookkeeping:
+
+```
+$u = array(w * h, every = w * h)   # the field now
+$v = array(w * h, every = w * h)   # a frame ago
+let c = $u[k]
+$u[k] = 2 * c - $v[k] + 0.25 * lap
+$v[k] = c
+```
+
+A step begins at the sample where `pixel_index(M, 1)` is 0, so with M =
+w·h steps land on `tv`'s frames. An element nobody stores keeps its
+value. Inside `each`, stores land at the end of the `each` and then at
+the step. M must be a whole number, 1 or more, known when the patch
+compiles; `every = 1` makes every store a one-sample delay. It also
+suits sound: a string or membrane that steps every 16 samples and is
+read at audio rate costs a sixteenth as much. `every` is taken by name,
+and only on state arrays (`$name = array`). It's the first builtin
+parameter with a name; the plan is for every builtin to take named
+arguments like a `def` (BUGS_AND_ISSUES), and `every` will then simply
+be `array`'s third parameter.
 
 ### Arrays are data, not a map
 
