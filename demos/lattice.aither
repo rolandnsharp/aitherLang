@@ -1,0 +1,96 @@
+# lattice: music that is also a picture. One stream, heard and then drawn:
+#
+#   ./aither demos/lattice.aither | tools/play hw:rockchipes8388c 20 | tools/tv --size 200x112 --smooth
+#
+# tv lays the samples out row by row, 200 to a row, so a row lasts
+# 200 / 44100 s: rows go by at 220.5 Hz, which is an A (A3). A tone at
+# exactly that pitch, written as a complex number (left the cosine, right
+# the sine), turns once round the colour wheel along every row: one
+# rainbow, the same on every row, a still vertical sweep. Its harmonics,
+# n times the pitch, turn n times along a row: n rainbows, n columns.
+#
+# So this is music made only of the harmonic series of A3, the notes a
+# bugle or an alphorn plays (A, A, E, A, C#, E, a flat G, A, B, ...), and
+# each note is a set of columns. Nudge a note's pitch up by a little and
+# each row starts a little further round the wheel than the one above:
+# the columns lean. A frame is 112 rows, 22400 samples, and comes 1.97
+# times a second; a nudge of m times that (1.97 Hz, too small to hear as
+# out of tune) leans the columns by m whole turns from top to bottom and
+# holds them still. That's the picture's other dimension:
+#
+#   a note's harmonic number is how many columns it draws,
+#   its nudge which way and how far they lean,
+#   a chord is columns crossing at different leans: a crystal lattice,
+#   two copies of a note m nudges apart beat m times a frame: m bands
+#     of light and dark down the screen, the beating you hear, laid out,
+#   a bell's overtones are finer columns over its own,
+#   and a note dying away dims down the screen, the decay drawn as it's heard.
+#
+# It's Fourier optics backwards: the picture's spectrum is the music's,
+# folded onto the screen. Hue is phase, brightness how strongly the waves
+# add there. One frame is one beat (118 a minute) and every pitch is a
+# whole harmonic of the frame rate, so each beat is a still picture, and
+# the next beat the next one.
+
+let w = 200
+let h = 112
+let frame = w * h
+let s = floor(t * sr + 0.5)                   # the sample, as tv counts it
+let beat = frame_number(w, h)                 # one frame, one beat
+let inBeat = (s % frame) / frame              # 0..1 down the screen
+
+# A tone: harmonic n of the row rate, nudged m frame rates sharp. That's
+# harmonic n·h + m of the frame rate, so its phase comes from the sample
+# count exactly and its picture stands still.
+def tone(n, m, amp, s, frame, h = 112):
+  let ph = TAU * (((n * h + m) * s) % frame) / frame
+  [cos(ph), sin(ph)] * amp
+
+# The drone: A3 and A4, the one-rainbow sweep everything else sits on.
+let drone = tone(1, 0, 0.2, s, frame) + tone(2, 0, 0.08, s, frame)
+
+# Four chords of sixteen beats, each three notes of the series, each note
+# twice, `spread` nudges apart (0: once, as one). The leans make a
+# crystal; the spread, bands. In turn: the bare series (columns), a
+# leaning lattice, a shimmering beat, and both.
+let sec = int(beat / 16) % 4
+let inSec = beat % 16 + inBeat
+let noteA = [4, 6, 8, 5]
+let noteB = [5, 7, 10, 6]
+let noteC = [6, 9, 12, 8]
+let leanA = [0, 1, 0, 2]
+let leanB = [0, -2, 0, -1]
+let leanC = [0, 3, 0, 1]
+let spread = [0, 0, 3, 2]
+let swell = ease(inSec / 2) * (1 - ease((inSec - 13) / 3))
+def voice(n, m, d, amp, s, frame): tone(n, m, amp, s, frame) + tone(n, m + d, amp, s, frame)
+let pad = (voice(noteA[sec], leanA[sec], spread[sec], 0.07, s, frame) +
+           voice(noteB[sec], leanB[sec], spread[sec], 0.06, s, frame) +
+           voice(noteC[sec], leanC[sec], spread[sec], 0.06, s, frame)) * swell
+
+# The bells: a tune on the series' upper notes, one per beat (0 rests,
+# and the last note rings on through it), leaning with the chord.
+let tune = [12, 0, 10, 0, 8, 0, 10, 12, 16, 0, 12, 0, 10, 0, 0, 0,
+            12, 0, 14, 0, 12, 9, 0, 12, 14, 0, 16, 14, 12, 0, 0, 0,
+            16, 0, 15, 0, 16, 12, 0, 10, 12, 0, 8, 10, 12, 0, 0, 0,
+            10, 0, 12, 0, 13, 12, 0, 10, 8, 0, 10, 0, 8, 0, 0, 0]
+let tilt = [0, 1, -1, 2]
+let now = tune[beat % 64]
+let before = tune[(beat + 63) % 64]
+let bn = if now > 0 then now else before
+let age = inBeat + (if now > 0 then 0 else 1)  # in beats since the strike
+let bm = tilt[sec]
+let on = if bn > 0 then 1 else 0
+
+# Its partials are the note's own harmonics, so its overtones are finer
+# columns at the same lean; the higher fade faster.
+let bell = (tone(bn, bm, 0.14 * exp(-age * 2.5), s, frame) +
+            tone(2 * bn, 2 * bm, 0.06 * exp(-age * 5), s, frame) +
+            tone(3 * bn, 3 * bm, 0.03 * exp(-age * 8), s, frame)) * on
+
+# Out through a gentle limiter on the magnitude alone: the phase, so the
+# colour and the lattice, untouched; quiet parts lifted so the picture
+# glows and the loud ones held under 1. It bends the waves a little, but
+# into more harmonics of the frame rate, so the picture still stands still.
+let z = drone + pad + bell
+z * 3 / (1 + 3 * magnitude(z))
