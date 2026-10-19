@@ -31,6 +31,9 @@ proc audit(path: string; secondsArg: float64; skip: float64) =
   ## pairs on stdin, `input()` in the patch reads them, and the render
   ## runs their full length unless a duration was given. `skip` seconds
   ## run first and aren't measured, to check a later section.
+  # The rate is AITHER_RATE's, as for the engine (44.1 kHz on the
+  # uConsole), so a check hears what the speaker plays; 48 kHz unset.
+  let rate = int(envFloat("AITHER_RATE", 48000.0))
   if not fileExists(path):
     stderr.writeLine "audit: file not found: " & path
     quit 1
@@ -39,16 +42,16 @@ proc audit(path: string; secondsArg: float64; skip: float64) =
   try:
     let input = if patchCallsInput(path): readRawStdin() else: (@[], @[])
     if input.left.len > 0 and seconds <= 0.0:
-      seconds = float64(input.left.len) / 48000.0 - skip
+      seconds = float64(input.left.len) / float64(rate) - skip
     if seconds <= 0.0: seconds = 1.0
-    r = renderPatchFull(path, seconds, 48000, input, skip)
+    r = renderPatchFull(path, seconds, rate, input, skip)
   except CatchableError as e:
     stderr.writeLine "audit: " & e.msg.splitLines()[0]
     quit 1
   let mono = monoMix(r.audio.left, r.audio.right)
-  let summary = analyze(mono, 48000.0)
+  let summary = analyze(mono, float64(rate))
   let at = if skip > 0.0: " from " & formatFloat(skip, ffDecimal, 1) & "s" else: ""
-  echo formatAudit(path & at, seconds, 48000.0, summary)
+  echo formatAudit(path & at, seconds, float64(rate), summary)
   let parts = formatPartLevels(r.parts)
   if parts.len > 0: echo parts
 

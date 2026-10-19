@@ -1154,7 +1154,7 @@ heard; `patches/didge_scope.aither` is written for that engine.
 | `levels master`                  | master-bus stats (the mix as written to the pipe)   |
 | `spectrum [voice]`               | FFT analysis of voice's recent buffer (or master)   |
 | `try <patch> [seconds] [--from S]` | render the patch as a send would land it now: the live voice's state and time |
-| `audit <patch> [seconds] [--from S]` | render offline from t=0: spectrum + per-part levels; raw pairs on stdin feed `input()` |
+| `audit <patch> [seconds] [--from S]` | render offline from t=0: spectrum + per-part levels; raw pairs on stdin feed `input()`. At `AITHER_RATE` like the engine (44.1 kHz on the uConsole), 48 kHz when unset; `make corpus` stays at 48 kHz so fingerprints match on every machine |
 
 Clips counters clear on read. `spectrum` runs against the
 engine's last ~0.5 s of audio per voice; `audit` is fully
