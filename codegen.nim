@@ -518,6 +518,17 @@ const PairCalls = ["cmul", "cdiv", "cscale", "rotate", "analytic",
 # number out.
 const PairReaders = ["magnitude", "phase"]
 
+# Whether argument j of a pair builtin (called with n arguments) is a
+# pair: the angle of rotate, the factor of cscale, analytic's signal and
+# phasor_pair's frequency are numbers, so a def parameter passed there
+# stays one (`def turn(th): rotate([1, 0], th)`).
+proc takesPairAt(name: string; j, n: int): bool =
+  case name
+  of "rotate": not (n == 2 and j == 1)
+  of "cscale": not (n == 2 and j == 0)
+  of "analytic", "phasor_pair", "input": false
+  else: true
+
 # Transparent helpers — process a signal without intentionally creating
 # L/R difference. Stereo input maps to stereo output by re-emitting the
 # call once per channel; each emission registers its own state region(s)
@@ -639,7 +650,7 @@ proc pairParams(c: Ctx; def: Node): seq[bool] =
         if arg.kind != nkIdent: continue
         let k = params.find(arg.str)
         if k < 0: continue
-        if n.str in PairCalls or n.str in PairReaders or
+        if ((n.str in PairCalls or n.str in PairReaders) and takesPairAt(n.str, j, n.kids.len)) or
            (j < callee.len and callee[j]):
           res[k] = true
     else: discard

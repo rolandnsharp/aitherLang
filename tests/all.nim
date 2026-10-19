@@ -14,7 +14,7 @@
 import additive_inharmonic, analysis, array_multiline, array_state,
        array_values, audit, backing_compiles, block_tick, blocks, builtin_named, check_unheard,
        choir_block_compiles,
-       codegen_kick, continuation, cutoff_clamp, def_params, delay_fractional, dho,
+       codegen_kick, continuation, pair_positions, cutoff_clamp, def_params, delay_fractional, dho,
        each_top_level,
        elif_chain, error_source_line, shader_fields, guide_string, hoist, imports, input_gate,
        lambdas,

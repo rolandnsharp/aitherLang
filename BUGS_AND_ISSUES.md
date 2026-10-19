@@ -4,6 +4,12 @@
 bug). Every other numbered item is resolved; the write-ups stay
 below as a record of what went wrong and why.
 
+## Session log: 2026-10-19
+
+| Issue | Status |
+|-------|--------|
+| a def parameter passed as `rotate`'s angle was taken for a pair: `def cardioid(th): rotate([0.5, 0], th)` failed with "rotate takes a pair and an angle (or three numbers), got 4 numbers". Pair inference marked every argument of a pair builtin as a pair, though `rotate`'s angle, `cscale`'s factor, `analytic`'s signal and `phasor_pair`'s frequency are numbers. Found writing patches/orbits on the vis branch | RESOLVED (takesPairAt in codegen; tests/pair_positions.nim) |
+
 ## Session log: 2026-10-17
 
 | Issue | Status |
