@@ -16,9 +16,6 @@ let seg = TAU / 6
 let fold = abs(a - floor(a / seg) * seg - seg / 2)
 let q = rotate([r, 0], fold)
 
-# The tunnel: each pixel shows what was nearer the middle last frame,
-# turned a little, so everything flies out and spins; a jolt on the kick.
-let back = last(rotate(q * (0.955 - kick * 0.04), 0.02 + kick * 0.06)) * 0.965
 
 # The kick's ring: petals on a circle that grows with the hit.
 let ringR = 0.08 + kick * 0.12
@@ -26,4 +23,11 @@ let ring = exp(-pow((r - ringR) / 0.03, 2))
 let petal = 0.5 + 0.5 * cos(12 * a + t * 2)
 let shot = rotate([1, 0], 2 * a + t * 0.7 + phase(input())) * ring * petal * kick * kick * 2.5
 
-draw back + shot
+# The tunnel ($f, kept pixel by pixel): each pixel takes what was nearer
+# the middle last frame, turned a little, so everything flies out and
+# spins; a jolt on the kick.
+def tunnel(q, shot, kick):
+  $f = [0, 0]
+  $f = $f[rotate(q * (0.955 - kick * 0.04), 0.02 + kick * 0.06)] * 0.965 + shot
+  $f
+draw tunnel(q, shot, kick)

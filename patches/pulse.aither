@@ -6,8 +6,8 @@
 #   hats   sparks, one burst a sixteenth
 #   chord  a rose, its petals and colour the chord's, pumping
 #
-# and the whole picture flies outward through a six-way kaleidoscope, so
-# every beat leaves a mandala sailing off the screen.
+# and the kick's and the hats' fly outward through a six-way kaleidoscope,
+# so every beat leaves a mandala sailing off the screen.
 #
 #   ./aither patches/pulse.aither | tools/play hw:rockchipes8388c 20 | tools/vis patches/pulse.aither
 
@@ -26,24 +26,25 @@ def kaleido(p):
   let seg = TAU / 6
   rotate([magnitude(p), 0], abs(a - floor(a / seg) * seg - seg / 2))
 
-# Last frame, drawn from a little nearer the middle and turned, so it all
-# flies out and spins; a jolt on the kick.
-def tunnel(p, kick):
-  last(rotate(kaleido(p) * (0.955 - kick * 0.04), 0.02 + kick * 0.06)) * 0.965
+# A tunnel for what a part draws: kept pixel by pixel ($f, this call's
+# own), each frame taken from a little nearer the middle and turned, so
+# it all flies out and spins; a jolt on the kick.
+def tunnel(p, shot, kick):
+  $f = [0, 0]
+  $f = $f[rotate(kaleido(p) * (0.955 - kick * 0.04), 0.02 + kick * 0.06)] * 0.965 + shot
+  $f
 
 # A ring at radius r, `n` petals round it, in colour turning with `hue`.
 def petals(p, r, n, hue):
   let ring = exp(-pow((magnitude(p) - r) / 0.03, 2))
   rotate([1, 0], 2 * phase(p) + hue) * ring * (0.5 + 0.5 * cos(n * phase(p)))
 
-draw tunnel(pixel(), kEnv)
-
 def voice(f): [osc(saw, f * 0.997), osc(saw, f * 1.003)]   # a saw a side, detuned
 
 # --- the parts ---
 
 play kick:
-  draw petals(pixel(), 0.08 + kEnv * 0.12, 12, t * 0.7) * kEnv * kEnv * 2.5
+  draw tunnel(pixel(), petals(pixel(), 0.08 + kEnv * 0.12, 12, t * 0.7) * kEnv * kEnv * 2.5, kEnv)
   sin(TAU * phasor(48 + 180 * exp(-beat * 30))) * kEnv * 0.75
 
 play bass:
@@ -57,7 +58,7 @@ play bass:
 play hats:
   let six = phasor(tempo * 4)
   let env = exp(-six * (if int(beat * 4) == 2 then 12 else 40))
-  draw (if noise() > 0.997 then [0.9, 0.9] else [0, 0]) * env
+  draw tunnel(pixel(), (if noise() > 0.997 then [0.9, 0.9] else [0, 0]) * env, kEnv)
   noise() * env |> hpf(7000, 0.3) |> gain(0.12)
 
 play chord:

@@ -1074,10 +1074,12 @@ sees the lets around it, so a part draws from its own envelope. The
 sound never sees a draw (the parser drops them), so a patch sounds the
 same with or without. A picture has `pixel()` (this pixel, as `tv`'s
 `pixel`), `input()`, `level()` and `low()` (the music at the sample
-heard: its pair, loudness, loudness below 150 Hz), `last(p)` (last
-frame's value at `p`), `t`; only what the draws use is compiled, and
-what needs memory is an error. A `def rec` stops after 1000 steps and
-gives 0. See VIS.md.
+heard: its pair, loudness, loudness below 150 Hz), `pixel_size()`,
+`t`; only what the draws use is compiled, and the sound's memory is an
+error. A picture's own memory is `$state` in a def a draw calls: a
+field, one value a pixel, kept frame to frame; `$x` is this pixel's,
+`$x[p]` (a point) last frame's at `p`, `$x[0]`/`$x[1]` its sides; at
+most 3. A `def rec` stops after 1000 steps and gives 0. See VIS.md.
 
 ### Polyphony
 

@@ -1,0 +1,147 @@
+# rain: a pond you can hear. The screen is water obeying the wave
+# equation, at every pixel, sixty steps a second; the music falls into it.
+#
+#   the rain    bells, a pentatonic in D. Each drop lands where its note
+#               lives on the pitch circle (once round an octave, from D at
+#               the right, the octave above further out), so a chord
+#               is a pattern of splashes and its ripples interfere
+#   the bass    two sources either side, swaying at its pitch slowed 40
+#               times: their waves cross in fringes, closer as it rises,
+#               a two-slit experiment in time with the bar
+#   the kick    a stone in the middle, every beat, in the storm
+#   the ink     each splash leaves a drop of its note's colour, carried
+#               along the water's slope, so the music marbles the pond
+#
+# Four sections of 32 s, round every two minutes: drizzle, shower (the
+# bass), storm (the beat, the rain at its densest) and clearing (the
+# rain thins and the water rings on, barely damped). Hue is the phase
+# of the water's swing, brightness how far it swings.
+#
+#   ./aither patches/rain.aither | tools/play hw:rockchipes8388c 20 | tools/vis patches/rain.aither
+
+let pos = t - start_t
+let x = pos - floor(pos / 128) * 128
+let tempo = 96 / 60
+let beat = phasor(tempo)
+let bar = int(pos * tempo / 4)
+let fin = ease(pos / 4)
+
+def inSec(x, s): ease((x - s * 32 + 2) / 4) * (1 - ease((x - s * 32 - 30) / 4))
+let drizzle = inSec(x, 0) + inSec(x, 4)
+let shower = inSec(x, 1)
+let storm = inSec(x, 2)
+let clearing = inSec(x, 3)
+
+# --- the rain: a chance of a drop every sixteenth ---
+# Which sixteenths rain, and which note each is, come from the golden
+# ratio and √2 (n·φ and n·√2, wrapped): spread evenly, never repeating,
+# and the same numbers for the sound and the picture.
+let rate = tempo * 4
+let step = pos * rate
+let density = (drizzle * 0.2 + shower * 0.35 + storm * 0.6 + clearing * (0.3 - ease((x - 100) / 20) * 0.22)) * fin
+let scale = [1, 1.125, 1.25, 1.5, 1.666667, 2, 2.25, 2.5]   # D E F# A B, and up
+def falls(m, density): if m * 0.618034 - floor(m * 0.618034) < density then 1 else 0
+def noteOf(m): floor((m * 0.414214 - floor(m * 0.414214)) * 8)
+
+# The drop j sixteenths ago: its note's ratio, and how long since it fell.
+def ratio(step, j, scale): scale[noteOf(floor(step) - j)]
+def since(step, j, rate): (step - floor(step) + j) / rate
+def wet(step, j, density): falls(floor(step) - j, density)
+
+# --- the picture's helpers ---
+
+# Where a note lands: its angle on the pitch circle, an octave out.
+def landing(r):
+  let oct = floor(log2(r))
+  rotate([0.22 + oct * 0.2, 0], TAU * log2(r))
+
+def splash(p, at, width): exp(-pow(magnitude(p - at) / width, 2))
+
+# The pond: $w is the water, [height now, height a frame ago], one pair
+# a pixel; $d the ink on it. Each frame every pixel is pulled toward its
+# neighbours' average (the wave equation, h apart: the eight round it,
+# the four sides counting four times the corners, so ripples come out
+# round), keeps `keep` of its speed, and takes the force; the ink is
+# carried down the slope. h is a pixel and a half or more, never whole,
+# so neighbours blend and the grid can't split into separate ponds. A
+# gentle spring pulls the level back to rest (every drop adds water, and
+# without it the whole pond would rise).
+def pond(p, force, keep, ink, h):
+  $w = [0, 0]
+  $d = [0, 0]
+  let u = $w[0]
+  let e = $w[p + [h, 0]][0]
+  let wv = $w[p - [h, 0]][0]
+  let n = $w[p + [0, h]][0]
+  let s = $w[p - [0, h]][0]
+  let corners = $w[p + [h, h]][0] + $w[p + [h, -h]][0] + $w[p + [-h, h]][0] + $w[p + [-h, -h]][0]
+  let lap = (4 * (e + wv + n + s) + corners - 20 * u) / 6
+  let next = u + (u - $w[1]) * keep + 0.3 * lap - u * 0.02 + force
+  $w = [next, u]
+  $d = $d[p - [e - wv, n - s] * 2] * 0.993 + ink
+  # The swing as a phasor (height, and speed over the ripples' rate, about
+  # a third of a radian a frame), and the ink; then a soft limit on the brightness
+  # alone, so a storm glows without losing its colours.
+  let z = [next, (next - u) * 3.5] * 2 + $d
+  z / (0.5 + magnitude(z))
+
+# What falls into the pond this frame, and where its ink goes.
+def drops(p, step, rate, density, scale):
+  let f0 = wet(step, 0, density) * splash(p, landing(ratio(step, 0, scale)), 0.03) * exp(-since(step, 0, rate) * 40)
+  let f1 = wet(step, 1, density) * splash(p, landing(ratio(step, 1, scale)), 0.03) * exp(-since(step, 1, rate) * 40)
+  f0 + f1
+
+def inks(p, step, rate, density, scale):
+  let r = ratio(step, 0, scale)
+  rotate([1, 0], TAU * log2(r)) * wet(step, 0, density) * splash(p, landing(r), 0.035) * exp(-since(step, 0, rate) * 12) * 0.2
+
+# --- the bass: D, then A below, a bar each ---
+let bassF = if bar % 2 == 0 then 73.42 else 55
+let bassW = (shower * ease((x - 34) / 6) + storm + clearing * (1 - ease((x - 104) / 8))) * fin
+let bassEnv = (0.6 + 0.4 * exp(-beat * 3)) * bassW
+
+# Two sources either side, swaying at the bass's pitch over 40.
+def sources(p, f, env):
+  let sway = sin(TAU * f / 40 * t) * env * 0.05
+  (splash(p, [-0.35, 0], 0.025) + splash(p, [0.35, 0], 0.025)) * sway
+
+# --- the kick: a stone a beat, in the storm ---
+let kickW = storm * fin
+let kEnv = exp(-beat * 16) * kickW
+
+# --- the whole pond ---
+let keep = 0.993 - storm * 0.004 + clearing * 0.006
+draw pond(pixel(), drops(pixel(), step, rate, density, scale) * 0.3 + sources(pixel(), bassF, bassEnv) * 0.6 +
+          splash(pixel(), [0, 0], 0.06) * exp(-beat * 40) * kickW * 0.4,
+          keep, inks(pixel(), step, rate, density, scale) + rotate([1, 0], bar * 1.7) * splash(pixel(), [0, 0], 0.06) * kEnv * 0.05,
+          pixel_size() * 2.5)
+
+# --- the sound ---
+
+# A drop j sixteenths ago, as a struck bell an octave above the scale.
+def bell(step, j, rate, density, scale):
+  let f = 587.33 * ratio(step, j, scale)
+  let a = since(step, j, rate)
+  (sin(TAU * f * a) * exp(-a * 3) + sin(TAU * f * 2.76 * a) * exp(-a * 7) * 0.35) * wet(step, j, density)
+
+def voice(f): [osc(saw, f * 0.997), osc(saw, f * 1.003)]   # a saw a side, detuned
+
+play rain:
+  # The last six sixteenths' drops ring on together.
+  let ring = bell(step, 0, rate, density, scale) + bell(step, 1, rate, density, scale) + bell(step, 2, rate, density, scale) +
+             bell(step, 3, rate, density, scale) + bell(step, 4, rate, density, scale) + bell(step, 5, rate, density, scale)
+  [ring, ring] * 0.1
+
+play drone:
+  let open = 250 + drizzle * 300 + shower * 600 + storm * 1500 + clearing * 900
+  (voice(73.42) + voice(110.13) + voice(146.83) + voice(183.54) * 0.7) |> lpf(open, 0.2) |> gain(0.045 * fin * (1 - kEnv * 0.5))
+
+play bass:
+  (osc(sin, bassF) + osc(saw, bassF) * 0.3) |> lpf(300, 0.3) |> gain(0.24 * bassEnv)
+
+play kick:
+  sin(TAU * phasor(46 + 160 * exp(-beat * 28))) * kEnv * 0.55
+
+play hats:
+  let six = phasor(rate)
+  noise() * exp(-six * 30) * storm * fin |> hpf(8000, 0.3) |> gain(0.07)

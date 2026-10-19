@@ -72,7 +72,8 @@ def bellLight(p, f, age):
   let d = magnitude(p - at)
   rotate([1, 0], a) * exp(-pow((d - age * 0.15) / 0.025, 2)) * exp(-age * 3)
 
-# --- the whole picture: last frame carried on ---
+# --- trails: what the Julia set, the kick and the bells draw is kept
+# pixel by pixel ($f, one field each) and carried on ---
 
 # Flow (dawn, drift): turned more near the middle, drawn outward a touch;
 # short trails at dawn so the Julia set reads, a drain in drift.
@@ -81,17 +82,19 @@ def bellLight(p, f, age):
 let tunnelW = clamp(rise + bloom, 0, 1)
 let swirl = 0.004 + drift * 0.03
 let keep = 0.88 + drift * 0.07 + tunnelW * 0.075
-def carry(p, tunnelW, swirl, keep, kEnv, riser):
+def carry(p, new, tunnelW, swirl, keep, kEnv, riser):
   let r = magnitude(p)
   let flow = rotate(p * 0.993, swirl / (0.15 + r))
   let tun = rotate(kaleido(p) * (0.96 - kEnv * 0.04), 0.015 + kEnv * 0.05 + riser * 0.08)
-  last(flow * (1 - tunnelW) + tun * tunnelW) * keep
-draw carry(pixel(), tunnelW, swirl, keep, kEnv, riser)
+  $f = [0, 0]
+  $f = $f[flow * (1 - tunnelW) + tun * tunnelW] * keep + new
+  $f
 
 # The Julia set, c a quarter turn round a chord, flinching on the kick.
 let juliaW = (dawn + bloom * 0.5 + drift * 0.3) * fin
 let c = rotate([0.7885 - kEnv * 0.03, 0], TAU * pos / 8)
-draw (if juliaW > 0.02 then julia(pixel(), c, 1.6 - bloom * 0.3) * juliaW * (0.14 - tunnelW * 0.1) else [0, 0])
+draw carry(pixel(), (if juliaW > 0.02 then julia(pixel(), c, 1.6 - bloom * 0.3) * juliaW * (0.14 - tunnelW * 0.1) else [0, 0]),
+           tunnelW, swirl, keep, kEnv, riser)
 
 # --- the parts ---
 
@@ -105,7 +108,8 @@ play pad:
 
 play kick:
   # Each kick its own colour, a step round the wheel.
-  draw petals(pixel(), 0.08 + kEnv * 0.12, 12, int(pos * tempo) * 2.4) * kEnv * kEnv * 1.3
+  draw carry(pixel(), petals(pixel(), 0.08 + kEnv * 0.12, 12, int(pos * tempo) * 2.4) * kEnv * kEnv * 1.3,
+             tunnelW, swirl, keep, kEnv, riser)
   sin(TAU * phasor(48 + 180 * exp(-beat * 30))) * kEnv * 0.75
 
 play bass:
@@ -129,7 +133,7 @@ play bells:
   let tones = [padA[k] * 2, padB[k] * 2, padC[k] * 2, padA[k] * 4]
   let f = tones[step]
   let age = beat
-  draw bellLight(pixel(), f, age) * w * 0.5
+  draw carry(pixel(), bellLight(pixel(), f, age) * w * 0.5, tunnelW, swirl, keep, kEnv, riser)
   let ring = sin(TAU * phasor(f)) * exp(-age * 3) + sin(TAU * phasor(f * 2.76)) * exp(-age * 6) * 0.4 +
              sin(TAU * phasor(f * 5.4)) * exp(-age * 10) * 0.2
   [ring, ring] * w * 0.14

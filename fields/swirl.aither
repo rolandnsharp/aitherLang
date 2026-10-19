@@ -1,8 +1,12 @@
-# swirl: last frame, turned a little more near the middle and drawn in a
-# touch, so colour flows inward like water down a drain; a ring of the
-# music's phase is poured in each frame.
+# swirl: a ring of the music's phase poured in each frame, and the water
+# it's poured into ($w, kept pixel by pixel) turning a little more near
+# the middle and drawn outward a touch, so colour flows like a drain.
 let p = pixel()
 let r = magnitude(p)
-let flow = last(rotate(p * 0.995, 0.03 / (0.15 + r)))
 let ring = if abs(r - 0.45) < 0.02 then rotate([1, 0], t * 2 + phase(input()) + p[0] * 3) else [0, 0]
-draw flow * 0.985 + ring * (0.5 + level() * 3)
+
+def water(p, pour):
+  $w = [0, 0]
+  $w = $w[rotate(p * 0.995, 0.03 / (0.15 + magnitude(p)))] * 0.985 + pour
+  $w
+draw water(p, ring * (0.5 + level() * 3))

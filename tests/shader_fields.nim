@@ -14,7 +14,8 @@ proc errorOf(src: string): string =
   except CatchableError as e: e.msg
 
 for f in ["fields/waves.aither", "fields/julia.aither", "fields/swirl.aither",
-          "fields/bloom.aither", "patches/pulse.aither", "patches/unfold.aither"]:
+          "fields/bloom.aither", "patches/pulse.aither", "patches/unfold.aither",
+          "patches/rain.aither"]:
   doAssert "void main()" in toGlsl(readFile(f)), f
 
 let j = toGlsl("def rec esc(z, c, n): if n == 0 or magnitude(z) > 2 then n else esc(cmul(z, z) + c, c, n - 1)\n" &
@@ -35,7 +36,16 @@ let song = "let beat = phasor(2)\n" &
 let g = toGlsl(song)
 doAssert "fract((2.0) * uT)" in g and "a_saw" in g and "lpf" notin g
 doAssert "only the sound" in errorOf("play a:\n  let f = 1 |> lpf(300, 0.5)\n  draw f\n  f\n")
-doAssert "only the sound" in errorOf("$x = 0\ndraw $x\n")
+doAssert "the sound's state" in errorOf("$x = 0\ndraw $x\n")
+
+# A picture's $state: a field a call site, read here, at a point, or by side.
+let tr = toGlsl("def trail(p, new):\n  $g = [0, 0]\n  $g = $g[p * 0.9] * 0.9 + new\n  $g[0] + $g\n" &
+                "draw trail(pixel(), 0.1)\ndraw trail(pixel(), 0.2)\n")
+doAssert "// fields: 2" in tr and "a_field(uF0, " in tr and "oF1 = " in tr and "fv_0.x" in tr
+doAssert "starts from" in errorOf("def f(p):\n  $g = p\n  $g\ndraw f(pixel())\n")
+doAssert "at most 3" in errorOf("def f(p):\n  $a = 0\n  $b = 0\n  $c = 0\n  $d = 0\n  $a\ndraw f(pixel())\n")
+doAssert "only reads" in errorOf("def f(p):\n  $g = [0, 0]\n  $g[p] = 1\n  $g\ndraw f(pixel())\n")
+doAssert "last() is gone" in errorOf("draw last(pixel())\n")
 doAssert "nothing to draw" in errorOf("sin(1)\n")
 doAssert "can't nest" in errorOf("def rec f(n): if n == 0 then 0 else 1 + f(n - 1)\ndraw f(3)\n")
 

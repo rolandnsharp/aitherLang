@@ -9,7 +9,11 @@
    tv shows one: hue from the phase, brightness from the magnitude.
    pixel() is where the pixel is (x across -1..1, y up, square pixels);
    input() is the music's pair at the sample being heard, level() its
-   loudness then, low() its loudness below 150 Hz (the kick); last(p) is last frame's value at p, the field's memory.
+   loudness then, low() its loudness below 150 Hz (the kick). A
+   picture's memory is $state in a def a draw calls: a field, one pair a
+   pixel, frame to frame, a texture here (at most 3); each frame the
+   picture and every field are written in one pass, reading last
+   frame's.
 
    Saving the patch reloads it within a frame; an error is printed and the
    old field keeps running. Stdin is copied to stdout unchanged. The field
@@ -78,10 +82,13 @@ static GLuint try_shader(GLenum type, const char *src) {
     return s;
 }
 
-/* The field's program, or 0: the old one keeps running. */
-static GLuint load(const char *patch) {
+/* The picture's program, or 0: the old one keeps running. *fields is
+   how many fields it keeps (the compiler says, on its second line). */
+static GLuint load(const char *patch, int *fields) {
     char *fs = compile_patch(patch);
     if (!fs) return 0;
+    const char *at = strstr(fs, "// fields: ");
+    *fields = at ? atoi(at + 11) : 0;
     GLuint f = try_shader(GL_FRAGMENT_SHADER, fs);
     free(fs);
     if (!f) return 0;
@@ -99,6 +106,21 @@ static GLuint load(const char *patch) {
         return 0;
     }
     return p;
+}
+
+/* A pair a pixel: 32-bit floats where this GPU can draw into them and
+   blend between them (a wave equation needs them), else 16-bit. */
+static GLuint rg_texture(int w, int h, int precise) {
+    GLuint t;
+    glGenTextures(1, &t);
+    glBindTexture(GL_TEXTURE_2D, t);
+    if (precise) glTexImage2D(GL_TEXTURE_2D, 0, GL_RG32F, w, h, 0, GL_RG, GL_FLOAT, NULL);
+    else glTexImage2D(GL_TEXTURE_2D, 0, GL_RG16F, w, h, 0, GL_RG, GL_HALF_FLOAT, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    return t;
 }
 
 static double mtime(const char *path) {
@@ -154,16 +176,22 @@ int main(int argc, char **argv) {
         fprintf(stderr, "vis: %dx%d rgb24 frames to %s\n"
                 "  ffmpeg -f rawvideo -pix_fmt rgb24 -s %dx%d -r 60 -i %s out.mp4\n", RW, RH, path, RW, RH, path);
 
-    GLuint prog = load(patch);
+    int nf = 0;
+    GLuint prog = load(patch, &nf);
     if (!prog) return 1;
     double seen = mtime(patch), checked = 0;
     GLuint show = gl_program(GL_FULLSCREEN_VS, ShowFS);
     GLuint empty;
     glGenVertexArrays(1, &empty);
 
-    /* The field now and last frame, two pairs a pixel. */
-    GLuint tex[2], fbo[2];
-    for (int i = 0; i < 2; i++) fbo[i] = gl_target(&tex[i], RW, RH, GL_RG16F, GL_RG, GL_HALF_FLOAT, GL_LINEAR);
+    /* The picture, and each field now and last frame: a pair a pixel.
+       fbo[cur] writes the picture and fields[k][cur]; fields[k][cur ^ 1]
+       is last frame's. Rebuilt (and so started afresh) when a reload
+       changes how many fields there are. */
+    GLuint pic, fields[3][2] = {{0}}, fbo[2] = {0};
+    int built = -1, fresh = 1;
+    int precise = gl_has("GL_EXT_color_buffer_float") && gl_has("GL_OES_texture_float_linear");
+    pic = rg_texture(RW, RH, 0);
 
     static float buf[2 * 2048];
     double t0 = now_s(), prev = t0;
@@ -218,27 +246,59 @@ int main(int argc, char **argv) {
             double m = mtime(patch);
             if (m != seen) {
                 seen = m;
-                GLuint p = load(patch);
-                if (p) { glDeleteProgram(prog); prog = p; fprintf(stderr, "vis: %s loaded\n", patch); }
+                int n = 0;
+                GLuint p = load(patch, &n);
+                if (p) { glDeleteProgram(prog); prog = p; nf = n; fprintf(stderr, "vis: %s loaded\n", patch); }
             }
         }
 
-        /* The field: every pixel, reading last frame's. */
+        if (nf != built) {
+            for (int k = 0; k < 3; k++)
+                for (int i = 0; i < 2; i++)
+                    if (fields[k][i]) { glDeleteTextures(1, &fields[k][i]); fields[k][i] = 0; }
+            if (fbo[0]) glDeleteFramebuffers(2, fbo);
+            glGenFramebuffers(2, fbo);
+            for (int k = 0; k < nf; k++) { fields[k][0] = rg_texture(RW, RH, precise); fields[k][1] = rg_texture(RW, RH, precise); }
+            for (int i = 0; i < 2; i++) {
+                glBindFramebuffer(GL_FRAMEBUFFER, fbo[i]);
+                glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, pic, 0);
+                GLenum bufs[4] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3};
+                for (int k = 0; k < nf; k++)
+                    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1 + k, GL_TEXTURE_2D, fields[k][i], 0);
+                glDrawBuffers(nf + 1, bufs);
+                if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+                    fprintf(stderr, "vis: %d fields at %dx%d won't fit this GPU\n", nf, RW, RH);
+                    return 1;
+                }
+            }
+            built = nf;
+            fresh = 1;
+        }
+
+        /* The picture and its fields: every pixel, reading last frame's. */
         glBindFramebuffer(GL_FRAMEBUFFER, fbo[cur]);
         glViewport(0, 0, RW, RH);
         glUseProgram(prog);
         glUniform1f(glGetUniformLocation(prog, "uT"), (float)t);
-        glUniform1f(glGetUniformLocation(prog, "uDt"), (float)dt);
+        glUniform1f(glGetUniformLocation(prog, "uRate"), music ? (float)stream.rate : (float)env_rate());
+        glUniform1f(glGetUniformLocation(prog, "uFresh"), (float)fresh);
+        glUniform1f(glGetUniformLocation(prog, "uPx"), 2.0f / RW);
         glUniform1f(glGetUniformLocation(prog, "uLevel"), (float)level);
         glUniform1f(glGetUniformLocation(prog, "uLow"), (float)low);
         glUniform1f(glGetUniformLocation(prog, "uFrame"), (float)frame);
         glUniform2f(glGetUniformLocation(prog, "uInput"), in[0], in[1]);
         glUniform2f(glGetUniformLocation(prog, "uSpan"), 1.0f, (float)RH / RW);
-        glUniform1i(glGetUniformLocation(prog, "uLast"), 0);
+        for (int k = 0; k < nf; k++) {
+            char name[8];
+            snprintf(name, sizeof name, "uF%d", k);
+            glUniform1i(glGetUniformLocation(prog, name), k + 1);
+            glActiveTexture(GL_TEXTURE1 + k);
+            glBindTexture(GL_TEXTURE_2D, fields[k][cur ^ 1]);
+        }
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, tex[cur ^ 1]);
         glBindVertexArray(empty);
         glDrawArrays(GL_TRIANGLES, 0, 3);
+        fresh = 0;
 
         /* On screen, as big as fits, its shape kept. */
         if (dest == DEST_FRAMES) display_target(&d, RW, RH);
@@ -249,7 +309,7 @@ int main(int argc, char **argv) {
         }
         glUseProgram(show);
         glUniform1i(glGetUniformLocation(show, "uPic"), 0);
-        glBindTexture(GL_TEXTURE_2D, tex[cur]);
+        glBindTexture(GL_TEXTURE_2D, pic);
         glDrawArrays(GL_TRIANGLES, 0, 3);
         display_present(&d);
         cur ^= 1;
