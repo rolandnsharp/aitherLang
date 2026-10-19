@@ -1,0 +1,29 @@
+# bloom: every kick fires a ring of petals from the middle, and the
+# frames before fly outward through a six-way kaleidoscope, so each beat
+# leaves a mandala that sails off the screen. The petals' colour is the
+# music's phase, so the chord paints them; between kicks it goes dark.
+#
+#   ./aither patches/pulse.aither | tools/play hw:rockchipes8388c 20 | tools/vis fields/bloom.aither
+
+let p = pixel()
+let r = magnitude(p)
+let a = phase(p)
+let kick = clamp((low() - 0.06) * 4, 0, 1)
+
+# The kaleidoscope: fold the angle into one sixth, mirrored, so whatever
+# is drawn is drawn six times over, in mirror pairs.
+let seg = TAU / 6
+let fold = abs(a - floor(a / seg) * seg - seg / 2)
+let q = rotate([r, 0], fold)
+
+# The tunnel: each pixel shows what was nearer the middle last frame,
+# turned a little, so everything flies out and spins; a jolt on the kick.
+let back = last(rotate(q * (0.955 - kick * 0.04), 0.02 + kick * 0.06)) * 0.965
+
+# The kick's ring: petals on a circle that grows with the hit.
+let ringR = 0.08 + kick * 0.12
+let ring = exp(-pow((r - ringR) / 0.03, 2))
+let petal = 0.5 + 0.5 * cos(12 * a + t * 2)
+let shot = rotate([1, 0], 2 * a + t * 0.7 + phase(input())) * ring * petal * kick * kick * 2.5
+
+back + shot

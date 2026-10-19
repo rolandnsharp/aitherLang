@@ -133,6 +133,7 @@ patches/phasor_pair_drone.aither  2F92BCC46DE4FBF1  -24.2  -12.7
 patches/phi_bush.aither  4EFB3BC905D154E9  -25.9  -5.2
 patches/physical_instruments_demo.aither  315351B367272A75  -11.3  2.8
 patches/primes.aither  1A1970268F7AFC09  -15.9  -2.1
+patches/pulse.aither  199C391BD86EA978  -17.2  -1.5
 patches/qigong_drift.aither  15392022173BEAF1  -28.4  -18.3
 patches/qigong_kit.aither  E76AB3FAAED39CB9  -24.8  -12.1
 patches/qigong_light.aither  00D24032E8F88087  -46.8  -29.6

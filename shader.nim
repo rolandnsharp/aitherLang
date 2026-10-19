@@ -215,6 +215,9 @@ proc emitCall(c: var Ctx; sc: Scope; n: Node; buf: var string): Val =
   of "level":
     need 0
     return ("uLevel", false)
+  of "low":                              # the loudness below ~150 Hz: the kick, the bass
+    need 0
+    return ("uLow", false)
   of "last":                             # last frame's value at a point
     need 1
     let p = arg(0)
@@ -321,7 +324,7 @@ proc emitBody(c: var Ctx; sc: var Scope; n: Node; buf: var string): Val =
 const Prelude = """#version 300 es
 precision highp float;
 in vec2 uv;
-uniform float uT, uDt, uLevel, uFrame;
+uniform float uT, uDt, uLevel, uLow, uFrame;
 uniform vec2 uInput, uSpan;
 uniform sampler2D uLast;
 out vec4 o;

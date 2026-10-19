@@ -1069,8 +1069,9 @@ See TV.md.
 
 `aither shader field.aither` compiles a field patch to GLSL for
 `tools/vis`, which runs it at every pixel of every frame: `pixel()`
-(this pixel, as `tv`'s `pixel`), `input()` and `level()` (the music
-at the sample heard), `last(p)` (last frame's value at `p`), `t` and
+(this pixel, as `tv`'s `pixel`), `input()`, `level()` and `low()`
+(the music at the sample heard: its pair, loudness, loudness below
+150 Hz), `last(p)` (last frame's value at `p`), `t` and
 `dt`. No state, `play` or imports; a `def rec` stops after 1000
 steps and gives 0. See VIS.md.
 

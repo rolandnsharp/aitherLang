@@ -9,7 +9,7 @@
    tv shows one: hue from the phase, brightness from the magnitude.
    pixel() is where the pixel is (x across -1..1, y up, square pixels);
    input() is the music's pair at the sample being heard, level() its
-   loudness then; last(p) is last frame's value at p, the field's memory.
+   loudness then, low() its loudness below 150 Hz (the kick); last(p) is last frame's value at p, the field's memory.
 
    Saving the patch reloads it within a frame; an error is printed and the
    old field keeps running. Stdin is copied to stdout unchanged. The field
@@ -178,15 +178,33 @@ int main(int argc, char **argv) {
 
         /* The music at the sample being heard: the pair, and the loudness
            over the last 2048 samples (46 ms at 44.1 kHz). */
-        double t = wall - t0, level = 0;
+        double t = wall - t0, level = 0, low = 0;
         float in[2] = {0, 0};
         if (music) {
-            uint64_t now = stream_now(dt);
-            if (stream.eof && now >= stream.head) break;
+            uint64_t now;
+            if (dest == DEST_FRAMES) {            /* a recording: frame k shows the music at k/60 s */
+                now = (uint64_t)(frame * stream.rate / 60);
+                while (stream.head < now && !stream.eof && !display_quit) sleep_s(0.002);
+                if (stream.head < now) break;
+            } else {
+                now = stream_now(dt);
+                if (stream.eof && now >= stream.head) break;
+            }
             t = now / stream.rate;
             uint64_t from = now > 2048 ? now - 2048 : 0;
             size_t n = stream_range(buf, from, now);
             for (size_t i = 0; i < n; i++) level += buf[2 * i] * buf[2 * i] + buf[2 * i + 1] * buf[2 * i + 1];
+            /* low: the same window through two one-pole low-passes at
+               150 Hz (settled within a few ms), its last 1024 samples. */
+            double a = 1 - exp(-6.2831853 * 150 / stream.rate), l1 = 0, l2 = 0;
+            size_t lown = 0;
+            for (size_t i = 0; i < n; i++) {
+                double m = (buf[2 * i] + buf[2 * i + 1]) * 0.5;
+                l1 += a * (m - l1);
+                l2 += a * (l1 - l2);
+                if (i + 1024 >= n) { low += l2 * l2; lown++; }
+            }
+            if (lown) low = sqrt(low / lown);
             if (n) {
                 level = sqrt(level / n);
                 in[0] = buf[2 * (n - 1)];
@@ -212,6 +230,7 @@ int main(int argc, char **argv) {
         glUniform1f(glGetUniformLocation(prog, "uT"), (float)t);
         glUniform1f(glGetUniformLocation(prog, "uDt"), (float)dt);
         glUniform1f(glGetUniformLocation(prog, "uLevel"), (float)level);
+        glUniform1f(glGetUniformLocation(prog, "uLow"), (float)low);
         glUniform1f(glGetUniformLocation(prog, "uFrame"), (float)frame);
         glUniform2f(glGetUniformLocation(prog, "uInput"), in[0], in[1]);
         glUniform2f(glGetUniformLocation(prog, "uSpan"), 1.0f, (float)RH / RW);

@@ -30,6 +30,7 @@ frame as raw RGB at 60 a second, and prints the `ffmpeg` line.
 | `t`, `dt` | time in seconds (the sample being heard, with music; the clock without), the frame's length |
 | `input()` | the music's pair at the sample being heard |
 | `level()` | its loudness then: RMS over the last 2048 samples |
+| `low()` | its loudness below about 150 Hz (the kick and the bass): RMS of the last 1024 samples through two 150 Hz low-passes |
 | `last(p)` | last frame's value at point `p`, smoothly between pixels: the field's memory, for flow, trails and feedback |
 | `phasor(f)` | `fract(f·t)`: the clock, exact, with no state |
 | `noise()` | −1..1, fresh at every pixel, every frame, every call |
@@ -55,4 +56,5 @@ recursion stops after 1000 steps and gives 0 (the watchdog's place).
 |---|---|
 | `waves` | three plane waves of colour crossing, brighter with the music |
 | `julia` | z → z² + c at every pixel, `c` walking round the edge of the Mandelbrot set, pushed out by the music's loudness |
+| `bloom` (with `patches/pulse`) | every kick fires a ring of petals from the middle, and the frames before fly outward through a six-way kaleidoscope: a mandala a beat, sailing off the screen. Driven by `low()` |
 | `swirl` | last frame turned and drawn in, so colour flows like water down a drain; a ring of the music's phase is poured in every frame |
