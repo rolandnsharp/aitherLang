@@ -1079,7 +1079,10 @@ heard: its pair, loudness, loudness below 150 Hz), `pixel_size()`,
 error. A picture's own memory is `$state` in a def a draw calls: a
 field, one value a pixel, kept frame to frame; `$x` is this pixel's,
 `$x[p]` (a point) last frame's at `p`, `$x[0]`/`$x[1]` its sides; at
-most 3. A `def rec` stops after 1000 steps and gives 0. See VIS.md.
+most 3. A `def rec` stops after 1000 steps and gives 0. `start_t` is
+the voice's (vis asks the engine, `started`), so `pos` and `phasor`
+keep step with the sound through sends; a picture's `phasor` needs a
+frequency that never changes, or it is an error. See VIS.md.
 
 ### Polyphony
 
@@ -1192,6 +1195,7 @@ output) gets a fixed loop delay. A block is `AITHER_BUFFER` frames
 | `list`                           | show active voices and their parts         |
 | `status`                         | `list` plus the master level               |
 | `retrigger <voice>`              | reset `start_t` in place                   |
+| `started <voice>`                | the voice's `start_t`, in engine seconds (what `tools/vis` asks, to keep a picture in step) |
 | `kill`                           | shut down engine                           |
 | `shader <patch.aither>`          | the patch's picture (its draws) as GLSL, for `tools/vis` (vis branch; see Pictures) |
 

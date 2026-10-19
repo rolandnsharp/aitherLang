@@ -34,7 +34,7 @@ let song = "let beat = phasor(2)\n" &
            "  draw [env, 0]\n  s\n" &
            "play lead:\n  draw osc(saw, 3) * 0.1\n  osc(saw, 440) * 0.1\n"
 let g = toGlsl(song)
-doAssert "fract((2.0) * uT)" in g and "a_saw" in g and "lpf" notin g
+doAssert "fract((2.0) * (uT - uStart))" in g and "a_saw" in g and "lpf" notin g
 doAssert "only the sound" in errorOf("play a:\n  let f = 1 |> lpf(300, 0.5)\n  draw f\n  f\n")
 doAssert "the sound's state" in errorOf("$x = 0\ndraw $x\n")
 
@@ -45,6 +45,9 @@ doAssert "// fields: 2" in tr and "a_field(uF0, " in tr and "oF1 = " in tr and "
 doAssert "starts from" in errorOf("def f(p):\n  $g = p\n  $g\ndraw f(pixel())\n")
 doAssert "at most 3" in errorOf("def f(p):\n  $a = 0\n  $b = 0\n  $c = 0\n  $d = 0\n  $a\ndraw f(pixel())\n")
 doAssert "only reads" in errorOf("def f(p):\n  $g = [0, 0]\n  $g[p] = 1\n  $g\ndraw f(pixel())\n")
+doAssert "never changes" in errorOf("let f = 2 + t\ndraw phasor(f)\n")      # it would drift
+doAssert "(uT - uStart)" in toGlsl("let fs = [2, 3]\nlet f = fs[1] * 2\ndef tick(g): phasor(g)\ndraw tick(f)\n")
+doAssert "uStart" in toGlsl("let pos = t - start_t\ndraw pos\n")
 doAssert "last() is gone" in errorOf("draw last(pixel())\n")
 doAssert "nothing to draw" in errorOf("sin(1)\n")
 doAssert "can't nest" in errorOf("def rec f(n): if n == 0 then 0 else 1 + f(n - 1)\ndraw f(3)\n")

@@ -1079,6 +1079,13 @@ proc handleCmd(line: string): string =
     else:
       let summary = analyze(buf, float64(SampleRate))
       "OK\n" & formatSpectrum(summary)
+  of "started":
+    # When a voice's clock began (its start_t, engine seconds): for a
+    # picture (tools/vis) to keep step with its sound across sends.
+    if parts.len < 2: return "ERR usage: started <voice>"
+    let idx = findSlot(parts[1])
+    if idx < 0: return "ERR not found: " & parts[1]
+    "OK " & formatFloat(slots[idx].voice.startT, ffDecimal, 9)
   of "retrigger":
     if parts.len < 2: return "ERR usage: retrigger <name>"
     let err = retriggerVoice(parts[1])

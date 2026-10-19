@@ -26,6 +26,7 @@ type
     state: bool                         # a `$name` of the sound's: sound only
     field: int                          # a picture's `$name`: its field index + 1
     lazy: int                           # a file's or play's let, compiled when first used: its lazies index + 1
+    steady: bool                        # a def parameter given something that never changes
   Scope = Table[string, Bind]
   Lazy = object
     node: Node
@@ -68,6 +69,7 @@ const Unary = {"sin": "sin", "cos": "cos", "tan": "tan", "exp": "exp", "log": "l
 
 proc emit(c: var Ctx; sc: Scope; n: Node; buf: var string): Val
 proc emitBody(c: var Ctx; sc: var Scope; n: Node; buf: var string): Val
+
 proc emitTable(c: var Ctx; name: string; n: Node): Bind
 proc isTable(n: Node): bool
 
@@ -84,6 +86,30 @@ proc emitArray(c: var Ctx; sc: Scope; name: string; n: Node; buf: var string): B
   Bind(code: g, table: vals.len)
 
 proc isArray(n: Node): bool = n.kind == nkArr and n.kids.len != 2
+
+const Math = ["sin", "cos", "tan", "exp", "log", "log2", "abs", "floor", "ceil", "sqrt",
+              "tanh", "int", "fract", "min", "max", "pow", "clamp"]
+
+# Does n never change: numbers, constants, tables read at a steady
+# index, and maths of those? A phasor needs a steady frequency: the
+# sound adds it up sample by sample, the picture can only multiply it
+# by the time, and the two agree only while it holds still.
+proc steady(c: Ctx; sc: Scope; n: Node): bool =
+  case n.kind
+  of nkNum: true
+  of nkIdent:
+    if n.str in sc:
+      let b = sc[n.str]
+      if b.lazy > 0:
+        let z = c.lazies[b.lazy - 1]
+        return z.node.kids[0].isTable or c.steady(z.env, z.node.kids[0])
+      return b.steady or b.table > 0
+    n.str in ["PI", "TAU", "sr", "dt"]
+  of nkBinOp, nkUnary, nkArr: n.kids.allIt(c.steady(sc, it))
+  of nkIf: n.kids.allIt(it == nil or c.steady(sc, it))
+  of nkIdx: c.steady(sc, n.kids[0]) and c.steady(sc, n.kids[1])
+  of nkCall: n.str in Math and n.kids.allIt(c.steady(sc, it))
+  else: false
 
 # A name's binding, a let compiled the first time it's used (at the top
 # of main, so it's there for every draw after).
@@ -173,7 +199,8 @@ proc callDef(c: var Ctx; sc: Scope; n: Node; d: Node; buf: var string): Val =
     let v = if given[i] != nil: c.emit(sc, a, buf) else: c.emit(inner, a, buf)
     let tmp = c.fresh(p)
     buf.add &"  {ty(v.pair)} {tmp} = {v.code};\n"
-    inner[p] = Bind(code: tmp, pair: v.pair)
+    inner[p] = Bind(code: tmp, pair: v.pair,
+                    steady: (if given[i] != nil: c.steady(sc, a) else: c.steady(inner, a)))
     args.add v
   if not d.isRec:
     return c.emitBody(inner, d.kids[0], buf)
@@ -255,9 +282,13 @@ proc emitCall(c: var Ctx; sc: Scope; n: Node; buf: var string): Val =
     need 3
     let x = arg(0)
     return (&"clamp({x.code}, {arg(1).code}, {arg(2).code})", x.pair)
-  of "phasor":                           # the clock, stateless: time is exact here
+  of "phasor":                           # the clock: exact, from the voice's start, while f holds
     need 1
-    return (&"fract(({arg(0).code}) * uT)", false)
+    if not c.steady(sc, n.kids[0]):
+      fail(n, "a picture's phasor needs a frequency that never changes: the sound adds a " &
+              "changing one up sample by sample, which a picture can't, so they'd drift apart " &
+              "(for a steady clock whose rate you vary, write TAU * f * t, or let the sound's own beat in through a let)")
+    return (&"fract(({arg(0).code}) * (uT - uStart))", false)
   of "noise":                            # each pixel, each frame, each call its own
     need 0
     inc c.n
@@ -321,7 +352,7 @@ proc emit(c: var Ctx; sc: Scope; n: Node; buf: var string): Val =
     of "t": ("uT", false)
     of "sr": ("uRate", false)
     of "dt": ("(1.0 / uRate)", false)
-    of "start_t": ("0.0", false)                 # the picture counts from where the stream began
+    of "start_t": ("uStart", false)              # the voice's, from the engine (0 without one)
     of "PI": ("3.14159265358979", false)
     of "TAU": ("6.28318530717959", false)
     else:
@@ -438,7 +469,7 @@ proc emitBody(c: var Ctx; sc: var Scope; n: Node; buf: var string): Val =
 const Prelude = """#version 300 es
 precision highp float;
 in vec2 uv;
-uniform float uT, uRate, uLevel, uLow, uFrame, uFresh, uPx;
+uniform float uT, uRate, uLevel, uLow, uFrame, uFresh, uPx, uStart;
 uniform vec2 uInput, uSpan;
 uniform sampler2D uF0, uF1, uF2;
 layout(location = 0) out vec4 o;

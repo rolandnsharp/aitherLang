@@ -30,6 +30,26 @@ The draws add, as plays mix: each pixel's pairs are summed, so they
 interfere. Two draws in step brighten; in opposite phase they cancel
 to black.
 
+## Keeping step
+
+A picture runs on the same clock as its sound. `t` is the sample being
+heard, the same in both. The voice's own clock, `start_t` (so `pos =
+t - start_t`, as COMPOSING.md writes every piece), is asked of the
+engine (`aither started <voice>`; the voice is the patch's name, and
+`AITHER_SOCK` picks the engine, as for any command), so the picture
+keeps step through a `send` that starts the voice and a `retrigger`.
+A hot swap keeps `start_t`, in both.
+
+`phasor(f)` in sound adds `f` up a sample at a time; a picture can only
+take `f · (t − start_t)`. The two are the same while `f` never
+changes, so a picture's `phasor` must have a steady frequency
+(numbers, constants, tables at a steady index, maths of those):
+anything else is an error saying so, rather than a picture quietly
+drifting off the beat. A rate that varies is `TAU * f * t`, written
+out. One thing still parts them: edit a steady `phasor`'s frequency and
+`send` it, and the sound keeps its phase while the picture starts the
+new rate from `start_t`; `retrigger` brings them back together.
+
 ## Memory: `$state`, a pixel at a time
 
 A picture remembers as sound does, with `$state`. In a def a draw
@@ -76,12 +96,12 @@ the `ffmpeg` line.
 |---|---|
 | `pixel()` | where this pixel is, as a pair: x across −1..1, y up, square pixels (y spans ±h/w), as `tv`'s `pixel(w, h)` |
 | `t` | time in seconds: the sample being heard (with music; the clock without) |
-| `sr`, `dt`, `start_t` | as in sound; `start_t` is 0, the picture counting from where the stream began |
+| `sr`, `dt`, `start_t` | as in sound: `start_t` is the voice's, asked of the engine four times a second (0 with no engine) |
 | `input()` | the music's pair at the sample being heard |
 | `level()` | its loudness then: RMS over the last 2048 samples |
 | `low()` | its loudness below about 150 Hz (the kick and the bass): RMS of the last 1024 samples through two 150 Hz low-passes |
 | `pixel_size()` | one pixel's width, in `pixel()`'s units: for reading a field's neighbours |
-| `phasor(f)` | `fract(f·t)`: the clock, exact, with no state |
+| `phasor(f)` | the clock, `fract(f·(t − start_t))`: exactly the sound's, with no state, for a frequency that never changes |
 | `noise()` | −1..1, fresh at every pixel, every frame, every call |
 
 Maths as in audio: `sin cos tan exp log log2 abs floor ceil sqrt tanh

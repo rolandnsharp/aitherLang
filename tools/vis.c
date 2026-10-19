@@ -25,6 +25,8 @@
 
 #include "display.h"
 #include <libgen.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <sys/wait.h>
 
 /* The field's pairs as colour: tv's domain colouring. */
@@ -123,6 +125,34 @@ static GLuint rg_texture(int w, int h, int precise) {
     return t;
 }
 
+/* When the patch's voice started (its start_t), asked of the engine
+   (`started <voice>` on its socket, AITHER_SOCK as for any command):
+   the picture's start_t and phasors count from it, so they keep step
+   with the sound through sends and retriggers. -1 if there's no
+   answer (no engine, no such voice): keep what we had. */
+static double voice_start(const char *voice) {
+    const char *path = getenv("AITHER_SOCK");
+    struct sockaddr_un a = {.sun_family = AF_UNIX};
+    snprintf(a.sun_path, sizeof a.sun_path, "%s", path ? path : "/tmp/aither.sock");
+    int s = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (s < 0) return -1;
+    struct timeval tv = {0, 50000};                   /* never hold up a frame for long */
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+    double r = -1;
+    char q[300], reply[128];
+    snprintf(q, sizeof q, "started %s\n", voice);
+    if (connect(s, (struct sockaddr *)&a, sizeof a) == 0 && write(s, q, strlen(q)) == (ssize_t)strlen(q)) {
+        ssize_t n = read(s, reply, sizeof reply - 1);
+        if (n > 3) {
+            reply[n] = 0;
+            if (!strncmp(reply, "OK ", 3)) r = atof(reply + 3);
+        }
+    }
+    close(s);
+    return r;
+}
+
 static double mtime(const char *path) {
     struct stat st;
     if (stat(path, &st) < 0) return 0;
@@ -179,7 +209,15 @@ int main(int argc, char **argv) {
     int nf = 0;
     GLuint prog = load(patch, &nf);
     if (!prog) return 1;
-    double seen = mtime(patch), checked = 0;
+    double seen = mtime(patch), checked = 0, asked = -1, start = 0;
+    char voice[256];                           /* the voice is the patch's name, as send names it */
+    {
+        char tmp[4096];
+        snprintf(tmp, sizeof tmp, "%s", patch);
+        snprintf(voice, sizeof voice, "%s", basename(tmp));
+        char *dot = strrchr(voice, '.');
+        if (dot) *dot = 0;
+    }
     GLuint show = gl_program(GL_FULLSCREEN_VS, ShowFS);
     GLuint empty;
     glGenVertexArrays(1, &empty);
@@ -240,6 +278,12 @@ int main(int argc, char **argv) {
             }
         }
 
+        if (music && wall - asked > 0.25) {
+            asked = wall;
+            double s = voice_start(voice);
+            if (s >= 0) start = s;
+        }
+
         /* Saved? Load it; an error leaves the old field running. */
         if (wall - checked > 0.25) {
             checked = wall;
@@ -283,6 +327,7 @@ int main(int argc, char **argv) {
         glUniform1f(glGetUniformLocation(prog, "uRate"), music ? (float)stream.rate : (float)env_rate());
         glUniform1f(glGetUniformLocation(prog, "uFresh"), (float)fresh);
         glUniform1f(glGetUniformLocation(prog, "uPx"), 2.0f / RW);
+        glUniform1f(glGetUniformLocation(prog, "uStart"), (float)start);
         glUniform1f(glGetUniformLocation(prog, "uLevel"), (float)level);
         glUniform1f(glGetUniformLocation(prog, "uLow"), (float)low);
         glUniform1f(glGetUniformLocation(prog, "uFrame"), (float)frame);

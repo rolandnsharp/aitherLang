@@ -75,7 +75,7 @@ proc sendPatch(path, extra: string): bool =
 proc usage() =
   echo "usage: aither [patch.aither ...] [seconds]      the engine: float pairs on stdout"
   echo "       aither <send|stop|mute|unmute|solo|park|unpark|clear|list|status|levels|" &
-       "parts|check|retrigger|midi|audit|try|spectrum|shader|kill> [args]"
+       "parts|check|retrigger|started|midi|audit|try|spectrum|shader|kill> [args]"
   echo ""
   echo "  aither | aplay -f FLOAT_LE -c 2 -r 48000      play; send patches to it"
   echo "  aither set.aither | tools/play                 same, with a first voice loaded"
@@ -96,6 +96,7 @@ proc usage() =
   echo "  status                      voices, parts and the master level"
   echo "  levels [name]               per-voice RMS/peak/clips/envelope"
   echo "  retrigger <name>            reset start_t so the composition plays from the top"
+  echo "  started <voice>             the voice's start_t (engine seconds), for tools/vis"
   echo "  parts <voice>               list parts (play blocks): state, gain, rms, peak"
   echo "  check <voice>               level, quiet parts, rollbacks and guard trips"
   echo "  profile <voice> [seconds]   CPU per part, top-level code and final expression (2 s)"
@@ -180,6 +181,9 @@ of "parts":
 of "profile":
   if args.len < 2: quit "usage: aither profile <voice> [seconds]"
   sendCmd("profile " & args[1] & (if args.len >= 3: " " & args[2] else: ""))
+of "started":
+  if args.len < 2: quit "usage: aither started <voice>"
+  sendCmd("started " & splitFile(args[1]).name)
 of "shader":
   if args.len < 2: quit "usage: aither shader <field.aither>"
   try: stdout.write toGlsl(readFile(args[1]))
