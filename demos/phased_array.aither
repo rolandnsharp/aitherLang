@@ -4,25 +4,26 @@
 # nothing moving. That's how a phased-array radar or a satellite dish on a
 # roof steers.
 #
-# The field is a 32×24 membrane obeying the wave equation, what Maxwell's
+# The field is a 48×27 membrane obeying the wave equation, what Maxwell's
 # equations give for a radio wave's electric field in a plane. Each pixel
 # shows its phasor, the field and how fast it's changing as one complex
 # number: hue is the phase of the oscillation, so wavefronts are bands of
 # colour running outward, and black is where the two waves cancel.
 #
-# The picture is the sound. At 44.1 kHz tv draws 32×24 pixels 57 times a
-# second, so what you hear is the field scanned row by row. The wavefronts
-# are 5 pixels apart, so a row crosses them at about 44100 / 5 ≈ 9 kHz:
+# The picture is the sound. At 44.1 kHz tv draws 48×27 pixels (16:9, the
+# uConsole's screen) 34 times a second, so what you hear is the field
+# scanned row by row. The wavefronts are 5 pixels apart, so a row crosses
+# them at about 44100 / 5 ≈ 9 kHz:
 # a high, glassy buzz. When the beam leans, the wavefronts tilt and a row
 # crosses them at a different spacing, so you hear the beam's direction as
 # a shift in pitch: the scan is measuring the wave's sideways wavenumber.
 #
-#   ./aither demos/phased_array.aither | tools/tv --size 32x24 --smooth | tools/play hw:rockchipes8388c 20
+#   ./aither demos/phased_array.aither | tools/tv --size 48x27 --smooth | tools/play hw:rockchipes8388c 20
 #
 # (AITHER_RATE=44100 from .bashrc, for both. Headphones help.)
 
-let w = 32
-let h = 24
+let w = 48
+let h = 27
 let k = pixel_index(w, h)
 let x = k % w
 let y = int(k / w)
@@ -33,8 +34,8 @@ let pos = t - start_t
 # 0.5 pixels a frame; set 3 pixels apart, near the bottom, facing up.
 let period = 10
 let omega = TAU / period
-let k1 = (h - 5) * w + 14
-let k2 = (h - 5) * w + 17
+let k1 = (h - 5) * w + 22
+let k2 = (h - 5) * w + 25
 let phi = PI * sin(TAU * pos / 20)      # the phase between them: −π..π every 20 s
 
 # The field now and a frame ago. Both step once a frame (every = w·h):

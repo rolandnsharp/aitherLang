@@ -1,51 +1,55 @@
-# chladni: a square drumhead, driven at one point, held at one of its
-# resonant pitches at a time. It rings up into that mode, a standing wave,
-# holds there, and every 20 s is stilled and moves on to the next.
-# Chladni (1787) bowed metal plates with sand on them: the sand ran off
-# what moved and gathered on what didn't, the nodal lines. Here they are
-# the black lines; the two sides of each line move in opposite
-# directions, so they show in opposite colours (hue is the phase of the
-# oscillation, brightness how far it swings).
+# chladni: a rectangular plate, 16:9 like the uConsole's screen, driven at
+# one point and held at one of its resonant pitches at a time. It rings up
+# into that mode, a standing wave, holds there, and every 30 s is stilled
+# and moves on to the next. Chladni (1787) bowed metal plates with sand on
+# them: the sand ran off what moved and gathered on what didn't, the nodal
+# lines. Here they are the black lines; the two sides of each line move in
+# opposite directions, so they show in opposite colours (hue is the phase
+# of the oscillation, brightness how far it swings).
 #
-# The membrane obeys the wave equation, clamped at its edges, with a little
-# damping, so a resonance takes a few seconds to build. Every 20 s a hand
-# stills the plate for a moment and the drive steps to the next mode's
-# exact pitch; after eight, they come round again. On a square, modes
-# (m, n) and (n, m) ring at the same pitch, and the drive excites both:
-# they mix into figures Chladni drew, which neither has alone.
+# The plate obeys the wave equation, clamped at its edges, with a little
+# damping, so a resonance takes about ten seconds to settle. Every 30 s a hand
+# stills it for a moment and the drive steps to the next pitch; after
+# eight, they come round again. The first four are single modes: plain
+# grids of cells. The rest sit between two modes that ring at almost the
+# same pitch (on this plate, (8,3) and (9,2) are 0.01% apart) and far from
+# any third, so both ring and mix into figures neither has alone, as a
+# square plate's mirror-image modes do.
 #
-# The picture is the sound: the membrane scanned row by row, its timbre the
+# The picture is the sound: the plate scanned row by row, its timbre the
 # figure on it, swelling as a resonance rings up.
 #
-#   ./aither demos/chladni.aither | tools/tv --size 40x40 --smooth | tools/play hw:rockchipes8388c 20
+#   ./aither demos/chladni.aither | tools/tv --size 48x27 --smooth | tools/play hw:rockchipes8388c 20
 
-let w = 40
-let h = 40
+let w = 48
+let h = 27
 let k = pixel_index(w, h)
 let x = k % w
 let y = int(k / w)
 let pos = t - start_t
 let edge = x == 0 or y == 0 or x == w - 1 or y == h - 1    # clamped
 
-# The drive: one point, off every line of symmetry so it reaches every
-# mode, held for 20 s at a time exactly on a resonance of this membrane.
-# Mode (m, n) has m half-waves across and n down; on a grid with
-# spacing 1 and the wave equation stepped as below, it rings at
-# ω = 2·asin(0.25·√λ) a frame, λ = 4·sin²(mπ/78) + 4·sin²(nπ/78).
-let modesM = [1, 2, 2, 3, 1, 4, 3, 5]
-let modesN = [2, 2, 3, 3, 5, 4, 6, 6]
-let held = int(pos / 20)
-let still = pos - held * 20 < 1.5        # a hand on the plate, as it changes
-let m = modesM[held]
-let n = modesN[held]
-let lam = 4 * pow(sin(m * PI / 78), 2) + 4 * pow(sin(n * PI / 78), 2)
-let sx = 0.25 * sqrt(lam)
-let omega = 2 * (sx + pow(sx, 3) / 6 + 3 * pow(sx, 5) / 40)   # 2·asin(sx)
+# The drive: one point near a corner, where Chladni bowed, chosen to reach
+# every mode below. Mode (m, n) has m half-waves across and n down; with
+# the edges 47 and 26 apart and the wave equation stepped as below, it
+# rings at ω = 2·asin(0.25·√λ) a frame, λ = 4·sin²(mπ/94) + 4·sin²(nπ/52).
+# Each held pitch is the mean of two modes (a single mode is listed twice).
+def ring(m, n):
+  let lam = 4 * pow(sin(m * PI / 94), 2) + 4 * pow(sin(n * PI / 52), 2)
+  let sx = 0.25 * sqrt(lam)
+  2 * (sx + pow(sx, 3) / 6 + 3 * pow(sx, 5) / 40)         # 2·asin(sx)
+let m1 = [2, 2, 3, 2, 5, 8, 8, 7]
+let n1 = [1, 2, 2, 3, 2, 2, 3, 4]
+let m2 = [2, 2, 3, 2, 3, 5, 9, 10]
+let n2 = [1, 2, 2, 3, 3, 4, 2, 1]
+let held = int(pos / 30)
+let still = pos - held * 30 < 1.5        # a hand on the plate, as it changes
+let omega = (ring(m1[held], n1[held]) + ring(m2[held], n2[held])) / 2
 $phase = 0.0
 $phase = if k == 0 then $phase + omega else $phase    # once a frame
-let drive = if k == 13 * w + 9 then sin($phase) else 0
+let drive = if k == 3 * w + 7 then sin($phase) else 0
 
-# The membrane now and a frame ago, stepping once a frame.
+# The plate now and a frame ago, stepping once a frame.
 $u = array(w * h, every = w * h)
 $v = array(w * h, every = w * h)
 let c = $u[k]
@@ -54,7 +58,7 @@ let lap = $u[k - 1] + $u[k + 1] + $u[k - w] + $u[k + w] - 4 * c
 
 # Leapfrog for u_tt = c² ∇²u - γ u_t, c² = 0.25: the speed it had, a
 # little damped, plus what its neighbours pull.
-let damp = if still then 0.9 else 0.998
+let damp = if still then 0.9 else 0.997
 let next = if edge then 0 else c + (c - p) * damp + 0.25 * lap + 0.05 * drive
 
 $u[k] = next

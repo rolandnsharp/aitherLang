@@ -19,19 +19,19 @@
 # the wavefronts every few pixels, so you hear a high buzz whose pitch
 # falls as the wavelength grows.
 #
-#   ./aither demos/ridge.aither | tools/tv --size 48x32 --smooth | tools/play hw:rockchipes8388c 20
+#   ./aither demos/ridge.aither | tools/tv --size 64x36 --smooth | tools/play hw:rockchipes8388c 20
 
-let w = 48
-let h = 32
+let w = 64
+let h = 36
 let k = pixel_index(w, h)
 let x = k % w
 let y = int(k / w)
 let f = frame_number(w, h)              # field time: one step a frame
 let pos = t - start_t
 
-# The terrain: flat ground three pixels deep, and a hill 13 high and 19
-# wide, centred two thirds of the way across.
-let groundTop = h - 3 - max(0, 13 * (1 - abs(x - 26) / 9.5))
+# The terrain: flat ground three pixels deep, and a hill 14 high and 23
+# wide, a little past halfway across, with the valley behind it.
+let groundTop = h - 3 - max(0, 14 * (1 - abs(x - 36) / 11.5))
 let earth = y >= groundTop
 
 # The transmitter: a mast 6 pixels above the ground, near the left edge.
