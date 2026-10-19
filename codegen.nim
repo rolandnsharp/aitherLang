@@ -435,14 +435,13 @@ proc constValue(c: Ctx; sc: Scope; n: Node): tuple[val: float64; ok: bool] =
 # `array(N)` / `array(N, init)`: the right side of a state or local
 # array declaration.
 proc arrayArgs(call: Node): tuple[pos: seq[Node]; every: Node] =
-  ## `array(N, init, every = M)`: the positional arguments, and `every`
-  ## (nil when absent), the one named argument a builtin takes.
-  for k in call.kids:
-    if k.kind == nkNamedArg: result.every = k.kids[0] else: result.pos.add k
+  ## `array(n, init, every)`: size and init, and `every` (nil when not
+  ## given). Named arguments were made positional by normalizeCalls.
+  for i, k in call.kids:
+    if i < 2: result.pos.add k else: result.every = k
 
 proc isArrayMake(n: Node): bool =
-  n != nil and n.kind == nkCall and n.str == "array" and
-    arrayArgs(n).pos.len in {1, 2}
+  n != nil and n.kind == nkCall and n.str == "array" and n.kids.len in {1, 2, 3}
 
 proc lookupStereo(sc: Scope; name: string): tuple[l, r: string, ok: bool] =
   var s = sc
@@ -1134,12 +1133,12 @@ proc declareStateArray(c: Ctx; sc: Scope; st: Node; pre: var string;
   let call = st.kids[0]
   let args = arrayArgs(call)
   let n = c.arrayMakeSize(sc, call)
-  var every = 0
+  var every = 0                          # 0: an ordinary state array
   if args.every != nil:
     let cv = c.constValue(sc, args.every)
-    if not cv.ok or float64(int(cv.val)) != cv.val or cv.val < 1:
+    if not cv.ok or float64(int(cv.val)) != cv.val or cv.val < 0:
       raise newException(ValueError,
-        "array: every = must be a whole number of samples, 1 or more, " &
+        "array: every must be a whole number of samples (0 for none), " &
         "known when the patch compiles " & errLoc(args.every))
     every = int(cv.val)
   let gens = if every > 0: 2 else: 1
@@ -1182,7 +1181,7 @@ proc declareLocalArray(c: Ctx; sc: Scope; name: string; rhs: Node;
     let args = arrayArgs(rhs)
     if args.every != nil:
       raise newException(ValueError,
-        "every = steps a state array, which keeps its values: $" & name &
+        "every steps a state array, which keeps its values: $" & name &
         " = array(...), not let " & errLoc(rhs))
     let n = c.arrayMakeSize(sc, rhs)
     let initC =
@@ -3199,10 +3198,70 @@ proc checkDefault(c: Ctx; def: Node; e: Node) =
 # codegen only ever sees a call with one positional argument per
 # parameter: `sing(220, g, vibrato = 0.3)` becomes the full list, each
 # missing argument filled with the def's default expression.
+# Builtins' parameters, named as SPEC writes them, so any call can name
+# its arguments: `reverb(sig, rt60 = 2.4, wet = 0.3)`. `name=v` has a
+# default. Stdlib functions are defs and name theirs already.
+const BuiltinParams = {
+  "lp1": @["sig", "cut"], "hp1": @["sig", "cut"],
+  "lpf": @["sig", "cut", "res"], "hpf": @["sig", "cut", "res"],
+  "bpf": @["sig", "cut", "res"], "notch": @["sig", "cut", "res"],
+  "delay": @["sig", "time", "max_time"],
+  "fbdelay": @["sig", "time", "max_time", "fb"],
+  "reverb": @["sig", "rt60", "wet"],
+  "impulse": @["freq"], "resonator": @["sig", "freq", "decay"],
+  "discharge": @["sig", "rate"],
+  "dho": @["force", "freq", "damp"], "dho_v": @["force", "freq", "damp"],
+  "tremolo": @["sig", "rate", "depth"], "slew": @["sig", "time"],
+  "wave": @["freq", "arr"], "phasor": @["freq"],
+  "pow": @["a", "b"], "min": @["a", "b"], "max": @["a", "b"],
+  "clamp": @["x", "l", "h"],
+  "array": @["n", "init=0", "every=0"],
+}.toTable
+
+proc reorderArgs(n: Node; what: string; params: seq[string];
+                 defaults: seq[Node]) =
+  ## A call's arguments in parameter order: positional first, then named,
+  ## missing ones from `defaults` (nil: required).
+  var args = newSeq[Node](params.len)
+  var pos = 0
+  var seenNamed = false
+  for k in n.kids:
+    if k.kind == nkNamedArg:
+      seenNamed = true
+      let i = params.find(k.str)
+      if i < 0:
+        raise newException(ValueError,
+          what & " has no parameter '" & k.str & "' (it takes " &
+          params.join(", ") & ") " & errLoc(k))
+      if args[i] != nil:
+        raise newException(ValueError,
+          what & ": '" & k.str & "' given twice " & errLoc(k))
+      args[i] = k.kids[0]
+    else:
+      if seenNamed:
+        raise newException(ValueError,
+          what & ": positional arguments go before named ones " & errLoc(k))
+      if pos >= params.len:
+        raise newException(ValueError,
+          "wrong arg count for " & what & ": expected " &
+          $params.len & " got " & $n.kids.len & " " & errLoc(n))
+      args[pos] = k
+      inc pos
+  for i, a in args:
+    if a == nil:
+      let d = if i < defaults.len: defaults[i] else: nil
+      if d == nil:
+        raise newException(ValueError,
+          what & ": missing '" & params[i] & "' " & errLoc(n))
+      args[i] = d
+  n.kids = args
+
 proc normalizeCalls(c: Ctx; n: Node; shadow: HashSet[string]) =
   ## `shadow`: parameter names in scope. Inside `def inharmonic(freq,
   ## ratio, ...)`, `ratio(n)` calls the parameter, not a top-level def
   ## that happens to be called ratio, so it isn't checked against one.
+  ## Calls that name an argument become positional here, defs and
+  ## builtins alike, so codegen only ever sees positional calls.
   if n == nil: return
   var inner = shadow
   if n.kind in {nkDef, nkLambda}:
@@ -3216,52 +3275,25 @@ proc normalizeCalls(c: Ctx; n: Node; shadow: HashSet[string]) =
   for k in n.kids:
     if k.kind == nkNamedArg: anyNamed = true
   if n.str notin c.userDefs:
-    if anyNamed:
-      # `every` on array (a stepped state array) is the one exception.
-      var named = 0
-      for k in n.kids:
-        if k.kind == nkNamedArg:
-          inc named
-          if n.str != "array" or k.str != "every" or named > 1:
-            raise newException(ValueError,
-              n.str & " is a builtin: it takes its arguments by position" &
-              (if n.str == "array": " (and one named, every = N)" else: "") &
-              " " & errLoc(k))
+    if not anyNamed: return
+    if n.str notin BuiltinParams:
+      raise newException(ValueError,
+        n.str & " takes its arguments by position " & errLoc(n))
+    var params: seq[string]
+    var defaults: seq[Node]
+    for p in BuiltinParams[n.str]:
+      let eq = p.find('=')
+      if eq < 0:
+        params.add p
+        defaults.add nil
+      else:
+        params.add p[0 ..< eq]
+        defaults.add Node(kind: nkNum, num: parseFloat(p[eq + 1 .. ^1]))
+    reorderArgs(n, n.str, params, defaults)
     return
   let def = c.userDefs[n.str]
   if not anyNamed and n.kids.len == def.params.len: return
-  var args = newSeq[Node](def.params.len)
-  var pos = 0
-  var seenNamed = false
-  for k in n.kids:
-    if k.kind == nkNamedArg:
-      seenNamed = true
-      let i = def.params.find(k.str)
-      if i < 0:
-        raise newException(ValueError,
-          def.str & " has no parameter '" & k.str & "' " & errLoc(k))
-      if args[i] != nil:
-        raise newException(ValueError,
-          def.str & ": '" & k.str & "' given twice " & errLoc(k))
-      args[i] = k.kids[0]
-    else:
-      if seenNamed:
-        raise newException(ValueError,
-          def.str & ": positional arguments go before named ones " & errLoc(k))
-      if pos >= def.params.len:
-        raise newException(ValueError,
-          "wrong arg count for " & def.str & ": expected " &
-          $def.params.len & " got " & $n.kids.len & " " & errLoc(n))
-      args[pos] = k
-      inc pos
-  for i, a in args:
-    if a == nil:
-      let d = if i < def.defaults.len: def.defaults[i] else: nil
-      if d == nil:
-        raise newException(ValueError,
-          def.str & ": missing '" & def.params[i] & "' " & errLoc(n))
-      args[i] = d
-  n.kids = args
+  reorderArgs(n, def.str, def.params, def.defaults)
 
 proc generateFull*(program: Node; patchPath: string = "";
                    sr: float64 = 48000.0):

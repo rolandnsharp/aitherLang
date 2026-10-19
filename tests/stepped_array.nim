@@ -65,8 +65,11 @@ block withEach:
 # The errors say what to write instead.
 doAssert "not let" in errorOf("let a = array(4, every = 2)\na[0]\n")
 doAssert "whole number" in errorOf("$a = array(4, every = 1.5)\n$a[0]\n")
-doAssert "every = N" in errorOf("$a = array(4, size = 2)\n$a[0]\n")
-doAssert "by position" in errorOf("phasor(440, every = 2)\n")      # a builtin
+doAssert "no parameter 'size'" in errorOf("$a = array(4, size = 2)\n$a[0]\n")
+doAssert "no parameter 'every'" in errorOf("phasor(440, every = 2)\n")   # a builtin
 doAssert "no parameter 'every'" in errorOf("osc(sin, 440, every = 2)\n")   # a stdlib def
+# every is array's third parameter: by name or by position, the same array.
+doAssert run("$c = array(1, 0, 4)\n$c[0] = $c[0] + 1\n[$c[0] * 0.01, pixel_index(4, 1)]\n") ==
+         run("$c = array(1, every = 4)\n$c[0] = $c[0] + 1\n[$c[0] * 0.01, pixel_index(4, 1)]\n")
 
 echo "stepped_array ok"

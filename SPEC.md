@@ -200,10 +200,27 @@ sing(220, g, 1.2, robot = 1)       # positional first, then named
 
 A default is an expression of numbers, `PI`/`TAU`, operators
 and calls (`decay = 1 / 4`, `q = sqrt(2)`); it may not name
-a variable or another parameter. Named arguments are for
-`def`s only; builtins take theirs by position, for now: `array`'s
-`every` is the first to take a name (see Stepped state arrays), and
-the others are to follow, with the parameter names SPEC uses.
+a variable or another parameter.
+
+Any call can name its arguments, a builtin's as well as a def's:
+
+```
+reverb(x, rt60 = 2.4, wet = 0.3)
+x |> lpf(cut = 800, res = 0.5)      # the pipe fills the first, sig
+$u = array(w * h, every = w * h)
+```
+
+A builtin's parameters have the names SPEC writes them with:
+`lp1`/`hp1(sig, cut)`, `lpf`/`hpf`/`bpf`/`notch(sig, cut, res)`,
+`delay(sig, time, max_time)`, `fbdelay(sig, time, max_time, fb)`,
+`reverb(sig, rt60, wet)`, `resonator(sig, freq, decay)`,
+`dho`/`dho_v(force, freq, damp)`, `impulse(freq)`, `phasor(freq)`,
+`discharge(sig, rate)`, `slew(sig, time)`,
+`tremolo(sig, rate, depth)`, `wave(freq, arr)`, `pow`/`min`/`max(a, b)`,
+`clamp(x, l, h)`, `array(n, init = 0, every = 0)`. One-argument
+builtins (`sin`, `midi_cc`, …) take theirs by position. Stdlib
+functions are defs and name theirs. A named call compiles to exactly
+the positional one. An unknown name says what the function takes.
 
 ### Array parameters
 
@@ -532,7 +549,7 @@ See `tests/state_arrays.nim` for the full one.
 $u = array(w * h, every = w * h)    # steps once a tv frame
 ```
 
-`every = M` makes a state array step: reads see the elements as they
+`every = M` (`array`'s third parameter) makes a state array step: reads see the elements as they
 were at the last step, and stores land together every M samples of the
 engine clock. It's `each`'s held-back stores, held back for M samples.
 A field that every element must advance from the same moment (a wave on
@@ -550,14 +567,13 @@ $v[k] = c
 A step begins at the sample where `pixel_index(M, 1)` is 0, so with M =
 w·h steps land on `tv`'s frames. An element nobody stores keeps its
 value. Inside `each`, stores land at the end of the `each` and then at
-the step. M must be a whole number, 1 or more, known when the patch
-compiles; `every = 1` makes every store a one-sample delay. It also
-suits sound: a string or membrane that steps every 16 samples and is
-read at audio rate costs a sixteenth as much. `every` is taken by name,
-and only on state arrays (`$name = array`). It's the first builtin
-parameter with a name; the plan is for every builtin to take named
-arguments like a `def` (BUGS_AND_ISSUES), and `every` will then simply
-be `array`'s third parameter.
+the step. M must be a whole number known when the patch compiles;
+0, the default, is an ordinary state array, and `every = 1` makes
+every store a one-sample delay. It also suits sound: a string or
+membrane that steps every 16 samples and is read at audio rate costs a
+sixteenth as much. `every` is `array`'s third parameter, usually named
+(`array(n, 0, 4)` is `array(n, every = 4)`), and only state arrays
+(`$name = array`) take it.
 
 ### Arrays are data, not a map
 
