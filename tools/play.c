@@ -12,7 +12,10 @@
    here, hard: the engine doesn't limit the mix, so a patch that wants
    a soft limiter ends with `|> tanh`. If the card ran dry while
    playing, play says how often when it exits. Exits when the pipe
-   closes.
+   closes. Like tv and scope it copies its input to stdout unchanged
+   (when stdout isn't a terminal), after the card has it, so it can sit
+   anywhere in a chain: music.aither | play | picture.aither | tv. If
+   the reader goes away, play stops copying and keeps playing.
    It runs on the audio core at real-time priority when allowed
    (realtime.c). Build: make tools/play */
 #include <stdio.h>
@@ -20,6 +23,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
+#include <signal.h>
+#include <errno.h>
 #include <alsa/asoundlib.h>
 
 #define FRAMES 256   /* one write: 5.3 ms at 48 kHz */
@@ -42,6 +47,8 @@ int main(int argc, char **argv) {
     if (err < 0) { fprintf(stderr, "play: set_params %s: %s\n", dev, snd_strerror(err)); return 1; }
     aither_realtime("play");
 
+    int pass = !isatty(1);                         /* copy the stream on, as tv and scope do */
+    signal(SIGPIPE, SIG_IGN);
     static float in[FRAMES * 2];
     static short out[FRAMES * 2];
     struct timespec t0, t;
@@ -74,6 +81,14 @@ int main(int argc, char **argv) {
             }
             if (w < 0) { fprintf(stderr, "play: write: %s\n", snd_strerror((int)w)); goto end; }
             done += w;
+        }
+        /* Then on down the chain, exactly as it came; a reader that has
+           gone ends the copying, not the playing. */
+        for (size_t o = 0; pass && o < got; ) {
+            ssize_t n = write(1, (char *)in + o, got - o);
+            if (n < 0 && errno == EINTR) continue;
+            if (n <= 0) { pass = 0; break; }
+            o += (size_t)n;
         }
     }
 end:

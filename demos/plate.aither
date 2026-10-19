@@ -17,7 +17,13 @@
 # ratios come back into step together, so a consonant chord's figures
 # fall into line over and over. That's consonance, seen.
 #
-#   tools/listen demos/chorale.aither demos/plate.aither 48x27
+#   ./aither demos/chorale.aither | tools/play hw:rockchipes8388c 20 |
+#     AITHER_SOCK=/tmp/aither-picture.sock ./aither demos/plate.aither |
+#     tools/tv --size 48x27 --smooth
+#
+# play passes the music on after the speaker has it, so this engine hears
+# exactly what you hear. q in tv closes the picture and the music plays
+# on; Ctrl-C stops the lot.
 
 import "lib/notes.aither"
 

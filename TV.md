@@ -96,10 +96,10 @@ takes a square root every step.
   at 2.1× real time on mains.
 - **Pictures that hear the music** run at the music's rate: a visuals
   engine whose `input()` is 44.1 kHz music makes 44 100 pixels a second,
-  48×27 at 34 frames a second. `tools/listen music.aither picture.aither
-  48x27` runs the two: the music to the speaker and, through `tee`, as
-  the picture's `input()`, to `tv` (demos/plate listens to
-  demos/chorale). A larger picture needs the engine to hold each input
+  48×27 at 34 frames a second. `play` hands the stream on after the
+  speaker has it, so one pipe does it: `./aither music.aither | play |
+  AITHER_SOCK=/tmp/aither-picture.sock ./aither picture.aither | tv`
+  (demos/plate listens to demos/chorale). A larger picture needs the engine to hold each input
   frame for several samples (an open question in the displays note).
 - **Stay within ±1.** The engine guards a picture as it guards sound:
   within 20 s of a send, a sample above 3.0 rolls the voice back, and

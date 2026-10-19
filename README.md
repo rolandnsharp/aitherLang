@@ -133,6 +133,9 @@ aither set.aither | tools/scope | tools/play hw:rockchipes8388c 20
                                               see it as well: a vector scope on the GPU (make tools/scope, needs sdl3)
 AITHER_RATE=1152000 aither patches/mandelbrot.aither | AITHER_RATE=1152000 tools/tv --size 160x120 > /dev/null
                                               a picture: each pair a pixel's complex value, as colour (make tools/tv)
+aither music.aither | tools/play hw:rockchipes8388c 20 | AITHER_SOCK=/tmp/b.sock aither picture.aither | tools/tv --size 48x27
+                                              a picture that listens: play hands the music on after the speaker has it,
+                                              and the second engine's input() hears it (its own socket; demos/plate)
 aither set.aither 30 > take.raw               offline: 30 s from t=0, then exit (sox makes the WAV)
 AITHER_RATE=192000 aither fm.aither | sdr-tx  the rate is yours; the reader agrees
 arecord -f FLOAT_LE -c 2 -r 48000 | aither fx.aither | tools/play    input() reads stdin

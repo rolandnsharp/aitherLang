@@ -4,8 +4,13 @@
 # bells arpeggiating it. The bells are dho resonators, a hammer hitting a
 # damped spring at each note's pitch, so they ring and fade as metal does.
 #
-#   tools/listen demos/chorale.aither demos/plate.aither 48x27
-#   ./aither demos/chorale.aither | tools/play hw:rockchipes8388c 20     (just the music)
+#   ./aither demos/chorale.aither | tools/play hw:rockchipes8388c 20 |
+#     AITHER_SOCK=/tmp/aither-picture.sock ./aither demos/plate.aither |
+#     tools/tv --size 48x27 --smooth
+#
+# play hands the music on down the pipe, to the plate, after the speaker
+# has it. The second engine needs its own socket. Without the last two
+# lines it's just the music.
 
 import "lib/notes.aither"
 
