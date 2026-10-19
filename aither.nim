@@ -111,7 +111,7 @@ proc usage() =
   echo "                              live voice's state and time, without touching the"
   echo "                              sound (default 2s). Catches NaN/runaways first"
   echo "  spectrum [voice]            spectral summary of the engine's recent buffer"
-  echo "  shader <field.aither>       a field patch as GLSL, for tools/vis (vis branch)"
+  echo "  shader <patch.aither>       the patch's picture (its draws) as GLSL, for tools/vis"
   echo "  kill                        shut down engine"
 
 proc isNumber(s: string): bool =

@@ -1,34 +1,71 @@
-# pulse: four on the floor at 124 for vis to dance to. A kick that drops
-# in pitch, a bass on the offbeats, sixteenth hats, and a chord that
-# ducks under every kick (the pump), wide in stereo so its phase turns.
+# pulse: four on the floor at 124, heard and seen from one patch. Each
+# part draws itself with its own envelope, on the same sample it sounds:
 #
-#   ./aither patches/pulse.aither | tools/play hw:rockchipes8388c 20 | tools/vis fields/bloom.aither
+#   kick   a ring of petals fired from the middle, as big as the hit
+#   bass   rings of colour, as many as its note is high, breathing with it
+#   hats   sparks, one burst a sixteenth
+#   chord  a rose, its petals and colour the chord's, pumping
+#
+# and the whole picture flies outward through a six-way kaleidoscope, so
+# every beat leaves a mandala sailing off the screen.
+#
+#   ./aither patches/pulse.aither | tools/play hw:rockchipes8388c 20 | tools/vis patches/pulse.aither
 
 let pos = t - start_t
 let tempo = 124 / 60
 let beat = phasor(tempo)                     # 0..1 through each beat
 let bar = int(pos * tempo / 4)
-
-# Kick: a sine falling from about 230 Hz to 48, gone in a tenth of a second.
 let kEnv = exp(-beat * 14)
-let kick = sin(TAU * phasor(48 + 180 * exp(-beat * 30))) * kEnv * 0.75
 
-# Bass: the offbeat, root of the bar's chord, a filtered saw.
-let roots = [55, 43.65, 65.41, 49]           # A1 F1 C2 G1
-let off = beat - 0.5
-let bEnv = if off > 0 then exp(-off * 9) else 0
-let bass = osc(saw, roots[bar % 4]) |> lpf(180 + bEnv * 900, 0.6) |> gain(0.35 * bEnv)
+# --- the picture's helpers: a def is only built where it's called, so
+# these are the picture's alone ---
 
-# Hats: sixteenths, the offbeat one open.
-let six = phasor(tempo * 4)
-let hEnv = exp(-six * (if int(beat * 4) == 2 then 12 else 40))
-let hat = noise() * hEnv |> hpf(7000, 0.3) |> gain(0.12)
+# Fold the angle into one sixth, mirrored: whatever is drawn, six times.
+def kaleido(p):
+  let a = phase(p)
+  let seg = TAU / 6
+  rotate([magnitude(p), 0], abs(a - floor(a / seg) * seg - seg / 2))
 
-# Chord: Am F C G, three saws a voice spread left and right, pumped.
-let third = [130.81, 110, 164.81, 123.47]
-let fifth = [164.81, 130.81, 196, 146.83]
-def voice(f): [osc(saw, f * 0.997), osc(saw, f * 1.003)]
-let chord = (voice(roots[bar % 4] * 4) + voice(third[bar % 4] * 2) + voice(fifth[bar % 4] * 2)) |> lpf(1400, 0.3)
-let pump = 1 - exp(-beat * 6)                # ducks on the kick, back by the offbeat
+# Last frame, drawn from a little nearer the middle and turned, so it all
+# flies out and spins; a jolt on the kick.
+def tunnel(p, kick):
+  last(rotate(kaleido(p) * (0.955 - kick * 0.04), 0.02 + kick * 0.06)) * 0.965
 
-[kick + bass + hat, kick + bass + hat] + chord * 0.07 * pump
+# A ring at radius r, `n` petals round it, in colour turning with `hue`.
+def petals(p, r, n, hue):
+  let ring = exp(-pow((magnitude(p) - r) / 0.03, 2))
+  rotate([1, 0], 2 * phase(p) + hue) * ring * (0.5 + 0.5 * cos(n * phase(p)))
+
+draw tunnel(pixel(), kEnv)
+
+def voice(f): [osc(saw, f * 0.997), osc(saw, f * 1.003)]   # a saw a side, detuned
+
+# --- the parts ---
+
+play kick:
+  draw petals(pixel(), 0.08 + kEnv * 0.12, 12, t * 0.7) * kEnv * kEnv * 2.5
+  sin(TAU * phasor(48 + 180 * exp(-beat * 30))) * kEnv * 0.75
+
+play bass:
+  let roots = [55, 43.65, 65.41, 49]           # A1 F1 C2 G1
+  let off = beat - 0.5
+  let env = if off > 0 then exp(-off * 9) else 0
+  let f = roots[bar % 4]
+  draw rotate([1, 0], magnitude(pixel()) * f * 0.6 - t * 3) * env * 0.12
+  osc(saw, f) |> lpf(180 + env * 900, 0.6) |> gain(0.35 * env)
+
+play hats:
+  let six = phasor(tempo * 4)
+  let env = exp(-six * (if int(beat * 4) == 2 then 12 else 40))
+  draw (if noise() > 0.997 then [0.9, 0.9] else [0, 0]) * env
+  noise() * env |> hpf(7000, 0.3) |> gain(0.12)
+
+play chord:
+  let roots = [55, 43.65, 65.41, 49]
+  let third = [130.81, 110, 164.81, 123.47]
+  let fifth = [164.81, 130.81, 196, 146.83]
+  let k = bar % 4
+  let pump = 1 - exp(-beat * 6)              # ducks on the kick, back by the offbeat
+  let rose = [6, 4, 5, 3]                    # petals: one count a chord
+  draw petals(pixel(), 0.55 + pump * 0.08, rose[k], k * TAU / 4 + t * 0.2) * pump * 0.08
+  (voice(roots[k] * 4) + voice(third[k] * 2) + voice(fifth[k] * 2)) |> lpf(1400, 0.3) |> gain(0.07 * pump)

@@ -1065,15 +1065,19 @@ the size. What the patch returns for a pixel is a complex number: `tv`
 shows its phase as hue and its magnitude as brightness, full at 1.
 See TV.md.
 
-### Fields (`vis`, an experiment on the `vis` branch)
+### Pictures (`draw`, `vis`: an experiment on the `vis` branch)
 
-`aither shader field.aither` compiles a field patch to GLSL for
-`tools/vis`, which runs it at every pixel of every frame: `pixel()`
-(this pixel, as `tv`'s `pixel`), `input()`, `level()` and `low()`
-(the music at the sample heard: its pair, loudness, loudness below
-150 Hz), `last(p)` (last frame's value at `p`), `t` and
-`dt`. No state, `play` or imports; a `def rec` stops after 1000
-steps and gives 0. See VIS.md.
+`draw expr`, in a play or at the top of the file (not in a def), adds
+to the patch's picture: the sum of its draws at every pixel of every
+frame, run by `tools/vis` from `aither shader patch.aither`. A draw
+sees the lets around it, so a part draws from its own envelope. The
+sound never sees a draw (the parser drops them), so a patch sounds the
+same with or without. A picture has `pixel()` (this pixel, as `tv`'s
+`pixel`), `input()`, `level()` and `low()` (the music at the sample
+heard: its pair, loudness, loudness below 150 Hz), `last(p)` (last
+frame's value at `p`), `t`; only what the draws use is compiled, and
+what needs memory is an error. A `def rec` stops after 1000 steps and
+gives 0. See VIS.md.
 
 ### Polyphony
 
@@ -1187,7 +1191,7 @@ output) gets a fixed loop delay. A block is `AITHER_BUFFER` frames
 | `status`                         | `list` plus the master level               |
 | `retrigger <voice>`              | reset `start_t` in place                   |
 | `kill`                           | shut down engine                           |
-| `shader <field.aither>`          | the field patch as GLSL, for `tools/vis` (vis branch; see Fields) |
+| `shader <patch.aither>`          | the patch's picture (its draws) as GLSL, for `tools/vis` (vis branch; see Pictures) |
 
 ### Part-level
 

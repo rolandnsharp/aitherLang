@@ -21,7 +21,8 @@ type
     nkPlay, nkLambda,
     nkImport,                   # `import "lib/voice.aither"`; str = the path
     nkStr,                      # a string literal; str = its text
-    nkNamedArg                  # `name = expr` in a call; str = name, kids = [expr]
+    nkNamedArg,                 # `name = expr` in a call; str = name, kids = [expr]
+    nkDraw                      # `draw expr`: a part's picture (vis); kids = [expr]
 
   Node* = ref object
     kind*: NodeKind
@@ -43,7 +44,7 @@ type
 # new code but loses the chance to redirect users running pre-sigil
 # patches with a clear message.
 const Keywords = ["var", "let", "def", "rec", "play", "if", "then", "else",
-                  "mod", "and", "or", "not", "import"]
+                  "mod", "and", "or", "not", "import", "draw"]
 
 # ----------------------------------------------------------------- tokenizer
 
@@ -270,6 +271,11 @@ type Parser = object
   stateScopes: seq[HashSet[string]]
   # How many def/play bodies we're inside: `import` is only legal at 0.
   bodyDepth: int
+  defDepth: int               # how many of those are defs: `draw` isn't legal in one
+  # `draw` statements are the picture (vis): kept only when compiling
+  # one (`aither shader`); for sound they are dropped here, so the
+  # audio backend never sees them.
+  keepDraws: bool
 
 proc peek(p: Parser; off: int = 0): Token {.inline.} =
   if p.idx + off < p.toks.len: p.toks[p.idx + off]
@@ -639,7 +645,7 @@ proc isBinding(n: Node): bool =
   ## array-handle update whose value only echoes what it did (the value
   ## set, the new length). A block reads on past it. `array_pop` is an
   ## expression: its value is the point.
-  n.kind in {nkLet, nkVar, nkAssign, nkIdxAssign} or
+  n.kind in {nkLet, nkVar, nkAssign, nkIdxAssign, nkDraw} or
     (n.kind == nkCall and n.str in ["each", "array_set", "array_push", "array_resize"])
 
 proc parseBody(p: var Parser; line: int; what: string): Node =
@@ -659,7 +665,7 @@ proc parseBody(p: var Parser; line: int; what: string): Node =
       p.fail(what & " has no expression: a body is its lets and $state, " &
              "ended by the expression that is its value")
     let s = p.parseStmt()
-    stmts.add s
+    if s.kind != nkDraw or p.keepDraws: stmts.add s
     if not s.isBinding: break
   if stmts.len == 1: stmts[0]
   else: Node(kind: nkBlock, kids: stmts, line: line)
@@ -688,7 +694,9 @@ proc parseDef(p: var Parser): Node =
   # write `$prev_g = 0.0; $prev_g = gate` and only the first line gets
   # the slot-allocation treatment.
   pushStateScope(p)
+  inc p.defDepth
   let body = p.parseBody(line, "def " & name)
+  dec p.defDepth
   popStateScope(p)
   Node(kind: nkDef, str: name, params: params, defaults: defaults,
        isRec: isRec, kids: @[body], line: line)
@@ -733,6 +741,11 @@ proc parseStmt(p: var Parser): Node =
     discard p.expect(tkAssign)
     let v = p.parseExpr()
     n = Node(kind: nkLet, str: name, kids: @[v], line: t.line)
+  elif t.kind == tkKeyword and t.str == "draw":
+    if p.defDepth > 0:
+      p.fail("draw belongs in a play or at the top of the file, not in a def: a def can return the picture for a draw to use")
+    discard p.advance()
+    n = Node(kind: nkDraw, kids: @[p.parseExpr()], line: t.line)
   elif t.kind == tkKeyword and t.str == "def":
     n = p.parseDef()
   elif t.kind == tkKeyword and t.str == "play":
@@ -778,9 +791,11 @@ proc parseStmt(p: var Parser): Node =
   while p.peek().kind in {tkNewline, tkSemi}: discard p.advance()
   n
 
-proc parseProgram*(source: string): Node =
+proc parseProgram*(source: string; keepDraws = false): Node =
+  ## The patch. `draw` statements (its picture) are dropped unless
+  ## `keepDraws` (aither shader).
   let toks = tokenize(source)
-  var p = Parser(toks: toks, idx: 0)
+  var p = Parser(toks: toks, idx: 0, keepDraws: keepDraws)
   # Top-level state scope. play bodies don't push their own scope —
   # they share this one so file-level state is reachable from every
   # play (matching the codegen rule that play-body `$x` resolves to
@@ -798,7 +813,7 @@ proc parseProgram*(source: string): Node =
           $exprLine & "). A def or play body ends at its expression, so a body " &
           "with a second expression spills out here; a file has one expression, its output")
       exprLine = s.line
-    stmts.add s
+    if s.kind != nkDraw or keepDraws: stmts.add s
     p.skipNewlines()
   popStateScope(p)
   Node(kind: nkBlock, kids: stmts, line: 1)

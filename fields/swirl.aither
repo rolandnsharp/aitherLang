@@ -5,4 +5,4 @@ let p = pixel()
 let r = magnitude(p)
 let flow = last(rotate(p * 0.995, 0.03 / (0.15 + r)))
 let ring = if abs(r - 0.45) < 0.02 then rotate([1, 0], t * 2 + phase(input()) + p[0] * 3) else [0, 0]
-flow * 0.985 + ring * (0.5 + level() * 3)
+draw flow * 0.985 + ring * (0.5 + level() * 3)

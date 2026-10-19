@@ -6,4 +6,4 @@ def rec escape(z, c, n):
 let c = rotate([0.7885 + level() * 0.2, 0], t * 0.2)
 let n = escape(z, c, 96)
 let k = 96 - n                             # steps it took to leave
-if n == 0 then [0, 0] else rotate([1, 0], k * 0.35 + t) * min(1, k / 12)
+draw if n == 0 then [0, 0] else rotate([1, 0], k * 0.35 + t) * min(1, k / 12)

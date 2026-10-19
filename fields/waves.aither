@@ -2,4 +2,4 @@
 let p = pixel()
 def wave(p, kx, ky, f): rotate([1, 0], TAU * (kx * p[0] + ky * p[1] - f * t))
 let a = wave(p, 3, 1, 0.2) + wave(p, -2, 3, 0.3) + wave(p, 1, -4, 0.15)
-a * (0.3 + level() * 2)
+draw a * (0.3 + level() * 2)

@@ -1,10 +1,12 @@
-## aither → GLSL: a field patch for tools/vis (the `vis` branch).
+## aither → GLSL: a patch's picture, for tools/vis (the `vis` branch).
 ##
-## An audio patch is f(t), run at every sample; a field patch is
-## f(pixel, t), run at every pixel of every frame on the GPU. Same
-## parser, same values (a number, or a pair: a complex number), same
-## defs and `def rec`; what can't run on a GPU (state, play, imports,
-## functions as values) is a clear error. See VIS.md.
+## A patch's sound is f(t), run at every sample; its picture is the sum
+## of its `draw`s, f(pixel, t), run at every pixel of every frame on the
+## GPU. One file: a draw in a play sees that play's lets, so the picture
+## runs on the same envelopes, beats and notes as the sound. Only what
+## the draws use is compiled; what that needs and a GPU can't run
+## (state, filters: anything with memory) is an error naming it. See
+## VIS.md.
 
 import std/[strutils, strformat, tables, os, sequtils]
 import parser
@@ -15,12 +17,22 @@ type
     code: string
     pair: bool
     table: int                          # > 0: a constant table of that length
+    fn: string                          # a function passed by name (`osc(saw, f)`)
+    state: bool                         # a `$name`: sound only
+    lazy: int                           # a file's or play's let, compiled when first used: its lazies index + 1
   Scope = Table[string, Bind]
+  Lazy = object
+    node: Node
+    env: Scope                          # the names it could see where it was written
+    done: bool
+    val: Bind
   Ctx = object
     defs: Table[string, Node]
     globals: string                     # constant tables
+    hoist: string                       # the lets the draws use, in the order they're needed
     n: int
     inRec: seq[string]                  # the rec defs being unrolled into loops
+    lazies: seq[Lazy]
 
 const RecLimit* = 1000                  # a shader has no watchdog: steps, then give up
 
@@ -47,6 +59,30 @@ const Unary = {"sin": "sin", "cos": "cos", "tan": "tan", "exp": "exp", "log": "l
 
 proc emit(c: var Ctx; sc: Scope; n: Node; buf: var string): Val
 proc emitBody(c: var Ctx; sc: var Scope; n: Node; buf: var string): Val
+proc emitTable(c: var Ctx; name: string; n: Node): Bind
+proc isTable(n: Node): bool
+
+# A name's binding, a let compiled the first time it's used (at the top
+# of main, so it's there for every draw after).
+proc look(c: var Ctx; sc: Scope; name: string; at: Node): Bind =
+  result = sc[name]
+  if result.state:
+    fail(at, &"{name} is state, which only the sound has: a picture has no memory but last()")
+  if result.lazy > 0:
+    let k = result.lazy - 1
+    if not c.lazies[k].done:
+      let node = c.lazies[k].node
+      if node.kids[0].isTable:
+        c.lazies[k].val = c.emitTable(name, node.kids[0])
+      else:
+        var h = ""
+        let env = c.lazies[k].env
+        let v = c.emit(env, node.kids[0], h)
+        let g = c.fresh(name)
+        c.hoist.add h & &"  {ty(v.pair)} {g} = {v.code};\n"
+        c.lazies[k].val = Bind(code: g, pair: v.pair)
+      c.lazies[k].done = true
+    result = c.lazies[k].val
 
 # The numbers a pair operation takes, pairs flattened (as the C backend's
 # pairOperands): cmul(p, q) and cmul(a, b, c, d) are the same call.
@@ -94,6 +130,12 @@ proc callDef(c: var Ctx; sc: Scope; n: Node; d: Node; buf: var string): Val =
   for i, p in d.params:
     let a = if given[i] != nil: given[i] else: d.defaults[i]
     if a == nil: fail(n, &"{d.str}: missing '{p}'")
+    # A function by name (`osc(saw, f)`): the parameter calls it.
+    if a.kind == nkIdent and (a.str notin sc or sc[a.str].fn != "") and
+       (a.str in Unary or a.str in c.defs or (a.str in sc and sc[a.str].fn != "")):
+      inner[p] = Bind(fn: (if a.str in sc: sc[a.str].fn else: a.str))
+      args.add (a.str, false)
+      continue
     # A default is written in the def, so it reads the def's other parameters.
     let v = if given[i] != nil: c.emit(sc, a, buf) else: c.emit(inner, a, buf)
     let tmp = c.fresh(p)
@@ -156,7 +198,10 @@ proc callDef(c: var Ctx; sc: Scope; n: Node; d: Node; buf: var string): Val =
 
 proc emitCall(c: var Ctx; sc: Scope; n: Node; buf: var string): Val =
   let name = n.str
-  if name in c.defs: return c.callDef(sc, n, c.defs[name], buf)
+  if name in sc and sc[name].fn != "":                 # a parameter holding a function
+    return c.emitCall(sc, Node(kind: nkCall, str: sc[name].fn, kids: n.kids, line: n.line), buf)
+  if name in c.defs and name notin ["pixel", "input", "level", "low", "last"]:
+    return c.callDef(sc, n, c.defs[name], buf)
   for a in n.kids:
     if a.kind == nkNamedArg: fail(n, &"{name}: name its arguments only in a def's call, in a field patch (for now)")
   template arg(i: int): Val = c.emit(sc, n.kids[i], buf)
@@ -224,23 +269,26 @@ proc emitCall(c: var Ctx; sc: Scope; n: Node; buf: var string): Val =
     if not p.pair: fail(n, "last takes a point: a pair")
     return (&"a_last({p.code})", true)
   else:
-    fail(n, &"'{name}' isn't something a field patch can call (yet)")
+    fail(n, &"'{name}' can't be drawn: it has memory (only the sound runs it) or isn't known to pictures yet")
 
 proc emit(c: var Ctx; sc: Scope; n: Node; buf: var string): Val =
   case n.kind
   of nkNum: (lit(n.num), false)
   of nkIdent:
     if n.str in sc:
-      let b = sc[n.str]
+      let b = c.look(sc, n.str, n)
       if b.table > 0: fail(n, &"{n.str} is a table: index it")
+      if b.fn != "": fail(n, &"{n.str} is a function: call it")
       return (b.code, b.pair)
     case n.str
     of "t": ("uT", false)
-    of "dt": ("uDt", false)
+    of "sr": ("uRate", false)
+    of "dt": ("(1.0 / uRate)", false)
+    of "start_t": ("0.0", false)                 # the picture counts from where the stream began
     of "PI": ("3.14159265358979", false)
     of "TAU": ("6.28318530717959", false)
     else:
-      if n.str.startsWith("$"): fail(n, "a field patch has no state: last() is its memory")
+      if n.str.startsWith("$"): fail(n, "state is the sound's: a picture's only memory is last()")
       fail(n, &"unknown name '{n.str}'")
   of nkArr:
     if n.kids.len != 2: fail(n, "an array here is a table: bind it with let, then index it")
@@ -252,8 +300,8 @@ proc emit(c: var Ctx; sc: Scope; n: Node; buf: var string): Val =
     let i = c.emit(sc, n.kids[1], buf)
     if i.pair: fail(n, "an index is a number")
     let tgt = n.kids[0]
-    if tgt.kind == nkIdent and tgt.str in sc and sc[tgt.str].table > 0:
-      let b = sc[tgt.str]
+    if tgt.kind == nkIdent and tgt.str in sc and c.look(sc, tgt.str, tgt).table > 0:
+      let b = c.look(sc, tgt.str, tgt)
       return (&"{b.code}[a_wrap({i.code}, {b.table})]", false)
     let p = c.emit(sc, tgt, buf)
     if not p.pair: fail(n, "only a pair or a table can be indexed")
@@ -315,7 +363,7 @@ proc emitBody(c: var Ctx; sc: var Scope; n: Node; buf: var string): Val =
         buf.add &"  {ty(v.pair)} {name} = {v.code};\n"
         sc[s.str] = Bind(code: name, pair: v.pair)
     of nkDef: c.defs[s.str] = s
-    of nkVar, nkAssign, nkIdxAssign: fail(s, "a field patch has no state: last() is its memory")
+    of nkVar, nkAssign, nkIdxAssign: fail(s, "state is the sound's: a picture's only memory is last()")
     of nkPlay: fail(s, "play is for sound; a field patch is one picture")
     of nkImport: fail(s, "imports aren't in field patches yet")
     else: last = c.emit(sc, s, buf)
@@ -324,7 +372,7 @@ proc emitBody(c: var Ctx; sc: var Scope; n: Node; buf: var string): Val =
 const Prelude = """#version 300 es
 precision highp float;
 in vec2 uv;
-uniform float uT, uDt, uLevel, uLow, uFrame;
+uniform float uT, uRate, uLevel, uLow, uFrame;
 uniform vec2 uInput, uSpan;
 uniform sampler2D uLast;
 out vec4 o;
@@ -352,19 +400,46 @@ float a_noise(float k) {
 vec2 a_last(vec2 p) { return texture(uLast, p / uSpan * 0.5 + 0.5).rg; }
 """
 
+const Stdlib = staticRead("stdlib.aither")
+
+# A file's or a play's statements: lets wait to be used, defs are
+# known, `$state` is marked sound-only, plays are walked in their own
+# scope, and each draw is compiled and added to the picture.
+proc walk(c: var Ctx; sc: var Scope; stmts: seq[Node]; draws: var seq[Val]; buf: var string) =
+  for s in stmts:
+    case s.kind
+    of nkLet:
+      c.lazies.add Lazy(node: s, env: sc)
+      sc[s.str] = Bind(lazy: c.lazies.len)
+    of nkDef: c.defs[s.str] = s
+    of nkVar: sc[s.str] = Bind(state: true)
+    of nkDraw: draws.add c.emit(sc, s.kids[0], buf)
+    of nkPlay:
+      var inner = sc
+      let body = s.kids[0]
+      c.walk(inner, (if body.kind == nkBlock: body.kids else: @[body]), draws, buf)
+    of nkImport: fail(s, "imports aren't in pictures yet")
+    else: discard                       # the sound, and stores to state
+
 proc toGlsl*(source: string): string =
-  ## The fragment shader for a field patch: its value at each pixel, as
-  ## a pair (a number fills both sides, as a mono sample does).
+  ## The fragment shader for a patch's picture: the sum of its draws at
+  ## each pixel, a pair (a number fills both sides, as a mono sample does).
   var c: Ctx
-  var sc: Scope
-  var body = ""
-  let prog = parseProgram(source)
+  for s in parseProgram(Stdlib).kids:
+    if s.kind == nkDef: c.defs[s.str] = s
+  let prog = parseProgram(source, keepDraws = true)
   for s in prog.kids:
     if s.kind == nkDef: c.defs[s.str] = s          # a def can be used above it
-  let v = c.emitBody(sc, prog, body)
+  var sc: Scope
+  var draws: seq[Val]
+  var body = ""
+  c.walk(sc, prog.kids, draws, body)
+  if draws.len == 0:
+    raise newException(ValueError, "nothing to draw: a picture is the sum of the patch's `draw`s")
+  let sum = draws.mapIt(asPair(it)).join(" + ")
   Prelude & c.globals &
-    "void main() {\n  vec2 vPix = (uv * 2.0 - 1.0) * uSpan;\n" & body &
-    &"  o = vec4({asPair(v)}, 0.0, 1.0);\n}}\n"
+    "void main() {\n  vec2 vPix = (uv * 2.0 - 1.0) * uSpan;\n" & c.hoist & body &
+    &"  o = vec4({sum}, 0.0, 1.0);\n}}\n"
 
 when isMainModule:
   try: stdout.write toGlsl(readFile(paramStr(1)))

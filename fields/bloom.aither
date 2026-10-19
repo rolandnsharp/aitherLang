@@ -26,4 +26,4 @@ let ring = exp(-pow((r - ringR) / 0.03, 2))
 let petal = 0.5 + 0.5 * cos(12 * a + t * 2)
 let shot = rotate([1, 0], 2 * a + t * 0.7 + phase(input())) * ring * petal * kick * kick * 2.5
 
-back + shot
+draw back + shot
