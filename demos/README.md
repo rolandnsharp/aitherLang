@@ -30,7 +30,7 @@ engine needs its own socket):
 and then drawn:
 
 ```
-./aither demos/lattice.aither | tools/play hw:rockchipes8388c 20 | tools/tv --size 200x112 --smooth
+./aither demos/lattice.aither | tools/play hw:rockchipes8388c 20 | tools/tv --size 200x112 --smooth --scan
 ```
 
 | Demo | Size | What it shows |

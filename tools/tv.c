@@ -15,7 +15,10 @@
    are state arrays in the patch.
 
    A frame is shown whole, never half-drawn, at the sample being heard
-   (as scope does); pixels are crisp squares, or soft with --smooth.
+   (as scope does): each picture one moment of a patch's field. With
+   --scan rows are drawn as they arrive instead, over the frame before,
+   as a CRT draws: smooth for a big, slow picture. Pixels are crisp
+   squares, or soft with --smooth.
    Stdin is copied to stdout unchanged. It opens full screen (--window
    for a window); f toggles, q or Escape closes it at once. The rate is AITHER_RATE, like the engine's, so the
    frame rate is the rate divided by w*h.
@@ -42,20 +45,22 @@ static const char *PicFS =
     "}\n";
 
 static void usage(void) {
-    fputs("usage: aither visuals.aither | tv [--size 64x48] [--smooth] [--window | --term | --frames FILE]\n"
+    fputs("usage: aither visuals.aither | tv [--size 64x48] [--smooth] [--scan] [--window | --term | --frames FILE]\n"
           "  float pairs in on stdin, the same out on stdout; full screen unless --window;\n"
+          "  --scan draws rows as they arrive, not whole frames (not for --frames);\n"
           "  f toggles full screen, q or Escape quits\n",
           stderr);
 }
 
 int main(int argc, char **argv) {
     const char *path = NULL;
-    int W = 64, H = 48, dest = -1, smooth = 0, windowed = 0;
+    int W = 64, H = 48, dest = -1, smooth = 0, windowed = 0, scan = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--size") && i + 1 < argc) {
             if (sscanf(argv[++i], "%dx%d", &W, &H) != 2) { usage(); return 2; }
         } else if (!strcmp(argv[i], "--smooth")) smooth = 1;
         else if (!strcmp(argv[i], "--window")) windowed = 1;
+        else if (!strcmp(argv[i], "--scan")) scan = 1;
         else if (!strcmp(argv[i], "--term")) dest = DEST_TERM;
         else if (!strcmp(argv[i], "--frames") && i + 1 < argc) { dest = DEST_FRAMES; path = argv[++i]; }
         else { usage(); return 2; }
@@ -133,6 +138,7 @@ int main(int argc, char **argv) {
 
     double prev = now_s();
     int64_t shown = -1;                       /* the last frame on the screen */
+    int64_t shownRow = -1;                    /* --scan: the last row on it, counted from the start */
     for (;;) {
         double t = now_s(), dt = t - prev;
         if (dt > 0.25) dt = 0.25;
@@ -140,8 +146,26 @@ int main(int argc, char **argv) {
         uint64_t now = stream_now(dt);
         if (display_poll(&d) || (stream.eof && now >= stream.head)) break;
 
+        /* --scan: every row complete at the sample being heard, each in
+           its place over the frame before (at most a frame's worth). */
+        if (scan && now >= (uint64_t)W) {
+            int64_t r = (int64_t)(now / W) - 1;
+            int64_t a = shownRow + 1;
+            if (a < r - H + 1) a = r - H + 1;
+            glBindTexture(GL_TEXTURE_2D, tex);
+            while (a <= r) {
+                int y = (int)(a % H);
+                int64_t n = r - a + 1;
+                if (n > H - y) n = H - y;
+                if (stream_range(buf, (uint64_t)a * W, (uint64_t)(a + n) * W) == (uint64_t)(n * W))
+                    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, y, W, (int)n, GL_RG, GL_FLOAT, buf);
+                a += n;
+            }
+            shownRow = r;
+        }
+
         /* The newest frame that is complete at the sample being heard. */
-        if (now >= N) {
+        if (!scan && now >= N) {
             int64_t f = (int64_t)(now / N) - 1;
             if (f > shown) {
                 if (stream_range(buf, (uint64_t)f * N, (uint64_t)(f + 1) * N) == N) {

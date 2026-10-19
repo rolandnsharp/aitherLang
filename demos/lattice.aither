@@ -1,6 +1,6 @@
 # lattice: music that is also a picture. One stream, heard and then drawn:
 #
-#   ./aither demos/lattice.aither | tools/play hw:rockchipes8388c 20 | tools/tv --size 200x112 --smooth
+#   ./aither demos/lattice.aither | tools/play hw:rockchipes8388c 20 | tools/tv --size 200x112 --smooth --scan
 #
 # tv lays the samples out row by row, 200 to a row, so a row lasts
 # 200 / 44100 s: rows go by at 220.5 Hz, which is an A (A3). A tone at
@@ -30,7 +30,9 @@
 # folded onto the screen. Hue is phase, brightness how strongly the waves
 # add there. One frame is one beat (118 a minute) and every pitch is a
 # whole harmonic of the frame rate, so each beat is a still picture, and
-# the next beat the next one.
+# the next beat the next one. Two frames a second would jump, so tv runs
+# with --scan: each beat's picture wipes down over the last, row by row,
+# as the rows are heard.
 
 let w = 200
 let h = 112

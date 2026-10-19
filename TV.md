@@ -19,7 +19,14 @@ AITHER_RATE=1152000 ./aither patches/mandelbrot.aither | AITHER_RATE=1152000 too
 The frame rate is the rate divided by w×h: 160×120 at 1.152 MHz is 60
 frames a second. Give the engine and `tv` the same `AITHER_RATE`. `tv`
 shows each frame whole at the sample being heard, as `scope` does, and
-passes the stream on unchanged. Pixels are crisp squares, or soft with
+passes the stream on unchanged. A whole frame is one moment of a
+patch's field (one step of an `every = w·h` array), so it is the
+default. `--scan` draws rows as they arrive instead, each over the same
+row of the frame before, as a CRT draws: the raster's own timing shown
+rather than held back, and smooth for a big picture whose frame rate is
+low (a new picture wipes down the screen rather than jumping in). A
+field that steps once a frame shows a seam where the new step meets the
+old. `--frames` records whole frames either way. Pixels are crisp squares, or soft with
 `--smooth`. It opens full screen (`--window` for a window); `f`
 toggles, and `q` or Escape closes it at once.
 `--term` draws in the terminal in half-blocks (over ssh), and
