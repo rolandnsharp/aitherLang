@@ -251,7 +251,9 @@ Defs don't return arrays; the pair is the only multi-value
 return.
 
 A def uses a parameter as a pair when it indexes it (`p[0]`),
-hands it to a pair operation (`cmul(p, q)`, `magnitude(p)`),
+hands it to a pair operation where that takes a pair (`cmul(p, q)`,
+`magnitude(p)`; `rotate`'s angle, `cscale`'s factor, `analytic`'s
+signal and `phasor_pair`'s frequency are numbers),
 passes it to a def that takes a pair there, or does
 arithmetic with it and a pair (`cmul(z, z) + c`); a `def rec`
 that passes itself a pair there counts too. Such a parameter
