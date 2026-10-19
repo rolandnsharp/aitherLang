@@ -95,10 +95,12 @@ takes a square root every step.
   a second (1.152 MHz), and the 64-step zoom at 128×96 (737 kHz) runs
   at 2.1× real time on mains.
 - **Pictures that hear the music** run at the music's rate: a visuals
-  engine whose `input()` is 48 kHz music makes 48 000 pixels a second,
-  32×24 at 62.5 frames a second. A larger picture needs the engine to
-  hold each input frame for several samples (an open question in the
-  displays note).
+  engine whose `input()` is 44.1 kHz music makes 44 100 pixels a second,
+  48×27 at 34 frames a second. `tools/listen music.aither picture.aither
+  48x27` runs the two: the music to the speaker and, through `tee`, as
+  the picture's `input()`, to `tv` (demos/plate listens to
+  demos/chorale). A larger picture needs the engine to hold each input
+  frame for several samples (an open question in the displays note).
 - **Stay within ±1.** The engine guards a picture as it guards sound:
   within 20 s of a send, a sample above 3.0 rolls the voice back, and
   above 8.0 mutes it. A NaN resets the pool, which wipes the state

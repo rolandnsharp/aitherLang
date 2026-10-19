@@ -1,0 +1,35 @@
+# chorale: the music for demos/plate.aither, which listens to it. A slow
+# I IV vi V in A, just intonation (pure ratios, so the chords beat less
+# than on a piano), eight seconds a chord: a soft pad, and three struck
+# bells arpeggiating it. The bells are dho resonators, a hammer hitting a
+# damped spring at each note's pitch, so they ring and fade as metal does.
+#
+#   tools/listen demos/chorale.aither demos/plate.aither 48x27
+#   ./aither demos/chorale.aither | tools/play hw:rockchipes8388c 20     (just the music)
+
+import "lib/notes.aither"
+
+let pos = t - start_t
+let chord = int(pos / 8)                 # the tables wrap: I IV vi V, again
+let inChord = pos - chord * 8
+let low = notes[chordLow[chord]]
+let mid = notes[chordMid[chord]]
+let high = notes[chordHigh[chord]]
+
+# The pad swells in over two seconds and out over the last one and a half,
+# so the chord changes in the quiet.
+let swell = ease(inChord / 2) * (1 - ease((inChord - 6.5) / 1.5))
+let pad = (osc(sin, low) + osc(sin, mid) + osc(sin, high)) * 0.05 * swell +
+          osc(sin, chordBass[chord]) * 0.07 * swell
+
+# The bells: low, mid, high, mid, two strikes a second.
+let step = int(pos * 2)
+let order = [0, 1, 2, 1]
+let which = order[step]
+let hit = impulse(2)
+def bell(freq, strike):
+  dho(force = strike * 9000 * freq, freq = freq, damp = 0.0015) * 0.35
+let bells = bell(low, hit * (which == 0)) + bell(mid, hit * (which == 1)) +
+            bell(high, hit * (which == 2))
+
+(pad + bells) * 1.8 |> reverb(rt60 = 3, wet = 0.3)

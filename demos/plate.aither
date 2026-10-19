@@ -1,0 +1,57 @@
+# plate: a plate that listens. It hears demos/chorale.aither through
+# input(), and each note it hears rings one of its modes: a Chladni figure
+# that blooms when the note sounds and fades as it dies. A chord is its
+# notes' figures laid over each other.
+#
+# That's resonance, the idea under the other demos: a plate, a string, an
+# antenna answers only the frequencies that match its modes. Here each
+# note has a detector tuned to it, a lock-in: multiply the music by a
+# reference wave at the note's pitch and smooth the product, and what is
+# left is how much of that note is sounding (radio receivers find a
+# station the same way). Lower notes ring simpler figures.
+#
+# Colour is pitch: a note's hue is its place in the octave, so both A's
+# are red and the two C#s the same yellow-green. The halves of each figure
+# move opposite ways and show in opposite colours, as in chladni. And each
+# figure turns at its note's frequency slowed 256 times: notes in simple
+# ratios come back into step together, so a consonant chord's figures
+# fall into line over and over. That's consonance, seen.
+#
+#   tools/listen demos/chorale.aither demos/plate.aither 48x27
+
+import "lib/notes.aither"
+
+let w = 48
+let h = 27
+let k = pixel_index(w, h)
+let x = k % w
+let y = int(k / w)
+
+# The figure each note rings: mode (m, n) of a 48x27 plate clamped at its
+# edges, m half-waves across and n down, simpler for lower notes.
+let modeM = [2, 1, 3, 2, 3, 4, 2, 4, 5]
+let modeN = [1, 2, 1, 2, 2, 1, 3, 2, 2]
+
+# The lock-in: the music times a reference at freq, smoothed over about
+# 60 ms. Its size is how much of freq is sounding.
+def lockin(music, freq):
+  let ph = TAU * phasor(freq)
+  $z = [0, 0]
+  $z = $z + ([music * cos(ph), -music * sin(ph)] - $z) * (dt / 0.06)
+  magnitude($z)
+
+let music = mono(input())
+let heard = array(9)
+let shape = array(9)
+each(9, i =>
+  heard[i] = lockin(music, notes[i])
+  shape[i] = sin(modeM[i] * PI * x / (w - 1)) * sin(modeN[i] * PI * y / (h - 1)))
+
+# Each note's figure, its size what is heard, its colour the note's place
+# in the octave, turning at the note's frequency slowed 256 times.
+def turn(i): TAU * log2(notes[i] / 220) + TAU * notes[i] / 256 * t
+let re = sum(9, n => shape[n - 1] * heard[n - 1] * cos(turn(n - 1)))
+let im = sum(9, n => shape[n - 1] * heard[n - 1] * sin(turn(n - 1)))
+# Softly bounded rather than clipped, so a bell's swell over the pad shows.
+let z = [re, im] * 40
+z / (1 + magnitude(z))
