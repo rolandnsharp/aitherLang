@@ -75,5 +75,6 @@ recursion stops after 1000 steps and gives 0 (the watchdog's place).
 | `waves` | three plane waves of colour crossing, brighter with the music |
 | `julia` | z → z² + c at every pixel, `c` walking round the edge of the Mandelbrot set, pushed out by the music's loudness |
 | `patches/pulse` | four on the floor, each part drawing itself: the kick a ring of petals fired from the middle, the bass rings as fine as its note is high, the hats sparks, the chord a rose in its own colour; all flying outward through a six-way kaleidoscope, a mandala a beat |
+| `patches/unfold` | two minutes in four sections, sound and picture changing together: dawn (a pad opening, bells, a Julia set breathing as its c walks a quarter turn a chord), rise (the beat coming in, the flow turning into a kaleidoscope tunnel, a riser spinning it), bloom (the full beat, a ring of petals a kick, each kick its own colour), drift (bells lighting where their notes sit on the pitch circle, the picture swirling down a drain) |
 | `bloom` (with music) | every kick fires a ring of petals from the middle, and the frames before fly outward through a six-way kaleidoscope: a mandala a beat, sailing off the screen. Driven by `low()` |
 | `swirl` | last frame turned and drawn in, so colour flows like water down a drain; a ring of the music's phase is poured in every frame |

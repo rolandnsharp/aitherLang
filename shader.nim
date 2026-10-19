@@ -62,6 +62,20 @@ proc emitBody(c: var Ctx; sc: var Scope; n: Node; buf: var string): Val
 proc emitTable(c: var Ctx; name: string; n: Node): Bind
 proc isTable(n: Node): bool
 
+# A local array, its entries computed (`[f * 2, f * 3, f * 4]`): a GLSL
+# array, indexed as a table is.
+proc emitArray(c: var Ctx; sc: Scope; name: string; n: Node; buf: var string): Bind =
+  var vals: seq[string]
+  for k in n.kids:
+    let v = c.emit(sc, k, buf)
+    if v.pair: fail(k, "an array's entries are numbers (a pair is two entries)")
+    vals.add v.code
+  let g = c.fresh(name)
+  buf.add &"  float {g}[{vals.len}] = float[]({vals.join(\", \")});\n"
+  Bind(code: g, table: vals.len)
+
+proc isArray(n: Node): bool = n.kind == nkArr and n.kids.len != 2
+
 # A name's binding, a let compiled the first time it's used (at the top
 # of main, so it's there for every draw after).
 proc look(c: var Ctx; sc: Scope; name: string; at: Node): Bind =
@@ -74,6 +88,11 @@ proc look(c: var Ctx; sc: Scope; name: string; at: Node): Bind =
       let node = c.lazies[k].node
       if node.kids[0].isTable:
         c.lazies[k].val = c.emitTable(name, node.kids[0])
+      elif node.kids[0].isArray:
+        var h = ""
+        let env = c.lazies[k].env
+        c.lazies[k].val = c.emitArray(env, name, node.kids[0], h)
+        c.hoist.add h
       else:
         var h = ""
         let env = c.lazies[k].env
@@ -357,6 +376,8 @@ proc emitBody(c: var Ctx; sc: var Scope; n: Node; buf: var string): Val =
     of nkLet:
       if s.kids[0].isTable:
         sc[s.str] = c.emitTable(s.str, s.kids[0])
+      elif s.kids[0].isArray:
+        sc[s.str] = c.emitArray(sc, s.str, s.kids[0], buf)
       else:
         let v = c.emit(sc, s.kids[0], buf)
         let name = c.fresh(s.str)

@@ -1,0 +1,138 @@
+# unfold: one patch, heard and seen, in four sections of 32 s that come
+# round every two minutes. Each part draws itself from its own envelope,
+# on the sample it sounds, and the sections move both together:
+#
+#   dawn    a pad opening in D minor, bells ringing up the chord; a Julia
+#           set breathing in the middle, its c walking round the edge of
+#           the Mandelbrot set a quarter turn a chord; colour flows
+#           outward like water
+#   rise    the kick comes in soft, then hats and bass; the flow turns
+#           into a kaleidoscope tunnel; a noise riser spins it faster
+#   bloom   the full beat: each kick fires a ring of petals, the bass
+#           draws rings as fine as its note, the hats spark, the Julia set
+#           flinches on every kick, the pad opens wide
+#   drift   the beat falls away; bells again, each one lighting where its
+#           note sits on the pitch circle (one turn an octave, so a chord
+#           is a shape); the picture swirls down a drain
+#
+#   ./aither patches/unfold.aither | tools/play hw:rockchipes8388c 20 | tools/vis patches/unfold.aither
+
+let pos = t - start_t
+let x = pos - floor(pos / 128) * 128            # where in the two minutes
+let tempo = 2                                   # 120 a minute
+let beat = phasor(tempo)                        # 0..1 through each beat
+let bar = int(pos / 2)
+let k = bar % 4                                 # Dm Bb F C, a bar each
+let fin = ease(pos / 3)
+
+# The sections, crossfading over 4 s (the end of drift into dawn too).
+def inSec(x, s): ease((x - s * 32 + 2) / 4) * (1 - ease((x - s * 32 - 30) / 4))
+let dawn = inSec(x, 0) + inSec(x, 4)
+let rise = inSec(x, 1)
+let bloom = inSec(x, 2)
+let drift = inSec(x, 3)
+let riser = ease((x - 54) / 10) * (1 - ease((x - 64) / 0.5))   # the last 10 s of rise
+
+let kickW = (rise * ease((x - 34) / 8) * 0.7 + bloom) * fin
+let kEnv = exp(-beat * 14) * kickW
+
+# The chords: roots (D2 Bb1 F2 C2), and the pad's three notes.
+let roots = [73.42, 58.27, 87.31, 65.41]
+let padA = [146.83, 116.54, 174.61, 130.81]
+let padB = [174.61, 146.83, 220, 164.81]
+let padC = [220, 174.61, 261.63, 196]
+
+# --- the picture's helpers ---
+
+def kaleido(p):
+  let a = phase(p)
+  let seg = TAU / 6
+  rotate([magnitude(p), 0], abs(a - floor(a / seg) * seg - seg / 2))
+
+# A ring at radius r with n petals, in colour turning with hue.
+def petals(p, r, n, hue):
+  let ring = exp(-pow((magnitude(p) - r) / 0.03, 2))
+  rotate([1, 0], 2 * phase(p) + hue) * ring * (0.5 + 0.5 * cos(n * phase(p)))
+
+def rec escape(z, c, n):
+  if n == 0 or magnitude(z) > 2 then n else escape(cmul(z, z) + c, c, n - 1)
+
+# The Julia set of c, coloured by how fast each point leaves; inside, and
+# far outside (where points leave at once), dark.
+def julia(p, c, zoom):
+  let n = escape(p * zoom, c, 48)
+  let steps = 48 - n
+  if n == 0 then [0, 0] else rotate([1, 0], steps * 0.4 + t * 0.5) * pow(min(1, steps / 14), 2)
+
+# A spot of light at a note's place on the pitch circle: one turn an
+# octave, from D; age 0..1 grows and fades it.
+def bellLight(p, f, age):
+  let a = TAU * log2(f / 73.42)
+  let at = rotate([0.55, 0], a)
+  let d = magnitude(p - at)
+  rotate([1, 0], a) * exp(-pow((d - age * 0.15) / 0.025, 2)) * exp(-age * 3)
+
+# --- the whole picture: last frame carried on ---
+
+# Flow (dawn, drift): turned more near the middle, drawn outward a touch;
+# short trails at dawn so the Julia set reads, a drain in drift.
+# Tunnel (rise, bloom): kaleidoscope, flying out, jolted by the kick,
+# spun by the riser.
+let tunnelW = clamp(rise + bloom, 0, 1)
+let swirl = 0.004 + drift * 0.03
+let keep = 0.88 + drift * 0.07 + tunnelW * 0.075
+def carry(p, tunnelW, swirl, keep, kEnv, riser):
+  let r = magnitude(p)
+  let flow = rotate(p * 0.993, swirl / (0.15 + r))
+  let tun = rotate(kaleido(p) * (0.96 - kEnv * 0.04), 0.015 + kEnv * 0.05 + riser * 0.08)
+  last(flow * (1 - tunnelW) + tun * tunnelW) * keep
+draw carry(pixel(), tunnelW, swirl, keep, kEnv, riser)
+
+# The Julia set, c a quarter turn round a chord, flinching on the kick.
+let juliaW = (dawn + bloom * 0.5 + drift * 0.3) * fin
+let c = rotate([0.7885 - kEnv * 0.03, 0], TAU * pos / 8)
+draw (if juliaW > 0.02 then julia(pixel(), c, 1.6 - bloom * 0.3) * juliaW * (0.14 - tunnelW * 0.1) else [0, 0])
+
+# --- the parts ---
+
+def voice(f): [osc(saw, f * 0.996), osc(saw, f * 1.004)]   # a saw a side, detuned
+
+play pad:
+  let open = 300 + dawn * ease((x - 4) / 24) * 900 + rise * 1200 + bloom * 2600 + drift * 700
+  let pump = 1 - kEnv * 0.7
+  draw petals(pixel(), 0.7, 3 + k, k * TAU / 4 + t * 0.1) * 0.03 * pump * fin
+  (voice(padA[k]) + voice(padB[k]) + voice(padC[k]) + voice(roots[k]) * 0.6) |> lpf(open, 0.25) |> gain(0.08 * pump * fin)
+
+play kick:
+  # Each kick its own colour, a step round the wheel.
+  draw petals(pixel(), 0.08 + kEnv * 0.12, 12, int(pos * tempo) * 2.4) * kEnv * kEnv * 1.3
+  sin(TAU * phasor(48 + 180 * exp(-beat * 30))) * kEnv * 0.75
+
+play bass:
+  let off = beat - 0.5
+  let env = (if off > 0 then exp(-off * 9) else 0) * (rise * ease((x - 44) / 4) + bloom + drift * 0.4 * (1 - ease((x - 100) / 8)))
+  let f = roots[k]
+  draw rotate([1, 0], magnitude(pixel()) * f * 0.5 - t * 3) * env * 0.05
+  osc(saw, f) |> lpf(160 + env * 900, 0.6) |> gain(0.32 * env)
+
+play hats:
+  let six = phasor(tempo * 4)
+  let w = rise * ease((x - 40) / 4) * 0.6 + bloom
+  let env = exp(-six * (if int(beat * 4) == 2 then 12 else 40)) * w
+  draw (if noise() > 0.997 then [0.9, 0.9] else [0, 0]) * env
+  noise() * env |> hpf(7000, 0.3) |> gain(0.1)
+
+play bells:
+  # Up the chord a beat at a time, an octave and more above the pad.
+  let w = (dawn + drift) * fin
+  let step = int(pos * tempo) % 4
+  let tones = [padA[k] * 2, padB[k] * 2, padC[k] * 2, padA[k] * 4]
+  let f = tones[step]
+  let age = beat
+  draw bellLight(pixel(), f, age) * w * 0.5
+  let ring = sin(TAU * phasor(f)) * exp(-age * 3) + sin(TAU * phasor(f * 2.76)) * exp(-age * 6) * 0.4 +
+             sin(TAU * phasor(f * 5.4)) * exp(-age * 10) * 0.2
+  [ring, ring] * w * 0.14
+
+play whoosh:
+  noise() * riser * riser |> hpf(400 + riser * 6000, 0.6) |> gain(0.08)

@@ -156,6 +156,7 @@ patches/tide.aither  1709F1E12D7309EA  -16.4  -6.6
 patches/tune.aither  685D2E094CB187D5  -15.1  -12.0
 patches/tuned_chords.aither  63793FDFF3E920BD  -20.4  -8.1
 patches/tuned_keys.aither  13014E187A2EB921  -22.5  -8.5
+patches/unfold.aither  6C3B0A8F361B104D  -25.8  -11.0
 patches/weather.aither  3E563D138B82A680  -26.2  -9.8
 patches/whipbird_doof.aither  5AD0FD761513A4CC  -28.3  -6.7
 patches/wobble.aither  A20D23164CE4A229  -13.0  -2.1

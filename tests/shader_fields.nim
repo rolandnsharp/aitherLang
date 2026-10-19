@@ -14,7 +14,7 @@ proc errorOf(src: string): string =
   except CatchableError as e: e.msg
 
 for f in ["fields/waves.aither", "fields/julia.aither", "fields/swirl.aither",
-          "fields/bloom.aither", "patches/pulse.aither"]:
+          "fields/bloom.aither", "patches/pulse.aither", "patches/unfold.aither"]:
   doAssert "void main()" in toGlsl(readFile(f)), f
 
 let j = toGlsl("def rec esc(z, c, n): if n == 0 or magnitude(z) > 2 then n else esc(cmul(z, z) + c, c, n - 1)\n" &
@@ -23,6 +23,7 @@ doAssert "for (int it = 0; it < " & $RecLimit in j and "continue;" in j and "bre
 doAssert "vec2 z_" in j                                   # z took the pair
 doAssert "o = vec4(vec2(0.5), 0.0, 1.0)" in toGlsl("draw 0.5\n")   # a number fills both sides
 doAssert "tab_notes" in toGlsl("let notes = [1, 2, 3]\ndraw notes[t]\n")
+doAssert "float[](" in toGlsl("let f = 2 + t\nlet a = [f, f * 2, f * 3]\ndraw a[t]\n")   # computed entries
 doAssert "+ vec2(0.25)" in toGlsl("draw [1, 0]\ndraw 0.25\n")      # draws add
 
 # One patch: a play's draw sees its lets; the sound's filter isn't
