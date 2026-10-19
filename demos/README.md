@@ -13,7 +13,8 @@ At the uConsole's 44.1 kHz (`AITHER_RATE` in `.bashrc`), a W×H picture
 is drawn 44100 / (W·H) times a second, and every pixel steps its field
 once a frame, so a demo costs about one cell update per sample.
 `./aither send demos/<demo>.aither` hot-swaps an edited demo as usual.
-`f` in `tv` is full screen, `q` closes it. Headphones help.
+`tv` opens full screen (`--window` for a window); `f` toggles, `q`
+closes it. Headphones help.
 
 | Demo | Size | What it shows |
 |---|---|---|

@@ -9,8 +9,8 @@
    one point to the next with the same energy per sample, so it is bright
    where it lingers and faint where it moves fast, and the phosphor fades
    it. A point outside the square blanks the beam. Stdin is copied to
-   stdout unchanged, so scope can sit anywhere in a chain. q or Escape
-   turns the tube off, f toggles full screen.
+   stdout unchanged, so scope can sit anywhere in a chain. It opens full
+   screen (--window for a window); f toggles, q or Escape closes it at once.
 
      --palette green|amber|cyan|blue|white|red   the phosphor (green, P31)
      --decay F    what is left of a trace after 1/60 s, 0..1 (0.85)
@@ -138,9 +138,7 @@ static const char *BlurFS =
     "}\n";
 
 /* The picture: light into the phosphor's colour, white-hot where it
-   burns. Turning on and off, the picture is squeezed toward the centre
-   (the same light in less room, so brighter) and the raster's glow
-   (uFlash) fills what is left of it. */
+   burns. */
 static const char *CompFS =
     "#version 300 es\n"
     "precision highp float;\n"
@@ -149,17 +147,9 @@ static const char *CompFS =
     "uniform highp sampler2D uBloom;\n"
     "uniform vec3 uPhos;\n"
     "uniform float uBloomK;\n"
-    "uniform float uFlash;\n"
-    "uniform float uSize;\n"
-    "uniform vec2 uCrt;\n"
     "out vec4 o;\n"
     "void main() {\n"
-    "  vec2 c = (uv - 0.5) / uCrt + 0.5;\n"
-    "  float light = 0.0;\n"
-    "  if (all(greaterThanEqual(c, vec2(0.0))) && all(lessThanEqual(c, vec2(1.0))))\n"
-    "    light = (texture(uAccum, c).r + uBloomK * texture(uBloom, c).r) / max(uCrt.x * uCrt.y, 0.02);\n"
-    "  vec2 e = max(abs(uv - 0.5) * uSize - max(uCrt * uSize * 0.5, vec2(1.2)), 0.0) / 1.5;\n"
-    "  light += uFlash * exp(-dot(e, e));\n"
+    "  float light = texture(uAccum, uv).r + uBloomK * texture(uBloom, uv).r;\n"
     "  vec3 col = uPhos * (1.0 - exp(-light));\n"
     "  col = mix(col, vec3(1.0), smoothstep(2.5, 14.0, light) * 0.85);\n"
     "  o = vec4(col + uPhos * 0.012, 1.0);\n"
@@ -167,18 +157,20 @@ static const char *CompFS =
 
 static void usage(void) {
     fputs("usage: aither patch.aither | scope [--palette green|amber|cyan|blue|white|red]\n"
-          "                                   [--decay 0.85] [--term | --frames FILE [--size 720]]\n"
-          "  float pairs in on stdin, the same out on stdout; q or Escape quits, f full screen\n",
+          "                                   [--decay 0.85] [--window | --term | --frames FILE [--size 720]]\n"
+          "  float pairs in on stdin, the same out on stdout; full screen unless --window;\n"
+          "  f toggles full screen, q or Escape quits\n",
           stderr);
 }
 
 int main(int argc, char **argv) {
     const char *pal = "green", *path = NULL;
     double decay = 0.85;
-    int dest = -1, size = 720;
+    int dest = -1, size = 720, windowed = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--palette") && i + 1 < argc) pal = argv[++i];
         else if (!strcmp(argv[i], "--decay") && i + 1 < argc) decay = atof(argv[++i]);
+        else if (!strcmp(argv[i], "--window")) windowed = 1;
         else if (!strcmp(argv[i], "--term")) dest = DEST_TERM;
         else if (!strcmp(argv[i], "--frames") && i + 1 < argc) { dest = DEST_FRAMES; path = argv[++i]; }
         else if (!strcmp(argv[i], "--size") && i + 1 < argc) size = atoi(argv[++i]);
@@ -197,6 +189,7 @@ int main(int argc, char **argv) {
 
     stream_start();
     Display d = {0};
+    d.windowed = windowed;
     if (display_open(&d, "scope", dest, path, size) < 0) return 1;
     if (dest == DEST_FRAMES)
         fprintf(stderr, "scope: %dx%d rgb24 frames at %d fps to %s\n"
@@ -208,9 +201,7 @@ int main(int argc, char **argv) {
            comp = gl_program(GL_FULLSCREEN_VS, CompFS);
     GLint uSize = glGetUniformLocation(beam, "uSize"), uSigma = glGetUniformLocation(beam, "uSigma"),
           uEnergy = glGetUniformLocation(beam, "uEnergy"), uStep = glGetUniformLocation(blur, "uStep"),
-          cPhos = glGetUniformLocation(comp, "uPhos"), cBloomK = glGetUniformLocation(comp, "uBloomK"),
-          cFlash = glGetUniformLocation(comp, "uFlash"), cSize = glGetUniformLocation(comp, "uSize"),
-          cCrt = glGetUniformLocation(comp, "uCrt");
+          cPhos = glGetUniformLocation(comp, "uPhos"), cBloomK = glGetUniformLocation(comp, "uBloomK");
     glUseProgram(down);
     glUniform1i(glGetUniformLocation(down, "uSrc"), 0);
     glUseProgram(blur);
@@ -247,13 +238,13 @@ int main(int argc, char **argv) {
     uint64_t shown = 0;                       /* samples drawn so far */
     int S = 0, B = 0;
     GLuint accT = 0, accF = 0, bT[2] = {0, 0}, bF[2] = {0, 0};
-    double t0 = now_s(), prev = t0, off = -1;
+    double prev = now_s();
 
     for (;;) {
         double t = now_s(), dt = t - prev;
         if (dt > 0.25) dt = 0.25;
         prev = t;
-        if ((display_poll(&d) || (stream.eof && shown >= stream.head)) && off < 0) off = t;
+        if (display_poll(&d) || (stream.eof && shown >= stream.head)) break;
 
         /* The phosphor is a float buffer the size of the picture, so the
            faintest trail fades all the way out; the bloom works at a
@@ -339,9 +330,6 @@ int main(int argc, char **argv) {
         glDrawArrays(GL_TRIANGLES, 0, 3);
 
         /* 4. The picture, in the phosphor's colour, wherever it goes. */
-        float cx = 1, cy = 1, flash = 0;
-        if (off >= 0) crt_off(t - off, &cx, &cy, &flash);
-        else if (t - t0 < CRT_ON) crt_on(t - t0, &cx, &cy, &flash);
         display_target(&d, S, S);
         glUseProgram(comp);
         glActiveTexture(GL_TEXTURE0);
@@ -350,14 +338,9 @@ int main(int argc, char **argv) {
         glBindTexture(GL_TEXTURE_2D, bT[0]);
         glUniform3f(cPhos, phos[0], phos[1], phos[2]);
         glUniform1f(cBloomK, BLOOM);
-        glUniform1f(cFlash, flash);
-        glUniform1f(cSize, (float)S);
-        glUniform2f(cCrt, cx, cy);
         glDrawArrays(GL_TRIANGLES, 0, 3);
         glActiveTexture(GL_TEXTURE0);
         display_present(&d);
-
-        if (off >= 0 && t - off > CRT_OFF) break;
     }
     display_close(&d);
     return 0;

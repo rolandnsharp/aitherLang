@@ -191,6 +191,7 @@ typedef struct {
     int dest;
     int halfblock;                /* terminal: half-blocks, two colours a cell (tv), not Braille */
     int nopace;                   /* frames: each one as it is drawn, no frame rate (tv) */
+    int windowed;                 /* a window (--window), not full screen */
     SDL_Window *win;              /* the window */
     SDL_GLContext ctx;
     EGLDisplay egl;               /* headless: EGL with no surface */
@@ -209,11 +210,12 @@ static volatile sig_atomic_t display_quit;
 static void on_signal(int s) { (void)s; display_quit = 1; }
 
 static int display_open(Display *d, const char *title, int dest, const char *path, int size) {
-    int halfblock = d->halfblock, nopace = d->nopace;   /* the caller's choices survive */
+    int halfblock = d->halfblock, nopace = d->nopace, windowed = d->windowed;  /* the caller's choices survive */
     memset(d, 0, sizeof *d);
     d->dest = dest;
     d->halfblock = halfblock;
     d->nopace = nopace;
+    d->windowed = windowed;
     d->size = size;
     d->tty_in = d->tty_out = d->frames = -1;
     if (dest == DEST_WINDOW) {
@@ -225,7 +227,9 @@ static int display_open(Display *d, const char *title, int dest, const char *pat
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
         SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-        d->win = SDL_CreateWindow(title, 720, 720, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+        /* Full screen (on the uConsole, the whole screen); f toggles. */
+        d->win = SDL_CreateWindow(title, 720, 720, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE |
+                                  (windowed ? 0 : SDL_WINDOW_FULLSCREEN));
         if (!d->win || !(d->ctx = SDL_GL_CreateContext(d->win))) {
             fprintf(stderr, "%s: no OpenGL ES 3 window: %s\n", title, SDL_GetError());
             return -1;
@@ -458,34 +462,6 @@ static void display_close(Display *d) {
         write_all(d->tty_out, off, strlen(off));
         tcsetattr(d->tty_in, TCSANOW, &d->saved);
     } else close(d->frames);
-}
-
-/* ------------------------------------------------------------- the tube */
-
-#define CRT_ON  0.8           /* seconds the tube takes to turn on */
-#define CRT_OFF 0.9           /* and off */
-
-static float ease(float x) {
-    x = x < 0 ? 0 : x > 1 ? 1 : x;
-    return x * x * (3 - 2 * x);
-}
-
-/* Turning on: a dot, a line opening sideways, the picture opening up
-   and down, and the flash fading. cx, cy are how much of the picture's
-   width and height are open; flash is the glow of what is open. */
-static void crt_on(double t, float *cx, float *cy, float *flash) {
-    const float e = 0.004f;
-    *cx = t < 0.12 ? e : e + (1 - e) * ease((float)(t - 0.12) / 0.18f);
-    *cy = t < 0.3 ? e : e + (1 - e) * ease((float)(t - 0.3) / 0.3f);
-    *flash = 2.5f * (1 - ease((float)(t / CRT_ON)));
-}
-
-/* And off: the picture collapses to a line, the line to a dot, the dot fades. */
-static void crt_off(double t, float *cx, float *cy, float *flash) {
-    const float e = 0.004f;
-    *cy = 1 - (1 - e) * ease((float)t / 0.3f);
-    *cx = 1 - (1 - e) * ease((float)(t - 0.3) / 0.25f);
-    *flash = 2.5f * ease((float)t / 0.3f) * (1 - ease((float)(t - 0.55) / 0.35f));
 }
 
 /* ---------------------------------------------------------------- GL bits */

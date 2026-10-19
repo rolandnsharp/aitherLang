@@ -21,8 +21,8 @@ make tools/scope                                        # needs sdl3
 chain, and it draws the sample being heard: with `play` after it, the
 picture keeps time with the sound. `--palette green|amber|cyan|blue|
 white|red` picks the phosphor, `--decay 0.85` how much of a trace is
-left after 1/60 s. `f` is full screen; `q` or Escape turns the tube
-off. `--term` draws in the terminal (over ssh), and `--frames FILE
+left after 1/60 s. It opens full screen (`--window` for a window); `f` toggles, and `q`
+or Escape closes it at once. `--term` draws in the terminal (over ssh), and `--frames FILE
 --size 720` writes raw RGB frames for `ffmpeg`.
 
 The display joins the points and fades them, so a slow motion is

@@ -20,7 +20,8 @@ The frame rate is the rate divided by w×h: 160×120 at 1.152 MHz is 60
 frames a second. Give the engine and `tv` the same `AITHER_RATE`. `tv`
 shows each frame whole at the sample being heard, as `scope` does, and
 passes the stream on unchanged. Pixels are crisp squares, or soft with
-`--smooth`. `f` is full screen; `q` or Escape turns the tube off.
+`--smooth`. It opens full screen (`--window` for a window); `f`
+toggles, and `q` or Escape closes it at once.
 `--term` draws in the terminal in half-blocks (over ssh), and
 `--frames FILE` writes every frame as raw RGB and prints the `ffmpeg`
 line that makes it a video.
