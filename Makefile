@@ -5,7 +5,7 @@ FLAGS := --mm:arc --threads:on --opt:speed -d:danger \
 
 all: aither
 
-aither: aither.nim engine.nim engine_types.nim cli_output.nim analysis.nim render.nim voice.nim codegen.nim tcc.nim parser.nim imports.nim dsp.nim midi.nim alsa_midi.c realtime.c stdlib.aither
+aither: aither.nim engine.nim engine_types.nim cli_output.nim analysis.nim render.nim voice.nim codegen.nim shader.nim tcc.nim parser.nim imports.nim dsp.nim midi.nim alsa_midi.c realtime.c stdlib.aither
 	$(NIM) c $(FLAGS) --out:aither aither.nim
 
 tools/play: tools/play.c realtime.c
@@ -22,6 +22,9 @@ tools/scope: tools/scope.c tools/display.h
 
 tools/tv: tools/tv.c tools/display.h
 	cc -O2 -Wall tools/tv.c -o tools/tv $$(pkg-config --cflags --libs sdl3) -lEGL -lGLESv2 -lpthread -lm
+
+tools/vis: tools/vis.c tools/display.h
+	cc -O2 -Wall tools/vis.c -o tools/vis $$(pkg-config --cflags --libs sdl3) -lEGL -lGLESv2 -lpthread -lm
 
 # One binary for every test that doesn't touch the engine's voice
 # table (tests/all.nim), then the ones that do, each on its own;
@@ -47,6 +50,6 @@ exact:
 	$(NIM) c -r $(TESTFLAGS) --out:tests/exact_builds tests/exact_builds.nim
 
 clean:
-	rm -rf aither nimcache/ test_parser test_eval test_stdlib tools/play tools/card tools/pad tools/scope tools/tv
+	rm -rf aither nimcache/ test_parser test_eval test_stdlib tools/play tools/card tools/pad tools/scope tools/tv tools/vis
 
 .PHONY: all clean test corpus corpus-update exact

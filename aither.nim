@@ -5,7 +5,7 @@
 ## (`audit`). No business logic lives here.
 
 import std/[os, strutils, times, terminal]
-import engine, render, analysis, cli_output
+import engine, render, analysis, cli_output, shader
 
 proc readRawStdin(): Stereo =
   ## `input()` for an offline run: raw float32 pairs on stdin, the same
@@ -75,7 +75,7 @@ proc sendPatch(path, extra: string): bool =
 proc usage() =
   echo "usage: aither [patch.aither ...] [seconds]      the engine: float pairs on stdout"
   echo "       aither <send|stop|mute|unmute|solo|park|unpark|clear|list|status|levels|" &
-       "parts|check|retrigger|midi|audit|try|spectrum|kill> [args]"
+       "parts|check|retrigger|midi|audit|try|spectrum|shader|kill> [args]"
   echo ""
   echo "  aither | aplay -f FLOAT_LE -c 2 -r 48000      play; send patches to it"
   echo "  aither set.aither | tools/play                 same, with a first voice loaded"
@@ -111,6 +111,7 @@ proc usage() =
   echo "                              live voice's state and time, without touching the"
   echo "                              sound (default 2s). Catches NaN/runaways first"
   echo "  spectrum [voice]            spectral summary of the engine's recent buffer"
+  echo "  shader <field.aither>       a field patch as GLSL, for tools/vis (vis branch)"
   echo "  kill                        shut down engine"
 
 proc isNumber(s: string): bool =
@@ -179,6 +180,10 @@ of "parts":
 of "profile":
   if args.len < 2: quit "usage: aither profile <voice> [seconds]"
   sendCmd("profile " & args[1] & (if args.len >= 3: " " & args[2] else: ""))
+of "shader":
+  if args.len < 2: quit "usage: aither shader <field.aither>"
+  try: stdout.write toGlsl(readFile(args[1]))
+  except CatchableError as e: quit e.msg
 of "check":
   if args.len < 2: quit "usage: aither check <voice>"
   sendCmd("check " & splitFile(args[1]).name)

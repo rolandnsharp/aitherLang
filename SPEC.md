@@ -1065,6 +1065,15 @@ the size. What the patch returns for a pixel is a complex number: `tv`
 shows its phase as hue and its magnitude as brightness, full at 1.
 See TV.md.
 
+### Fields (`vis`, an experiment on the `vis` branch)
+
+`aither shader field.aither` compiles a field patch to GLSL for
+`tools/vis`, which runs it at every pixel of every frame: `pixel()`
+(this pixel, as `tv`'s `pixel`), `input()` and `level()` (the music
+at the sample heard), `last(p)` (last frame's value at `p`), `t` and
+`dt`. No state, `play` or imports; a `def rec` stops after 1000
+steps and gives 0. See VIS.md.
+
 ### Polyphony
 
 - `poly(n_voices, voice_fn)` — fan a per-key synth across N voices
@@ -1177,6 +1186,7 @@ output) gets a fixed loop delay. A block is `AITHER_BUFFER` frames
 | `status`                         | `list` plus the master level               |
 | `retrigger <voice>`              | reset `start_t` in place                   |
 | `kill`                           | shut down engine                           |
+| `shader <field.aither>`          | the field patch as GLSL, for `tools/vis` (vis branch; see Fields) |
 
 ### Part-level
 

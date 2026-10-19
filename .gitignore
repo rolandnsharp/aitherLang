@@ -19,3 +19,4 @@ tests/*
 !tests/*.aither
 !tests/corpus.golden
 __pycache__/
+tools/vis

@@ -102,7 +102,7 @@ if paramCount() >= 4 and paramStr(1) == "shard":
   quit 0
 
 let tracked = execProcess("git ls-files '*.aither'").splitLines().filterIt(it.len > 0)
-let files = tracked.filterIt("/lib/" notin it).sorted()
+let files = tracked.filterIt("/lib/" notin it and not it.startsWith("fields/")).sorted()   # fields are pictures (vis)
 # Every tracked patch, libraries included, as committed at HEAD.
 let head = getTempDir() / ("aither-corpus-" & $getCurrentProcessId())
 createDir(head)
