@@ -1,0 +1,71 @@
+# ridge: a radio wave meets a hill. A transmitter on the left sends
+# waves over flat ground towards a ridge; the valley behind the ridge is
+# in its radio shadow, yet the waves bend over the top and down into it.
+# That's diffraction (Huygens, Fresnel; "knife-edge" to radio people),
+# and it's why a signal reaches you behind a hill, faintly, in the bush.
+#
+# The frequency slowly sweeps. Longer waves bend further into the shadow:
+# low frequencies get behind hills, high ones don't. Watch the valley
+# brighten as the wavelength grows.
+#
+# The field is Maxwell's for a wave in a vertical plane: the wave
+# equation, with the earth and the hill as conductors (the field is held
+# at zero there, so they reflect) and a soft border on the other three
+# sides that soaks the waves up, as if the sky went on. Each pixel shows
+# its phasor: hue is the phase of the oscillation, brightness the power a
+# receiver there would pick up. The terrain is drawn a dim, steady brown.
+#
+# The picture is the sound: the field scanned row by row. A row crosses
+# the wavefronts every few pixels, so you hear a high buzz whose pitch
+# falls as the wavelength grows.
+#
+#   ./aither demos/ridge.aither | tools/tv --size 48x32 --smooth | tools/play hw:rockchipes8388c 20
+
+let w = 48
+let h = 32
+let k = pixel_index(w, h)
+let x = k % w
+let y = int(k / w)
+let f = frame_number(w, h)              # field time: one step a frame
+let even = f % 2 == 0
+let pos = t - start_t
+
+# The terrain: flat ground three pixels deep, and a hill 13 high and 19
+# wide, centred two thirds of the way across.
+let groundTop = h - 3 - max(0, 13 * (1 - abs(x - 26) / 9.5))
+let earth = y >= groundTop
+
+# The transmitter: a mast 6 pixels above the ground, near the left edge.
+# Its period sweeps 8 to 16 frames (wavelength 4 to 8 pixels at 0.5
+# pixels a frame) and back every 40 s; its phase runs on smoothly.
+let period = 12 + 4 * sin(TAU * pos / 40)
+let omega = TAU / period
+$phase = 0.0
+$phase = if k == 0 then $phase + omega else $phase    # once a frame
+let mast = (h - 3 - 6) * w + 5
+
+# Two frames of the field, swapped each frame (as in phased_array).
+$a = array(w * h)
+$b = array(w * h)
+let c  = if even then $a[k] else $b[k]
+let p  = if even then $b[k] else $a[k]
+let lt = if x > 0 then (if even then $a[k - 1] else $b[k - 1]) else 0
+let rt = if x < w - 1 then (if even then $a[k + 1] else $b[k + 1]) else 0
+let up = if even then $a[k - w] else $b[k - w]
+let dn = if even then $a[k + w] else $b[k + w]
+
+# Leapfrog for u_tt = c² ∇²u, c² = 0.25. The sky, left and right edges
+# soak the waves up; the earth holds the field at zero.
+let lap = lt + rt + up + dn - 4 * c
+let edge = min(min(x, w - 1 - x), y)
+let soak = if edge < 4 then 0.8 + 0.05 * edge else 1
+let drive = if k == mast then sin($phase) else 0
+let next = if earth then 0 else (2 * c - p + 0.25 * lap) * soak + 0.5 * drive
+
+$b[k] = if even then next else $b[k]
+$a[k] = if even then $a[k] else next
+
+# The phasor, brightness as power; the terrain a dim brown.
+let z = [next, (next - c) / omega]
+let shown = z * magnitude(z) * 10
+if earth then [0.11, 0.06] else shown / max(1, magnitude(shown))

@@ -18,3 +18,4 @@ once a frame, so a demo costs about one cell update per sample.
 | Demo | Size | What it shows |
 |---|---|---|
 | `phased_array` | 32x24 | Two antennas, one wave field (Maxwell). The phase between them turns, and the beam swings with nothing moving: phased arrays, Steinmetz phasors. Hue is each pixel's phase, brightness its power. You hear the beam's angle as pitch. |
+| `ridge` | 48x32 | A radio wave meets a hill (Maxwell, Huygens, Fresnel). Waves from a mast bend over the ridge into the valley behind it, its radio shadow; the frequency sweeps, and longer waves reach further in. Ground reflections interfere near the mast. You hear the wavelength as pitch. |
