@@ -1077,7 +1077,9 @@ sees the lets around it, so a part draws from its own envelope. The
 sound never sees a draw (the parser drops them), so a patch sounds the
 same with or without. A picture has `pixel()` (this pixel, as `tv`'s
 `pixel`), `input()`, `level()` and `low()` (the music at the sample
-heard: its pair, loudness, loudness below 150 Hz), `pixel_size()`,
+heard: its pair, loudness, loudness below 150 Hz), `trace(x)` (the
+last 1024 pairs from a trigger, 0..1), `spectrum(f)` (its complex
+spectrum at f Hz, phase from a fixed time), `pixel_size()`,
 `t`; only what the draws use is compiled, and the sound's memory is an
 error. A picture's own memory is `$state` in a def a draw calls: a
 field, one value a pixel, kept frame to frame; `$x` is this pixel's,

@@ -260,7 +260,7 @@ proc emitCall(c: var Ctx; sc: Scope; n: Node; buf: var string): Val =
   let name = n.str
   if name in sc and sc[name].fn != "":                 # a parameter holding a function
     return c.emitCall(sc, Node(kind: nkCall, str: sc[name].fn, kids: n.kids, line: n.line), buf)
-  if name in c.defs and name notin ["pixel", "pixel_size", "input", "level", "low"]:
+  if name in c.defs and name notin ["pixel", "pixel_size", "input", "level", "low", "trace", "spectrum"]:
     return c.callDef(sc, n, c.defs[name], buf)
   for a in n.kids:
     if a.kind == nkNamedArg: fail(n, &"{name}: name its arguments only in a def's call, in a field patch (for now)")
@@ -327,6 +327,16 @@ proc emitCall(c: var Ctx; sc: Scope; n: Node; buf: var string): Val =
   of "low":                              # the loudness below ~150 Hz: the kick, the bass
     need 0
     return ("uLow", false)
+  of "trace":                            # the waveform, 0 oldest .. 1 newest, triggered
+    need 1
+    let x = arg(0)
+    if x.pair: fail(n, "trace takes a number, 0..1 along the last 1024 samples")
+    return (&"a_trace({x.code})", true)
+  of "spectrum":                         # the music's complex spectrum at f Hz
+    need 1
+    let f = arg(0)
+    if f.pair: fail(n, "spectrum takes a frequency in Hz")
+    return (&"a_spectrum({f.code})", true)
   of "pixel_size":                       # one pixel's width, in pixel()'s units
     need 0
     return ("uPx", false)
@@ -469,9 +479,9 @@ proc emitBody(c: var Ctx; sc: var Scope; n: Node; buf: var string): Val =
 const Prelude = """#version 300 es
 precision highp float;
 in vec2 uv;
-uniform float uT, uRate, uLevel, uLow, uFrame, uFresh, uPx, uStart;
+uniform float uT, uRate, uLevel, uLow, uFrame, uFresh, uPx, uStart, uT0;
 uniform vec2 uInput, uSpan;
-uniform sampler2D uF0, uF1, uF2;
+uniform sampler2D uF0, uF1, uF2, uTrace, uSpec;
 layout(location = 0) out vec4 o;
 float a_div(float a, float b) { return b == 0.0 ? 0.0 : a / b; }
 vec2 a_div(vec2 a, float b) { return b == 0.0 ? vec2(0.0) : a / b; }
@@ -493,6 +503,20 @@ float a_noise(float k) {
   v = v * 1664525u + 1013904223u; v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
   v ^= v >> 16u; v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
   return float(v.x) / 2147483648.0 - 1.0;
+}
+vec2 a_trace(float x) { return texture(uTrace, vec2((clamp(x, 0.0, 1.0) * 1023.0 + 0.5) / 1024.0, 0.5)).rg; }
+// Bin k of the spectrum, its phase taken from f rather than its centre
+// (the rest of the way to phase from sample 0), so a tone at f holds still.
+vec2 a_bin(int k, float f) {
+  vec2 b = texelFetch(uSpec, ivec2(((k % 4096) + 4096) % 4096, 0), 0).rg;
+  float a = -6.28318530717959 * fract((f - float(k) * uRate / 4096.0) * uT0);
+  return vec2(b.x * cos(a) - b.y * sin(a), b.x * sin(a) + b.y * cos(a));
+}
+vec2 a_spectrum(float f) {
+  if (abs(f) >= uRate * 0.5) return vec2(0.0);
+  float x = f / uRate * 4096.0;
+  float k = floor(x);
+  return mix(a_bin(int(k), f), a_bin(int(k) + 1, f), x - k);
 }
 vec2 a_field(sampler2D f, vec2 p, vec2 init) { return uFresh > 0.5 ? init : texture(f, p / uSpan * 0.5 + 0.5).rg; }
 """

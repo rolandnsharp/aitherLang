@@ -9,7 +9,8 @@
    tv shows one: hue from the phase, brightness from the magnitude.
    pixel() is where the pixel is (x across -1..1, y up, square pixels);
    input() is the music's pair at the sample being heard, level() its
-   loudness then, low() its loudness below 150 Hz (the kick). A
+   loudness then, low() its loudness below 150 Hz (the kick), trace(x)
+   the last 1024 pairs from a trigger, spectrum(f) its FFT at f Hz. A
    picture's memory is $state in a def a draw calls: a field, one pair a
    pixel, frame to frame, a texture here (at most 3); each frame the
    picture and every field are written in one pass, reading last
@@ -153,6 +154,84 @@ static double voice_start(const char *voice) {
     return r;
 }
 
+/* The trace: TRACE_N pairs, from a rising zero-crossing of the real part
+   (as a scope triggers), so a steady tone stands still. The spectrum: a
+   SPEC_N-point FFT of the pair as one complex signal, Hann-windowed,
+   each bin's phase measured from sample 0 rather than from the window's
+   start (here, exactly, for the bin's own frequency; the shader takes
+   off the rest for the frequency it asks for, a few hertz at most, from
+   uT0), so a steady tone keeps its phase frame to frame and two close
+   tones turn at their difference; a full-scale tone reads 1. */
+#define TRACE_N 1024
+#define SPEC_N 4096
+
+static void fft(double *re, double *im, int n) {
+    for (int i = 1, j = 0; i < n; i++) {                /* bit-reversed order */
+        int b = n >> 1;
+        for (; j & b; b >>= 1) j ^= b;
+        j |= b;
+        if (i < j) {
+            double tr = re[i], ti = im[i];
+            re[i] = re[j]; im[i] = im[j]; re[j] = tr; im[j] = ti;
+        }
+    }
+    for (int len = 2; len <= n; len <<= 1) {
+        double a = -6.283185307179586 / len, wr = cos(a), wi = sin(a);
+        for (int i = 0; i < n; i += len) {
+            double cr = 1, ci = 0;
+            for (int k = 0; k < len / 2; k++) {
+                int p = i + k, q = p + len / 2;
+                double xr = re[q] * cr - im[q] * ci, xi = re[q] * ci + im[q] * cr;
+                re[q] = re[p] - xr; im[q] = im[p] - xi;
+                re[p] += xr; im[p] += xi;
+                double nr = cr * wr - ci * wi;
+                ci = cr * wi + ci * wr;
+                cr = nr;
+            }
+        }
+    }
+}
+
+/* Both, for the music at sample `now`, into the two textures; *t0 is
+   when the spectrum's window starts, in seconds. */
+static void readouts(uint64_t now, GLuint traceTex, GLuint specTex, double *t0) {
+    static float buf[2 * SPEC_N], out[2 * SPEC_N];
+    static double re[SPEC_N], im[SPEC_N];
+    uint64_t from = now > 2 * TRACE_N ? now - 2 * TRACE_N : 0;
+    size_t n = stream_range(buf, from, now);
+    memset(out, 0, sizeof out);
+    if (n >= TRACE_N) {
+        size_t start = n - TRACE_N;
+        for (size_t k = n - TRACE_N; k >= 1; k--)
+            if (buf[2 * (k - 1)] < 0 && buf[2 * k] >= 0) { start = k; break; }
+        memcpy(out, buf + 2 * start, sizeof(float) * 2 * TRACE_N);
+    }
+    glBindTexture(GL_TEXTURE_2D, traceTex);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, TRACE_N, 1, GL_RG, GL_FLOAT, out);
+
+    uint64_t s0 = now > SPEC_N ? now - SPEC_N : 0;
+    *t0 = s0 / stream.rate;
+    n = stream_range(buf, s0, now);
+    memset(out, 0, sizeof out);
+    if (n == SPEC_N) {
+        for (int i = 0; i < SPEC_N; i++) {
+            double w = 0.5 - 0.5 * cos(6.283185307179586 * i / SPEC_N);
+            re[i] = buf[2 * i] * w;
+            im[i] = buf[2 * i + 1] * w;
+        }
+        fft(re, im, SPEC_N);
+        uint64_t off = s0 % SPEC_N;
+        for (int k = 0; k < SPEC_N; k++) {
+            double a = -6.283185307179586 * (double)(((uint64_t)k * off) % SPEC_N) / SPEC_N;
+            double c = cos(a), s = sin(a);
+            out[2 * k] = (float)((re[k] * c - im[k] * s) / (SPEC_N / 2));
+            out[2 * k + 1] = (float)((re[k] * s + im[k] * c) / (SPEC_N / 2));
+        }
+    }
+    glBindTexture(GL_TEXTURE_2D, specTex);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, SPEC_N, 1, GL_RG, GL_FLOAT, out);
+}
+
 static double mtime(const char *path) {
     struct stat st;
     if (stat(path, &st) < 0) return 0;
@@ -230,6 +309,8 @@ int main(int argc, char **argv) {
     int built = -1, fresh = 1;
     int precise = gl_has("GL_EXT_color_buffer_float") && gl_has("GL_OES_texture_float_linear");
     pic = rg_texture(RW, RH, 0);
+    GLuint traceTex = rg_texture(TRACE_N, 1, precise), specTex = rg_texture(SPEC_N, 1, precise);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);   /* specTex: negative f wraps to the top bins */
 
     static float buf[2 * 2048];
     double t0 = now_s(), prev = t0;
@@ -244,7 +325,7 @@ int main(int argc, char **argv) {
 
         /* The music at the sample being heard: the pair, and the loudness
            over the last 2048 samples (46 ms at 44.1 kHz). */
-        double t = wall - t0, level = 0, low = 0;
+        double t = wall - t0, level = 0, low = 0, t0spec = 0;
         float in[2] = {0, 0};
         if (music) {
             uint64_t now;
@@ -276,6 +357,7 @@ int main(int argc, char **argv) {
                 in[0] = buf[2 * (n - 1)];
                 in[1] = buf[2 * (n - 1) + 1];
             }
+            readouts(now, traceTex, specTex, &t0spec);
         }
 
         if (music && wall - asked > 0.25) {
@@ -328,6 +410,13 @@ int main(int argc, char **argv) {
         glUniform1f(glGetUniformLocation(prog, "uFresh"), (float)fresh);
         glUniform1f(glGetUniformLocation(prog, "uPx"), 2.0f / RW);
         glUniform1f(glGetUniformLocation(prog, "uStart"), (float)start);
+        glUniform1f(glGetUniformLocation(prog, "uT0"), (float)t0spec);
+        glUniform1i(glGetUniformLocation(prog, "uTrace"), 4);
+        glUniform1i(glGetUniformLocation(prog, "uSpec"), 5);
+        glActiveTexture(GL_TEXTURE4);
+        glBindTexture(GL_TEXTURE_2D, traceTex);
+        glActiveTexture(GL_TEXTURE5);
+        glBindTexture(GL_TEXTURE_2D, specTex);
         glUniform1f(glGetUniformLocation(prog, "uLevel"), (float)level);
         glUniform1f(glGetUniformLocation(prog, "uLow"), (float)low);
         glUniform1f(glGetUniformLocation(prog, "uFrame"), (float)frame);

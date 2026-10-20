@@ -1,0 +1,121 @@
+# prism: the music's spectrum, measured, drawn on a pitch spiral. One
+# turn is an octave (A at the right, going round anticlockwise), seven
+# octaves out from the middle, so every point of the spiral is a pitch
+# and the same note in every octave lies on one spoke. Each point is lit
+# by the music's spectrum there, brightness how loud on a decibel scale
+# (-50 dB black, -6 dB full), hue the note's place in the octave (A red,
+# every octave), so a chord is a star of colours and two notes a hair
+# apart pulse at the rate they beat. Every voice is a complex tone (left
+# the cosine, right the sine), so round the outside the waveform itself,
+# bent into a ring, turns through the colours as a pair does.
+#
+# The music is written to show what the spiral sees, 30 s each:
+#
+#   series  the harmonic series of A1, a partial at a time: octaves stack
+#           on one spoke, the fifths (3, 6, 12) on the next, then the
+#           thirds, the natural seventh just shy of G
+#   chords  just chords, A D E A: each a star of spokes
+#   siren   one voice gliding up three octaves and down, a point running
+#           round the spiral with its harmonics in tow
+#   beats   pairs of close notes, so their spots pulse: A4 and a hertz
+#           above, then over A4 the just fifth (660 Hz, 3:2) and the
+#           tempered one (659.26 Hz, the piano's), beating three times in
+#           four seconds: the 0.11% the piano's fifth is off
+#
+#   ./aither patches/prism.aither | tools/play hw:rockchipes8388c 20 | tools/vis patches/prism.aither
+
+let pos = t - start_t
+let x = pos - floor(pos / 120) * 120
+let fin = ease(pos / 3)
+def inSec(x, s): ease((x - s * 30 + 1.5) / 3) * (1 - ease((x - s * 30 - 28.5) / 3))
+let series = inSec(x, 0) + inSec(x, 4)
+let chords = inSec(x, 1)
+let siren = inSec(x, 2)
+let beats = inSec(x, 3)
+
+# --- the sound ---
+
+# A complex tone: the cosine left, the sine right, one spot on the spiral
+# (a real tone would be two, at plus and minus its frequency).
+def tone(f): rotate([1, 0], TAU * phasor(f))
+
+# A partial n of A1 (55 Hz), in once the series reaches it.
+def partial(n, x):
+  let on = ease((x - n * 1.6 + 1) / 1.2)
+  tone(55 * n) * on / pow(n, 0.6)
+
+play harmonics:
+  let s = partial(1, x) + partial(2, x) + partial(3, x) + partial(4, x) + partial(5, x) + partial(6, x) +
+          partial(7, x) + partial(8, x) + partial(9, x) + partial(10, x) + partial(11, x) + partial(12, x) +
+          partial(13, x) + partial(14, x) + partial(15, x) + partial(16, x)
+  s * 0.09 * series * fin
+
+# A note: three harmonics, softly.
+def note(f): tone(f) + tone(2 * f) * 0.3 + tone(3 * f) * 0.12
+
+play just:
+  let k = int((x - 30) / 7.5) % 4
+  let root = [110, 146.667, 165, 110]
+  let r = root[k]
+  let sw = ease(((x - 30) - floor((x - 30) / 7.5) * 7.5) / 0.6)
+  let s = note(r) + note(r * 1.25) + note(r * 1.5) + note(r * 2) * 0.7
+  s * 0.08 * chords * sw * fin
+
+play glide:
+  # Up three octaves over 13 s, a breath, and down.
+  let u = clamp((x - 61) / 13, 0, 1) - clamp((x - 75) / 13, 0, 1)
+  let f = 110 * pow(2, 3 * ease(u))
+  let s = note(f) + note(55) * 0.5
+  s * 0.1 * siren * fin
+
+play pairs:
+  # A4 and a hertz above for 15 s (they beat once a second), then over
+  # A4 its just fifth (3:2) and its tempered fifth (2^(7/12)) together.
+  let first = 1 - ease((x - 104) / 1)
+  let a = (note(440) + note(441)) * first
+  let b = (note(440) + note(440 * 1.5) * 0.8 + note(440 * pow(2, 7 / 12)) * 0.8) * (1 - first)
+  (a + b) * 0.07 * beats * fin
+
+# --- the picture ---
+
+# Where p falls on the spiral: which turn (octave) it's nearest, and
+# how far off the arm, in octaves.
+def arm(p):
+  let u = phase(p) / TAU
+  let o = (magnitude(p) - 0.06) / 0.07 - u
+  [floor(o + 0.5) + u, o - floor(o + 0.5)]
+
+# The spiral lit by the spectrum: the pitch at p (from A0, 27.5 Hz),
+# how loud the music is there in decibels (-50 black, -6 full), in the
+# colour of its place in the octave, only on the arm. (Hue isn't the
+# measured phase: measured from a fixed time, phase turns a full circle
+# per hertz per second of that time, so neighbouring pixels would be
+# every colour; a note's phase holds still only at its own pitch.)
+def lit(p):
+  let w = arm(p)
+  let f = 27.5 * pow(2, w[0])
+  let db = 20 * log(max(magnitude(spectrum(f)), 1e-6)) / log(10)
+  let b = clamp((db + 50) / 44, 0, 1)
+  if w[0] < 0 or w[0] > 7 then [0, 0] else rotate([1, 0], TAU * w[0]) * b * 1.3 * exp(-pow(w[1] / 0.12, 2))
+
+# A faint guide: the arm itself, and the spokes of A and E.
+def guide(p):
+  let w = arm(p)
+  let onArm = exp(-pow(w[1] / 0.03, 2)) * 0.05
+  let spokeA = exp(-pow((w[0] - floor(w[0] + 0.5)) / 0.008, 2)) * 0.06
+  if w[0] < 0 or w[0] > 7 then [0, 0] else [onArm + spokeA, onArm]
+
+# The waveform round the outside: angle is time along the trace, the
+# ring pushed out and in by the real part, coloured by the pair.
+def ring(p):
+  let s = trace(phase(p) / TAU + 0.5)
+  let r = 0.62 + s[0] * 0.12
+  s / max(magnitude(s), 1e-6) * exp(-pow((magnitude(p) - r) / 0.006, 2)) * 0.9
+
+# A little phosphor, so the spiral glows rather than flickers.
+def glow(p, new):
+  $g = [0, 0]
+  $g = $g * 0.6 + new * 0.4
+  $g
+
+draw glow(pixel(), lit(pixel())) + guide(pixel()) + ring(pixel())

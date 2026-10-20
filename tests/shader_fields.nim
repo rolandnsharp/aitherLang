@@ -15,7 +15,7 @@ proc errorOf(src: string): string =
 
 for f in ["fields/waves.aither", "fields/julia.aither", "fields/swirl.aither",
           "fields/bloom.aither", "patches/pulse.aither", "patches/unfold.aither",
-          "patches/rain.aither", "patches/orbits.aither"]:
+          "patches/rain.aither", "patches/orbits.aither", "patches/prism.aither"]:
   doAssert "void main()" in toGlsl(readFile(f)), f
 
 let j = toGlsl("def rec esc(z, c, n): if n == 0 or magnitude(z) > 2 then n else esc(cmul(z, z) + c, c, n - 1)\n" &
@@ -48,6 +48,8 @@ doAssert "only reads" in errorOf("def f(p):\n  $g = [0, 0]\n  $g[p] = 1\n  $g\nd
 doAssert "never changes" in errorOf("let f = 2 + t\ndraw phasor(f)\n")      # it would drift
 doAssert "(uT - uStart)" in toGlsl("let fs = [2, 3]\nlet f = fs[1] * 2\ndef tick(g): phasor(g)\ndraw tick(f)\n")
 doAssert "uStart" in toGlsl("let pos = t - start_t\ndraw pos\n")
+doAssert "a_trace(" in toGlsl("draw trace(0.5)\n") and "a_spectrum(" in toGlsl("draw spectrum(440)\n")
+doAssert "frequency in Hz" in errorOf("draw spectrum([1, 2])\n")
 doAssert "last() is gone" in errorOf("draw last(pixel())\n")
 doAssert "nothing to draw" in errorOf("sin(1)\n")
 doAssert "can't nest" in errorOf("def rec f(n): if n == 0 then 0 else 1 + f(n - 1)\ndraw f(3)\n")
