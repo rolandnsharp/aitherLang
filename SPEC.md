@@ -260,7 +260,8 @@ that passes itself a pair there counts too. Such a parameter
 takes a pair whole, and a number passed to it fills both
 sides. A def returns a pair when its result is one: a literal
 `[a, b]`, a pair call, a pair parameter, a `let` bound to a
-pair, or arithmetic on one (`def norm(z): z / magnitude(z)`).
+pair, pair state (`$z = [0, 0]`), or arithmetic on one
+(`def norm(z): z / magnitude(z)`).
 
 `sum`, `each` and `array(N)` accept any compile-time number:
 a literal, a name bound to one, `len(array)`, or arithmetic

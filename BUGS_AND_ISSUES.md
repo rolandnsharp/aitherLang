@@ -9,6 +9,7 @@ below as a record of what went wrong and why.
 | Issue | Status |
 |-------|--------|
 | a def parameter passed as `rotate`'s angle was taken for a pair: `def cardioid(th): rotate([0.5, 0], th)` failed with "rotate takes a pair and an angle (or three numbers), got 4 numbers". Pair inference marked every argument of a pair builtin as a pair, though `rotate`'s angle, `cscale`'s factor, `analytic`'s signal and `phasor_pair`'s frequency are numbers. Found writing patches/orbits on the vis branch | RESOLVED (takesPairAt in codegen; tests/pair_positions.nim) |
+| a def couldn't return its own pair state: `def f(x): $z = [0, 0] ... $z * 0.5` failed with "the result needs one number but gets a pair", though a let bound to a pair worked. The return inference followed pair lets, not pair `$state` | RESOLVED (stereoIn counts pair state declarations; tests/pair_positions.nim) |
 
 ## Session log: 2026-10-17
 
