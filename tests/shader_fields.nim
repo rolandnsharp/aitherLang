@@ -15,7 +15,7 @@ proc errorOf(src: string): string =
 
 for f in ["fields/waves.aither", "fields/julia.aither", "fields/swirl.aither",
           "fields/bloom.aither", "patches/pulse.aither", "patches/unfold.aither",
-          "patches/rain.aither"]:
+          "patches/rain.aither", "patches/orbits.aither"]:
   doAssert "void main()" in toGlsl(readFile(f)), f
 
 let j = toGlsl("def rec esc(z, c, n): if n == 0 or magnitude(z) > 2 then n else esc(cmul(z, z) + c, c, n - 1)\n" &
