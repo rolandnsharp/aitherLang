@@ -707,7 +707,8 @@ proc emitStereo(c: Ctx; sc: Scope; n: Node; pre: var string): StereoVal
 proc isStereoReturn(c: Ctx; n: Node): bool
 
 # Inside a def body, `names` are the names known to hold a pair: its
-# pair params (see pairParams) and the lets bound to a pair so far. A
+# pair params (see pairParams), the lets bound to a pair so far, and
+# its pair state (`$z = [0, 0]`, declared so far). A
 # result that is one of them, or arithmetic on one, is a pair too, so
 # `def norm(z): z / magnitude(z)` and a recursion's `then z` return
 # pairs.
@@ -723,6 +724,8 @@ proc stereoIn(c: Ctx; n: Node; names: HashSet[string]): bool =
       if k.kind == nkLet:
         if c.stereoIn(k.kids[0], names): names.incl k.str
         else: names.excl k.str
+      elif k.kind == nkVar and c.stereoIn(k.kids[0], names):
+        names.incl k.str
     false
   of nkIf:
     c.stereoIn(n.kids[1], names) or c.stereoIn(n.kids[2], names)

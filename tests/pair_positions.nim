@@ -16,4 +16,7 @@ same("def grow(k): cscale(k, [0.3, 0.1])\ngrow(t)\n", "cscale(t, [0.3, 0.1])\n")
 same("def turn(p, th): rotate(p, th)\nturn([0.5, 0.2], t)\n", "rotate([0.5, 0.2], t)\n")   # p still a pair
 same("def card(th): rotate([0.5, 0], th) - rotate([0.25, 0], 2 * th)\ncard(t) * 0.5\n",
      "(rotate([0.5, 0], t) - rotate([0.25, 0], 2 * t)) * 0.5\n")
+# A def returns its pair state, as it returns a pair let.
+same("def f(x):\n  $z = [0, 0]\n  $z = [x, 0.2]\n  $z * 0.5\nf(sin(TAU * 3 * t))\n",
+     "def f(x):\n  $z = [0, 0]\n  $z = [x, 0.2]\n  let r = [$z[0], $z[1]]\n  r * 0.5\nf(sin(TAU * 3 * t))\n")
 echo "pair_positions ok"
