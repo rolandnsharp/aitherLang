@@ -688,6 +688,47 @@ plane: inside the cardioid → silent (fixed point); just past the
 boundary → chaotic but bounded → a shimmering metallic zone; far
 outside → escape and silence.
 
+### Orbit synthesis: the iteration clocked at the pitch
+
+Iterating once a sample makes c choose the timbre *and* the pitch: a
+3-cycle at 48 kHz sounds at 16 kHz. Clock the hops instead, q of them
+a cycle, and glide between the points they land on:
+
+```
+def orbit(f, q, c):
+  let step = phasor(f * q)
+  $z = [0, 0]
+  $was = [0, 0]
+  $last = 0
+  let hop = step < $last                 # the phasor wrapped: hop
+  $last = step
+  $was = if hop then $z else $was
+  $z = if hop then (if magnitude($z) > 2 then [0, 0] else cmul($z, $z) + c) else $z
+  let s = step * step * (3 - 2 * step)   # glide from where it was to where it is
+  $was + ($z - $was) * s
+```
+
+Now pitch and timbre come apart. The pitch is `f`. The timbre is the
+shape of the orbit, which c decides, and the Mandelbrot set is a map
+of timbres:
+
+- **Inside the main cardioid** z spirals into a fixed point. The tone
+  rings down like a plucked string, turning at an angle set by c.
+- **In the bulb at angle p/q round the cardioid** z settles into a
+  cycle of q points, a q-pointed star traced round and round. Clocked
+  at q hops a cycle, that is a steady tone at exactly `f`, and the
+  star is its waveform: left the real part, right the imaginary, so
+  `tools/scope` draws the star itself.
+
+The point at angle θ round the cardioid is `rotate([0.5, 0], θ) -
+rotate([0.25, 0], 2 * θ)`. A bulb p/q sits there at θ = 2π·p/q and is
+about sin(πp/q)/q² across, so a c a little way out from the edge
+along that direction lands in it. A chord is then a set of pitches
+*and* rotation numbers (1/2, 1/3, 1/4 …). Moving c from one bulb to
+the next through the cardioid collapses one star, rings down, and
+locks into the next one: a change of chord heard as mode-locking.
+`patches/orbits.aither` plays four such chords, three voices each.
+
 ### Cost notes
 
 - Pair ops are 4 mults + 2 adds at most (`cmul`, `rotate`). Trivial.

@@ -1,0 +1,83 @@
+# orbits: orbit synthesis. Three voices, each a point z hopping
+# z -> z² + c, the hops played as its waveform (left the real part,
+# right the imaginary, so tools/scope draws the orbit itself).
+#
+# The hops are clocked by a phasor at q times the pitch, and z glides
+# from one point to the next between them. Where c is decides the
+# sound. Inside the main cardioid z spirals into a fixed point: the
+# tone dies away like a plucked string, turning at an angle set by c.
+# Out in the bulb at angle p/q round it, z falls into a cycle of q
+# points, a q-pointed star, played round and round: a steady tone at
+# exactly the pitch, whose timbre is the star. So the chord is a set of
+# rotation numbers (1/2, 1/3, 1/4 ...), and between chords each voice
+# dives back into the cardioid (its star collapses, ringing down) and
+# climbs out into the next bulb (a new star locks in): consonance as
+# mode-locking. See COMPOSING.md, "Orbit synthesis".
+#
+#   ./aither patches/orbits.aither | tools/play hw:rockchipes8388c 20 | tools/scope
+
+let pos = t - start_t
+let fin = ease(pos / 6)
+
+# Four chords of 24 s; each voice glides to the next over the last 8.
+let span = 24
+let sec = int(pos / span)
+let into = pos - sec * span
+let u = ease((into - 16) / 8)                     # 0 holding, 0..1 moving on
+let a = sec % 4
+let b = (sec + 1) % 4
+
+# Each voice: its pitch, and its bulb's rotation number p/q.
+let pitch1 = [110, 92.5, 73.42, 82.41]           # A  F#  D  E
+let pitch2 = [165, 138.75, 110.13, 123.61]
+let pitch3 = [220, 185, 146.83, 164.81]
+let num1 = [1, 1, 2, 1]
+let den1 = [2, 3, 5, 4]
+let num2 = [1, 2, 3, 1]
+let den2 = [3, 5, 7, 3]
+let num3 = [1, 1, 1, 3]
+let den3 = [4, 5, 3, 8]
+
+# The point of the main cardioid at angle θ, and c: out into that
+# bulb by a little less than its size (about sin(πp/q)/q²) while held,
+# back inside the cardioid halfway through a glide.
+def cardioid(th): rotate([0.5, 0], th) - rotate([0.25, 0], 2 * th)
+def seat(n0, d0, n1, d1, u):
+  let r0 = n0 / d0
+  let r1 = n1 / d1
+  let th = TAU * (r0 + (r1 - r0) * u)
+  let out = (sin(PI * r0) / (d0 * d0)) * (1 - u) + (sin(PI * r1) / (d1 * d1)) * u
+  let edge = cardioid(th)
+  let dip = sin(PI * u)
+  edge * (1 - dip * 0.12) + edge / magnitude(edge) * out * 0.6 * (1 - dip)
+
+let c1 = seat(num1[a], den1[a], num1[b], den1[b], u)
+let c2 = seat(num2[a], den2[a], num2[b], den2[b], u)
+let c3 = seat(num3[a], den3[a], num3[b], den3[b], u)
+let f1 = pitch1[a] + (pitch1[b] - pitch1[a]) * u
+let f2 = pitch2[a] + (pitch2[b] - pitch2[a]) * u
+let f3 = pitch3[a] + (pitch3[b] - pitch3[a]) * u
+let q1 = den1[a] + (den1[b] - den1[a]) * u
+let q2 = den2[a] + (den2[b] - den2[a]) * u
+let q3 = den3[a] + (den3[b] - den3[a]) * u
+
+# --- the sound: z hops q times a cycle, so a q-cycle sounds at f ---
+
+def orbit(f, q, c):
+  let step = phasor(f * q)
+  $z = [0, 0]
+  $was = [0, 0]
+  $last = 0
+  let hop = step < $last                             # the phasor wrapped: hop
+  $last = step
+  $was = if hop then $z else $was
+  $z = if hop then (if magnitude($z) > 2 then [0, 0] else cmul($z, $z) + c) else $z
+  let s = step * step * (3 - 2 * step)               # glide from where it was to where it is
+  $was + ($z - $was) * s
+
+play voices:
+  let v = orbit(f1, q1, c1) * 0.5 + orbit(f2, q2, c2) * 0.35 + orbit(f3, q3, c3) * 0.25
+  v |> hpf(30, 0.5) |> lpf(3500, 0.3) |> gain(1.6 * fin)
+
+play sub:
+  osc(sin, f1 / 2) * 0.07 * fin
