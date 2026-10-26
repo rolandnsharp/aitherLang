@@ -1503,8 +1503,9 @@ midi_freq and produces silence).
 
 ## Performance
 
-- The engine is a bytecode VM, not tree-walking. Even so,
-  four voices with reverb each can hit 60%+ of one core.
+- Each patch is compiled to C (by TCC at once, then by cc -O2
+  behind it). Even so, four voices with reverb each can hit
+  60%+ of one core on the uConsole.
 - **Reverb is expensive.** A Schroeder reverb does ~10
   array accesses per sample. One shared reverb beats four
   per-voice reverbs.

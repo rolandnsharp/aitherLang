@@ -198,7 +198,7 @@ aither stop kick 4          # fade out over 4 seconds
 
 ## Why the language defines itself
 
-The only builtins hardcoded in the evaluator are math
+The only builtins hardcoded in the compiler are math
 functions (`sin`, `cos`, `exp`, `pow`...), two stateful
 primitives (`phasor`, `noise`), and one compile-time fold
 (`sum(N, lambda)`). The fold isn't really runtime — it

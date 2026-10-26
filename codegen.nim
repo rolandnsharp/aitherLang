@@ -1908,8 +1908,7 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
     # abs on doubles is fabs in C
     if name == "abs" and n.kids.len == 1:
       return "fabs(" & c.emitExpr(sc, n.kids[0]) & ")"
-    # Shape helpers (builtin as bytecode ops previously) — inline via
-    # phasor + shape fn. But these take a *phase* argument, not freq.
+    # Shape helpers — inline via phasor + shape fn. But these take a *phase* argument, not freq.
     # saw/tri/sqr are shape functions: saw(x) where x is TAU*phase.
     # Keeping the aitherism: shape_saw/tri/sqr map x in [0, TAU] to wave.
     if name in ["saw", "tri", "sqr"] and n.kids.len == 1:

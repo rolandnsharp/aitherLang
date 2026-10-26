@@ -1,11 +1,11 @@
-## Native DSP primitives. Compiled Nim, called from the bytecode VM
-## via opCallNative. Each function claims slots from voice.dspPool
-## (flat float64 array) at runtime — no variants, no allocation.
+## Native DSP primitives: compiled Nim, called from a patch's generated
+## C. Each function claims slots from its voice's pool (a flat float64
+## array) at runtime — no variants, no allocation.
 ##
-## State convention follows aitherNimScript: `claimDsp(n)` advances
-## the per-voice dspIdx by n; same call order each tick = same slots
-## = phase continuity. Hot reload preserves the pool and idx pattern
-## as long as call structure is stable.
+## `claim(n)` advances the voice's `idx` by n; the generated C points
+## `idx` at each call site's region before the call, so the same call
+## site gets the same slots every sample = phase continuity, and hot
+## reload carries a region across by its identity (voice.commit).
 
 import std/math
 

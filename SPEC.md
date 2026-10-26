@@ -864,7 +864,7 @@ unless you have a reason to push higher.
 
 ### Native DSP functions
 
-These are compiled Nim (in `dsp.nim`) called from the VM.
+These are compiled Nim (in `dsp.nim`) called from a patch's generated C.
 Each call-site gets its own state slots from a per-voice
 float64 pool. The pool is as big as the patch needs: every delay,
 tape, reverb and state array is added up when the patch compiles,
