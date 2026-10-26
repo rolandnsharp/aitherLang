@@ -1,7 +1,9 @@
 # flute — a slow melodic line above retreat, in D pentatonic.
 # breathy sine + odd harmonics + vibrato; legato slew, long phrases.
 
-let pos = t - start_t
+$elapsed = 0
+$elapsed = $elapsed + dt
+let pos = $elapsed
 
 # fade in over 20s so it joins gracefully.
 let fadeIn = ease(pos / 20)

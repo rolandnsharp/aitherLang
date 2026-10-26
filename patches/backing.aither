@@ -11,7 +11,9 @@
 #   none on backing — these are all knobs for fm_swarm. backing is the
 #   *stage*; the keyboard is the soloist.
 
-let pos    = t - start_t
+$elapsed    = 0
+$elapsed    = $elapsed + dt
+let pos    = $elapsed
 let fadeIn = ease(pos / 6)
 
 let tempo   = 100.0 / 60                            # beats / sec

@@ -2,7 +2,9 @@
 # FM self-feedback (one sample of memory) = endless harmonics from almost no code.
 # pitch wanders via summed irrational LFOs; mod depth breathes; pan drifts.
 
-let pos    = t - start_t
+$elapsed    = 0
+$elapsed    = $elapsed + dt
+let pos    = $elapsed
 let fadeIn = ease(pos / 5)
 
 # pitch wander: two non-locking LFOs, swept between ~80 and ~460 Hz.

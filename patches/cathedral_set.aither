@@ -23,7 +23,9 @@
 # Lead on keys: glass-bell using phi-spaced partials. Polyphonic.
 # Played notes are NOT scale-locked — explore freely.
 
-let pos    = t - start_t
+$elapsed    = 0
+$elapsed    = $elapsed + dt
+let pos    = $elapsed
 let fadeIn = ease(pos / 8)
 
 let droneLvl  = midi_cc(82)

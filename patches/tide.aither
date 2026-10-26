@@ -2,7 +2,9 @@
 # demonstrates Phase 3: plays return [L, R] or float, final line IS the mix.
 
 # ---------- shared signals ----------
-let pos   = t - start_t
+$elapsed   = 0
+$elapsed   = $elapsed + dt
+let pos   = $elapsed
 let fin   = ease(pos / 6)
 let tempo = 100.0 / 60.0                          # 1.667 Hz beat
 

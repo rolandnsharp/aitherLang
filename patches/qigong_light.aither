@@ -10,7 +10,9 @@
 #
 # One pipe per let: chained pipes currently miscompile.
 
-let pos    = t - start_t
+$elapsed    = 0
+$elapsed    = $elapsed + dt
+let pos    = $elapsed
 let fadeIn = ease(pos / 10)
 let breath = (sin(TAU * pos / 10 - PI / 2) + 1) * 0.5    # 0..1, 10 s
 

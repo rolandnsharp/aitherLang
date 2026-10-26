@@ -28,7 +28,9 @@ let k = pixel_index(w, h)
 let x = k % w
 let y = int(k / w)
 let f = frame_number(w, h)              # field time: one step a frame
-let pos = t - start_t
+$elapsed = 0
+$elapsed = $elapsed + dt
+let pos = $elapsed
 
 # The antennas: a period of 10 frames, so wavelength 5 pixels at speed
 # 0.5 pixels a frame; set 3 pixels apart, near the bottom, facing up.

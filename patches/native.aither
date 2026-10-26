@@ -9,7 +9,9 @@
 # section cycle, never literally repeating because of the phi-rate
 # in the lead pitch LFO.
 
-let pos    = t - start_t
+$elapsed    = 0
+$elapsed    = $elapsed + dt
+let pos    = $elapsed
 let fadeIn = ease(pos / 6)
 
 let tempo   = 90.0 / 60                            # 1.5 Hz beat

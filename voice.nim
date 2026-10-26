@@ -10,8 +10,8 @@ type
   TickBlockFn* = proc (s: pointer; n: clong; outL, outR: ptr float64) {.cdecl.}
   SizeFn = proc (): cint {.cdecl.}
 
-  # Mirrors the codegen's VoiceState prefix (through `start_t`). Writing
-  # t/start_t from Nim is a plain struct-field store into the malloc'd
+  # Mirrors the codegen's VoiceState prefix. Writing t from Nim is a
+  # plain struct-field store into the malloc'd
   # buffer — no allocation, no GC touch.
   VoiceHeader* {.byref.} = object
     pool*:          ptr UncheckedArray[float64]   # right after the struct
@@ -19,7 +19,7 @@ type
     idx*:           int
     overflow*:      bool
     sr*:            float64
-    t*, dt*, start_t*: float64
+    t*, dt*: float64
     # Points into the Nim-owned partGains seq so generated C can read
     # per-part gains. Set at load(); the seq is sized once (on first load
     # per voice) so its data address stays stable.
@@ -65,7 +65,6 @@ type
     tccLib*:    TccState
     oldLibs*:   seq[TccState]    # kept alive across hot reloads (small leak)
     varNames*:  seq[string]
-    startT*:    float64
     # Play-block support (unused in phase 1; present so engine.nim's
     # per-sample gain loop is a zero-iter no-op without special cases).
     partNames*:       seq[string]
@@ -292,7 +291,7 @@ proc clockReadCost*(): float64 =
 # Layout constants mirror the codegen's emitted struct — see the NOTE in
 # codegen.nim near the VoiceState emission. Migration here writes directly
 # into the buffer by computed offsets; stay in lockstep with codegen.
-const HeaderSize  = sizeof(VoiceHeader)   # bytes up to and including start_t
+const HeaderSize  = sizeof(VoiceHeader)   # the struct's fixed fields
 const VarSlotSize = sizeof(float64)
 
 proc poolOf*(state: pointer): ptr UncheckedArray[float64] {.inline.} =
@@ -375,6 +374,16 @@ proc isBadVar(x: float64): bool {.inline.} =
 # NaN event. "pvar" regions (pair-valued state inside defs) are user
 # state too. Top-level vars sit after the pool in the struct and
 # aren't touched either.
+proc restart*(v: NativeVoice) =
+  ## Born again: every bit of the voice's state as a fresh voice has it,
+  ## so its `$` state takes its first values once more (`retrigger`).
+  if v.state == nil: return
+  let hdr = cast[ptr VoiceHeader](v.state)
+  zeroMem(hdr.pool, hdr.poolSlots * sizeof(float64))
+  for i in 0 ..< v.varNames.len:
+    varAddr(v.state, i)[] = 0.0
+    initedAddr(v.state, v.varNames.len, i)[] = 0'u8
+
 proc resetPool*(v: NativeVoice) =
   if v.state == nil: return
   let pool = poolOf(v.state)
@@ -612,7 +621,6 @@ proc snapshotInto*(src: NativeVoice; dst: NativeVoice; buf: pointer) =
   dst.partParkPending = src.partParkPending
   dst.prof = newSeq[float64](MaxProfSlots)     # a preview isn't profiled
   cast[ptr VoiceHeader](buf).profiling = 0
-  dst.startT = src.startT
 
 proc dispose*(v: NativeVoice) =
   ## Free a preview voice: its state, its prev, and its compiled code.
@@ -644,7 +652,6 @@ proc tick*(v: NativeVoice; t: float64): tuple[l, r: float64] {.inline.} =
   ## render, try and the tests use.
   let hdr = cast[ptr VoiceHeader](v.state)
   hdr.t = t
-  hdr.start_t = v.startT
   var l, r: float64
   v.tickFn(v.state, addr l, addr r)
   (l, r)
@@ -654,6 +661,4 @@ proc tickBlock*(v: NativeVoice; n: int; outL, outR: ptr float64) {.inline.} =
   ## input() from hdr.inBuf and the fade and part ramps advanced per
   ## sample in C: the engine's path. The caller reads the fade, the bad
   ## count and the raw peak back from the header afterwards.
-  let hdr = cast[ptr VoiceHeader](v.state)
-  hdr.start_t = v.startT
   v.tickBlockFn(v.state, clong(n), outL, outR)

@@ -2,7 +2,9 @@
 # Pulse-wave lead + 16th-note arp over a sidechained pad + sub.
 # Loops cleanly. Drop in any side-scroller, dungeon, or vault scene.
 
-let pos    = t - start_t
+$elapsed    = 0
+$elapsed    = $elapsed + dt
+let pos    = $elapsed
 let fadeIn = ease(pos / 3)
 
 let tempo  = 100 / 60                    # 1.667 Hz beat (100 BPM)

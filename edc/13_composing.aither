@@ -49,7 +49,9 @@
 
 def gate(pos, t0, t1): ease((pos - t0) / 4) * (1 - ease((pos - t1) / 4))
 
-let pos  = t - start_t
+$elapsed  = 0
+$elapsed  = $elapsed + dt
+let pos  = $elapsed
 let beat = 96 / 60
 let bar  = phasor(beat / 16)
 
@@ -78,8 +80,8 @@ drone + pulse + bells
 #
 #   1. Restart the piece from the top without re-sending:
 #        ./aither retrigger 13_composing
-#   2. Skip ahead while editing: change "let pos = t -
-#      start_t" to "let pos = t - start_t + 40" to start at
+#   2. Skip ahead while editing: change "let pos =
+#      $elapsed" to "let pos = $elapsed + 40" to start at
 #      the 40-second mark. Remove it when you're done.
 #   3. Move the climax: change both 48s in "open" to 30.
 #   4. Make the pulse duck under each bell (a sidechain, as

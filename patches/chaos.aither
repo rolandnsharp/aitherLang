@@ -4,7 +4,9 @@
 # ż = xy - βz
 # L = x / 25, R = (z - 25) / 25  → on X-Y scope: the butterfly.
 
-let pos    = t - start_t
+$elapsed    = 0
+$elapsed    = $elapsed + dt
+let pos    = $elapsed
 let fadeIn = ease(pos / 6)
 
 # time scaling: Lorenz natural time ≈ 1s. we want audio-rate chaos but still

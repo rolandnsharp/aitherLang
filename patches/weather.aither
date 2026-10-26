@@ -5,7 +5,9 @@
 # different. Demonstrates: physical ODEs, shared sidechain, cross-play
 # feedback via prev(), envelopes, stereo stdlib, character effects.
 
-let pos = t - start_t
+$elapsed = 0
+$elapsed = $elapsed + dt
+let pos = $elapsed
 let fin = ease(pos / 8)
 
 # ---------- the Lorenz mood clock (sub-audio rate) ----------

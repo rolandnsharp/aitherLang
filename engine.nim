@@ -509,8 +509,8 @@ proc loadPatch*(filename: string; fadeIn: float64): string =
     let retrigger = (not slots[idx].active) or
                     slots[idx].fadeGain <= 0.0 or
                     slots[idx].fadeDelta < 0.0       # interrupting a fade-out
-    if retrigger:
-      slots[idx].voice.startT = now
+    if retrigger:                          # a stopped voice sent again is born again
+      slots[idx].voice.restart()
       slots[idx].active = true
       slots[idx].fadeGain = if fadeIn > 0.0: 0.0 else: 1.0
       slots[idx].fadeDelta = if fadeIn > 0.0: fadeDeltaFor(fadeIn) else: 0.0
@@ -525,7 +525,6 @@ proc loadPatch*(filename: string; fadeIn: float64): string =
       return "voice limit reached (" & $MaxVoices & ")"
     let voice = newVoice(float64(SampleRate))
     voice.commit(prepared)
-    voice.startT = now
     slots[slotCount] = Slot(
       name: baseName, voice: voice, active: true,
       fadeGain: (if fadeIn > 0.0: 0.0 else: 1.0),
@@ -580,7 +579,6 @@ proc tryPatch*(filename: string; seconds, skip: float64): string =
   let origin =
     if scratch.state != nil: "live state of " & baseName
     else: "fresh state (no live voice " & baseName & ")"
-  if scratch.state == nil: scratch.startT = now
   scratch.commit(prepared)
   let head = "try: " & baseName & " from " & origin & ", t=" &
              formatFloat(now + skip, ffDecimal, 1) & "s, " &
@@ -665,7 +663,7 @@ proc retriggerVoice(name: string): string =
   let idx = findSlot(name)
   if idx < 0: return "not found: " & name
   lockForCommand()
-  slots[idx].voice.startT = timeSec + timeFrac
+  slots[idx].voice.restart()
   release(mtx)
   ""
 

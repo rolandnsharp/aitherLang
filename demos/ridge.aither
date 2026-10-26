@@ -27,7 +27,9 @@ let k = pixel_index(w, h)
 let x = k % w
 let y = int(k / w)
 let f = frame_number(w, h)              # field time: one step a frame
-let pos = t - start_t
+$elapsed = 0
+$elapsed = $elapsed + dt
+let pos = $elapsed
 
 # The terrain: flat ground three pixels deep, and a hill 14 high and 23
 # wide, a little past halfway across, with the valley behind it.

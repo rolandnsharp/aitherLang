@@ -2,7 +2,9 @@
 # shared signals (sc, kEnv, note derivations) live at file level.
 
 # ---------- shared file-level state ----------
-let pos   = t - start_t
+$elapsed   = 0
+$elapsed   = $elapsed + dt
+let pos   = $elapsed
 let fin   = ease(pos / 4)
 let tempo = 140.0 / 60.0
 

@@ -44,7 +44,9 @@
 #          between -40 and +40 Hz: listen to it turn from
 #          sweet to eerie and back
 
-let pos  = t - start_t
+$elapsed  = 0
+$elapsed  = $elapsed + dt
+let pos  = $elapsed
 let beat = 72 / 60
 
 play bells:

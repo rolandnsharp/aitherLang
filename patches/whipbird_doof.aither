@@ -44,7 +44,9 @@ def stick(strike, freq, decay, bright):
     $x * amp)
 
 let tempo = 142 / 60.0
-let pos   = t - start_t
+$elapsed   = 0
+$elapsed   = $elapsed + dt
+let pos   = $elapsed
 
 # ---------------------------------------------------------------- clocks
 let barPh  = (t * tempo / 4) mod 1

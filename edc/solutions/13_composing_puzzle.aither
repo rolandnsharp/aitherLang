@@ -6,7 +6,9 @@
 
 def gate(pos, t0, t1): ease((pos - t0) / 4) * (1 - ease((pos - t1) / 4))
 
-let pos  = t - start_t
+$elapsed  = 0
+$elapsed  = $elapsed + dt
+let pos  = $elapsed
 let beat = 96 / 60
 let bar  = phasor(beat / 16)
 

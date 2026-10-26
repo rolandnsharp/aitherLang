@@ -35,7 +35,9 @@ let attack  = 0.005 + midi_cc(18) * 1.495
 let release = 0.1   + midi_cc(19) * 2.9
 let revWet  = (1 - midi_cc(93)) * 0.5
 let widen   = midi_cc(16)
-let pos     = t - start_t
+$elapsed     = 0
+$elapsed     = $elapsed + dt
+let pos     = $elapsed
 
 play sculpt:
   midi_keyboard((freq, gate, vel) =>

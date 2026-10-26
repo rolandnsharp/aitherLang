@@ -1,3 +1,5 @@
 # 5-second fade in from start, then sustained tone
-let fade = clamp((t - start_t) / 5, 0, 1)
+$elapsed = 0
+$elapsed = $elapsed + dt
+let fade = clamp($elapsed / 5, 0, 1)
 osc(sin, 440) * fade * 0.3

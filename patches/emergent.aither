@@ -16,7 +16,9 @@ def ks(freq, damp, excite):
   $cursor = ($cursor + 1) mod size
   out
 
-let pos = t - start_t
+$elapsed = 0
+$elapsed = $elapsed + dt
+let pos = $elapsed
 let fin = ease(pos / 8)
 
 # Non-locking pluck triggers - strings never repeat in phase

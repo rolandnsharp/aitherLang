@@ -138,11 +138,42 @@ A few consequences worth knowing:
 
 ## The composition clock
 
-`start_t` is the time the voice was first loaded. Use it:
+`t` is the one clock: seconds since the engine started, the same
+for every voice, so `sin(TAU * 440 * t)` is a wave of the one time
+and two voices agree on what now is. A piece's *own* time, how
+long it has been playing, isn't a second clock. It is something the
+piece lives through, so it is state:
 
 ```
-let pos = t - start_t   # elapsed seconds since the piece started
+$elapsed = 0
+$elapsed = $elapsed + dt   # one sample's time more, every sample
+let pos = $elapsed         # seconds since the piece began
 ```
+
+This is PHILOSOPHY's duality at work: `sin(TAU * 440 * t)` is
+Pythagorean, a wave that exists at every time at once; `$elapsed`
+is Heraclitean, an integral, known only by living through every
+sample before it. Because it is ordinary state it does the right
+thing on its own: `send` keeps it (an edit doesn't restart the
+piece), and `retrigger`, or sending a stopped voice again, starts it
+from 0, as the voice is born again.
+
+Name it for what it means in the piece. Some names, and the
+picture each carries:
+
+| name | the picture |
+|------|-------------|
+| `$elapsed` | the plain word: time gone by since the start |
+| `$sweep` | an oscilloscope's timebase: triggered at the start, running linearly, starting over on a new trigger |
+| `$ramp` | the waveform it is: a sawtooth that never wraps, `phasor`'s sibling |
+| `$timebase` | an analogue computer's independent variable: an integrator fed a steady voltage from the moment the machine goes to *operate* |
+| `$age` | how long the piece has lived |
+| `$pos` | where the piece's head is, as on a tape |
+| `$proper` | physics' proper time: the clock carried *with* the voice, where `t` is the time everyone shares |
+
+Adding `dt` drifts by microseconds over an hour, nothing you can
+hear in a fade or a section. Where it must be exact, count samples:
+`$n = 0`, `$n = $n + 1`, and `$n * dt` is the time.
 
 `pos` is your composition timeline. Shape the piece as a
 function of `pos`:

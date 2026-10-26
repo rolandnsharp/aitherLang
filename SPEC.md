@@ -33,12 +33,18 @@ gets a float.
 | `t`       | time in seconds since engine start     |
 | `sr`      | sample rate (48000)                    |
 | `dt`      | 1 / sample rate                        |
-| `start_t` | time when this voice was first loaded  |
 | `PI`      | 3.14159...                             |
 | `TAU`     | 6.28318... (2π)                        |
 
-Use `pos = t - start_t` as the composition clock — seconds
-since this voice started, independent of engine uptime.
+`t` is the one clock. A piece's own time, seconds since it began,
+is state it lives through (COMPOSING.md, "The composition clock"):
+
+```
+$elapsed = 0
+$elapsed = $elapsed + dt
+```
+
+`send` keeps it, as any state; `retrigger` starts it again.
 
 ## State
 
@@ -1261,7 +1267,7 @@ output) gets a fixed loop delay. A block is `AITHER_BUFFER` frames
 | `clear [fade]`                   | stop all voices                            |
 | `list`                           | show active voices and their parts         |
 | `status`                         | `list` plus the master level               |
-| `retrigger <voice>`              | reset `start_t` in place                   |
+| `retrigger <voice>`              | reset the voice's state: it plays from the top |
 | `kill`                           | shut down engine                           |
 
 ### Part-level
@@ -1513,7 +1519,9 @@ def ease(x):
   let c = clamp(x, 0, 1)
   c * c * (3 - 2 * c)
 
-let pos    = t - start_t
+$elapsed   = 0
+$elapsed   = $elapsed + dt
+let pos    = $elapsed
 let breath = (sin(TAU * pos / 20) + 1) * 0.5
 
 play drone:

@@ -95,7 +95,7 @@ proc usage() =
   echo "  list                        show active voices"
   echo "  status                      voices, parts and the master level"
   echo "  levels [name]               per-voice RMS/peak/clips/envelope"
-  echo "  retrigger <name>            reset start_t so the composition plays from the top"
+  echo "  retrigger <name>            reset the voice's state: it plays from the top"
   echo "  parts <voice>               list parts (play blocks): state, gain, rms, peak"
   echo "  check <voice>               level, quiet parts, rollbacks and guard trips"
   echo "  profile <voice> [seconds]   CPU per part, top-level code and final expression (2 s)"

@@ -2,7 +2,9 @@
 # every 32s a tension/release cycle. lead notes come from a quantised irrational
 # LFO, sampled-and-held at each beat → pattern never repeats but stays in key.
 
-let pos   = t - start_t
+$elapsed   = 0
+$elapsed   = $elapsed + dt
+let pos   = $elapsed
 let fin   = ease(pos / 4)
 let tempo = 140.0 / 60.0
 

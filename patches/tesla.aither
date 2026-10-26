@@ -2,7 +2,9 @@
 # two non-locking impulse rates give aperiodic "arcs"; carrier only plays
 # during spark envelopes — the classic Tesla coil texture.
 
-let pos    = t - start_t
+$elapsed    = 0
+$elapsed    = $elapsed + dt
+let pos    = $elapsed
 let fadeIn = ease(pos / 5)
 
 # carrier wanders in high register

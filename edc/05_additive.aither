@@ -46,7 +46,9 @@
 # 2300 Hz. Those boosted regions are called FORMANTS.
 
 play tour:
-  let pos   = t - start_t
+  $elapsed   = 0
+  $elapsed   = $elapsed + dt
+  let pos   = $elapsed
   let which = int(pos / 5) mod 3
   let m     = ease(((pos mod 15) - 10) / 5)
   if which == 0 then sum(8, n => sin(TAU * phasor(n * 165)) / n) * 0.12

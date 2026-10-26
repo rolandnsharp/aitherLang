@@ -65,7 +65,9 @@
 #      the right. The two ears hear the dot's left-right
 #      and up-down, so the sound seems to spin.
 
-let pos = t - start_t
+$elapsed = 0
+$elapsed = $elapsed + dt
+let pos = $elapsed
 let lap = phasor(220)
 
 play longway:

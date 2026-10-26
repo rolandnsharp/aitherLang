@@ -1682,7 +1682,6 @@ static V emit_ident(Ctx* c, Scope* sc, Node* n) {
   if (eq(s, "t")) return mono("s->t");
   if (eq(s, "sr")) return mono("s->sr");
   if (eq(s, "dt")) return mono("s->dt");
-  if (eq(s, "start_t")) return mono("s->start_t");
   if (eq(s, "PI")) return mono("3.14159265358979323846");
   if (eq(s, "TAU")) return mono("(2.0 * 3.14159265358979323846)");
   for (Scope* x = sc; x; x = x->parent) {
@@ -2446,7 +2445,7 @@ static const char* emit_program(Ctx* c, Node* program) {
     "  long   idx;\n"
     "  char   overflow;\n"
     "  double sr;\n"
-    "  double t, dt, start_t;\n"
+    "  double t, dt;\n"
     "  double* part_gains;\n"
     "  double* part_out;\n"
     "  double* part_park;\n"

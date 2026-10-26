@@ -69,7 +69,9 @@ play clock:
 play tone:
   sin(TAU * phasor(220)) * 0.2
 
-if t - start_t < 3 then clock else tone
+$elapsed = 0
+$elapsed = $elapsed + dt
+if $elapsed < 3 then clock else tone
 
 # ▶ TRY THIS (edit, save, send again)
 #

@@ -41,7 +41,9 @@
 #       "broken-radio bass" without changing the underlying line.
 #       This is the radical knob.
 
-let pos    = t - start_t
+$elapsed    = 0
+$elapsed    = $elapsed + dt
+let pos    = $elapsed
 let fadeIn = ease(pos / 4)
 
 let tempo = 100.0 / 60                              # 100 BPM hardcoded

@@ -10,7 +10,7 @@
 ##   #include <math.h>
 ##   extern double n_<fn>(...);                    (one per dsp.nim primitive)
 ##   typedef struct { pool/idx/overflow/sr    ← DspState prefix (binary-
-##                    t,dt,start_t,           ←  compatible cast to
+##                    t,dt,                   ←  compatible cast to
 ##                    <top-level vars>,       ←  DspState*)
 ##                    inited[...]; } VoiceState;
 ##   void tick(VoiceState* s, double* outL, double* outR) { ... }
@@ -1629,7 +1629,6 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
     of "t":       "s->t"
     of "sr":      "s->sr"
     of "dt":      "s->dt"
-    of "start_t": "s->start_t"
     of "PI":      "3.14159265358979323846"
     of "TAU":     "(2.0 * 3.14159265358979323846)"
     else:
@@ -2707,7 +2706,7 @@ proc emit*(c: Ctx; program: Node): string =
   # go after.
   # NOTE: voice.nim depends on this exact layout for state migration:
   #   [DspState prefix: pool pointer, pool_slots, idx, overflow, sr]
-  #   [double t, dt, start_t, ...]  (the rest of VoiceHeader)
+  #   [double t, dt, ...]  (the rest of VoiceHeader)
   #   [double v_<name0>, v_<name1>, ...]  (one slot per top-level var)
   #   [unsigned char inited[N]]  (one byte per top-level var)
   # and after the struct, in the same allocation, the pool itself:
@@ -2718,7 +2717,7 @@ proc emit*(c: Ctx; program: Node): string =
   pre.add "  long   idx;\n"
   pre.add "  char   overflow;\n"
   pre.add "  double sr;\n"
-  pre.add "  double t, dt, start_t;\n"
+  pre.add "  double t, dt;\n"
   pre.add "  double* part_gains;\n"
   pre.add "  double* part_out;\n"
   pre.add "  double* part_park;\n"

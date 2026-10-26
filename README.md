@@ -152,7 +152,7 @@ aither parts piano                    focused per-play view for one voice
 aither levels master                  master-bus RMS / peak / clips / envelope
 aither spectrum [voice]               FFT of voice's recent buffer (or master)
 aither audit piano.aither 2           offline render + spectral analysis
-aither retrigger piano                reset start_t so the piece plays from top
+aither retrigger piano                reset the voice's state: the piece plays from the top
 aither midi list                      ALSA seq input ports
 aither midi connect 28:0              subscribe to a specific port
 aither clear 2                        fade everything out
@@ -198,7 +198,9 @@ expression that's the voice's stereo output.
 def warm_pad(f, g):                  # helper — your choice of synthesis
   additive(f, warm_shape, 12) * swell(g, 0.4, 1.2) * 0.15
 
-let pos = t - start_t                # file-level binding, visible to all parts
+$elapsed = 0                         # the piece's own time: state it lives through
+$elapsed = $elapsed + dt
+let pos = $elapsed                   # file-level binding, visible to all parts
 let breathe = (sin(TAU * pos / 30) + 1) * 0.5
 
 play pad:
