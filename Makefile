@@ -50,3 +50,17 @@ clean:
 	rm -rf aither nimcache/ test_parser test_eval test_stdlib tools/play tools/card tools/pad tools/scope tools/tv
 
 .PHONY: all clean test corpus corpus-update exact
+
+# parser.c against parser.nim: the tree of every tracked patch and the
+# stdlib, printed by each, must be the same text.
+parse-check:
+	mkdir -p nimcache/parse-check
+	cc -O2 -Wall -o nimcache/parse-check/astdump_c tools/astdump/astdump.c parser.c
+	$(NIM) c --hints:off --warnings:off -d:release --nimcache:nimcache/parse-check \
+	  --out:nimcache/parse-check/astdump_nim tools/astdump/astdump.nim
+	files="$$(git ls-files '*.aither') stdlib.aither"; \
+	  nimcache/parse-check/astdump_c $$files > nimcache/parse-check/c.txt && \
+	  nimcache/parse-check/astdump_nim $$files > nimcache/parse-check/nim.txt && \
+	  cmp nimcache/parse-check/c.txt nimcache/parse-check/nim.txt && \
+	  echo "parse-check ok ($$(grep -c '^==' nimcache/parse-check/c.txt) files)"
+.PHONY: parse-check
