@@ -80,3 +80,13 @@ codegen-check:
 	  cmp nimcache/codegen-check/c.txt nimcache/codegen-check/nim.txt && \
 	  echo "codegen-check ok ($$(grep -c '^==' nimcache/codegen-check/c.txt) files)"
 .PHONY: codegen-check
+
+# The C compiler against the Nim one by ear: every tracked patch rendered
+# briefly through each must give the same bits (a fast make corpus).
+render-check:
+	$(NIM) c --hints:off --warnings:off -d:release --mm:arc --threads:on \
+	  --passL:"-ltcc -ldl -lasound" --nimcache:nimcache/render-check \
+	  --out:nimcache/render-check/rcheck tools/render-check/rcheck.nim
+	git ls-files '*.aither' | grep -v '/lib/' | xargs -n 12 -P 4 nimcache/render-check/rcheck \
+	  && echo "render-check ok"
+.PHONY: render-check
