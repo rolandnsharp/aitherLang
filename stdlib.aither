@@ -27,6 +27,26 @@ def osc(shape, freq): shape(TAU * phasor(freq))
 # Pulse with adjustable width (0..1).
 def pulse(freq, width): if phasor(freq) < width then 1 else -1
 
+# An oscillator that keeps itself alive (Van der Pol), as a bow, a reed
+# or lips do: it feeds energy in while it is small and takes it out
+# while it is large, so from a tiny `start` it grows to its own circle,
+# radius 1, and stays. `mu` is how hard it pulls: small, a sine with an
+# attack of its own; large, a buzzing relaxation tone, lower in pitch.
+# `push` moves its rest point (a hand, a signal, a spring to another
+# vdp: two detuned ones pushed toward each other lock to one pitch).
+# Returns the pair [x, v / w]: a phasor, round when mu is small.
+#   x'' = mu w (1 - 4 x^2) x' - w^2 (x - push)
+def vdp(freq, mu = 0.1, push = 0, start = 0.01):
+  $x = 0.0
+  $v = 0.0
+  $on = 0.0
+  let w = TAU * freq
+  $x = if $on == 0 then start else $x
+  $on = 1
+  $v = $v + (mu * w * (1 - 4 * $x * $x) * $v - w * w * ($x - push)) * dt
+  $x = $x + $v * dt
+  [$x, $v / w]
+
 # ---------------------------------------------------------------- helpers
 
 def gain(signal, amount): signal * amount

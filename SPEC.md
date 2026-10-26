@@ -1010,6 +1010,21 @@ def osc(shape, freq):  shape(TAU * phasor(freq))
 def pulse(freq, width): if phasor(freq) < width then 1 else -1
 ```
 
+### Self-sustaining oscillator
+
+`vdp(freq, mu = 0.1, push = 0, start = 0.01)` is the Van der Pol
+oscillator, `x'' = mu w (1 - 4x²) x' - w² (x - push)`: it feeds energy
+in while small and takes it out while large, so from `start` it grows
+to a circle of radius 1 and holds it, as a bow, a reed or lips do.
+`dho` and `resonator` ring only while something drives them; `vdp`
+sounds by itself, with an attack its physics shapes (about 80 ms at
+220 Hz and `mu` 0.1). `mu` walks from a sine (0.1) to a buzzing
+relaxation tone with odd harmonics (3: 220 Hz sounds at about 168 Hz,
+as the physics says). `push` moves its rest point: a hand, a signal,
+or a spring to another `vdp`, and two detuned ones pushed toward each
+other lock to one pitch (COMPOSING.md, "Voices that lock"). Returns
+the pair `[x, v / w]`, a phasor, round when `mu` is small.
+
 ### Spectral synthesis (built on `sum`)
 
 ```

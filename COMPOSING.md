@@ -548,6 +548,35 @@ DHO does NOT replace `additive` for hundred-partial drones —
 many sines. DHO is for *expressive single voices* where one knob
 should walk continuously between named timbres.
 
+### An oscillator that sounds by itself: `vdp`
+
+A DHO rings only while something pushes it. `vdp(freq, mu)` keeps
+itself alive, as a bowed string, a reed or the lips on a didgeridoo
+do: it grows from almost nothing to its own amplitude and holds it.
+Its attack is physics, not an envelope, and `mu` is the bow pressure:
+0.1 is a pure tone, 3 a buzzing relaxation tone that sags in pitch.
+
+### Voices that lock
+
+Two `vdp`s a little out of tune, each pushed toward the other, pull
+into one pitch, as organ pipes side by side and pendulum clocks on one
+wall do. The chord tunes itself:
+
+```
+$pa = 0.0
+$pb = 0.0
+let k = 0.1                                   # the spring
+let a = vdp(220, push = k * ($pb - $pa))
+let b = vdp(223, push = k * ($pa - $pb))
+$pa = a[0]
+$pb = b[0]
+(a[0] + b[0]) * 0.4
+```
+
+With `k` 0 they beat at 3 Hz; at 0.03 they pull at each other and
+wobble; at 0.1 they sound one pitch, 221.7 Hz, between the two. Let
+`k` follow a knob and the beating slows and stops under your hand.
+
 ## Shared state as an excitation bus
 
 A single file-level state cell is a coupling primitive. Write a
