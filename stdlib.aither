@@ -7,7 +7,7 @@
 #   stateful:  phasor noise
 #   arrays:    array len
 #
-# Native (compiled Nim in dsp.nim, called from the generated C):
+# Native (C in dsp.c, called from the generated C):
 #   filters:   lp1 hp1 lpf hpf bpf notch
 #   delays:    delay fbdelay tape
 #   reverb:    reverb

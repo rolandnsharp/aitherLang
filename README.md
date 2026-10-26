@@ -234,7 +234,7 @@ expressions at codegen time. The standard composition primitive for
 anything you want N copies of (additive partials, modal banks,
 voice pools).
 
-**Native DSP** in `dsp.nim`, callable from any patch: `lpf hpf bpf
+**Native DSP** in `dsp.c`, callable from any patch: `lpf hpf bpf
 notch lp1 hp1 delay fbdelay reverb impulse resonator discharge
 tremolo slew wave`.
 
@@ -394,7 +394,8 @@ high-quality reverb tails simultaneously, use a DAW.
 parser.nim         ~700 lines   tokenizer + recursive descent → AST
 codegen.nim       ~1740 lines   AST → C source + per-helper-type state layout
 voice.nim          ~270 lines   TCC compile → dlopen'd tick(); hot-reload migration
-dsp.nim            ~300 lines   native DSP primitives (filters, delay, reverb…)
+dsp.c              ~330 lines   native DSP primitives (filters, delay, tape, reverb…)
+dsp.nim            ~100 lines   dsp.c's functions for Nim, and the table of natives
 midi.nim           ~330 lines   ALSA seq input + auto-resubscribe + held-notes
 engine.nim         ~750 lines   audio callback + UNIX socket server + stats
 engine_types.nim    ~60 lines   data structs returned by engine procs

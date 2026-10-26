@@ -862,7 +862,8 @@ unless you have a reason to push higher.
 
 ### Native DSP functions
 
-These are compiled Nim (in `dsp.nim`) called from a patch's generated C.
+These are C (in `dsp.c`) called from a patch's generated C; `dsp.nim`
+lists them for the compiler.
 Each call-site gets its own state slots from a per-voice
 float64 pool. The pool is as big as the patch needs: every delay,
 tape, reverb and state array is added up when the patch compiles,
@@ -1312,7 +1313,7 @@ at the size its patch reports (`voice_pool_slots`). Hot-reload commits a new
 compile under a brief mutex, migrates state by region identity
 (skips NaN-poisoned regions to recover cleanly).
 
-### Native DSP (`dsp.nim`, ~205 lines)
+### Native DSP (`dsp.c`, ~330 lines)
 
 Filters, delays, tape, reverb, resonator, discharge, tremolo, slew,
 wave. Each function claims state slots from the per-voice pool.

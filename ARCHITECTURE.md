@@ -7,7 +7,8 @@ parser.nim         ~560 lines   tokenizer + recursive descent → AST
 codegen.nim       ~1350 lines   AST → C source + per-helper-type state layout
 voice.nim          ~260 lines   TCC compile → dlopen'd tick(); hot-reload migration
 tcc.nim             ~40 lines   minimal TCC FFI
-dsp.nim            ~205 lines   native DSP primitives (filters, delay, reverb…)
+dsp.c              ~330 lines   native DSP primitives (filters, delay, tape, reverb…)
+dsp.nim            ~100 lines   dsp.c's functions for Nim, and the table of natives
 midi.nim           ~235 lines   ALSA seq input thread + auto-resubscribe
 engine.nim         ~735 lines   audio callback + UNIX socket server + per-voice stats
 engine_types.nim    ~50 lines   data structs (VoiceInfo, StatsSnapshot, MidiStatus…)
@@ -181,7 +182,7 @@ brief mutex).
   coefficient arguments are compile-time invariant is emitted as its
   `_c` step with the coefficient in a static computed by `hoist_init`,
   called once per block (and per call in the one-sample `tick`). The
-  natives in `dsp.nim` are split into `coef` and `_c` halves, with the
+  natives in `dsp.c` are split into `coef` and `_c` halves, with the
   plain native being one calling the other, so both paths are the
   same bits. `AITHER_HOIST=0` disables it.
 - ALSA MIDI input on its own thread (auto-resubscribes if the
@@ -323,8 +324,8 @@ The aither stdlib contains things expressible as pure aither defs:
 - Misc (`gain`, `prev`, `ease`)
 
 Heavier DSP (SVF filters, Schroeder reverb, ring-buffer delay,
-resonator, discharge, `wave`) lives in `dsp.nim` as compiled Nim,
-called from generated C via small wrapper functions.
+resonator, discharge, `wave`) lives in `dsp.c`, plain C compiled into
+aither with no fused multiply-adds, called from generated C.
 
 ## Analysis CLI
 
@@ -356,7 +357,7 @@ without a concrete musical need:
    shortcuts like `saw(440)`.
 2. **Two stateful builtin primitives: `phasor`, `noise`.**
    Everything stateful in user-visible stdlib is built from
-   these (plus the native DSP helpers wrapped from `dsp.nim`).
+   these (plus the native DSP helpers in `dsp.c`).
 3. **`$state` / `let` scope rules** — see SPEC.md Scope section.
    Top-level `$state` shared by name; `def` `$state` per call-
    site; lambda-body `$state` per-iteration; `play`/`def` body

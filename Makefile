@@ -5,7 +5,7 @@ FLAGS := --mm:arc --threads:on --opt:speed -d:danger \
 
 all: aither
 
-aither: aither.nim engine.nim engine_types.nim cli_output.nim analysis.nim render.nim voice.nim codegen.nim tcc.nim parser.nim imports.nim dsp.nim midi.nim alsa_midi.c realtime.c stdlib.aither
+aither: aither.nim engine.nim engine_types.nim cli_output.nim analysis.nim render.nim voice.nim codegen.nim tcc.nim parser.nim imports.nim dsp.nim dsp.c dsp.h midi.nim alsa_midi.c realtime.c stdlib.aither
 	$(NIM) c $(FLAGS) --out:aither aither.nim
 
 tools/play: tools/play.c realtime.c
