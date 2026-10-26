@@ -635,12 +635,10 @@ proc parseExpr(p: var Parser): Node = p.parsePipe()
 
 proc isBinding(n: Node): bool =
   ## A statement made for its effect, not its value: a `let`, a `$state`
-  ## or element store, an `each` (statements unrolled, value 0), or an
-  ## array-handle update whose value only echoes what it did (the value
-  ## set, the new length). A block reads on past it. `array_pop` is an
-  ## expression: its value is the point.
+  ## or element store, or an `each` (statements unrolled, value 0). A
+  ## block reads on past it.
   n.kind in {nkLet, nkVar, nkAssign, nkIdxAssign} or
-    (n.kind == nkCall and n.str in ["each", "array_set", "array_push", "array_resize"])
+    (n.kind == nkCall and n.str == "each")
 
 proc parseBody(p: var Parser; line: int; what: string): Node =
   ## A def or play body: its bindings, ended by the expression that is

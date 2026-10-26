@@ -50,13 +50,6 @@ type
     owner*: string
     offset*: int            # absolute start offset into pool (in slots)
     size*: int              # number of float64 slots
-    # Optional payload written into the first `init.len` slots when the
-    # voice's pool is first allocated. Used by `array_make` to seed the
-    # length and capacity header (slots 0 and 1) without paying a
-    # per-tick init branch. Across hot reload, region migration may
-    # overwrite these — that's the desired behaviour: a same-shape array
-    # carries its data forward; a resized array gets its fresh init.
-    init*: seq[float64]
 
   Scope = ref object
     parent: Scope
@@ -273,8 +266,8 @@ proc offsetPlaceholder(rid: int): string =
 # Register one stateful call site. Returns a placeholder token to embed
 # in the emitted C — substituted with the absolute pool offset after
 # the walk, once per-type bases are known.
-proc registerRegionInit(c: Ctx; typeName: string; size: int;
-                        init: seq[float64] = @[]; stateName = ""): string =
+proc registerRegion(c: Ctx; typeName: string; size: int;
+                    stateName = ""): string =
   var owner = c.defStack.join(">")
   if stateName.len > 0: owner.add "/$" & stateName
   if typeName notin c.typeCounter:
@@ -293,11 +286,8 @@ proc registerRegionInit(c: Ctx; typeName: string; size: int;
   # it to an absolute pool slot once region bases are assigned.
   c.regions.add Region(typeName: typeName, perTypeIdx: perTypeIdx,
                        scope: c.scope, scopeIdx: scopeIdx, owner: owner,
-                       offset: intraOffset, size: size, init: init)
+                       offset: intraOffset, size: size)
   offsetPlaceholder(rid)
-
-proc registerRegion(c: Ctx; typeName: string; size: int): string =
-  registerRegionInit(c, typeName, size, @[])
 
 proc fresh(c: Ctx; prefix: string): string =
   inc c.tmpCounter
@@ -491,9 +481,7 @@ const BuiltinFns = ["saw", "tri", "sqr", "phasor", "noise", "abs", "pow",
                     "midi_cc", "midi_note", "midi_freq", "midi_gate",
                     "midi_trig", "midi_voice_freq", "midi_voice_gate",
                     "midi_voice_vel", "midi_voice_key", "midi_vel",
-                    "magnitude", "phase", "freq_shift",
-                    "array_make", "array_get", "array_set", "array_len",
-                    "array_push", "array_pop", "array_resize"]
+                    "magnitude", "phase", "freq_shift"]
 
 # Pair-returning builtins. Each emits two C expressions — one for the
 # real component, one for the imaginary. They piggy-back on the stereo
@@ -1151,7 +1139,7 @@ proc declareStateArray(c: Ctx; sc: Scope; st: Node; pre: var string;
         "known when the patch compiles " & errLoc(args.every))
     every = int(cv.val)
   let gens = if every > 0: 2 else: 1
-  let off = c.registerRegionInit("sarr", 1 + gens * n, stateName = st.str)
+  let off = c.registerRegion("sarr", 1 + gens * n, stateName = st.str)
   var initPre = ""
   let initC =
     if args.pos.len == 2: c.scalarValue(sc, args.pos[1], initPre, "$" & st.str)
@@ -1292,7 +1280,7 @@ proc emitLocalStmt(c: Ctx; sc: Scope; st: Node; pre: var string) =
       # inited flag then the two sides. Its own helper type, so adding
       # one doesn't shift the "var" regions of scalar state.
       let flagSlot = c.fresh("pf")
-      let off = c.registerRegionInit("pvar", 3, stateName = st.str)
+      let off = c.registerRegion("pvar", 3, stateName = st.str)
       pre.add &"  long {flagSlot} = {off};\n"
       var initPre = ""
       let v = c.emitStereo(sc, st.kids[0], initPre)
@@ -1310,7 +1298,7 @@ proc emitLocalStmt(c: Ctx; sc: Scope; st: Node; pre: var string) =
       # the (type, perTypeIdx) pair survives a state migration).
       let flagSlot = c.fresh("vf")
       let valSlot = c.fresh("vs")
-      let off = c.registerRegionInit("var", 2, stateName = st.str)
+      let off = c.registerRegion("var", 2, stateName = st.str)
       pre.add &"  long {flagSlot} = {off};\n  long {valSlot} = ({off}) + 1;\n"
       var initPre = ""
       let initC = c.scalarValue(sc, st.kids[0], initPre, "$" & st.str)
@@ -1937,69 +1925,6 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
     if name == "freq_shift":
       raise newException(ValueError,
         "freq_shift(signal, hz) takes exactly 2 args " & errLoc(n))
-    # Mutable arrays. Per-call-site region (length, capacity, data...).
-    # Handle = pool offset of the region's metadata head, returned as
-    # double for plumbing through aither's normal scalar path. Bounds
-    # checks are runtime; out-of-bounds reads return 0 (no crash).
-    if name == "array_make":
-      if n.kids.len != 1 or n.kids[0].kind != nkNum:
-        raise newException(ValueError,
-          "array_make takes a numeric literal capacity " & errLoc(n))
-      let cap = int(n.kids[0].num)
-      if cap <= 0 or cap > 4096:
-        raise newException(ValueError,
-          "array_make: capacity must be 1..4096, got " &
-          $cap & " " & errLoc(n))
-      # Header: 2 slots (length, capacity). Data: cap slots, zero-init.
-      let off = c.registerRegionInit("array",
-                                     2 + cap,
-                                     @[float64(cap), float64(cap)])
-      return &"((double){off})"
-    if name == "array_get" and n.kids.len == 2:
-      let h = c.emitExpr(sc, n.kids[0])
-      let i = c.emitExpr(sc, n.kids[1])
-      return "(({ long _h = (long)(" & h & "); long _i = (long)(" & i & "); " &
-             "long _len = (long)s->pool[_h]; " &
-             "(_i >= 0 && _i < _len) ? s->pool[_h + 2 + _i] : 0.0; }))"
-    if name == "array_set" and n.kids.len == 3:
-      let h = c.emitExpr(sc, n.kids[0])
-      let i = c.emitExpr(sc, n.kids[1])
-      let v = c.emitExpr(sc, n.kids[2])
-      return "(({ long _h = (long)(" & h & "); long _i = (long)(" & i & "); " &
-             "double _v = (" & v & "); " &
-             "long _len = (long)s->pool[_h]; " &
-             "if (_i >= 0 && _i < _len) s->pool[_h + 2 + _i] = _v; " &
-             "_v; }))"
-    if name == "array_len" and n.kids.len == 1:
-      let h = c.emitExpr(sc, n.kids[0])
-      return "(s->pool[(long)(" & h & ")])"
-    if name == "array_push" and n.kids.len == 2:
-      let h = c.emitExpr(sc, n.kids[0])
-      let v = c.emitExpr(sc, n.kids[1])
-      return "(({ long _h = (long)(" & h & "); double _v = (" & v & "); " &
-             "long _len = (long)s->pool[_h]; long _cap = (long)s->pool[_h + 1]; " &
-             "if (_len < _cap) { s->pool[_h + 2 + _len] = _v; " &
-             "s->pool[_h] = (double)(_len + 1); _len = _len + 1; } " &
-             "(double)_len; }))"
-    if name == "array_pop" and n.kids.len == 1:
-      let h = c.emitExpr(sc, n.kids[0])
-      return "(({ long _h = (long)(" & h & "); " &
-             "long _len = (long)s->pool[_h]; double _r; " &
-             "if (_len > 0) { _len = _len - 1; s->pool[_h] = (double)_len; " &
-             "_r = s->pool[_h + 2 + _len]; } else { _r = 0.0; } " &
-             "_r; }))"
-    if name == "array_resize" and n.kids.len == 2:
-      let h = c.emitExpr(sc, n.kids[0])
-      let nl = c.emitExpr(sc, n.kids[1])
-      return "(({ long _h = (long)(" & h & "); long _n = (long)(" & nl & "); " &
-             "long _cap = (long)s->pool[_h + 1]; long _old = (long)s->pool[_h]; " &
-             "if (_n < 0) _n = 0; if (_n > _cap) _n = _cap; " &
-             "for (long _k = _old; _k < _n; ++_k) s->pool[_h + 2 + _k] = 0.0; " &
-             "s->pool[_h] = (double)_n; (double)_n; }))"
-    if name in ["array_make", "array_get", "array_set", "array_len",
-                "array_push", "array_pop", "array_resize"]:
-      raise newException(ValueError,
-        name & ": wrong arg count " & errLoc(n))
     # MIDI input primitives — read engine-owned global state.
     # midi_cc/note/trig take a note-or-CC number; midi_freq/gate are 0-arg.
     # midi_trig is stateful (per-voice pool slot for edge detection), so
@@ -3062,10 +2987,7 @@ proc emit*(c: Ctx; program: Node): string =
             body.add c.emitIdxAssign(inner, st)
           else:
             # Non-final expression statements run for their side effects
-            # (the value is dropped). This matters for stateful builtins
-            # where the user expects mutation: `array_set(arr, i, v)`,
-            # `array_push(arr, v)`. Without `(void)(...)` they'd silently
-            # vanish and the array would never update.
+            # (the value is dropped): a stateful call's state still steps.
             if c.refsStereo(inner, st):
               var sub = ""
               let v = c.emitStereo(inner, st, sub)
@@ -3082,9 +3004,8 @@ proc emit*(c: Ctx; program: Node): string =
         body.add pre
         body.add &"  *outL = ({v.l}); *outR = ({v.r});\n"
       else:
-        # Non-final bare expression at top level: run for side effects.
-        # `array_set`, `array_push`, and similar mutators are useful
-        # statements; without this they'd compile to nothing.
+        # Non-final bare expression at top level: run for side effects
+        # (a stateful call's state still steps).
         if c.refsStereo(topSc, s):
           var pre = ""
           let v = c.emitStereo(topSc, s, pre)

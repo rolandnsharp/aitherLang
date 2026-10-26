@@ -817,66 +817,32 @@ locks into the next one: a change of chord heard as mode-locking.
 
 ## State that holds an array
 
-`$state` cells hold scalar `float64` by default — fast, flat, fixed
-shape. For the cases where a voice needs *structured* state — a
-running history, a mutable scale, an evolving wavetable — `$state`
-can also hold an array handle.
-
-The seven operations:
-
-| call                              | does                                                                                |
-|-----------------------------------|-------------------------------------------------------------------------------------|
-| `array_make(N)`                   | reserve a per-call-site array (length=N, capacity=N, all zeros). Returns a handle.  |
-| `array_get(arr, i)`               | read; out-of-bounds returns 0 (no crash)                                            |
-| `array_set(arr, i, v)`            | write; out-of-bounds is a no-op                                                     |
-| `array_len(arr)`                  | current length                                                                      |
-| `array_push(arr, v)` / `pop(arr)` | grow / shrink length within capacity                                                |
-| `array_resize(arr, n)`            | truncate or pad with zeros                                                          |
-
-`array_make(N)` is per-call-site: the same call site returns the
-same handle every tick, the array's contents persist. So bind once
-at the top of the patch and read the handle as a regular `double`:
+`$state` holds one number by default. When a voice needs to remember
+more — a mutable scale, a history, a medium a wave travels along —
+a state array holds N of them, kept from sample to sample and across
+hot reloads (SPEC.md, "State arrays"):
 
 ```
-let scale = array_make(8)
-$inited = 0
-let _seed = sum(8, n =>
-  if $inited > 0.5 then 0.0 else array_set(scale, n - 1, 110 * pow(2, (n - 1) / 12)))
-$inited = 1
+let seedFreqs = [110.0, 138.59, 164.81, 220.0, 277.18, 329.63, 440.0, 554.37]
+$scale = array(8)
+$inited = 0.0
+each(8, i => $scale[i] = if $inited > 0.5 then $scale[i] else seedFreqs[i])
+$inited = 1.0
+
+$scale[$cursor] = if trig > 0.5 then newF else $scale[$cursor]   # rewrite one
+sum(8, n => additive($scale[n - 1], warm_shape, 6))               # read them all
 ```
 
-Then read from downstream:
+The index can be worked out as it runs, which suits "every bar
+mutate one of N entries" when the entry isn't known until the
+trigger fires. `patches/adaptive_scale.aither` keeps an 8-note chord
+this way; one slot at a time is rewritten toward the held MIDI pitch,
+so hold a key for a minute and the chord migrates toward you.
 
-```
-sum(8, n => additive(array_get(scale, n - 1), warm_shape, 6))
-```
-
-### When an array beats a scalar `$state`
-
-When the patch needs to remember more than ~3-4 values (a pitch
-history, an evolving scale, a per-step velocity table), an array
-is one allocation instead of a forest of `$slot_0`, `$slot_1`, …
-cells. Plus the index can be computed at runtime — useful for
-"every bar mutate one of N entries" patterns where the entry isn't
-known until the trigger fires.
-
-`patches/adaptive_scale.aither` keeps an 8-element chord in an
-array; every K1 seconds, one slot is rewritten toward the held MIDI
-pitch (with K2 controlling pull-strength). Hold a key for a minute
-and the chord migrates toward your input — the patch "learns" you.
-
-### Don'ts
-
-- Capacity is fixed at codegen time. `array_make(N)` requires `N` to
-  be a numeric literal; you can't size by a runtime value.
-- Not the same thing as the constant arrays you pass to `wave()`
-  (`let notes = [220, 247.5, …]`). Those are immutable, hoisted to
-  static const data, and indexed for compile-time scale lookup. The
-  `array_*` family is mutable, lives in the voice pool, and is the
-  right tool when you want runtime mutation.
-- Don't put `array_make` inside a function called from many sites:
-  each call site allocates its own region. Allocate once at top
-  level, pass the handle around.
+A state array is not the constant table you pass to `wave()`
+(`let notes = [220, 247.5, …]`): that one is fixed and hoisted to
+static data; a state array lives in the voice's pool and changes.
+Its size is fixed when the patch compiles.
 
 ## Timbre choice: which paradigm for which sound
 

@@ -33,18 +33,13 @@ let stickiness = midi_cc(71)              # 0..1
 let voiceGain = 0.05 + midi_cc(76) * 0.2
 let revWet    = midi_cc(77) * 0.5
 
-# The array. 8 frequencies, initialised on first sample to a major
-# pentatonic over an octave — a comfortable starting chord. Subsequent
-# samples leave it alone unless a mutation fires.
-let scale = array_make(8)
-
-# One-shot init. State `$inited` starts at 0, set to 1 after first
-# tick. The init seeds the array from a static lookup table.
+# The scale: 8 frequencies, a state array, seeded on the first sample
+# with a major pentatonic over an octave — a comfortable starting chord.
+# Later samples leave it alone unless a mutation fires.
 let seedFreqs = [110.0, 138.59, 164.81, 220.0, 277.18, 329.63, 440.0, 554.37]
+$scale = array(8)
 $inited = 0.0
-let _initStep = sum(8, n =>
-  if $inited > 0.5 then 0.0
-  else array_set(scale, n - 1, seedFreqs[n - 1]))
+each(8, i => $scale[i] = if $inited > 0.5 then $scale[i] else seedFreqs[i])
 $inited = 1.0
 
 # Mutation trigger. Fires at mutRate Hz; each fire picks a slot and
@@ -62,13 +57,13 @@ $mutCursor = if mutTrig > 0.5 then ($mutCursor + 1) mod 8 else $mutCursor
 #   - input pitch: midi_freq() if a key is held, else 0
 #   - current value: read from the array, slightly perturbed
 # stickiness blends them: 1 = full input pull, 0 = full random walk.
-let curFreq = array_get(scale, $mutCursor)
+let curFreq = $scale[$mutCursor]
 let inputF  = if midi_gate() > 0.5 then midi_freq() else curFreq
 let walkF   = curFreq * (1 + (noise() * 0.1))
 let newF    = inputF * stickiness + walkF * (1 - stickiness)
 
 # On mutation trigger, write newF into the targeted slot.
-let _setStep = if mutTrig > 0.5 then array_set(scale, $mutCursor, newF) else 0.0
+$scale[$mutCursor] = if mutTrig > 0.5 then newF else $scale[$mutCursor]
 
 # Render. The pad sums 8 voices, one per scale slot. Each is a warm
 # additive partial bank with a soft per-voice tremolo so the chord
@@ -77,7 +72,7 @@ let _setStep = if mutTrig > 0.5 then array_set(scale, $mutCursor, newF) else 0.0
 def voice(freq):
   additive(freq, warm_shape, 6) * (1 + sin(TAU * phasor(0.7 * freq / 220.0)) * 0.05) * voiceGain
 
-let pad = sum(8, n => voice(array_get(scale, n - 1)))
+let pad = sum(8, n => voice($scale[n - 1]))
 
 let dry  = pad
 let wet  = dry |> reverb(3.5, 0.4)

@@ -157,10 +157,8 @@ def chord(root):
 ### Blocks end at their expression
 
 A body is its bindings, ended by the expression that is its
-value. `let`, `$state = ...`, element stores (`a[i] = v`),
-`each(...)` and the array-handle updates (`array_set`,
-`array_push`, `array_resize`) are bindings: the block reads on
-past them. The first other expression is the return value, and
+value. `let`, `$state = ...`, element stores (`a[i] = v`) and
+`each(...)` are bindings: the block reads on past them. The first other expression is the return value, and
 it closes the block. There is no terminator, and indentation
 means nothing; indent for the reader:
 

@@ -338,13 +338,6 @@ proc prepare*(program: Node; sr: float64; patchPath: string = ""): Prepared =
   placePool(newState, size, int(slotsFn()))
   cast[ptr VoiceHeader](newState).sr = sr
   cast[ptr VoiceHeader](newState).dt = 1.0 / sr
-  # Apply per-region init payloads. Used by array_make to seed length and
-  # capacity slots so the first tick can read a valid header without
-  # paying an init branch on every access.
-  let pool = poolOf(newState)
-  for r in regions:
-    for k, v in r.init:
-      pool[r.offset + k] = v
   Prepared(lib: lib, tickFn: fn, state: newState, stateSize: size, csrc: csrc,
            varNames: varNames, partNames: partNames, unheard: unheard,
            regions: regions)

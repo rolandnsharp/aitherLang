@@ -11,7 +11,7 @@
 ## binaries so they don't leak state into each other; `make test` runs
 ## them after this. `temporal_audit` is a tool, not a test.
 
-import additive_inharmonic, analysis, array_multiline, array_state,
+import additive_inharmonic, analysis, array_multiline,
        array_values, audit, backing_compiles, block_tick, blocks, builtin_named, check_unheard,
        choir_block_compiles,
        codegen_kick, continuation, pair_positions, cutoff_clamp, def_params, delay_fractional, dho,
