@@ -7,7 +7,7 @@
 ## site gets the same slots every sample = phase continuity, and hot
 ## reload carries a region across by its identity (voice.commit).
 
-import std/math
+import std/[math, tables]
 
 # A voice's pool is as big as its patch needs: the compiler adds up every
 # delay, reverb, tape and state array (codegen's finaliseLayout), and the
@@ -219,7 +219,7 @@ proc nFbdelay*(s: var DspState; signal, time, maxTime, fb: float64): float64 {.c
 # head stays at now.
 
 proc nTape*(s: var DspState; signal, on, w, r, maxTime, keep: float64): float64 {.cdecl, exportc: "n_tape".} =
-  let n = max(2, int(maxTime * s.sr))
+  let n = max(1, int(maxTime * s.sr))
   let base = s.claim(n)
   var at = floorMod(r * s.sr, float64(n))
   # A head on a sample reads that sample: `t * sr` lands a hair either
@@ -238,6 +238,13 @@ proc nTape*(s: var DspState; signal, on, w, r, maxTime, keep: float64): float64 
 # Schroeder: 4 parallel comb filters into 2 series allpass.
 
 const ReverbCombLens = [1557, 1617, 1491, 1422]
+const ReverbApLens = [225, 556]
+
+# The slots one reverb claims: each comb's cursor, damp state and
+# buffer, each allpass's cursor and buffer.
+proc reverbSlots(): int =
+  for L in ReverbCombLens: result += 2 + L
+  for L in ReverbApLens: result += 1 + L
 
 # Each comb's feedback gain from the decay time: one pow per comb.
 proc reverbCoef(rt60, sr: float64): array[4, float64] {.inline.} =
@@ -253,13 +260,10 @@ proc reverbC(s: var DspState; signal, wet: float64;
              gains: array[4, float64]): float64 {.inline.} =
   const
     combLens = ReverbCombLens
-    apLens   = [225, 556]
+    apLens   = ReverbApLens
     apFb     = 0.5
     damp     = 0.3
-  var total = 0
-  for L in combLens: total += 2 + L     # cursor, damp state, buffer
-  for L in apLens:   total += 1 + L     # cursor, buffer
-  let base = s.claim(total)
+  let base = s.claim(reverbSlots())
   var off = base
   var combSum = 0.0
   for ci in 0 .. 3:
@@ -439,3 +443,44 @@ var inputL*, inputR*: float64
 
 proc nInputL*(): float64 {.cdecl, exportc: "n_input_l".} = inputL
 proc nInputR*(): float64 {.cdecl, exportc: "n_input_r".} = inputR
+
+# ------------------------------------------------------------- the natives
+# Every native a patch calls by name, in one place: its parameters as
+# SPEC names them (`name=v` has a default), the slots one call site
+# claims, and its code, `n_<name>` in C. codegen and voice take
+# everything else from here. A buffer's length comes from a parameter,
+# a literal in seconds: `extra + max(1, int(seconds * sr))` slots.
+
+type
+  NativeSpec* = object
+    params*: seq[string]
+    slots*: int        # the slots a call site claims (with a buffer: besides it)
+    bufArg*: int       # the parameter sizing a buffer, or -1
+    fn*: pointer
+
+proc fixed(params: seq[string]; slots: int; fn: pointer): NativeSpec =
+  NativeSpec(params: params, slots: slots, bufArg: -1, fn: fn)
+
+proc buffered(params: seq[string]; bufArg, extra: int; fn: pointer): NativeSpec =
+  NativeSpec(params: params, slots: extra, bufArg: bufArg, fn: fn)
+
+let Natives* = {
+  "lp1":       fixed(@["sig", "cut"], 1, cast[pointer](nLp1)),
+  "hp1":       fixed(@["sig", "cut"], 1, cast[pointer](nHp1)),
+  "lpf":       fixed(@["sig", "cut", "res"], 2, cast[pointer](nLpf)),
+  "hpf":       fixed(@["sig", "cut", "res"], 2, cast[pointer](nHpf)),
+  "bpf":       fixed(@["sig", "cut", "res"], 2, cast[pointer](nBpf)),
+  "notch":     fixed(@["sig", "cut", "res"], 2, cast[pointer](nNotch)),
+  "delay":     buffered(@["sig", "time", "max_time"], 2, 1, cast[pointer](nDelay)),
+  "fbdelay":   buffered(@["sig", "time", "max_time", "fb"], 2, 1, cast[pointer](nFbdelay)),
+  "tape":      buffered(@["sig", "on", "w", "r", "max_time", "keep=0"], 4, 0, cast[pointer](nTape)),
+  "reverb":    fixed(@["sig", "rt60", "wet"], reverbSlots(), cast[pointer](nReverb)),
+  "impulse":   fixed(@["freq"], 1, cast[pointer](nImpulse)),
+  "resonator": fixed(@["sig", "freq", "decay"], 2, cast[pointer](nResonator)),
+  "dho":       fixed(@["force", "freq", "damp"], 2, cast[pointer](nDho)),
+  "dho_v":     fixed(@["force", "freq", "damp"], 2, cast[pointer](nDhoV)),
+  "discharge": fixed(@["sig", "rate"], 1, cast[pointer](nDischarge)),
+  "tremolo":   fixed(@["sig", "rate", "depth"], 1, cast[pointer](nTremolo)),
+  "slew":      fixed(@["sig", "time"], 1, cast[pointer](nSlew)),
+  "wave":      fixed(@["freq", "arr"], 1, cast[pointer](nWave)),   # its table is emitted (codegen)
+}.toTable

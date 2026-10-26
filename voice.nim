@@ -140,14 +140,12 @@ proc nOverrun(s: ptr VoiceHeader; where: cstring): clong {.cdecl.} =
   1
 
 proc registerNatives(s: TccState) =
+  # Every native a patch calls by name, from dsp.nim's table; then the
+  # hoisted forms and the rest codegen calls itself.
+  for name, spec in Natives:
+    discard s.addSymbol(cstring("n_" & name), spec.fn)
   discard s.addSymbol("n_overrun",   cast[pointer](nOverrun))
   discard s.addSymbol("n_now",       cast[pointer](nNow))
-  discard s.addSymbol("n_lpf",       cast[pointer](nLpf))
-  discard s.addSymbol("n_hpf",       cast[pointer](nHpf))
-  discard s.addSymbol("n_bpf",       cast[pointer](nBpf))
-  discard s.addSymbol("n_notch",     cast[pointer](nNotch))
-  discard s.addSymbol("n_lp1",       cast[pointer](nLp1))
-  discard s.addSymbol("n_hp1",       cast[pointer](nHp1))
   # Hoisted forms: coefficient once (hoist_init), step per sample.
   discard s.addSymbol("n_lp1_coef",  cast[pointer](nLp1Coef))
   discard s.addSymbol("n_lp1_c",     cast[pointer](nLp1C))
@@ -159,18 +157,6 @@ proc registerNatives(s: TccState) =
   discard s.addSymbol("n_notch_c",   cast[pointer](nNotchC))
   discard s.addSymbol("n_reverb_coef", cast[pointer](nReverbCoef))
   discard s.addSymbol("n_reverb_c",  cast[pointer](nReverbC))
-  discard s.addSymbol("n_delay",     cast[pointer](nDelay))
-  discard s.addSymbol("n_fbdelay",   cast[pointer](nFbdelay))
-  discard s.addSymbol("n_tape",      cast[pointer](nTape))
-  discard s.addSymbol("n_reverb",    cast[pointer](nReverb))
-  discard s.addSymbol("n_impulse",   cast[pointer](nImpulse))
-  discard s.addSymbol("n_resonator", cast[pointer](nResonator))
-  discard s.addSymbol("n_dho",       cast[pointer](nDho))
-  discard s.addSymbol("n_dho_v",     cast[pointer](nDhoV))
-  discard s.addSymbol("n_discharge", cast[pointer](nDischarge))
-  discard s.addSymbol("n_tremolo",   cast[pointer](nTremolo))
-  discard s.addSymbol("n_slew",      cast[pointer](nSlew))
-  discard s.addSymbol("n_wave",      cast[pointer](nWave))
   discard s.addSymbol("n_hilbert_a", cast[pointer](nHilbertA))
   discard s.addSymbol("n_hilbert_b", cast[pointer](nHilbertB))
   discard s.addSymbol("n_freq_shift", cast[pointer](nFreqShift))

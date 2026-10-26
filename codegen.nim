@@ -166,16 +166,7 @@ type
     stereoSeen: HashSet[string]
     pureSeen: HashSet[string]
 
-# Native dsp.nim primitives callable from generated C.
-# Name -> arity (not counting the state pointer).
-const NativeArities = {
-  "lp1": 2, "hp1": 2, "lpf": 3, "hpf": 3, "bpf": 3, "notch": 3,
-  "delay": 3, "fbdelay": 4, "tape": 6, "reverb": 3,
-  "impulse": 1, "resonator": 3, "discharge": 2,
-  "dho": 3, "dho_v": 3,
-  "tremolo": 3, "slew": 2,
-  "wave": -1,                      # special: freq + array
-}.toTable
+# The natives a patch calls by name are dsp.nim's `Natives` table.
 
 # Libm 1-arg pass-throughs.
 const Libm1 = ["sin", "cos", "tan", "tanh", "exp", "log", "log2",
@@ -590,7 +581,7 @@ proc isValueName(c: Ctx; sc: Scope; name: string): bool =
 proc isFnName(c: Ctx; sc: Scope; name: string): bool =
   if isValueName(c, sc, name): return false
   name in Libm1 or name in BuiltinFns or
-  name in c.userDefs or NativeArities.hasKey(name) or
+  name in c.userDefs or Natives.hasKey(name) or
   sc.lookupFn(name).len > 0
 
 # Reference to one channel of a play block or stereo let, as a C lvalue.
@@ -777,7 +768,7 @@ proc isPureForStereo(c: Ctx; n: Node): bool =
     # state. Treat sum() as stateful for stereo-inlining purposes.
     if n.str in ["sum", "each", "array"]: return false
     if n.str in ["phasor", "phasor_pair", "noise", "midi_trig"]: return false
-    if NativeArities.hasKey(n.str): return false
+    if Natives.hasKey(n.str): return false
     if n.str in c.userDefs and n.str notin c.pureSeen:
       c.pureSeen.incl n.str
       let pure = isPureForStereo(c, c.userDefs[n.str].kids[0])
@@ -1629,26 +1620,17 @@ proc emitNoise(c: Ctx): string =
     "s->pool[" & slot & "] = (double)r; " &
     "((double)r / 4294967295.0) * 2.0 - 1.0; }))"
 
-# Size (in float64 slots) claimed by one call to a given native. For
-# delay/fbdelay/tape this depends on the `max_time` argument, which must be
-# a numeric literal so the region size is compile-time known.
-proc delayBufSlots(c: Ctx; name: string; maxTimeArg: Node): int =
-  if maxTimeArg.kind != nkNum:
-    raise newException(ValueError,
-      name & " max_time must be a numeric literal " & errLoc(maxTimeArg))
-  1 + max(1, int(maxTimeArg.num * c.sr))
-
+# The slots one call site of a native claims (dsp.nim's table): a fixed
+# count, and for a buffer its length, from a parameter that must be a
+# numeric literal so the region's size is known when the patch compiles.
 proc nativeSlotSize(c: Ctx; name: string; kids: seq[Node]): int =
-  case name
-  of "lp1", "hp1", "impulse", "discharge", "tremolo", "slew", "wave": 1
-  of "lpf", "hpf", "bpf", "notch", "resonator", "dho", "dho_v":       2
-  of "delay", "fbdelay":          delayBufSlots(c, name, kids[2])
-  of "tape":                      max(2, delayBufSlots(c, name, kids[4]) - 1)
-  of "reverb":
-    # Matches dsp.nim nReverb's total = sum(2+L for combLens) + sum(1+L for apLens).
-    (2+1557) + (2+1617) + (2+1491) + (2+1422) + (1+225) + (1+556)
-  else:
-    raise newException(ValueError, "no slot size for native '" & name & "'")
+  let spec = Natives[name]
+  if spec.bufArg < 0: return spec.slots
+  let a = kids[spec.bufArg]
+  if a.kind != nkNum:
+    raise newException(ValueError,
+      name & " " & spec.params[spec.bufArg] & " must be a numeric literal " & errLoc(a))
+  spec.slots + max(1, int(a.num * c.sr))
 
 proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
   case n.kind
@@ -2111,11 +2093,8 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
     # nativeAt points s->idx at it after evaluating the args, so the
     # native's internal claim() writes into its dedicated region
     # regardless of what natives the args themselves call.
-    if name in NativeArities:
-      let arity = NativeArities[name]
-      if arity == -1:
-        raise newException(ValueError,
-          name & " (array arg) not yet supported in codegen " & errLoc(n))
+    if name in Natives and name != "wave":
+      let arity = Natives[name].params.len
       if n.kids.len != arity:
         raise newException(ValueError,
           name & " takes " & $arity & " args, got " & $n.kids.len &
@@ -2761,13 +2740,12 @@ proc emit*(c: Ctx; program: Node): string =
   var pre = ""
   pre.add "#include <math.h>\n"
   pre.add "typedef struct DspState DspState;\n"
-  # extern declarations for every dsp.nim primitive we might call.
-  pre.add "extern double n_lpf(DspState*,double,double,double);\n"
-  pre.add "extern double n_hpf(DspState*,double,double,double);\n"
-  pre.add "extern double n_bpf(DspState*,double,double,double);\n"
-  pre.add "extern double n_notch(DspState*,double,double,double);\n"
-  pre.add "extern double n_lp1(DspState*,double,double);\n"
-  pre.add "extern double n_hp1(DspState*,double,double);\n"
+  # extern declarations: every native a patch calls by name (dsp.nim's
+  # table), then the hoisted forms and the rest codegen calls itself.
+  for name, spec in Natives:
+    if name != "wave":
+      pre.add "extern double n_" & name & "(DspState*" &
+              ",double".repeat(spec.params.len) & ");\n"
   # Hoisted forms (coefficient once, step per sample).
   pre.add "extern double n_lp1_coef(double,double);\n"
   pre.add "extern double n_lp1_c(DspState*,double,double);\n"
@@ -2779,17 +2757,6 @@ proc emit*(c: Ctx; program: Node): string =
   pre.add "extern double n_notch_c(DspState*,double,const double*);\n"
   pre.add "extern void n_reverb_coef(double,double,double*);\n"
   pre.add "extern double n_reverb_c(DspState*,double,double,const double*);\n"
-  pre.add "extern double n_delay(DspState*,double,double,double);\n"
-  pre.add "extern double n_fbdelay(DspState*,double,double,double,double);\n"
-  pre.add "extern double n_tape(DspState*,double,double,double,double,double,double);\n"
-  pre.add "extern double n_reverb(DspState*,double,double,double);\n"
-  pre.add "extern double n_impulse(DspState*,double);\n"
-  pre.add "extern double n_resonator(DspState*,double,double,double);\n"
-  pre.add "extern double n_dho(DspState*,double,double,double);\n"
-  pre.add "extern double n_dho_v(DspState*,double,double,double);\n"
-  pre.add "extern double n_discharge(DspState*,double,double);\n"
-  pre.add "extern double n_tremolo(DspState*,double,double,double);\n"
-  pre.add "extern double n_slew(DspState*,double,double);\n"
   pre.add "extern double n_wave(DspState*,double,double*,int);\n"
   pre.add "extern double n_hilbert_a(DspState*,double);\n"
   pre.add "extern double n_hilbert_b(DspState*,double);\n"
@@ -3229,22 +3196,17 @@ proc checkDefault(c: Ctx; def: Node; e: Node) =
 # its arguments: `reverb(sig, rt60 = 2.4, wet = 0.3)`. `name=v` has a
 # default. Stdlib functions are defs and name theirs already.
 const BuiltinParams = {
-  "lp1": @["sig", "cut"], "hp1": @["sig", "cut"],
-  "lpf": @["sig", "cut", "res"], "hpf": @["sig", "cut", "res"],
-  "bpf": @["sig", "cut", "res"], "notch": @["sig", "cut", "res"],
-  "delay": @["sig", "time", "max_time"],
-  "fbdelay": @["sig", "time", "max_time", "fb"],
-  "tape": @["sig", "on", "w", "r", "max_time", "keep=0"],
-  "reverb": @["sig", "rt60", "wet"],
-  "impulse": @["freq"], "resonator": @["sig", "freq", "decay"],
-  "discharge": @["sig", "rate"],
-  "dho": @["force", "freq", "damp"], "dho_v": @["force", "freq", "damp"],
-  "tremolo": @["sig", "rate", "depth"], "slew": @["sig", "time"],
-  "wave": @["freq", "arr"], "phasor": @["freq"],
+  "phasor": @["freq"],
   "pow": @["a", "b"], "min": @["a", "b"], "max": @["a", "b"],
   "clamp": @["x", "l", "h"],
   "array": @["n", "init=0", "every=0"],
 }.toTable
+
+proc builtinParams(name: string): seq[string] =
+  ## A builtin's parameters (a native's from dsp.nim's table); none for
+  ## a name that isn't one.
+  if name in Natives: Natives[name].params
+  else: BuiltinParams.getOrDefault(name)
 
 proc reorderArgs(n: Node; what: string; params: seq[string];
                  defaults: seq[Node]) =
@@ -3305,14 +3267,14 @@ proc normalizeCalls(c: Ctx; n: Node; shadow: HashSet[string]) =
   if n.str notin c.userDefs:
     # By position with nothing missing: as written. A builtin left short
     # gets its trailing defaults, as a def does (`tape(x, on, w, r, 8)`).
-    if not anyNamed and (n.str notin BuiltinParams or
-                         n.kids.len >= BuiltinParams[n.str].len): return
-    if n.str notin BuiltinParams:
+    let known = builtinParams(n.str)
+    if not anyNamed and (known.len == 0 or n.kids.len >= known.len): return
+    if known.len == 0:
       raise newException(ValueError,
         n.str & " takes its arguments by position " & errLoc(n))
     var params: seq[string]
     var defaults: seq[Node]
-    for p in BuiltinParams[n.str]:
+    for p in known:
       let eq = p.find('=')
       if eq < 0:
         params.add p
