@@ -19,7 +19,7 @@ proc renderWith(path: string; optimized: bool): Stereo =
   for cc in 0 .. 127: midiCc(cc, 64)
   for key in [60, 64, 67]: midiNoteOn(key, 100)
   let v = newVoice(48000.0)
-  v.load(buildProgram(readFile(path), path), 48000.0, path)
+  v.loadSource(Stdlib, readFile(path), path, 48000.0, path)
   if optimized:
     v.optimize()
     doAssert v.optimized, path & ": the cc -O2 build didn't land"

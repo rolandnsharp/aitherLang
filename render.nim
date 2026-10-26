@@ -12,9 +12,9 @@
 ## iterated on offline against the same material every time.
 
 import std/[os, math, strutils, sets]
-import parser, voice, dsp, engine_types, imports
+import parser, voice, dsp, engine_types, imports, ccompile
 
-const Stdlib = staticRead("stdlib.aither")
+const Stdlib* = staticRead("stdlib.aither")
 
 type
   RenderError* = object of CatchableError
@@ -120,6 +120,13 @@ proc renderProgram(prog: Node; seconds: float64; sr: int;
   v.load(prog, float64(sr))
   renderVoice(v, seconds, sr, input, skip)
 
+proc renderSource(src, tag: string; seconds: float64; sr: int;
+                  input: Stereo; skip = 0.0): Rendered =
+  ## A patch's source through the compiler in C, rendered.
+  let v = newVoice(float64(sr))
+  v.loadSource(Stdlib, src, tag, float64(sr))
+  renderVoice(v, seconds, sr, input, skip)
+
 proc buildProgram*(src, srcTag: string): Node =
   let stdAst = parseProgram(Stdlib)
   setSource(stdAst, "stdlib")
@@ -139,12 +146,12 @@ proc renderPatchSrc*(src: string; seconds: float64;
   ## empty buffers — handy for "does it parse?"). NaN at any sample
   ## raises RenderError so downstream analysis can't silently ingest
   ## garbage.
-  renderProgram(buildProgram(src, "<inline>"), seconds, sr, input).audio
+  renderSource(src, "<inline>", seconds, sr, input).audio
 
 proc patchCallsInput*(srcPath: string): bool =
   ## Does the patch (with its imports) call `input()`? `audit` reads
   ## stdin only then.
-  callsInput(buildProgram(readFile(srcPath), srcPath))
+  compileSource(Stdlib, readFile(srcPath), srcPath, "", 48000.0).callsInput
 
 proc renderPatchFull*(srcPath: string; seconds: float64; sr: int = 48000;
                       input: Stereo = (@[], @[]); skip = 0.0): Rendered =
@@ -155,7 +162,7 @@ proc renderPatchFull*(srcPath: string; seconds: float64; sr: int = 48000;
   if not fileExists(srcPath):
     raise newException(IOError, "patch not found: " & srcPath)
   let src = readFile(srcPath)
-  renderProgram(buildProgram(src, srcPath), seconds, sr, input, skip)
+  renderSource(src, srcPath, seconds, sr, input, skip)
 
 proc renderPatch*(srcPath: string; seconds: float64;
                   sr: int = 48000; input: Stereo = (@[], @[])): Stereo =

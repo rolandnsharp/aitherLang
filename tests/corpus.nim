@@ -45,11 +45,11 @@ proc fingerprint(path: string): string =
   midiResetAll()
   for cc in 0 .. 127: midiCc(cc, 64)
   try:
-    let prog = buildProgram(readFile(path), path)
+    let src = readFile(path)
     var windows: seq[Stereo]
     chord([60, 64, 67], 100)
     let v = newVoice(48000.0)
-    v.load(prog, 48000.0)
+    v.loadSource(Stdlib, src, path, 48000.0)
     windows.add renderVoice(v, 0.5, 48000).audio
     for k in [60, 64, 67]: midiNoteOff(k)
     chord([65, 69, 72], 50)
@@ -58,7 +58,7 @@ proc fingerprint(path: string): string =
     for cc in 0 .. 127: midiCc(cc, 64)
     chord([60, 64, 67], 100)
     let late = newVoice(48000.0)
-    late.load(prog, 48000.0)
+    late.loadSource(Stdlib, src, path, 48000.0)
     windows.add renderVoice(late, 0.5, 48000, t0 = Late).audio
     var h = 0xcbf29ce484222325'u64          # FNV-1a over the samples' bits
     var sum, peak = 0.0

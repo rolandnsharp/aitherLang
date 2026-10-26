@@ -3,7 +3,7 @@
 ## its compiled tick() can run) and a malloc'd VoiceState buffer.
 
 import std/[strutils, tables, sets, os, osproc, locks, monotimes]
-import parser, tcc, dsp, codegen, midi, engine_types
+import parser, tcc, dsp, codegen, midi, engine_types, ccompile
 
 type
   TickFn* = proc (s: pointer; outL, outR: ptr float64) {.cdecl.}
@@ -180,11 +180,9 @@ proc registerNatives(s: TccState) =
 const SizeHelper = "\nint voice_state_size(void) { return sizeof(VoiceState) + " &
   "voice_pool_slots() * sizeof(double); }\n"
 
-proc compileProgram(program: Node; patchPath: string; sr: float64):
-    tuple[lib: TccState; tickFn: TickFn; size: int; csrc: string;
-          varNames, partNames, unheard: seq[string]; regions: seq[Region]] =
-  let (csrc, varNames, partNames, unheard, regions) =
-    generateFull(program, patchPath, sr)
+proc compileC(csrc: string):
+    tuple[lib: TccState; tickFn: TickFn; size: int; csrc: string] =
+  ## Generated C to a loaded library: tick(), and the state's size.
   acquire(tccLock)
   defer: release(tccLock)
   let lib = tccNew()
@@ -214,7 +212,7 @@ proc compileProgram(program: Node; patchPath: string; sr: float64):
   if fn == nil or sizeFn == nil:
     lib.delete()
     raise newException(ValueError, "TCC symbol lookup failed")
-  (lib, fn, int(sizeFn()), withSize, varNames, partNames, unheard, regions)
+  (lib, fn, int(sizeFn()), withSize)
 
 # A live engine builds -O2 code beside the playing voices, so the build
 # waits its turn (nice 19): when it and the audio want the same core, the
@@ -327,20 +325,30 @@ type
     regions*: seq[Region]
     csrc*: string                # the C that was compiled, for compileOptimized
 
-proc prepare*(program: Node; sr: float64; patchPath: string = ""): Prepared =
-  ## Compile + allocate the new state buffer. Slow (TCC compile is 5-20 ms
-  ## on big patches, state zero-init a ms or so a few MB). Caller must
-  ## hand the result to `commit` to actually swap it in.
-  let (lib, fn, size, csrc, varNames, partNames, unheard, regions) =
-    compileProgram(program, patchPath, sr)
+proc prepareC(csrc: string; varNames, partNames, unheard: seq[string];
+              regions: seq[Region]; sr: float64): Prepared =
+  let (lib, fn, size, src) = compileC(csrc)
   let newState = alloc0(size)
   let slotsFn = cast[SizeFn](lib.getSymbol("voice_pool_slots"))
   placePool(newState, size, int(slotsFn()))
   cast[ptr VoiceHeader](newState).sr = sr
   cast[ptr VoiceHeader](newState).dt = 1.0 / sr
-  Prepared(lib: lib, tickFn: fn, state: newState, stateSize: size, csrc: csrc,
+  Prepared(lib: lib, tickFn: fn, state: newState, stateSize: size, csrc: src,
            varNames: varNames, partNames: partNames, unheard: unheard,
            regions: regions)
+
+proc prepare*(program: Node; sr: float64; patchPath: string = ""): Prepared =
+  ## Compile + allocate the new state buffer. Slow (TCC compile is 5-20 ms
+  ## on big patches, state zero-init a ms or so a few MB). Caller must
+  ## hand the result to `commit` to actually swap it in.
+  let (csrc, varNames, partNames, unheard, regions) = generateFull(program, patchPath, sr)
+  prepareC(csrc, varNames, partNames, unheard, regions, sr)
+
+proc prepareSource*(stdlibSrc, src, tag: string; sr: float64; patchPath = "";
+                    seedSelf = false): tuple[prepared: Prepared; callsInput: bool] =
+  ## `prepare` from a patch's source, through the compiler in C.
+  let g = compileSource(stdlibSrc, src, tag, patchPath, sr, seedSelf)
+  (prepareC(g.csrc, g.varNames, g.partNames, g.unheard, g.regions, sr), g.callsInput)
 
 # Defense 1: a region is "poisoned" if any of its slots is NaN, ±Inf,
 # or absurdly large (a near-blow-up that hasn't tipped to Inf yet).
@@ -625,6 +633,11 @@ proc load*(v: NativeVoice; program: Node; sr: float64;
   ## the audio critical path (e.g. from tests). Engine.nim uses the
   ## split form so the heavy compile happens outside the mutex.
   v.commit(prepare(program, sr, patchPath))
+
+proc loadSource*(v: NativeVoice; stdlibSrc, src, tag: string; sr: float64;
+                 patchPath: string = "") =
+  ## `load` from a patch's source, through the compiler in C.
+  v.commit(prepareSource(stdlibSrc, src, tag, sr, patchPath).prepared)
 
 proc tick*(v: NativeVoice; t: float64): tuple[l, r: float64] {.inline.} =
   ## One sample at engine time `t`, input() from the dsp globals: what

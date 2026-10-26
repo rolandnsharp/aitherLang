@@ -20,8 +20,6 @@ const
   RunawayRetryGap = 2.0
   RunawayRetries  = 3
 
-const Stdlib = staticRead("stdlib.aither")
-
 # AITHER_SOCK runs a second engine (or talks to one) beside the default.
 let SocketPath = getEnv("AITHER_SOCK", "/tmp/aither.sock")
 # Frames per write to the pipe. 512 (10.7 ms at 48 kHz) suits a machine
@@ -464,49 +462,23 @@ proc loadPatch*(filename: string; fadeIn: float64): string =
 
   stderr.write "loading " & extractFilename(filename) & " ... "
 
-  # Parse stdlib and user source separately so error line numbers
-  # reference the user's file directly (not the combined source).
-  var stdlibAst: parser.Node
-  var userAst: parser.Node
+  # Parse (stdlib and patch apart, so line numbers are the patch's), tag
+  # each node with its file, splice imports (re-read on every send, so an
+  # edited library lands with the next send) and compile, in C. The heavy
+  # phase runs OUTSIDE the audio mutex: the audio callback only blocks
+  # briefly (~µs) on the swap below.
+  var prepared: Prepared
   try:
-    stdlibAst = parseProgram(Stdlib)
-    userAst = parseProgram(userSrc)
+    let r = prepareSource(Stdlib, userSrc, filename, float64(SampleRate), filename,
+                          seedSelf = true)
+    prepared = r.prepared
+    if r.callsInput: inputUsed = true
   except ParseError as e:
     stderr.writeLine "parse FAIL"
     return "parse error: " & e.msg
-
-  # Tag every node with its source origin so codegen errors (and the
-  # `#line` directives feeding TCC) can point at the right file. Without
-  # this, a stdlib-sourced error reports under the user's patch path and
-  # sends the user hunting through their own code for a fault that's in
-  # stdlib (or in their invocation of a stdlib def).
-  setSource(stdlibAst, "stdlib")
-  setSource(userAst, filename)
-  # Splice `import "lib/x.aither"` files in (re-read on every send, so an
-  # edited library lands with the next send of the patch).
-  try:
-    var files: seq[string]
-    var seen = initHashSet[string]()
-    seen.incl(try: expandFilename(filename) except OSError: filename)
-    userAst = expandImports(userAst, filename, files, seen)
   except ImportError as e:
     stderr.writeLine "import FAIL"
     return "import error: " & e.msg
-  if callsInput(userAst): inputUsed = true
-
-  # Merge: stdlib's top-level statements come first, then the user's.
-  let program = parser.Node(
-    kind: parser.nkBlock,
-    kids: stdlibAst.kids & userAst.kids,
-    line: 1)
-
-  # Heavy phase — compile + alloc — runs OUTSIDE the audio mutex. Taking
-  # the mutex here was causing buffer drops when TCC compile took >10 ms
-  # on big patches. Now the audio callback only blocks briefly (~µs) on
-  # the swap below.
-  var prepared: Prepared
-  try:
-    prepared = prepare(program, float64(SampleRate), filename)
   except CatchableError as e:
     stderr.writeLine "compile FAIL"
     return "compile error: " & annotateErr(e.msg, userSrc, filename)
@@ -580,17 +552,8 @@ proc tryPatch*(filename: string; seconds, skip: float64): string =
   let baseName = splitFile(filename).name
   var prepared: Prepared
   try:
-    let stdlibAst = parseProgram(Stdlib)
-    var userAst = parseProgram(userSrc)
-    setSource(stdlibAst, "stdlib")
-    setSource(userAst, filename)
-    var files: seq[string]
-    var seen = initHashSet[string]()
-    seen.incl(try: expandFilename(filename) except OSError: filename)
-    userAst = expandImports(userAst, filename, files, seen)
-    let program = parser.Node(kind: parser.nkBlock,
-                              kids: stdlibAst.kids & userAst.kids, line: 1)
-    prepared = prepare(program, float64(SampleRate), filename)
+    prepared = prepareSource(Stdlib, userSrc, filename, float64(SampleRate), filename,
+                             seedSelf = true).prepared
   except ParseError as e:
     return "ERR parse error: " & e.msg
   except ImportError as e:

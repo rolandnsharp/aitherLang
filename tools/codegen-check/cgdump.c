@@ -22,7 +22,8 @@ int main(int argc, char** argv) {
     Arena* a = arena_new();
     char err[2048];
     printf("== %s\n", argv[f]);
-    Node* prog = build_program(a, stdlib, src, argv[f], err, sizeof err);
+    int kind;
+    Node* prog = build_program(a, stdlib, src, argv[f], 0, &kind, err, sizeof err);
     Generated g;
     if (!prog) printf("error: %s\n", err);
     else if (generate_full(a, prog, "", 48000.0, 1, &g, err, sizeof err)) printf("error: %s\n", err);

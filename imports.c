@@ -142,8 +142,9 @@ static int expand(Arena* a, Node* ast, const char* from, Seen* seen, int as_libr
 }
 
 Node* build_program(Arena* a, const char* stdlib_src, const char* src, const char* src_tag,
-                    char* err, int errlen) {
+                    int seed_self, int* kind, char* err, int errlen) {
   char perr[1024];
+  *kind = BUILD_PARSE;
   Node* std = parse_program(a, stdlib_src, perr, sizeof perr);
   if (!std) { snprintf(err, errlen, "stdlib: %s", perr); return NULL; }
   set_source(a, std, "stdlib");
@@ -153,10 +154,13 @@ Node* build_program(Arena* a, const char* stdlib_src, const char* src, const cha
   const char* from = strcmp(src_tag, "<inline>") ? src_tag : "";
   Seen seen = {0};
   Kids kids = {0};
+  if (seed_self && from[0]) seen_add(&seen, key_of(a, from));
   for (int i = 0; i < std->nkids; i++) kid(&kids, std->kids[i]);
+  *kind = BUILD_IMPORT;
   int r = expand(a, user, from, &seen, 0, &kids, err, errlen);
   free(seen.v);
   if (r) { free(kids.v); return NULL; }
+  *kind = BUILD_OK;
   Node* prog = arena_alloc(a, sizeof(Node));
   prog->kind = nkBlock; prog->line = 1; prog->str = ""; prog->source = "";
   prog->nkids = kids.n;
