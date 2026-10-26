@@ -35,7 +35,7 @@ for r in v.regions:
     varRegionOff = r.offset
     varRegionSize = r.size
 doAssert varRegionOff >= 0, "test setup failed: no var region"
-let pool = cast[ptr UncheckedArray[float64]](v.state)
+let pool = poolOf(v.state)
 doAssert pool[varRegionOff] == 1.0,     "var inited-flag should be set"
 doAssert pool[varRegionOff + 1] == 100.0, "var value slot should be 100"
 

@@ -9,22 +9,26 @@
 
 import std/math
 
-const DspPoolSize* = 524288     # 4 MB per voice; covers seconds of fbdelay
-const OverflowSlot = DspPoolSize - 128   # shared fallback region at pool tail
+# A voice's pool is as big as its patch needs: the compiler adds up every
+# delay, reverb, tape and state array (codegen's finaliseLayout), and the
+# voice is allocated with that many slots after its struct, plus this
+# shared fallback region at the tail.
+const PoolOverflowSlots* = 128
 
 type
   DspState* = object
-    pool*:     array[DspPoolSize, float64]
-    idx*:      int
-    overflow*: bool          # set when claim had to clamp; callback may log
-    sr*:       float64
+    pool*:      ptr UncheckedArray[float64]   # this voice's, right after its struct
+    poolSlots*: int          # its length, the overflow tail included
+    idx*:       int
+    overflow*:  bool         # set when claim had to clamp; callback may log
+    sr*:        float64
 
 template claim(s: var DspState; n: int = 1): int =
   # Bounds-check so a patch requesting more state than the pool holds
   # degrades to shared garbage-state rather than segfaulting the engine.
-  if s.idx + n > OverflowSlot:
+  if s.idx + n > s.poolSlots - PoolOverflowSlots:
     s.overflow = true
-    OverflowSlot
+    s.poolSlots - PoolOverflowSlots
   else:
     let r = s.idx
     s.idx += n
@@ -199,6 +203,36 @@ proc nFbdelay*(s: var DspState; signal, time, maxTime, fb: float64): float64 {.c
   result = tapInterp(s, base, bufLen, cursor, d)
   s.pool[base + 1 + cursor] = signal + result * fb
   s.pool[base] = float64((cursor + 1) mod bufLen)
+
+# -------------------------------------------------------------------- tape
+# A piece of tape `max_time` long, with a write head and a read head whose
+# positions are signals, in seconds, wrapping round it. Layout: the
+# samples, nothing else (the heads are where the patch says they are).
+#
+# It reads before it writes, as a deck's play head sits behind its record
+# head: a read at the write position hears what was there, one trip round
+# the tape ago, which is what a loop recording over itself must play. The
+# read is between samples (linear, as `delay`), so a slow head bends the
+# pitch; the write lands on the nearest sample. While `on` > 0 the write
+# is `signal` plus what was there times `keep` (the erase head: 0 records
+# over, 1 adds, between fades old passes). `delay` is a tape whose write
+# head stays at now.
+
+proc nTape*(s: var DspState; signal, on, w, r, maxTime, keep: float64): float64 {.cdecl, exportc: "n_tape".} =
+  let n = max(2, int(maxTime * s.sr))
+  let base = s.claim(n)
+  var at = floorMod(r * s.sr, float64(n))
+  # A head on a sample reads that sample: `t * sr` lands a hair either
+  # side of a whole number, and a loop (r = w) must not hear a millionth
+  # of the sample just written beside it.
+  let near = floor(at + 0.5)
+  if abs(at - near) < 1e-6: at = floorMod(near, float64(n))
+  let i = min(int(at), n - 1)
+  let frac = at - float64(i)
+  result = s.pool[base + i] * (1.0 - frac) + s.pool[base + (i + 1) mod n] * frac
+  if on > 0.0:
+    let k = int(floorMod(floor(w * s.sr + 0.5), float64(n)))
+    s.pool[base + k] = signal + s.pool[base + k] * keep
 
 # ------------------------------------------------------------------ reverb
 # Schroeder: 4 parallel comb filters into 2 series allpass.

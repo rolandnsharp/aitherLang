@@ -213,14 +213,16 @@ $u = array(w * h, every = w * h)
 A builtin's parameters have the names SPEC writes them with:
 `lp1`/`hp1(sig, cut)`, `lpf`/`hpf`/`bpf`/`notch(sig, cut, res)`,
 `delay(sig, time, max_time)`, `fbdelay(sig, time, max_time, fb)`,
-`reverb(sig, rt60, wet)`, `resonator(sig, freq, decay)`,
+`tape(sig, on, w, r, max_time, keep = 0)`, `reverb(sig, rt60, wet)`, `resonator(sig, freq, decay)`,
 `dho`/`dho_v(force, freq, damp)`, `impulse(freq)`, `phasor(freq)`,
 `discharge(sig, rate)`, `slew(sig, time)`,
 `tremolo(sig, rate, depth)`, `wave(freq, arr)`, `pow`/`min`/`max(a, b)`,
 `clamp(x, l, h)`, `array(n, init = 0, every = 0)`. One-argument
 builtins (`sin`, `midi_cc`, …) take theirs by position. Stdlib
 functions are defs and name theirs. A named call compiles to exactly
-the positional one. An unknown name says what the function takes.
+the positional one. An unknown name says what the function takes. A
+builtin's defaults fill in for trailing arguments left out, by
+position too, as a def's do: `tape(x, on, w, r, 8)` is `keep = 0`.
 
 ### Array parameters
 
@@ -863,8 +865,12 @@ unless you have a reason to push higher.
 ### Native DSP functions
 
 These are compiled Nim (in `dsp.nim`) called from the VM.
-Each call-site gets its own state slot from a per-voice
-float64 pool (4 MB).
+Each call-site gets its own state slots from a per-voice
+float64 pool. The pool is as big as the patch needs: every delay,
+tape, reverb and state array is added up when the patch compiles,
+and the voice gets that much, up to 512 MB (a 30-second stereo tape
+is about 23 MB). An edit that needs more gets a bigger pool, and
+hot-reload carries the state across as ever.
 
 **Filters**: `lp1(sig, cut)`, `hp1(sig, cut)`,
 `lpf(sig, cut, res)`, `hpf(sig, cut, res)`,
@@ -882,6 +888,47 @@ with `time` 0 is the current input; `fbdelay` starts at one sample
 (its feedback needs last sample's output). `max_time` must be a
 literal (it sizes the buffer) and the longest delay is one sample
 under it.
+
+**Tape**: `tape(sig, on, w, r, max_time, keep = 0)`. A piece of tape
+`max_time` seconds long, with a write head and a read head. While
+`on` > 0 it records `sig` at `w`; it always plays what is under `r`.
+Both heads are positions in seconds, any signal, wrapping round the
+tape, so the tape machine's moves are choices of them:
+
+```
+tape(x, 1, t, t - 0.5, 1)                 # a delay: the write head at now
+tape(x, recording, t, h, 30)              # a loop: h = start + (t - start) mod len
+tape(x, 1, t, t * 0.5, 30)                # half speed: half the pitch, as on a deck
+tape(x, 1, t, 2 * start - t, 30)          # reverse
+tape(x, 1, t, knob * 4, 4)                # scrubbing: the head is a hand
+tape(x, 1, t, t, 8, keep = 0.8)           # sound on sound, old passes fading
+```
+
+The controls are signals like any other, so the pedal is whatever
+you write: `midi_cc(64) > 0.5`, a key, `bar < 0.25`, the loudness of
+the mic. A loop pedal is a def over `tape` (COMPOSING.md, "Looping
+your playing"). `sig` may be a pair: two tapes on the same heads,
+which keeps a frequency and its gate together. What is looped is a
+signal, so a loop of `[midi_freq(), midi_gate()]` loops the playing,
+not the sound: it plays through whatever patch it feeds, as you edit
+it.
+
+It reads before it writes, as a deck's play head sits behind its
+record head: a read at the write position hears what was there one
+trip round the tape ago, which is what a loop recording over itself
+must play. The read is between samples (linear, as `delay`), and a
+head within a millionth of a sample of one reads that sample, so a
+loop comes back exact. The write lands on the nearest sample, as
+`sig` plus what was there times `keep` (the erase head: 0 records
+over, 1 adds, between lets old passes fade). A fresh tape is silence.
+`max_time` must be a literal (it sizes the tape); a pair takes twice
+the memory. `delay` is a tape whose write head stays at now.
+
+A tape is a function, not a program in the pipe, by the rule that
+keeps the two apart: **programs are the ends, functions are the
+middle.** Whatever touches a device or a file (`play`, `card`,
+`scope`, `tv`, a recording with `tee`) is a tool in the pipe; whatever
+is steered by signals or feeds back is a function in aither.
 
 **Reverb**: `reverb(sig, rt60, wet)` (Schroeder); a pair in runs one
 reverb per side.
@@ -1247,13 +1294,14 @@ time.
 ### Voice (`voice.nim`, ~260 lines)
 
 Owns the TCC compilation, dlopen of the resulting library, and
-the per-voice float64 state pool. Hot-reload commits a new
+the per-voice float64 state pool, allocated after the voice's struct
+at the size its patch reports (`voice_pool_slots`). Hot-reload commits a new
 compile under a brief mutex, migrates state by region identity
 (skips NaN-poisoned regions to recover cleanly).
 
 ### Native DSP (`dsp.nim`, ~205 lines)
 
-Filters, delays, reverb, resonator, discharge, tremolo, slew,
+Filters, delays, tape, reverb, resonator, discharge, tremolo, slew,
 wave. Each function claims state slots from the per-voice pool.
 Pool access is bounds-checked — overflow degrades to a shared
 safe slot rather than segfaulting.
@@ -1414,6 +1462,9 @@ play loop:
 
 loop
 ```
+
+A loop of the playing rather than the sound is a `tape` with a pedal
+def over it; see COMPOSING.md, "Looping your playing".
 
 ### Drone with stereo pad
 

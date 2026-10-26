@@ -9,7 +9,7 @@
 #
 # Native (compiled Nim, called via opCallNative):
 #   filters:   lp1 hp1 lpf hpf bpf notch
-#   delays:    delay fbdelay
+#   delays:    delay fbdelay tape
 #   reverb:    reverb
 #   physics:   impulse resonator discharge
 #   modulation: tremolo slew

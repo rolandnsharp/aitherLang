@@ -1,7 +1,8 @@
 ## Validates that generated C can call into dsp.nim's n_* primitives
 ## via tcc_add_symbol. Layout contract: VoiceState begins with the exact
-## DspState fields (pool, idx, overflow, sr), so a VoiceState* casts to
-## a DspState* safely.
+## DspState fields (pool, pool_slots, idx, overflow, sr), so a
+## VoiceState* casts to a DspState* safely. The pool is the voice's own,
+## sized by its patch; here a small one beside the state.
 
 import std/math
 import ../tcc, ../dsp
@@ -17,7 +18,8 @@ extern double n_lpf(DspState* s, double sig, double cut, double res);
 
 typedef struct {
   /* --- DspState prefix (must match dsp.nim layout) --- */
-  double pool[524288];
+  double* pool;
+  long   pool_slots;
   long   idx;
   char   overflow;
   /* 7 bytes padding */
@@ -58,7 +60,10 @@ echo "sizeof VState    = ", sizeof(VState)
 let fn = cast[TickFn](s.getSymbol("tick"))
 doAssert fn != nil
 
-var st = create(VState)  # heap — 4 MB, too big for the stack
+var st = create(VState)
+var pool: array[256, float64]
+st.state.pool = cast[ptr UncheckedArray[float64]](addr pool[0])
+st.state.poolSlots = pool.len
 st.state.sr = 48000.0
 st.dt = 1.0 / 48000.0
 

@@ -47,7 +47,7 @@ let (_, _, _, rb) = generate(prog(B), "", 48000.0)
 let v = newVoice(48000.0)
 v.load(prog(A), 48000.0)
 for i in 1 .. 4800: discard v.tick(float64(i) / 48000.0)
-let pool = cast[ptr UncheckedArray[float64]](v.state)
+let pool = poolOf(v.state)
 var before: seq[seq[float64]]
 for (sc, idx) in [("play b/let y", 0), ("play b/let z", 0), ("play a/let x", 0)]:
   let r = find(ra, sc, "var", idx)
@@ -56,7 +56,7 @@ for (sc, idx) in [("play b/let y", 0), ("play b/let z", 0), ("play a/let x", 0)]
   before.add s
 
 v.load(prog(B), 48000.0)
-let pool2 = cast[ptr UncheckedArray[float64]](v.state)
+let pool2 = poolOf(v.state)
 for n, (sc, idx) in [("play b/let y", 0), ("play b/let z", 0), ("play a/let x", 0)]:
   let r = find(rb, sc, "var", idx)
   for k in 0 ..< r.size:

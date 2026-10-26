@@ -21,7 +21,7 @@ for i in 1 .. 8:
 # that produced NaN at some point in its accumulator. (In production
 # the source is the patch itself; here we inject directly because a
 # clean patch wouldn't generate NaN deterministically.)
-let pool = cast[ptr UncheckedArray[float64]](v.state)
+let pool = poolOf(v.state)
 for k in 0 ..< 16:
   pool[k] = NaN
 

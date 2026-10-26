@@ -28,6 +28,7 @@ import additive_inharmonic, analysis, array_multiline, array_state,
        prev_edge, render, reset_preserves_var, rollback, runaway_guard,
        scope_keying, shadow_play_name, sigil_state, small_syntax,
        state_arrays, stepped_array, stereo_haas_reverb, stereo_once, tail_recursion,
+       tape_heads,
        tcc_dsp, tcc_hello,
        tcc_tick, transparent_helpers_polymorphic, two_entry_tables,
        wave_autohoist

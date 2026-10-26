@@ -19,9 +19,11 @@
 ## outputs are set equal; if it's [L,R], they're set independently.
 
 import std/[strutils, tables, sets, strformat, sequtils, os]
-import parser
+import parser, dsp
 
-const PoolSize* = 524288
+# The most pool a voice may have, in slots (a slot is a double): 512 MB.
+# Each voice gets what its patch needs (finaliseLayout), up to this.
+const MaxPoolSlots* = 1 shl 26
 
 type
   # A per-helper-type state region. Each stateful call site owns one
@@ -168,7 +170,7 @@ type
 # Name -> arity (not counting the state pointer).
 const NativeArities = {
   "lp1": 2, "hp1": 2, "lpf": 3, "hpf": 3, "bpf": 3, "notch": 3,
-  "delay": 3, "fbdelay": 4, "reverb": 3,
+  "delay": 3, "fbdelay": 4, "tape": 6, "reverb": 3,
   "impulse": 1, "resonator": 3, "discharge": 2,
   "dho": 3, "dho_v": 3,
   "tremolo": 3, "slew": 2,
@@ -436,9 +438,11 @@ proc constValue(c: Ctx; sc: Scope; n: Node): tuple[val: float64; ok: bool] =
 # array declaration.
 proc arrayArgs(call: Node): tuple[pos: seq[Node]; every: Node] =
   ## `array(n, init, every)`: size and init, and `every` (nil when not
-  ## given). Named arguments were made positional by normalizeCalls.
+  ## given, or given as its default 0: not stepped). Named arguments, and
+  ## defaults left out, were made positional by normalizeCalls.
   for i, k in call.kids:
-    if i < 2: result.pos.add k else: result.every = k
+    if i < 2: result.pos.add k
+    elif not (k.kind == nkNum and k.num == 0.0): result.every = k
 
 proc isArrayMake(n: Node): bool =
   n != nil and n.kind == nkCall and n.str == "array" and n.kids.len in {1, 2, 3}
@@ -548,7 +552,7 @@ proc takesPairAt(name: string; j, n: int): bool =
 # (whose own state slots are claimed per call site).
 const TransparentHelpers = ["lpf", "hpf", "bpf", "lp1", "hp1",
                             "drive", "fold",
-                            "delay", "fbdelay", "reverb",
+                            "delay", "fbdelay", "tape", "reverb",
                             "slew", "discharge",
                             "pluck", "swell", "adsr",
                             "gain", "prev", "tremolo"]
@@ -1626,7 +1630,7 @@ proc emitNoise(c: Ctx): string =
     "((double)r / 4294967295.0) * 2.0 - 1.0; }))"
 
 # Size (in float64 slots) claimed by one call to a given native. For
-# delay/fbdelay this depends on the `max_time` argument, which must be
+# delay/fbdelay/tape this depends on the `max_time` argument, which must be
 # a numeric literal so the region size is compile-time known.
 proc delayBufSlots(c: Ctx; name: string; maxTimeArg: Node): int =
   if maxTimeArg.kind != nkNum:
@@ -1639,6 +1643,7 @@ proc nativeSlotSize(c: Ctx; name: string; kids: seq[Node]): int =
   of "lp1", "hp1", "impulse", "discharge", "tremolo", "slew", "wave": 1
   of "lpf", "hpf", "bpf", "notch", "resonator", "dho", "dho_v":       2
   of "delay", "fbdelay":          delayBufSlots(c, name, kids[2])
+  of "tape":                      max(2, delayBufSlots(c, name, kids[4]) - 1)
   of "reverb":
     # Matches dsp.nim nReverb's total = sum(2+L for combLens) + sum(1+L for apLens).
     (2+1557) + (2+1617) + (2+1491) + (2+1422) + (1+225) + (1+556)
@@ -2777,6 +2782,7 @@ proc emit*(c: Ctx; program: Node): string =
   pre.add "extern double n_reverb_c(DspState*,double,double,const double*);\n"
   pre.add "extern double n_delay(DspState*,double,double,double);\n"
   pre.add "extern double n_fbdelay(DspState*,double,double,double,double);\n"
+  pre.add "extern double n_tape(DspState*,double,double,double,double,double,double);\n"
   pre.add "extern double n_reverb(DspState*,double,double,double);\n"
   pre.add "extern double n_impulse(DspState*,double);\n"
   pre.add "extern double n_resonator(DspState*,double,double,double);\n"
@@ -2809,12 +2815,15 @@ proc emit*(c: Ctx; program: Node): string =
   # VoiceState — DspState prefix is *exactly* the Nim layout; new fields
   # go after.
   # NOTE: voice.nim depends on this exact layout for state migration:
-  #   [DspState prefix (sizeof DspState = 4194328 bytes)]
-  #   [double t, dt, start_t]  (3*8 = 24 bytes, header ends at 4194352)
+  #   [DspState prefix: pool pointer, pool_slots, idx, overflow, sr]
+  #   [double t, dt, start_t, ...]  (the rest of VoiceHeader)
   #   [double v_<name0>, v_<name1>, ...]  (one slot per top-level var)
   #   [unsigned char inited[N]]  (one byte per top-level var)
+  # and after the struct, in the same allocation, the pool itself:
+  # voice_pool_slots() doubles, which `pool` points at.
   pre.add "typedef struct {\n"
-  pre.add "  double pool[524288];\n"
+  pre.add "  double* pool;\n"
+  pre.add "  long   pool_slots;\n"
   pre.add "  long   idx;\n"
   pre.add "  char   overflow;\n"
   pre.add "  double sr;\n"
@@ -3180,14 +3189,19 @@ proc finaliseLayout(c: Ctx; src: var string) =
   for t in c.typeOrder:
     bases[t] = base
     base += c.typeCumSize[t]
-  if base > PoolSize:
+  if base + PoolOverflowSlots > MaxPoolSlots:
     raise newException(ValueError,
-      "patch needs " & $base & " pool slots, pool is " & $PoolSize &
-      " — reduce delays / reverbs or raise DspPoolSize")
+      "patch needs " & $(base * 8 div 1_000_000) & " MB of state (delays, " &
+      "tapes, reverbs, arrays); a voice may have " &
+      $(MaxPoolSlots * 8 div 1_000_000) & " MB")
   for r in c.regions.mitems:
     r.offset = bases[r.typeName] + r.offset
   for rid, r in c.regions:
     src = src.replace(offsetPlaceholder(rid), $r.offset)
+  # The pool this patch needs, its overflow tail included: the voice is
+  # allocated with this many slots after its struct.
+  src.add "\nlong voice_pool_slots(void) { return " &
+          $(base + PoolOverflowSlots) & "; }\n"
 
 
 # A default stands on its own: numbers, PI/TAU, operators and calls,
@@ -3221,6 +3235,7 @@ const BuiltinParams = {
   "bpf": @["sig", "cut", "res"], "notch": @["sig", "cut", "res"],
   "delay": @["sig", "time", "max_time"],
   "fbdelay": @["sig", "time", "max_time", "fb"],
+  "tape": @["sig", "on", "w", "r", "max_time", "keep=0"],
   "reverb": @["sig", "rt60", "wet"],
   "impulse": @["freq"], "resonator": @["sig", "freq", "decay"],
   "discharge": @["sig", "rate"],
@@ -3289,7 +3304,10 @@ proc normalizeCalls(c: Ctx; n: Node; shadow: HashSet[string]) =
   for k in n.kids:
     if k.kind == nkNamedArg: anyNamed = true
   if n.str notin c.userDefs:
-    if not anyNamed: return
+    # By position with nothing missing: as written. A builtin left short
+    # gets its trailing defaults, as a def does (`tape(x, on, w, r, 8)`).
+    if not anyNamed and (n.str notin BuiltinParams or
+                         n.kids.len >= BuiltinParams[n.str].len): return
     if n.str notin BuiltinParams:
       raise newException(ValueError,
         n.str & " takes its arguments by position " & errLoc(n))

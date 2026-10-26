@@ -167,6 +167,7 @@ signals instead:
 | "bar counter variable"             | a slow phasor *is* the bar position     |
 | "shift note offsets for swing"     | warp the phase: `p + sin(p*π) * swing`  |
 | "velocity table lookup"            | velocity is an amplitude oscillator     |
+| "record a clip and loop it"        | tape the gesture, a head reads it back  |
 
 Continuous pitch, continuous amplitude, continuous
 sections. Quantize only when the genre demands it.
@@ -210,6 +211,54 @@ vel` is the velocity-sensitive envelope, release tail included.
 The deepest layer is `midi_voice_freq(n)` / `_gate` / `_vel` /
 `_key` — for hand-rolled allocation logic that doesn't fit
 `poly`'s shape.
+
+### Looping your playing (tape)
+
+The human plays the melody; a tape lets them play it back to
+themselves. Loop the *gesture*, not the sound: record the pair
+`[midi_freq(), midi_gate()]` on a `tape` and feed what it plays to a
+voice. The loop then goes through the patch live, so you can edit the
+voice while your phrase keeps playing through it, slow the loop down
+without changing its key (the gestures slow, the pitch is the
+voice's), or send it to a second voice as an answer to the first.
+
+A loop pedal is a def over the tape's heads, so how it behaves is
+yours to change, as a pedal's is not. This one: the first press
+records, the second closes the loop and plays it, the third stops.
+
+```
+def looper(press):
+  $mode = 0                     # 0 waiting, 1 recording, 2 looping
+  $start = 0.0
+  $len = 1.0
+  let m = $mode
+  $start = if press > 0 and m == 0 then t else $start
+  $len = if press > 0 and m == 1 then t - $start else $len
+  $mode = if press > 0 then (if m == 2 then 0 else m + 1) else m
+  [$start + (t - $start) mod $len, $mode]      # the read head, the mode
+
+def voice(f, g): osc(saw, f) * slew(g, 0.01) |> lpf(1200, 0.3)
+
+let down = if midi_cc(64) > 0.5 then 1 else 0  # the sustain pedal
+let press = if down > prev(down) then 1 else 0
+let lp = looper(press)
+let fg = tape([midi_freq(), midi_gate()], if lp[1] == 1 then 1 else 0, t, lp[0], 30)
+let looping = if lp[1] == 2 then 1 else 0
+
+voice(midi_freq(), midi_gate()) + voice(fg[0], fg[1]) * looping
+```
+
+The loop comes back exact, sample for sample. The press can be
+anything that is a signal: a key's `midi_trig`, a CC, a phasor
+(`bar > 0.99`, a loop closed every 32 bars by itself), the mic's
+loudness. And the heads are signals too, so the deck's other moves
+are a line each: the looper's last line reading `$start + ((t -
+$start) * 0.5) mod $len` plays the loop at half speed, two loops of unequal length (17 s and 23 s,
+Eno's way) drifting against each other, `keep = 0.8` to overdub with
+the old passes fading.
+
+Loop sound instead (a mic, a whole patch) by taping the signal
+itself: then a slow head bends the pitch, as on a deck.
 
 ### Smoothstep (ease 0→1)
 
@@ -1433,6 +1482,9 @@ midi_freq and produces silence).
 - **`wave` and `impulse` are cheap.** `lpf`/`hpf`/`bpf`
   are cheap. `reverb` and `fbdelay` with long buffers are
   not.
+- **`tape` is cheap to run and costs memory:** two reads and a
+  write a sample, and 8 bytes a sample of length (30 s of a
+  pair is about 23 MB). The voice gets what its tapes need.
 - If a patch sounds muddy, suspect *too many voices doing
   their own reverb* before suspecting the synthesis.
 

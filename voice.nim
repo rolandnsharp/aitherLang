@@ -14,7 +14,8 @@ type
   # t/start_t from Nim is a plain struct-field store into the malloc'd
   # buffer — no allocation, no GC touch.
   VoiceHeader* {.byref.} = object
-    pool*:          array[DspPoolSize, float64]
+    pool*:          ptr UncheckedArray[float64]   # right after the struct
+    poolSlots*:     int
     idx*:           int
     overflow*:      bool
     sr*:            float64
@@ -160,6 +161,7 @@ proc registerNatives(s: TccState) =
   discard s.addSymbol("n_reverb_c",  cast[pointer](nReverbC))
   discard s.addSymbol("n_delay",     cast[pointer](nDelay))
   discard s.addSymbol("n_fbdelay",   cast[pointer](nFbdelay))
+  discard s.addSymbol("n_tape",      cast[pointer](nTape))
   discard s.addSymbol("n_reverb",    cast[pointer](nReverb))
   discard s.addSymbol("n_impulse",   cast[pointer](nImpulse))
   discard s.addSymbol("n_resonator", cast[pointer](nResonator))
@@ -188,7 +190,9 @@ proc registerNatives(s: TccState) =
   discard s.addSymbol("n_midi_voice_key",  cast[pointer](nMidiVoiceKey))
   discard s.addSymbol("n_midi_vel",        cast[pointer](nMidiVel))
 
-const SizeHelper = "\nint voice_state_size(void) { return sizeof(VoiceState); }\n"
+# The whole allocation: the struct, then the pool its patch needs.
+const SizeHelper = "\nint voice_state_size(void) { return sizeof(VoiceState) + " &
+  "voice_pool_slots() * sizeof(double); }\n"
 
 proc compileProgram(program: Node; patchPath: string; sr: float64):
     tuple[lib: TccState; tickFn: TickFn; size: int; csrc: string;
@@ -307,6 +311,16 @@ proc clockReadCost*(): float64 =
 const HeaderSize  = sizeof(VoiceHeader)   # bytes up to and including start_t
 const VarSlotSize = sizeof(float64)
 
+proc poolOf*(state: pointer): ptr UncheckedArray[float64] {.inline.} =
+  cast[ptr VoiceHeader](state).pool
+
+proc placePool(state: pointer; stateSize, slots: int) =
+  ## Point a state's pool at its own slots, after the struct.
+  let hdr = cast[ptr VoiceHeader](state)
+  hdr.poolSlots = slots
+  hdr.pool = cast[ptr UncheckedArray[float64]](
+    cast[uint](state) + uint(stateSize - slots * sizeof(float64)))
+
 proc varAddr(state: pointer; i: int): ptr float64 {.inline.} =
   cast[ptr float64](cast[uint](state) + uint(HeaderSize) +
                     uint(i) * uint(VarSlotSize))
@@ -322,24 +336,26 @@ type
     lib*: TccState
     tickFn*: TickFn
     state*: pointer
-    stateSize*: int
+    stateSize*: int              # the struct and its pool
     varNames*, partNames*, unheard*: seq[string]
     regions*: seq[Region]
     csrc*: string                # the C that was compiled, for compileOptimized
 
 proc prepare*(program: Node; sr: float64; patchPath: string = ""): Prepared =
   ## Compile + allocate the new state buffer. Slow (TCC compile is 5-20 ms
-  ## on big patches, state zero-init is another ms for 4 MB). Caller must
+  ## on big patches, state zero-init a ms or so a few MB). Caller must
   ## hand the result to `commit` to actually swap it in.
   let (lib, fn, size, csrc, varNames, partNames, unheard, regions) =
     compileProgram(program, patchPath, sr)
   let newState = alloc0(size)
+  let slotsFn = cast[SizeFn](lib.getSymbol("voice_pool_slots"))
+  placePool(newState, size, int(slotsFn()))
   cast[ptr VoiceHeader](newState).sr = sr
   cast[ptr VoiceHeader](newState).dt = 1.0 / sr
   # Apply per-region init payloads. Used by array_make to seed length and
   # capacity slots so the first tick can read a valid header without
   # paying an init branch on every access.
-  let pool = cast[ptr UncheckedArray[float64]](newState)
+  let pool = poolOf(newState)
   for r in regions:
     for k, v in r.init:
       pool[r.offset + k] = v
@@ -374,7 +390,7 @@ proc isBadVar(x: float64): bool {.inline.} =
 # aren't touched either.
 proc resetPool*(v: NativeVoice) =
   if v.state == nil: return
-  let pool = cast[ptr UncheckedArray[float64]](v.state)
+  let pool = poolOf(v.state)
   for r in v.regions:
     if r.typeName in ["var", "pvar"]: continue
     zeroMem(addr pool[r.offset], r.size * sizeof(float64))
@@ -388,7 +404,7 @@ proc scrubState*(v: NativeVoice; hard = false) =
   ## are kept, so the arrangement doesn't jump. Allocation-free: called
   ## from the audio callback.
   if v.state == nil: return
-  let pool = cast[ptr UncheckedArray[float64]](v.state)
+  let pool = poolOf(v.state)
   for r in v.regions:
     if r.typeName notin ["var", "pvar"]: continue
     if hard or isPoisonedRegion(pool, r.offset, r.size):
@@ -503,8 +519,8 @@ proc commit*(v: NativeVoice; p: Prepared) =
     # state. Mismatched sizes and unmatched regions start zeroed — one
     # helper loses its history rather than everything else shifting.
     # Poisoned old regions (NaN, >1e6) are never copied.
-    let oldPool = cast[ptr UncheckedArray[float64]](v.state)
-    let newPool = cast[ptr UncheckedArray[float64]](p.state)
+    let oldPool = poolOf(v.state)
+    let newPool = poolOf(p.state)
     var oldScopes, newScopes = initHashSet[string]()
     for r in v.regions: oldScopes.incl r.scope
     for r in p.regions: newScopes.incl r.scope
@@ -583,18 +599,17 @@ proc upgrade*(v: NativeVoice; gen: int; lib: TccState; fn: TickFn): bool =
 proc snapshotInto*(src: NativeVoice; dst: NativeVoice; buf: pointer) =
   ## Make `dst` a stand-in for `src` as it is right now, for a preview
   ## render: same layout and part gains, state copied into `buf` (an
-  ## alloc0'd buffer of src.stateSize). Copies only the regions in use
-  ## and the header/vars tail, not the whole 4 MB pool, to keep the time
+  ## alloc0'd buffer of src.stateSize). Copies the struct and only the
+  ## regions of the pool in use, not the whole pool, to keep the time
   ## under the audio mutex short. Caller holds the mutex. `dst` gets no
   ## code: commit a Prepared to it next, which migrates from this state.
-  let sp = cast[ptr UncheckedArray[float64]](src.state)
-  let dp = cast[ptr UncheckedArray[float64]](buf)
+  let slots = cast[ptr VoiceHeader](src.state).poolSlots
+  copyMem(buf, src.state, src.stateSize - slots * sizeof(float64))
+  placePool(buf, src.stateSize, slots)
+  let sp = poolOf(src.state)
+  let dp = poolOf(buf)
   for r in src.regions:
     copyMem(addr dp[r.offset], addr sp[r.offset], r.size * sizeof(float64))
-  let tail = DspPoolSize * sizeof(float64)
-  copyMem(cast[pointer](cast[uint](buf) + uint(tail)),
-          cast[pointer](cast[uint](src.state) + uint(tail)),
-          src.stateSize - tail)
   dst.state = buf
   dst.stateSize = src.stateSize
   dst.varNames = src.varNames

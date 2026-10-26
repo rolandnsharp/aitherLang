@@ -65,7 +65,7 @@ echo "lastA = ", lastA.l
 # Peek at the phasor slot before reload — it must survive.
 let oldPhasorOff = find(regionsA, "phasor", 0).offset
 let oldDelayOff = find(regionsA, "delay", 0).offset
-let pool = cast[ptr UncheckedArray[float64]](v.state)
+let pool = poolOf(v.state)
 let phasorBefore = pool[oldPhasorOff]
 let delayBufSample = pool[oldDelayOff + 100]  # arbitrary slot in the delay buffer
 echo "phasor before = ", phasorBefore, "  delay-buf@100 = ", delayBufSample
@@ -76,7 +76,7 @@ v.load(parseProgram(PatchB), 48000.0)
 
 let newPhasorOff = find(regionsB, "phasor", 0).offset
 let newDelayOff = find(regionsB, "delay", 0).offset
-let pool2 = cast[ptr UncheckedArray[float64]](v.state)
+let pool2 = poolOf(v.state)
 echo "phasor after reload = ", pool2[newPhasorOff]
 echo "delay-buf@100 after reload = ", pool2[newDelayOff + 100]
 

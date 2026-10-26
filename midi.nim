@@ -17,7 +17,6 @@ import dsp
 {.compile: "alsa_midi.c".}
 {.passL: "-lasound".}
 
-const OverflowSlotMidi = DspPoolSize - 128
 const MaxPolyphony* = 16
   ## Cap on simultaneously-held MIDI notes. Allocator stages new notes
   ## into slots 1..MaxPolyphony; `midi_voice_freq(n)` / `_gate(n)` read
@@ -215,7 +214,7 @@ proc nMidiVoiceKey*(n: cint): cdouble {.cdecl, exportc: "n_midi_voice_key".} =
 proc nMidiTrig*(s: var DspState; n: cint): cdouble
                {.cdecl, exportc: "n_midi_trig".} =
   if n < 0 or n >= 128: return 0.0
-  if s.idx + 1 > OverflowSlotMidi:
+  if s.idx + 1 > s.poolSlots - PoolOverflowSlots:
     s.overflow = true
     return 0.0
   let i = s.idx

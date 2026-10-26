@@ -79,6 +79,11 @@ let fn = cast[TickFn](s.getSymbol("tick"))
 doAssert fn != nil
 
 var st = create(VState)
+# The pool the patch asks for (voice_pool_slots), beside the state.
+let slots = cast[proc (): clong {.cdecl.}](s.getSymbol("voice_pool_slots"))()
+var pool = newSeq[float64](slots)
+st.state.pool = cast[ptr UncheckedArray[float64]](addr pool[0])
+st.state.poolSlots = int(slots)
 st.state.sr = 48000.0
 st.dt = 1.0 / 48000.0
 var partGains: array[16, float64]

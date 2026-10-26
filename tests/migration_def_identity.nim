@@ -39,7 +39,7 @@ proc vars(rs: seq[Region]; owner: string): seq[Region] =
     if r.typeName == "var" and r.owner.startsWith(owner): result.add r
 
 proc slots(v: NativeVoice; rs: seq[Region]): seq[float64] =
-  let pool = cast[ptr UncheckedArray[float64]](v.state)
+  let pool = poolOf(v.state)
   for r in rs:
     for k in 0 ..< r.size: result.add pool[r.offset + k]
 

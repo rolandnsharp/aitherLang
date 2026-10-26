@@ -26,7 +26,7 @@ for i in 1 .. 4:
   discard v.tick(float64(i) / 48000.0)
 
 # Sanity: PatchA's lpf state should now contain NaN.
-let pool = cast[ptr UncheckedArray[float64]](v.state)
+let pool = poolOf(v.state)
 var foundNaN = false
 for r in v.regions:
   if r.typeName == "lpf":
@@ -41,7 +41,7 @@ doAssert s.l == s.l and s.r == s.r,
   $s.l & ", " & $s.r
 
 # And the lpf region in the new state should be zero (migration skipped).
-let pool2 = cast[ptr UncheckedArray[float64]](v.state)
+let pool2 = poolOf(v.state)
 for r in v.regions:
   if r.typeName == "lpf":
     # After one tick the lpf has accumulated a tiny non-NaN value, so we
