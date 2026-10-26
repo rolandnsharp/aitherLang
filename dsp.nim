@@ -2,7 +2,7 @@
 ## patch's generated C. This module is the bridge: the C functions under
 ## their Nim names, and the table of what a patch calls by name.
 
-import std/[tables, os]
+import std/[tables, os, strutils]
 
 const DspH = currentSourcePath().parentDir / "dsp.h"   # found from any build dir
 {.compile("dsp.c", "-ffp-contract=off").}
@@ -64,11 +64,8 @@ var inputL* {.importc: "dsp_input_l", header: DspH.}: float64
 var inputR* {.importc: "dsp_input_r", header: DspH.}: float64
 
 # ------------------------------------------------------------- the natives
-# Every native a patch calls by name, in one place: its parameters as
-# SPEC names them (`name=v` has a default), the slots one call site
-# claims, and its code, `n_<name>` in C. codegen and voice take
-# everything else from here. A buffer's length comes from a parameter,
-# a literal in seconds: `extra + max(1, int(seconds * sr))` slots.
+# Every native a patch calls by name: dsp.c's dsp_natives, the one list,
+# read here in its order (so the C compilers list them alike).
 
 type
   NativeSpec* = object
@@ -76,30 +73,22 @@ type
     slots*: int        # the slots a call site claims (with a buffer: besides it)
     bufArg*: int       # the parameter sizing a buffer, or -1
     fn*: pointer
+  NativeRow {.importc: "NativeSpec", header: DspH, bycopy.} = object
+    name, params: cstring
+    slots: clong
+    buf_arg: cint
+    fn: pointer
 
-proc fixed(params: seq[string]; slots: int; fn: pointer): NativeSpec =
-  NativeSpec(params: params, slots: slots, bufArg: -1, fn: fn)
+proc dspNatives(): ptr UncheckedArray[NativeRow] =
+  {.emit: "`result` = (NativeSpec*)dsp_natives;".}
 
-proc buffered(params: seq[string]; bufArg, extra: int; fn: pointer): NativeSpec =
-  NativeSpec(params: params, slots: extra, bufArg: bufArg, fn: fn)
+proc readNatives(): OrderedTable[string, NativeSpec] =
+  let rows = dspNatives()
+  var i = 0
+  while rows[i].name != nil:
+    let r = rows[i]
+    result[$r.name] = NativeSpec(params: ($r.params).split(','), slots: int(r.slots),
+                                 bufArg: int(r.buf_arg), fn: r.fn)
+    inc i
 
-let Natives* = {
-  "lp1":       fixed(@["sig", "cut"], 1, cast[pointer](nLp1)),
-  "hp1":       fixed(@["sig", "cut"], 1, cast[pointer](nHp1)),
-  "lpf":       fixed(@["sig", "cut", "res"], 2, cast[pointer](nLpf)),
-  "hpf":       fixed(@["sig", "cut", "res"], 2, cast[pointer](nHpf)),
-  "bpf":       fixed(@["sig", "cut", "res"], 2, cast[pointer](nBpf)),
-  "notch":     fixed(@["sig", "cut", "res"], 2, cast[pointer](nNotch)),
-  "delay":     buffered(@["sig", "time", "max_time"], 2, 1, cast[pointer](nDelay)),
-  "fbdelay":   buffered(@["sig", "time", "max_time", "fb"], 2, 1, cast[pointer](nFbdelay)),
-  "tape":      buffered(@["sig", "on", "w", "r", "max_time", "keep=0"], 4, 0, cast[pointer](nTape)),
-  "reverb":    fixed(@["sig", "rt60", "wet"], int(dspReverbSlots()), cast[pointer](nReverb)),
-  "impulse":   fixed(@["freq"], 1, cast[pointer](nImpulse)),
-  "resonator": fixed(@["sig", "freq", "decay"], 2, cast[pointer](nResonator)),
-  "dho":       fixed(@["force", "freq", "damp"], 2, cast[pointer](nDho)),
-  "dho_v":     fixed(@["force", "freq", "damp"], 2, cast[pointer](nDhoV)),
-  "discharge": fixed(@["sig", "rate"], 1, cast[pointer](nDischarge)),
-  "tremolo":   fixed(@["sig", "rate", "depth"], 1, cast[pointer](nTremolo)),
-  "slew":      fixed(@["sig", "time"], 1, cast[pointer](nSlew)),
-  "wave":      fixed(@["freq", "arr"], 1, cast[pointer](nWave)),   # its table is emitted (codegen)
-}.toTable
+let Natives* = readNatives()

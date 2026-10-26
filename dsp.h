@@ -70,4 +70,18 @@ double n_input_r(void);
 /* The slots one reverb claims. */
 long dsp_reverb_slots(void);
 
+/* Every native a patch calls by name, in one place: its parameters as
+ * SPEC names them (comma-separated; `name=v` has a default), the slots
+ * one call site claims, and which parameter (a literal, in seconds)
+ * sizes a buffer of `slots + max(1, int(seconds * sr))` slots, or -1.
+ * Its C function is `n_<name>`. Ended by a row with no name. */
+typedef struct {
+  const char* name;
+  const char* params;
+  long slots;
+  int buf_arg;
+  void* fn;
+} NativeSpec;
+extern const NativeSpec dsp_natives[];
+
 #endif

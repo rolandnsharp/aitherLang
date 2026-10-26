@@ -387,3 +387,29 @@ double n_freq_shift(DspState* s, double sig, double hz) {
 double dsp_input_l, dsp_input_r;
 double n_input_l(void) { return dsp_input_l; }
 double n_input_r(void) { return dsp_input_r; }
+
+/* ------------------------------------------------------------- the natives */
+
+#define REVERB_SLOTS ((2 + 1557) + (2 + 1617) + (2 + 1491) + (2 + 1422) + (1 + 225) + (1 + 556))
+
+const NativeSpec dsp_natives[] = {
+  {"lp1", "sig,cut", 1, -1, (void*)n_lp1},
+  {"hp1", "sig,cut", 1, -1, (void*)n_hp1},
+  {"lpf", "sig,cut,res", 2, -1, (void*)n_lpf},
+  {"hpf", "sig,cut,res", 2, -1, (void*)n_hpf},
+  {"bpf", "sig,cut,res", 2, -1, (void*)n_bpf},
+  {"notch", "sig,cut,res", 2, -1, (void*)n_notch},
+  {"delay", "sig,time,max_time", 1, 2, (void*)n_delay},
+  {"fbdelay", "sig,time,max_time,fb", 1, 2, (void*)n_fbdelay},
+  {"tape", "sig,on,w,r,max_time,keep=0", 0, 4, (void*)n_tape},
+  {"reverb", "sig,rt60,wet", REVERB_SLOTS, -1, (void*)n_reverb},
+  {"impulse", "freq", 1, -1, (void*)n_impulse},
+  {"resonator", "sig,freq,decay", 2, -1, (void*)n_resonator},
+  {"dho", "force,freq,damp", 2, -1, (void*)n_dho},
+  {"dho_v", "force,freq,damp", 2, -1, (void*)n_dho_v},
+  {"discharge", "sig,rate", 1, -1, (void*)n_discharge},
+  {"tremolo", "sig,rate,depth", 1, -1, (void*)n_tremolo},
+  {"slew", "sig,time", 1, -1, (void*)n_slew},
+  {"wave", "freq,arr", 1, -1, (void*)n_wave},     /* its table is emitted (codegen) */
+  {0, 0, 0, 0, 0}
+};

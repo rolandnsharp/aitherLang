@@ -32,6 +32,7 @@ struct Node {
 typedef struct Arena Arena;
 Arena* arena_new(void);
 void arena_free(Arena* a);
+void* arena_alloc(Arena* a, unsigned long n);     /* zeroed */
 
 /* Parse a program. NULL on a parse error, with the message in `err`
  * (as the Nim parser words it). */

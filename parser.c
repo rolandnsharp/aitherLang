@@ -36,6 +36,8 @@ static void* alloc(Arena* a, size_t n) {
   return p;
 }
 
+void* arena_alloc(Arena* a, unsigned long n) { return alloc(a, n); }
+
 static const char* dup(Arena* a, const char* s, size_t n) {
   char* d = alloc(a, n + 1);
   memcpy(d, s, n);
