@@ -85,6 +85,7 @@ struct Ctx {
   Node** var_decls; int nvar_decls, cap_var_decls;
   Map pair_param_cache;     /* p = int* flags, n = count */
   Map top_sarrays, top_larrays, top_sarray_names;
+  Map file_vars;            /* every file-level `$x`, known from the start */
   int each_depth;
   Buf deferred;
   Map recursive, tail_checked, stereo_seen, pure_seen;
@@ -191,11 +192,6 @@ static Ent* hput(Ctx* c, Map* m, const char* key) {
   return lput(c, l, key);
 }
 static void incl(Ctx* c, Map* m, const char* key) { hput(c, m, key); }
-static void excl(Map* m, const char* key) {
-  Ent** l = &m->b[hsh(key)];
-  for (; *l; l = &(*l)->next)
-    if (eq((*l)->key, key)) { *l = (*l)->next; m->n--; return; }
-}
 
 /* ---- errors ---- */
 
@@ -245,17 +241,6 @@ static Node* mknum(Ctx* c, double v, int line, const char* source) {
   Node* n = mknode(c, nkNum, line, source);
   n->num = v;
   return n;
-}
-static Node* mkident(Ctx* c, const char* name, int line, const char* source) {
-  Node* n = mknode(c, nkIdent, line, source);
-  n->str = name;
-  return n;
-}
-static void add_kid(Ctx* c, Node* n, Node* k) {
-  Node** kids = al(c, (n->nkids + 1) * sizeof(Node*));
-  if (n->nkids) memcpy(kids, n->kids, n->nkids * sizeof(Node*));
-  kids[n->nkids++] = k;
-  n->kids = kids;
 }
 
 static const char* const LIBM1[] = {"sin", "cos", "tan", "tanh", "exp", "log", "log2",
@@ -538,16 +523,6 @@ static const char* lookup(Scope* sc, const char* name) {
   return "";
 }
 
-/* The nearest binding of `name` is a plain number, shadowing a file-level
- * pair of the same name. */
-static int scalar_shadows(Scope* sc, const char* name) {
-  for (Scope* s = sc; s; s = s->parent) {
-    if (lfind(s->stereo, name)) return 0;
-    if (lfind(s->names, name)) return 1;
-  }
-  return 0;
-}
-
 static const char* const BUILTIN_FNS[] = {
   "saw", "tri", "sqr", "phasor", "noise", "abs", "pow",
   "midi_cc", "midi_note", "midi_freq", "midi_gate",
@@ -568,16 +543,6 @@ static int takes_pair_at(const char* name, int j, int n) {
   return 1;
 }
 
-/* Helpers that process a signal without making its sides differ: given a
- * pair, they run once per side, each with its own state. */
-static const char* const TRANSPARENT_HELPERS[] = {
-  "lpf", "hpf", "bpf", "lp1", "hp1", "drive", "fold",
-  "delay", "fbdelay", "tape", "reverb", "slew", "discharge",
-  "pluck", "swell", "adsr", "gain", "prev", "tremolo", NULL};
-
-/* Pair-returning defs that need a mono input. */
-static const char* const MONO_ONLY_INPUT_DEFS[] = {"pan", NULL};
-
 static const NativeSpec* native(const char* name) {
   for (int i = 0; dsp_natives[i].name; i++) if (eq(dsp_natives[i].name, name)) return &dsp_natives[i];
   return NULL;
@@ -594,7 +559,7 @@ static int is_value_name(Ctx* c, Scope* sc, const char* name) {
   if (lookup_array(c, sc, name)) return 1;
   if (lookup_sarray(c, sc, name) || lookup_larray(c, sc, name)) return 1;
   if (has(&c->top_lets, name)) return 1;
-  if (has(&c->top_var_set, name)) return 1;
+  if (has(&c->top_var_set, name) || has(&c->file_vars, name)) return 1;
   if (has(&c->pair_vars, name)) return 1;
   if (has(&c->play_set, name)) return 1;
   if (has(&c->stereo_lets, name)) return 1;
@@ -608,9 +573,6 @@ static int is_fn_name(Ctx* c, Scope* sc, const char* name) {
          native(name) || lookup_fn(sc, name)[0];
 }
 
-static const char* stereo_ref(Ctx* c, const char* name, const char* chan) {
-  return F(c, "%s%s_%s", has(&c->play_set, name) ? "p_" : "l_", name, chan);
-}
 
 static const char* pair_var_field(Ctx* c, const char* name, int k) { return F(c, "%s__%d", name, k); }
 static const char* pair_var_ref(Ctx* c, const char* name, int k) { return F(c, "s->v_%s__%d", name, k); }
@@ -702,133 +664,59 @@ static int* pair_params(Ctx* c, Node* def) {
   return res;
 }
 
-static int has_pair_params(Ctx* c, const char* name) {
-  Node* d = user_def(c, name);
-  if (!d) return 0;
-  int* p = pair_params(c, d);
-  for (int i = 0; i < d->nparams; i++) if (p[i]) return 1;
-  return 0;
-}
 
-/* ------------------------------------------------- expression codegen */
 
-static const char* emit_expr(Ctx* c, Scope* sc, Node* n);
-static const char* emit_block_expr(Ctx* c, Scope* sc, Node* blk);
-static int refs_stereo(Ctx* c, Scope* sc, Node* n);
+/* ------------------------------------------------- expression codegen
+ *
+ * Every value is a pair, its two sides: `l` and `r`, each a pure C
+ * expression (no side effects: whatever has state is a statement in `pre`
+ * that leaves its result in a temporary, so a side may be read twice).
+ * A number is a pair whose sides are known equal (`pair` is 0): it is
+ * computed once. A function given a pair where it takes a number runs
+ * once per side, each side with its own state; a def's own pair
+ * parameters (pair_params) take the pair whole. Only `if` is lazy: a
+ * branch's statements run only when it is taken. */
+
+typedef struct { const char* l; const char* r; int pair; } V;
+
+static V mono(const char* s) { return (V){s, s, 0}; }
+static V vpair(const char* l, const char* r) { return (V){l, r, 1}; }
+static const char* side(V v, int k) { return k ? v.r : v.l; }
+
+static V emit(Ctx* c, Scope* sc, Node* n, Buf* pre);
+static V emit_block(Ctx* c, Scope* sc, Node* blk, Buf* pre);
+static void emit_local_stmt(Ctx* c, Scope* sc, Node* st, Buf* pre);
 static const char* emit_idx_assign(Ctx* c, Scope* sc, Node* st);
 static void declare_state_array(Ctx* c, Scope* sc, Node* st, Buf* pre, int top_level);
 static void declare_local_array(Ctx* c, Scope* sc, const char* name, Node* rhs, Buf* pre, int top_level);
 
-typedef struct { const char* l; const char* r; int stereo; } SV;
-static SV emit_stereo(Ctx* c, Scope* sc, Node* n, Buf* pre);
-static int is_stereo_return(Ctx* c, Node* n);
-
-/* Inside a def body, `names` are those known to hold a pair. */
+/* A name set, for the recursion checks. */
 typedef struct NameSet { const char** v; int n; } NameSet;
 static int ns_has(NameSet* s, const char* k) {
   for (int i = 0; i < s->n; i++) if (eq(s->v[i], k)) return 1;
   return 0;
 }
-/* A copy with room for `extra` more names. */
-static NameSet ns_copy(Ctx* c, NameSet* s, int extra) {
-  NameSet r = {al(c, (s->n + extra + 1) * sizeof(char*)), s->n};
-  if (s->n) memcpy(r.v, s->v, s->n * sizeof(char*));
-  return r;
-}
 static void ns_incl(NameSet* s, const char* k) { if (!ns_has(s, k)) s->v[s->n++] = k; }
-static void ns_excl(NameSet* s, const char* k) {
-  for (int i = 0; i < s->n; i++)
-    if (eq(s->v[i], k)) { s->v[i] = s->v[--s->n]; return; }
-}
 
-static int stereo_in(Ctx* c, Node* n, NameSet* names) {
-  if (!n) return 0;
-  switch (n->kind) {
-  case nkIdent: return ns_has(names, n->str);
-  case nkBinOp: case nkUnary:
-    for (int i = 0; i < n->nkids; i++) if (stereo_in(c, n->kids[i], names)) return 1;
-    return 0;
-  case nkBlock: {
-    NameSet nm = ns_copy(c, names, n->nkids);
-    for (int i = 0; i < n->nkids; i++) {
-      Node* k = n->kids[i];
-      if (i == n->nkids - 1) return stereo_in(c, k, &nm);
-      if (k->kind == nkLet) {
-        if (stereo_in(c, k->kids[0], &nm)) ns_incl(&nm, k->str);
-        else ns_excl(&nm, k->str);
-      } else if (k->kind == nkVar && stereo_in(c, k->kids[0], &nm)) {
-        ns_incl(&nm, k->str);
-      }
-    }
-    return 0;
-  }
-  case nkIf:
-    return stereo_in(c, n->kids[1], names) || stereo_in(c, n->kids[2], names);
-  default:
-    return is_stereo_return(c, n);
-  }
-}
-
-static int is_stereo_def(Ctx* c, Node* def) {
-  if (has(&c->stereo_seen, def->str)) return 0;
-  incl(c, &c->stereo_seen, def->str);
-  NameSet names = {al(c, (def->nparams + 1) * sizeof(char*)), 0};
-  int* pairs = pair_params(c, def);
-  for (int i = 0; i < def->nparams; i++) if (pairs[i]) ns_incl(&names, def->params[i]);
-  int r = stereo_in(c, def->kids[0], &names);
-  excl(&c->stereo_seen, def->str);
-  return r;
-}
-
-static int is_stereo_return(Ctx* c, Node* n) {
-  if (!n) return 0;
-  switch (n->kind) {
-  case nkArr: return n->nkids == 2;
-  case nkBlock: return n->nkids == 0 ? 0 : is_stereo_return(c, n->kids[n->nkids - 1]);
-  case nkIf:
-    return is_stereo_return(c, n->kids[1]) || (n->kids[2] && is_stereo_return(c, n->kids[2]));
-  case nkCall:
-    if (in(n->str, PAIR_CALLS)) return 1;
-    { Node* d = user_def(c, n->str); return d && is_stereo_def(c, d); }
-  default: return 0;
-  }
-}
-
-/* Can a def be inlined twice, once per channel? Not with state in it. */
-static int is_pure_for_stereo(Ctx* c, Node* n) {
-  if (!n) return 1;
-  switch (n->kind) {
-  case nkVar: return 0;
-  case nkCall:
-    if (eq(n->str, "sum") || eq(n->str, "each") || eq(n->str, "array")) return 0;
-    if (eq(n->str, "phasor") || eq(n->str, "phasor_pair") || eq(n->str, "noise") || eq(n->str, "midi_trig")) return 0;
-    if (native(n->str)) return 0;
-    {
-      Node* d = user_def(c, n->str);
-      if (d && !has(&c->pure_seen, n->str)) {
-        incl(c, &c->pure_seen, n->str);
-        int pure = is_pure_for_stereo(c, d->kids[0]);
-        excl(&c->pure_seen, n->str);
-        if (!pure) return 0;
-      }
-    }
-    break;
-  case nkLambda: return 0;
-  default: break;
-  }
-  for (int i = 0; i < n->nkids; i++)
-    if (n->kids[i] && !is_pure_for_stereo(c, n->kids[i])) return 0;
+/* A text read more than once: a temporary unless it is already one word. */
+static int is_simple(const char* s) {
+  for (; *s; s++) if (*s == '(' || *s == ' ') return 0;
   return 1;
 }
+static const char* once(Ctx* c, Buf* pre, const char* s) {
+  if (is_simple(s)) return s;
+  const char* t = fresh(c, "v");
+  badd(c, pre, "  double %s = (%s);\n", t, s);
+  return t;
+}
 
-static const char* call_args(Ctx* c, Scope* sc, Node** kids, int nkids) {
-  Buf b = {0};
-  for (int i = 0; i < nkids; i++) {
-    const char* e = emit_expr(c, sc, kids[i]);
-    if (i) bcat(c, &b, ", ");
-    bcat(c, &b, e);
-  }
-  return sdup(c, bstr(&b));
+/* `n` where one number is needed. */
+static const char* emit1(Ctx* c, Scope* sc, Node* n, Buf* pre, const char* what) {
+  V v = emit(c, sc, n, pre);
+  if (v.pair)
+    fail(c, "%s needs one number but gets a pair — pick a side with [0] / [1], or make it "
+         "pair state: $x = [0, 0] %s", what, err_loc(c, n));
+  return v.l;
 }
 
 /* ---- hoisting: what can't change within a block runs once a block ---- */
@@ -902,13 +790,17 @@ static Node* spell(Ctx* c, Scope* sc, Node* n) {
   return r;
 }
 
+/* An invariant expression as hoist_init computes it: numbers, knobs and
+ * pure maths, so one expression and no statements. */
 static const char* emit_invariant(Ctx* c, Scope* sc, Node* n) {
   Node* sp = spell(c, sc, n);
   int was = c->in_hoist;
   c->in_hoist = 1;
-  const char* r = emit_expr(c, push(c, NULL), sp);
+  Buf p = {0};
+  V v = emit(c, push(c, NULL), sp, &p);
   c->in_hoist = was;
-  return r;
+  if (p.n || v.pair) fail(c, "internal: an invariant expression needed statements %s", err_loc(c, n));
+  return v.l;
 }
 
 /* A static double computed once from `cexpr`; its name. */
@@ -946,34 +838,12 @@ static const char* hoist_arr(Ctx* c, int n, const char* init_call) {
   return name;
 }
 
-/* `call` with $1, $2, ... standing for names[0], names[1], ... */
-static const char* subst(Ctx* c, const char* call, const char** names, int n) {
-  Buf b = {0};
-  for (const char* p = call; *p;) {
-    if (*p == '$' && p[1] >= '1' && p[1] <= '9') {
-      int k = 0;
-      p++;
-      while (*p >= '0' && *p <= '9') k = k * 10 + (*p++ - '0');
-      if (k >= 1 && k <= n) bcat(c, &b, names[k - 1]);
-    } else {
-      bput(c, &b, p, 1);
-      p++;
-    }
-  }
-  return sdup(c, bstr(&b));
-}
-
-/* A stateful native at its call site's region: the args into locals
- * first (one may move s->idx), then s->idx, then the call. */
-static const char* native_at(Ctx* c, const char* off, const char** args, int nargs, const char* call) {
-  Buf pre = {0};
-  const char** names = al(c, (nargs ? nargs : 1) * sizeof(char*));
-  for (int i = 0; i < nargs; i++) {
-    const char* t = fresh(c, "na");
-    badd(c, &pre, "double %s = (%s); ", t, args[i]);
-    names[i] = t;
-  }
-  return F(c, "(({ %ss->idx = %s; %s; }))", bstr(&pre), off, subst(c, call, names, nargs));
+/* A stateful native at its call site's region: point s->idx there, then
+ * call. Its result in a temporary. */
+static const char* native_call(Ctx* c, Buf* pre, const char* off, const char* call) {
+  const char* t = fresh(c, "nv");
+  badd(c, pre, "  s->idx = %s; double %s = %s;\n", off, t, call);
+  return t;
 }
 
 /* An argument bound at compile time: a lambda, a function or an array. */
@@ -1021,9 +891,7 @@ static int bind_by_name(Ctx* c, Scope* sc, Scope* inner, const char* p, Node* a,
       d->a = sym; d->n = a->nkids;
     } else {
       const char* tmp = fresh(c, F(c, "arg_%s", p));
-      Buf sub = {0};
-      declare_local_array(c, sc, tmp, a, &sub, 0);
-      bcat(c, preface, bstr(&sub));
+      declare_local_array(c, sc, tmp, a, preface, 0);
       Ent* src = lfind(sc->larrays, tmp);
       Ent* d = lput(c, &inner->larrays, p);
       d->a = src->a; d->n = src->n;
@@ -1052,7 +920,8 @@ static int indexes(Node* n, const char* name) {
   return 0;
 }
 
-/* Which params take a pair argument whole. */
+/* Which params take a pair whole: those the body reads as a pair, and
+ * those it indexes (a pair indexes like a two-entry table). */
 static int* takes_pair(Ctx* c, Node* def) {
   int* pp = pair_params(c, def);
   int* r = al(c, (def->nparams ? def->nparams : 1) * sizeof(int));
@@ -1060,74 +929,85 @@ static int* takes_pair(Ctx* c, Node* def) {
   return r;
 }
 
-static const char* emit_def_inline(Ctx* c, Scope* sc, Node* def, Node* call) {
+/* Bind a value to a parameter: a pair as two temporaries, a number as
+ * one, with its compile-time value or invariance noted. */
+static void bind_value(Ctx* c, Scope* inner, const char* p, V v, int whole, Node* arg, Scope* sc, Buf* pre) {
+  if (whole) {
+    const char* tl = fresh(c, F(c, "p_%s_l", p));
+    const char* tr = fresh(c, F(c, "p_%s_r", p));
+    badd(c, pre, "  double %s = (%s); double %s = (%s);\n", tl, v.l, tr, v.r);
+    Ent* e = lput(c, &inner->stereo, p);
+    e->a = tl; e->b = tr;
+    return;
+  }
+  const char* t = fresh(c, F(c, "p_%s", p));
+  badd(c, pre, "  double %s = (%s);\n", t, v.l);
+  lput(c, &inner->names, p)->a = t;
+  double cv;
+  if (arg && const_value(c, sc, arg, &cv)) lput(c, &inner->numlits, p)->v = cv;
+  else if (arg) note_invariant(c, inner, p, arg, sc);
+}
+
+/* A def inlined. Given a pair where it takes a number, it runs once per
+ * side, each side its own state; else once. */
+static V emit_def(Ctx* c, Scope* sc, Node* def, Node* call, Buf* pre) {
   if (call->nkids != def->nparams)
     fail(c, "wrong arg count for %s: expected %d got %d %s", def->str, def->nparams, call->nkids, err_loc(c, call));
   if (sfind(&c->def_stack, def->str) >= 0) cycle_error(c, def, call);
-  Scope* inner = push(c, sc);
-  Buf preface = {0};
-  int* pairs = pair_params(c, def);
-  for (int i = 0; i < def->nparams; i++) {
-    const char* p = def->params[i];
-    Node* a = call->kids[i];
-    if (pairs[i] || (indexes(def->kids[0], p) && refs_stereo(c, sc, a))) {
-      Buf sub = {0};
-      SV sv = emit_stereo(c, sc, a, &sub);
-      const char* tl = fresh(c, F(c, "p_%s_l", p));
-      const char* tr = fresh(c, F(c, "p_%s_r", p));
-      bcat(c, &preface, bstr(&sub));
-      badd(c, &preface, "double %s = (%s); double %s = (%s); ", tl, sv.l, tr, sv.r);
-      Ent* e = lput(c, &inner->stereo, p);
-      e->a = tl; e->b = tr;
-      continue;
-    }
-    if (bind_by_name(c, sc, inner, p, a, &preface)) continue;
-    const char* arg = emit_expr(c, sc, a);
-    const char* tmp = fresh(c, F(c, "p_%s", p));
-    badd(c, &preface, "double %s = (%s); ", tmp, arg);
-    lput(c, &inner->names, p)->a = tmp;
-    double v;
-    if (const_value(c, sc, a, &v)) lput(c, &inner->numlits, p)->v = v;
-    else note_invariant(c, inner, p, a, sc);
+  int* whole = takes_pair(c, def);
+  int np = def->nparams;
+  Scope* names = push(c, sc);              /* what binds by name: lambdas, functions, arrays */
+  V* args = al(c, (np + 1) * sizeof(V));
+  int* bound = al(c, (np + 1) * sizeof(int));
+  int split = 0;
+  for (int i = 0; i < np; i++) {
+    if (bind_by_name(c, sc, names, def->params[i], call->kids[i], pre)) { bound[i] = 1; continue; }
+    args[i] = emit(c, sc, call->kids[i], pre);
+    if (args[i].pair && !whole[i]) split = 1;
   }
   Node* body = def->kids[0];
-  spush(c, &c->def_stack, def->str);
-  const char* b = body->kind == nkBlock ? emit_block_expr(c, inner, body) : emit_expr(c, inner, body);
-  c->def_stack.n--;
-  return F(c, "(({ %sdouble __r = (%s); __r; }))", bstr(&preface), b);
+  if (!split) {
+    Scope* inner = push(c, names);
+    for (int i = 0; i < np; i++)
+      if (!bound[i]) bind_value(c, inner, def->params[i], args[i], whole[i], call->kids[i], sc, pre);
+    spush(c, &c->def_stack, def->str);
+    V r = body->kind == nkBlock ? emit_block(c, inner, body, pre) : emit(c, inner, body, pre);
+    c->def_stack.n--;
+    return r;
+  }
+  const char* res[2];
+  for (int k = 0; k < 2; k++) {
+    Scope* inner = push(c, names);
+    for (int i = 0; i < np; i++) {
+      if (bound[i]) continue;
+      V a = whole[i] ? args[i] : mono(side(args[i], k));
+      bind_value(c, inner, def->params[i], a, whole[i], args[i].pair ? NULL : call->kids[i], sc, pre);
+    }
+    spush(c, &c->def_stack, def->str);
+    V r = body->kind == nkBlock ? emit_block(c, inner, body, pre) : emit(c, inner, body, pre);
+    c->def_stack.n--;
+    if (r.pair)
+      fail(c, "%s returns a pair, and given a pair it runs once per side: a pair of pairs %s",
+           def->str, err_loc(c, call));
+    res[k] = r.l;
+  }
+  return vpair(res[0], res[1]);
 }
 
-/* `n` where one number is needed. */
-static const char* scalar_value(Ctx* c, Scope* sc, Node* n, Buf* pre, const char* what) {
-  if (!refs_stereo(c, sc, n)) return emit_expr(c, sc, n);
-  SV v = emit_stereo(c, sc, n, pre);
-  if (v.stereo)
-    fail(c, "%s needs one number but gets a pair — pick a side with [0] / [1], or make it "
-         "pair state: $x = [0, 0] %s", what, err_loc(c, n));
-  return v.l;
-}
-
-/* Operands of a pair operation, flattened to numbers, each into a temp. */
+/* Operands of a pair operation, flattened to numbers, each a temporary:
+ * a pair gives its two sides, a number itself. */
 static const char** pair_operands(Ctx* c, Scope* sc, Node* n, Buf* pre, int want, const char* usage) {
   const char** r = al(c, (2 * n->nkids + 1) * sizeof(char*));
   int k = 0;
   for (int i = 0; i < n->nkids; i++) {
-    Node* kid = n->kids[i];
-    if (refs_stereo(c, sc, kid)) {
-      SV v = emit_stereo(c, sc, kid, pre);
-      const char* tl = fresh(c, F(c, "%s_a", n->str));
-      badd(c, pre, "  double %s = (%s);\n", tl, v.l);
-      r[k++] = tl;
-      if (v.stereo) {
-        const char* tr = fresh(c, F(c, "%s_a", n->str));
-        badd(c, pre, "  double %s = (%s);\n", tr, v.r);
-        r[k++] = tr;
-      }
-    } else {
-      const char* t = fresh(c, F(c, "%s_a", n->str));
-      const char* e = emit_expr(c, sc, kid);
-      badd(c, pre, "  double %s = (%s);\n", t, e);
-      r[k++] = t;
+    V v = emit(c, sc, n->kids[i], pre);
+    const char* tl = fresh(c, F(c, "%s_a", n->str));
+    badd(c, pre, "  double %s = (%s);\n", tl, v.l);
+    r[k++] = tl;
+    if (v.pair) {
+      const char* tr = fresh(c, F(c, "%s_a", n->str));
+      badd(c, pre, "  double %s = (%s);\n", tr, v.r);
+      r[k++] = tr;
     }
   }
   if (k != want)
@@ -1135,10 +1015,11 @@ static const char** pair_operands(Ctx* c, Scope* sc, Node* n, Buf* pre, int want
   return r;
 }
 
-/* `target = rhs` for a pair: both sides into temps before either is stored. */
+/* `target = rhs` for a pair: both sides into temps before either is
+ * stored; a number fills both. */
 static const char* assign_pair(Ctx* c, Scope* sc, const char* tl0, const char* tr0, Node* rhs) {
   Buf pre = {0};
-  SV v = emit_stereo(c, sc, rhs, &pre);
+  V v = emit(c, sc, rhs, &pre);
   const char* tl = fresh(c, "pa_l");
   const char* tr = fresh(c, "pa_r");
   badd(c, &pre, "  double %s = (%s);\n  double %s = (%s);\n  %s = %s;\n  %s = %s;\n",
@@ -1158,7 +1039,7 @@ static const char* assign_pair_side(Ctx* c, Scope* sc, Node* st) {
     else if (has(&c->pair_vars, base->str)) target = pair_var_ref(c, base->str, k);
     if (target[0]) {
       Buf pre = {0};
-      const char* rhs = scalar_value(c, sc, st->kids[2], &pre, F(c, "$%s[%d]", base->str, k));
+      const char* rhs = emit1(c, sc, st->kids[2], &pre, F(c, "$%s[%d]", base->str, k));
       badd(c, &pre, "  %s = (%s);\n", target, rhs);
       return sdup(c, bstr(&pre));
     }
@@ -1198,7 +1079,7 @@ static void declare_state_array(Ctx* c, Scope* sc, Node* st, Buf* pre, int top_l
   int gens = every > 0 ? 2 : 1;
   const char* off = register_region(c, "sarr", 1 + gens * n, st->str);
   Buf init_pre = {0};
-  const char* init = args.npos == 2 ? scalar_value(c, sc, args.pos[1], &init_pre, F(c, "$%s", st->str)) : "0.0";
+  const char* init = args.npos == 2 ? emit1(c, sc, args.pos[1], &init_pre, F(c, "$%s", st->str)) : "0.0";
   long wo = every > 0 ? n : 0;
   const char* base;
   if (top_level) {
@@ -1227,7 +1108,7 @@ static void declare_local_array(Ctx* c, Scope* sc, const char* name, Node* rhs, 
   if (rhs->kind == nkArr) {
     badd(c, pre, "  double %s[%d];\n", sym, rhs->nkids);
     for (int k = 0; k < rhs->nkids; k++) {
-      const char* v = scalar_value(c, sc, rhs->kids[k], pre, F(c, "%s[%d]", name, k));
+      const char* v = emit1(c, sc, rhs->kids[k], pre, F(c, "%s[%d]", name, k));
       badd(c, pre, "  %s[%d] = (%s);\n", sym, k, v);
     }
     Ent* e = top_level ? hput(c, &c->top_larrays, name) : lput(c, &sc->larrays, name);
@@ -1238,7 +1119,7 @@ static void declare_local_array(Ctx* c, Scope* sc, const char* name, Node* rhs, 
       fail(c, "every steps a state array, which keeps its values: $%s = array(...), not let %s",
            name, err_loc(c, rhs));
     int n = array_make_size(c, sc, rhs);
-    const char* init = args.npos == 2 ? scalar_value(c, sc, args.pos[1], pre, name) : "0.0";
+    const char* init = args.npos == 2 ? emit1(c, sc, args.pos[1], pre, name) : "0.0";
     badd(c, pre, "  double %s[%d];\n  { double _v = (%s); for (long _k = 0; _k < %d; ++_k) %s[_k] = _v; }\n",
          sym, n, init, n, sym);
     Ent* e = top_level ? hput(c, &c->top_larrays, name) : lput(c, &sc->larrays, name);
@@ -1253,25 +1134,22 @@ static const char* emit_idx_assign(Ctx* c, Scope* sc, Node* st) {
     Ent* sa = lookup_sarray(c, sc, base->str);
     if (sa) {
       Buf pre = {0};
-      const char* ix = emit_expr(c, sc, st->kids[1]);
-      const char* v = scalar_value(c, sc, st->kids[2], &pre, F(c, "$%s[i]", base->str));
+      const char* ix = emit1(c, sc, st->kids[1], &pre, "an index");
+      const char* v = emit1(c, sc, st->kids[2], &pre, F(c, "$%s[i]", base->str));
       const char* it = fresh(c, "ai");
       const char* vt = fresh(c, "av");
       badd(c, &pre, "  long %s = (long)(%s); double %s = (%s);\n", it, ix, vt, v);
       const char* store = F(c, "  if (%s >= 0 && %s < %ld) s->pool[%s + 1 + %ld + %s] = %s;\n",
                             it, it, sa->n, sa->a, sa->wo, it, vt);
-      if (c->each_depth > 0) {
-        bcat(c, &c->deferred, store);
-        return sdup(c, bstr(&pre));
-      }
-      bcat(c, &pre, store);
+      if (c->each_depth > 0) bcat(c, &c->deferred, store);
+      else bcat(c, &pre, store);
       return sdup(c, bstr(&pre));
     }
     Ent* la = lookup_larray(c, sc, base->str);
     if (la) {
       Buf pre = {0};
-      const char* ix = emit_expr(c, sc, st->kids[1]);
-      const char* v = scalar_value(c, sc, st->kids[2], &pre, F(c, "%s[i]", base->str));
+      const char* ix = emit1(c, sc, st->kids[1], &pre, "an index");
+      const char* v = emit1(c, sc, st->kids[2], &pre, F(c, "%s[i]", base->str));
       badd(c, &pre, "  { long _i = (long)(%s) %% %ld; %s[_i < 0 ? _i + %ld : _i] = (%s); }\n",
            ix, la->n, la->a, la->n, v);
       return sdup(c, bstr(&pre));
@@ -1288,85 +1166,85 @@ static int all_nums(Node* a) {
   return 1;
 }
 
-/* One non-final statement of a def, lambda or stereo-def body. */
+/* A table of numbers, as static data; its symbol. */
+static const char* static_table(Ctx* c, const char* sym, Node* arr, const char** items) {
+  Buf list = {0};
+  for (int i = 0; i < arr->nkids; i++) {
+    const char* x = num_lit(c, arr->kids[i]->num);
+    if (items) items[i] = x;
+    if (i) bcat(c, &list, ", ");
+    bcat(c, &list, x);
+  }
+  badd(c, &c->array_decls, "static const double %s[%d] = {%s};\n", sym, arr->nkids, bstr(&list));
+  return sym;
+}
+
+/* `let name = rhs` in a scope (a def, lambda or play body): a table, an
+ * array of this sample's numbers, a pair, or a number. */
+static void emit_let(Ctx* c, Scope* sc, const char* name, Node* rhs, Buf* pre, const char* cname) {
+  int numeric = rhs->kind == nkArr && rhs->nkids > 0 && all_nums(rhs);
+  if ((rhs->kind == nkArr && rhs->nkids != 2 && rhs->nkids > 0 && !numeric) || is_array_make(rhs)) {
+    declare_local_array(c, sc, name, rhs, pre, 0);
+    return;
+  }
+  if (numeric) {
+    const char** items = al(c, rhs->nkids * sizeof(char*));
+    Ent* e = lput(c, &sc->arrays, name);
+    e->a = static_table(c, fresh(c, F(c, "arr_%s", name)), rhs, items);
+    e->n = rhs->nkids;
+    if (rhs->nkids != 2) return;
+    /* two numbers are a pair as well */
+    Ent* s2 = lput(c, &sc->stereo, name);
+    s2->a = items[0]; s2->b = items[1];
+    return;
+  }
+  V v = emit(c, sc, rhs, pre);
+  if (v.pair) {
+    const char* tl = cname ? F(c, "%s_l", cname) : fresh(c, F(c, "l_%s_l", name));
+    const char* tr = cname ? F(c, "%s_r", cname) : fresh(c, F(c, "l_%s_r", name));
+    badd(c, pre, "  double %s = (%s);\n  double %s = (%s);\n", tl, v.l, tr, v.r);
+    Ent* e = lput(c, &sc->stereo, name);
+    e->a = tl; e->b = tr;
+    return;
+  }
+  const char* t = cname ? cname : fresh(c, F(c, "l_%s", name));
+  badd(c, pre, "  double %s = (%s);\n", t, v.l);
+  lput(c, &sc->names, name)->a = t;
+  double cv;
+  if (const_value(c, sc, rhs, &cv)) lput(c, &sc->numlits, name)->v = cv;
+  else note_invariant(c, sc, name, rhs, sc);
+}
+
+/* One non-final statement of a body. */
 static void emit_local_stmt(Ctx* c, Scope* sc, Node* st, Buf* pre) {
   switch (st->kind) {
-  case nkLet: {
-    Node* rhs = st->kids[0];
-    if ((rhs->kind == nkArr && rhs->nkids != 2 && rhs->nkids > 0 && !all_nums(rhs)) || is_array_make(rhs)) {
-      declare_local_array(c, sc, st->str, rhs, pre, 0);
-    } else if (rhs->kind == nkArr && rhs->nkids > 0 && all_nums(rhs)) {
-      const char* sym = fresh(c, F(c, "arr_def_%s", st->str));
-      const char** items = al(c, rhs->nkids * sizeof(char*));
-      Buf list = {0};
-      for (int i = 0; i < rhs->nkids; i++) {
-        items[i] = num_lit(c, rhs->kids[i]->num);
-        if (i) bcat(c, &list, ", ");
-        bcat(c, &list, items[i]);
-      }
-      badd(c, &c->array_decls, "static const double %s[%d] = {%s};\n", sym, rhs->nkids, bstr(&list));
-      Ent* e = lput(c, &sc->arrays, st->str);
-      e->a = sym; e->n = rhs->nkids;
-      if (rhs->nkids == 2) {
-        const char* tl = fresh(c, F(c, "l_%s_l", st->str));
-        const char* tr = fresh(c, F(c, "l_%s_r", st->str));
-        badd(c, pre, "  double %s = %s;\n  double %s = %s;\n", tl, items[0], tr, items[1]);
-        Ent* s2 = lput(c, &sc->stereo, st->str);
-        s2->a = tl; s2->b = tr;
-      }
-    } else if (refs_stereo(c, sc, rhs)) {
-      SV v = emit_stereo(c, sc, rhs, pre);
-      if (v.stereo) {
-        const char* tl = fresh(c, F(c, "l_%s_l", st->str));
-        const char* tr = fresh(c, F(c, "l_%s_r", st->str));
-        badd(c, pre, "  double %s = (%s);\n  double %s = (%s);\n", tl, v.l, tr, v.r);
-        Ent* e = lput(c, &sc->stereo, st->str);
-        e->a = tl; e->b = tr;
-      } else {
-        const char* t = fresh(c, F(c, "l_%s", st->str));
-        badd(c, pre, "  double %s = (%s);\n", t, v.l);
-        lput(c, &sc->names, st->str)->a = t;
-      }
-    } else {
-      const char* t = fresh(c, F(c, "l_%s", st->str));
-      const char* v = emit_expr(c, sc, rhs);
-      badd(c, pre, "  double %s = (%s);\n", t, v);
-      lput(c, &sc->names, st->str)->a = t;
-      double cv;
-      if (const_value(c, sc, rhs, &cv)) lput(c, &sc->numlits, st->str)->v = cv;
-      else note_invariant(c, sc, st->str, rhs, sc);
-    }
+  case nkLet:
+    emit_let(c, sc, st->str, st->kids[0], pre, NULL);
     break;
-  }
-  case nkVar:
-    if (is_array_make(st->kids[0])) {
-      declare_state_array(c, sc, st, pre, 0);
-    } else if (is_stereo_return(c, st->kids[0])) {
-      /* Pair state: a "pvar" region, the flag then the two sides. */
+  case nkVar: {
+    if (is_array_make(st->kids[0])) { declare_state_array(c, sc, st, pre, 0); break; }
+    /* `$x` in a def: its first value runs once, then the state keeps. A
+     * pair is a "pvar" region (the flag, two sides), a number a "var". */
+    Buf init_pre = {0};
+    V v = emit(c, sc, st->kids[0], &init_pre);
+    if (v.pair) {
       const char* flag = fresh(c, "pf");
       const char* off = register_region(c, "pvar", 3, st->str);
-      badd(c, pre, "  long %s = %s;\n", flag, off);
-      Buf init_pre = {0};
-      SV v = emit_stereo(c, sc, st->kids[0], &init_pre);
-      badd(c, pre, "  if (s->pool[%s] == 0.0) {\n%s    s->pool[%s + 1] = (%s);\n"
+      badd(c, pre, "  long %s = %s;\n  if (s->pool[%s] == 0.0) {\n%s    s->pool[%s + 1] = (%s);\n"
            "    s->pool[%s + 2] = (%s);\n    s->pool[%s] = 1.0;\n  }\n",
-           flag, bstr(&init_pre), flag, v.l, flag, v.r, flag);
+           flag, off, flag, bstr(&init_pre), flag, v.l, flag, v.r, flag);
       Ent* e = lput(c, &sc->stereo, st->str);
       e->a = F(c, "s->pool[%s + 1]", flag);
       e->b = F(c, "s->pool[%s + 2]", flag);
     } else {
-      /* `$x` in a def: a "var" region, a flag and the value. */
       const char* flag = fresh(c, "vf");
-      const char* val = fresh(c, "vs");
       const char* off = register_region(c, "var", 2, st->str);
-      badd(c, pre, "  long %s = %s;\n  long %s = (%s) + 1;\n", flag, off, val, off);
-      Buf init_pre = {0};
-      const char* init = scalar_value(c, sc, st->kids[0], &init_pre, F(c, "$%s", st->str));
-      badd(c, pre, "  if (s->pool[%s] == 0.0) {\n%s    s->pool[%s] = (%s);\n    s->pool[%s] = 1.0;\n  }\n",
-           flag, bstr(&init_pre), val, init, flag);
-      lput(c, &sc->names, st->str)->a = F(c, "s->pool[%s]", val);
+      badd(c, pre, "  long %s = %s;\n  if (s->pool[%s] == 0.0) {\n%s    s->pool[%s + 1] = (%s);\n"
+           "    s->pool[%s] = 1.0;\n  }\n", flag, off, flag, bstr(&init_pre), flag, v.l, flag);
+      lput(c, &sc->names, st->str)->a = F(c, "s->pool[%s + 1]", flag);
     }
     break;
+  }
   case nkAssign: {
     Ent* pair = lookup_stereo(sc, st->str);
     if (pair) {
@@ -1374,7 +1252,7 @@ static void emit_local_stmt(Ctx* c, Scope* sc, Node* st, Buf* pre) {
     } else {
       const char* target = lookup(sc, st->str);
       if (!target[0]) fail(c, "unknown assignment target: %s %s", st->str, err_loc(c, st));
-      const char* rhs = scalar_value(c, sc, st->kids[0], pre, F(c, "$%s", st->str));
+      const char* rhs = emit1(c, sc, st->kids[0], pre, F(c, "$%s", st->str));
       badd(c, pre, "  %s = (%s);\n", target, rhs);
     }
     break;
@@ -1383,29 +1261,15 @@ static void emit_local_stmt(Ctx* c, Scope* sc, Node* st, Buf* pre) {
     bcat(c, pre, emit_idx_assign(c, sc, st));
     break;
   default:
-    if (refs_stereo(c, sc, st)) {
-      SV v = emit_stereo(c, sc, st, pre);
-      badd(c, pre, "  (void)(%s);\n  (void)(%s);\n", v.l, v.r);
-    } else {
-      const char* e = emit_expr(c, sc, st);
-      badd(c, pre, "  (void)(%s);\n", e);
-    }
+    emit(c, sc, st, pre);      /* run for its effects */
   }
 }
 
-/* A def's body: its statements, then the expression returned. */
-static const char* emit_block_expr(Ctx* c, Scope* sc, Node* blk) {
-  Buf pre = {0};
-  int last = blk->nkids - 1;
-  for (int i = 0; i < blk->nkids; i++) {
-    Node* s = blk->kids[i];
-    if (i == last) {
-      const char* v = scalar_value(c, sc, s, &pre, "the result");
-      return F(c, "({ %sdouble __r = (%s); __r; })", bstr(&pre), v);
-    }
-    emit_local_stmt(c, sc, s, &pre);
-  }
-  return "0.0";
+/* A body: its statements, then the value of its last expression. */
+static V emit_block(Ctx* c, Scope* sc, Node* blk, Buf* pre) {
+  for (int i = 0; i < blk->nkids - 1; i++) emit_local_stmt(c, sc, blk->kids[i], pre);
+  if (blk->nkids == 0) return mono("0.0");
+  return emit(c, sc, blk->kids[blk->nkids - 1], pre);
 }
 
 /* ---- recursion: a def that calls itself compiles to a loop ---- */
@@ -1413,8 +1277,8 @@ static const char* emit_block_expr(Ctx* c, Scope* sc, Node* blk) {
 typedef struct {
   Node* def;
   const char** vl; const char** vr;    /* each parameter's loop variable(s); "" when bound by name */
-  int* pairs;
-  int pair;
+  int* whole;
+  int any_pair;                        /* some branch's result is a pair */
   const char* rl; const char* rr;
 } RecLoop;
 
@@ -1512,9 +1376,9 @@ static int* changing_params(Ctx* c, Node* def) {
   return res;
 }
 
-static void emit_local_stmt(Ctx* c, Scope* sc, Node* st, Buf* pre);
-
-/* The tail of a recursive def's body, as statements inside the loop. */
+/* The tail of a recursive def's body, as statements in the loop: a real
+ * branch for each `if`, `continue` for a repeat, `break` with the
+ * result for anything else. */
 static void emit_tail(Ctx* c, Scope* sc, RecLoop* lp, Node* n, Buf* o) {
   switch (n->kind) {
   case nkBlock: {
@@ -1526,7 +1390,7 @@ static void emit_tail(Ctx* c, Scope* sc, RecLoop* lp, Node* n, Buf* o) {
     return;
   }
   case nkIf: {
-    const char* cond = scalar_value(c, sc, n->kids[0], o, "the condition");
+    const char* cond = emit1(c, sc, n->kids[0], o, "the condition");
     badd(c, o, "  if ((%s) != 0.0) {\n", cond);
     emit_tail(c, sc, lp, n->kids[1], o);
     bcat(c, o, "  } else {\n");
@@ -1550,19 +1414,19 @@ static void emit_tail(Ctx* c, Scope* sc, RecLoop* lp, Node* n, Buf* o) {
                  "parameter is passed on unchanged when a def repeats", def->str, p, err_loc(c, n));
           continue;
         }
-        if (lp->pairs[i]) {
+        if (lp->whole[i]) {
           if (a->kind == nkIdent) {
             Ent* st = lookup_stereo(sc, a->str);
-            if (eq(st ? st->a : "", lp->vl[i])) continue;
+            if (st && eq(st->a, lp->vl[i])) continue;
           }
-          SV sv = emit_stereo(c, sc, a, o);
+          V v = emit(c, sc, a, o);
           const char* tl = fresh(c, F(c, "next_%s_l", p));
           const char* tr = fresh(c, F(c, "next_%s_r", p));
-          badd(c, o, "  double %s = (%s); double %s = (%s);\n", tl, sv.l, tr, sv.r);
+          badd(c, o, "  double %s = (%s); double %s = (%s);\n", tl, v.l, tr, v.r);
           badd(c, &assigns, "  %s = %s; %s = %s;\n", lp->vl[i], tl, lp->vr[i], tr);
         } else {
           if (a->kind == nkIdent && eq(lookup(sc, a->str), lp->vl[i])) continue;
-          const char* x = scalar_value(c, sc, a, o, F(c, "%s's %s", def->str, p));
+          const char* x = emit1(c, sc, a, o, F(c, "%s's %s", def->str, p));
           const char* t = fresh(c, F(c, "next_%s", p));
           badd(c, o, "  double %s = (%s);\n", t, x);
           badd(c, &assigns, "  %s = %s;\n", lp->vl[i], t);
@@ -1575,97 +1439,103 @@ static void emit_tail(Ctx* c, Scope* sc, RecLoop* lp, Node* n, Buf* o) {
     break;
   default: break;
   }
-  if (lp->pair) {
-    SV v = emit_stereo(c, sc, n, o);
-    badd(c, o, "  %s = (%s); %s = (%s); break;\n", lp->rl, v.l, lp->rr, v.r);
-  } else {
-    const char* v = scalar_value(c, sc, n, o, F(c, "the result of %s", lp->def->str));
-    badd(c, o, "  %s = (%s); break;\n", lp->rl, v);
-  }
+  V v = emit(c, sc, n, o);
+  if (v.pair) lp->any_pair = 1;
+  badd(c, o, "  %s = (%s); %s = (%s); break;\n", lp->rl, v.l, lp->rr, v.r);
 }
 
-/* A call to a recursive def: the loop's statements, and its result. */
-typedef struct { const char* stmts; const char* l; const char* r; } Loop;
-static Loop emit_loop(Ctx* c, Scope* sc, Node* def, Node* call, int pair) {
-  if (call->nkids != def->nparams)
-    fail(c, "wrong arg count for %s: expected %d got %d %s", def->str, def->nparams, call->nkids, err_loc(c, call));
+/* A call to a recursive def: the loop's statements into `pre`, and its
+ * result. */
+static V emit_loop_side(Ctx* c, Scope* sc, Node* def, Node* call, V* args, int* bound, int k, Buf* pre) {
+  /* `sc` holds what binds by name (bound[i]) already. */
   if (sfind(&c->def_stack, def->str) >= 0) cycle_error(c, def, call);
   check_repeats(c, def);
   int* changing = changing_params(c, def);
-  RecLoop lp = {def, NULL, NULL, pair_params(c, def), pair, NULL, NULL};
+  RecLoop lp = {def, NULL, NULL, takes_pair(c, def), 0, NULL, NULL};
   lp.vl = al(c, (def->nparams + 1) * sizeof(char*));
   lp.vr = al(c, (def->nparams + 1) * sizeof(char*));
   Scope* inner = push(c, sc);
-  Buf o = {0};
   for (int i = 0; i < def->nparams; i++) {
     const char* p = def->params[i];
-    Node* a = call->kids[i];
-    if (lp.pairs[i]) {
-      SV sv = emit_stereo(c, sc, a, &o);
+    if (bound[i]) { lp.vl[i] = ""; lp.vr[i] = ""; continue; }
+    if (lp.whole[i]) {
       const char* vl = fresh(c, F(c, "rec_%s_l", p));
       const char* vr = fresh(c, F(c, "rec_%s_r", p));
-      badd(c, &o, "  double %s = (%s); double %s = (%s);\n", vl, sv.l, vr, sv.r);
+      badd(c, pre, "  double %s = (%s); double %s = (%s);\n", vl, args[i].l, vr, args[i].r);
       Ent* e = lput(c, &inner->stereo, p);
       e->a = vl; e->b = vr;
       lp.vl[i] = vl; lp.vr[i] = vr;
       continue;
     }
-    Buf sub = {0};
-    if (bind_by_name(c, sc, inner, p, a, &sub)) {
-      bcat(c, &o, bstr(&sub));
-      lp.vl[i] = ""; lp.vr[i] = "";
-      continue;
-    }
-    const char* v = scalar_value(c, sc, a, &o, F(c, "%s's %s", def->str, p));
     const char* vn = fresh(c, F(c, "rec_%s", p));
-    badd(c, &o, "  double %s = (%s);\n", vn, v);
+    badd(c, pre, "  double %s = (%s);\n", vn, side(args[i], k));
     lput(c, &inner->names, p)->a = vn;
-    if (!changing[i]) {
+    if (!changing[i] && !args[i].pair) {
       double cv;
-      if (const_value(c, sc, a, &cv)) lput(c, &inner->numlits, p)->v = cv;
-      else note_invariant(c, inner, p, a, sc);
+      if (const_value(c, sc, call->kids[i], &cv)) lput(c, &inner->numlits, p)->v = cv;
+      else note_invariant(c, inner, p, call->kids[i], sc);
     }
     lp.vl[i] = vn; lp.vr[i] = "";
   }
   lp.rl = fresh(c, F(c, "rec_%s", def->str));
-  lp.rr = pair ? fresh(c, F(c, "rec_%s_r", def->str)) : lp.rl;
+  lp.rr = fresh(c, F(c, "rec_%s_r", def->str));
   const char* steps = fresh(c, "steps");
-  const char* give_up = pair ? F(c, "%s = %s = 0.0 / 0.0;", lp.rl, lp.rr) : F(c, "%s = 0.0 / 0.0;", lp.rl);
+  const char* give_up = F(c, "%s = %s = 0.0 / 0.0;", lp.rl, lp.rr);
   const char* where = c_literal(c, F(c, "%s %s", def->str, err_loc(c, def)));
-  if (pair) badd(c, &o, "  double %s, %s;\n", lp.rl, lp.rr);
-  else badd(c, &o, "  double %s;\n", lp.rl);
-  badd(c, &o, "  long %s = 0;\n", steps);
-  badd(c, &o, "  if (s->stuck) { %s } else for (;;) {\n", give_up);
-  badd(c, &o, "  if ((++%s & 65535) == 0 && n_overrun((void*)s, %s)) { %s break; }\n", steps, where, give_up);
+  badd(c, pre, "  double %s, %s;\n  long %s = 0;\n", lp.rl, lp.rr, steps);
+  badd(c, pre, "  if (s->stuck) { %s } else for (;;) {\n", give_up);
+  badd(c, pre, "  if ((++%s & 65535) == 0 && n_overrun((void*)s, %s)) { %s break; }\n", steps, where, give_up);
   spush(c, &c->def_stack, def->str);
   int depth = c->each_depth;
   Buf deferred = c->deferred;
   c->each_depth = 0;
   c->deferred = (Buf){0};
-  emit_tail(c, inner, &lp, def->kids[0], &o);
+  emit_tail(c, inner, &lp, def->kids[0], pre);
   c->each_depth = depth;
   c->deferred = deferred;
   c->def_stack.n--;
-  bcat(c, &o, "  }\n");
-  return (Loop){sdup(c, bstr(&o)), lp.rl, lp.rr};
+  bcat(c, pre, "  }\n");
+  return lp.any_pair ? vpair(lp.rl, lp.rr) : mono(lp.rl);
+}
+
+static V emit_loop(Ctx* c, Scope* sc, Node* def, Node* call, Buf* pre) {
+  if (call->nkids != def->nparams)
+    fail(c, "wrong arg count for %s: expected %d got %d %s", def->str, def->nparams, call->nkids, err_loc(c, call));
+  int* whole = takes_pair(c, def);
+  V* args = al(c, (def->nparams + 1) * sizeof(V));
+  int* bound = al(c, (def->nparams + 1) * sizeof(int));
+  int split = 0;
+  Scope* names = push(c, sc);
+  for (int i = 0; i < def->nparams; i++) {
+    if (bind_by_name(c, sc, names, def->params[i], call->kids[i], pre)) { bound[i] = 1; continue; }
+    args[i] = emit(c, sc, call->kids[i], pre);
+    if (args[i].pair && !whole[i]) split = 1;
+  }
+  if (!split) return emit_loop_side(c, names, def, call, args, bound, 0, pre);
+  V l = emit_loop_side(c, names, def, call, args, bound, 0, pre);
+  V r = emit_loop_side(c, names, def, call, args, bound, 1, pre);
+  if (l.pair || r.pair)
+    fail(c, "%s returns a pair, and given a pair it runs once per side: a pair of pairs %s",
+         def->str, err_loc(c, call));
+  return vpair(l.l, r.l);
 }
 
 /* phasor(freq): one slot, advanced and wrapped. */
-static const char* emit_phasor(Ctx* c, Scope* sc, Node* freq) {
+static const char* emit_phasor(Ctx* c, Scope* sc, Node* freq_node, const char* freq, Buf* pre) {
   const char* step;
-  if (c->hoist_on && is_invariant(c, sc, freq)) step = hoist(c, F(c, "(%s) / s->sr", emit_invariant(c, sc, freq)));
-  else step = F(c, "(%s) / s->sr", emit_expr(c, sc, freq));
+  if (c->hoist_on && is_invariant(c, sc, freq_node)) step = hoist(c, F(c, "(%s) / s->sr", emit_invariant(c, sc, freq_node)));
+  else step = F(c, "(%s) / s->sr", freq);
   const char* slot = fresh(c, "ph");
   const char* off = register_region(c, "phasor", 1, NULL);
-  return F(c, "(({ long %s = %s; s->pool[%s] = fmod(s->pool[%s] + %s, 1.0); "
-           "if (s->pool[%s] < 0.0) s->pool[%s] += 1.0; s->pool[%s]; }))",
-           slot, off, slot, slot, step, slot, slot, slot);
+  badd(c, pre, "  long %s = %s; s->pool[%s] = fmod(s->pool[%s] + %s, 1.0); "
+       "if (s->pool[%s] < 0.0) s->pool[%s] += 1.0;\n", slot, off, slot, slot, step, slot, slot);
+  return F(c, "s->pool[%s]", slot);
 }
 
 /* noise(): xorshift32 in a slot, seeded from where the call is (its
  * statement, its defs, which noise() there), so each call site is its
  * own stream, the same on every run. */
-static const char* emit_noise(Ctx* c) {
+static const char* emit_noise(Ctx* c, Buf* pre) {
   const char* slot = fresh(c, "nz");
   const char* off = register_region(c, "noise", 1, NULL);
   Region* r = &c->regions[c->nregions - 1];
@@ -1673,9 +1543,11 @@ static const char* emit_noise(Ctx* c) {
   const char* id = F(c, "%s|%s|%d", r->scope, r->owner, r->scope_idx);
   for (const char* p = id; *p; p++) seed = (seed ^ (unsigned char)*p) * 16777619u;
   if (seed == 0) seed = 2463534242u;
-  return F(c, "(({ long %s = %s; unsigned int r = (unsigned int)s->pool[%s]; if (r == 0) r = %uu; "
-           "r ^= r << 13; r ^= r >> 17; r ^= r << 5; s->pool[%s] = (double)r; "
-           "((double)r / 4294967295.0) * 2.0 - 1.0; }))", slot, off, slot, seed, slot);
+  const char* t = fresh(c, "nzv");
+  badd(c, pre, "  double %s; { long %s = %s; unsigned int r = (unsigned int)s->pool[%s]; if (r == 0) r = %uu; "
+       "r ^= r << 13; r ^= r >> 17; r ^= r << 5; s->pool[%s] = (double)r; "
+       "%s = ((double)r / 4294967295.0) * 2.0 - 1.0; }\n", t, slot, off, slot, seed, slot, t);
+  return t;
 }
 
 /* The slots one call site of a native claims. */
@@ -1684,7 +1556,6 @@ static long native_slot_size(Ctx* c, const char* name, Node** kids) {
   if (spec->buf_arg < 0) return spec->slots;
   Node* a = kids[spec->buf_arg];
   if (a->kind != nkNum) {
-    /* the parameter's name, from the comma-separated list */
     const char* p = spec->params;
     for (int i = 0; i < spec->buf_arg; i++) p = strchr(p, ',') + 1;
     const char* e = strchr(p, ',');
@@ -1705,752 +1576,530 @@ static const char* const MIDI_FNS[] = {"midi_cc", "midi_note", "midi_trig", "mid
                                        "midi_gate", "midi_voice_freq", "midi_voice_gate",
                                        "midi_voice_vel", "midi_voice_key", "midi_vel", NULL};
 
-static const char* emit_expr(Ctx* c, Scope* sc, Node* n) {
+/* A call's arguments, each a value. */
+static V* emit_args(Ctx* c, Scope* sc, Node* n, Buf* pre, int* any_pair) {
+  V* a = al(c, (n->nkids + 1) * sizeof(V));
+  *any_pair = 0;
+  for (int i = 0; i < n->nkids; i++) {
+    a[i] = emit(c, sc, n->kids[i], pre);
+    if (a[i].pair) *any_pair = 1;
+  }
+  return a;
+}
+
+/* The sides of `args` for side k: a number is the same on both. */
+static const char** sides(Ctx* c, V* a, int n, int k) {
+  const char** s = al(c, (n + 1) * sizeof(char*));
+  for (int i = 0; i < n; i++) s[i] = side(a[i], k);
+  return s;
+}
+
+/* A pure function applied side by side: once for numbers, per side for a
+ * pair (a number then read on both). `build` makes one side's text. */
+typedef const char* (*Build)(Ctx* c, const char* name, const char** x, int n);
+static V map_pure(Ctx* c, const char* name, V* a, int n, int any_pair, Build build, Buf* pre) {
+  if (!any_pair) return mono(build(c, name, sides(c, a, n, 0), n));
+  for (int i = 0; i < n; i++)
+    if (!a[i].pair) a[i] = mono(once(c, pre, a[i].l));
+  return vpair(build(c, name, sides(c, a, n, 0), n), build(c, name, sides(c, a, n, 1), n));
+}
+
+static const char* b_fn1(Ctx* c, const char* name, const char** x, int n) { (void)n; return F(c, "%s(%s)", name, x[0]); }
+static const char* b_abs(Ctx* c, const char* name, const char** x, int n) { (void)n; (void)name; return F(c, "fabs(%s)", x[0]); }
+static const char* b_shape(Ctx* c, const char* name, const char** x, int n) { (void)n; return F(c, "shape_%s(%s)", name, x[0]); }
+static const char* b_pow(Ctx* c, const char* name, const char** x, int n) { (void)n; (void)name; return F(c, "pow(%s, %s)", x[0], x[1]); }
+static const char* b_minmax(Ctx* c, const char* name, const char** x, int n) {
+  const char* acc = x[0];
+  for (int i = 1; i < n; i++) acc = F(c, "f%s(%s, %s)", name, acc, x[i]);
+  return acc;
+}
+static const char* b_clamp(Ctx* c, const char* name, const char** x, int n) { (void)n; (void)name; return F(c, "fmin(fmax(%s, %s), %s)", x[0], x[1], x[2]); }
+static const char* b_int(Ctx* c, const char* name, const char** x, int n) { (void)n; (void)name; return F(c, "((double)(long)(%s))", x[0]); }
+static const char* b_midi(Ctx* c, const char* name, const char** x, int n) {
+  return n ? F(c, "n_%s((int)(%s))", name, x[0]) : F(c, "n_%s()", name);
+}
+
+/* A stateful call per side: once for numbers, per side for a pair, each
+ * side its own region (left first). `call` makes one side's statement
+ * and value. */
+typedef const char* (*Stateful)(Ctx* c, Scope* sc, Node* n, const char** x, Buf* pre, void* ud);
+static V per_side(Ctx* c, Scope* sc, Node* n, V* a, int any_pair, Stateful call, Buf* pre, void* ud) {
+  if (!any_pair) return mono(call(c, sc, n, sides(c, a, n->nkids, 0), pre, ud));
+  const char* l = call(c, sc, n, sides(c, a, n->nkids, 0), pre, ud);
+  const char* r = call(c, sc, n, sides(c, a, n->nkids, 1), pre, ud);
+  return vpair(l, r);
+}
+
+static const char* s_phasor(Ctx* c, Scope* sc, Node* n, const char** x, Buf* pre, void* ud) {
+  (void)ud;
+  return emit_phasor(c, sc, n->kids[0], x[0], pre);
+}
+static const char* s_freq_shift(Ctx* c, Scope* sc, Node* n, const char** x, Buf* pre, void* ud) {
+  (void)sc; (void)n; (void)ud;
+  const char* off = register_region(c, "freq_shift", 33, NULL);
+  return native_call(c, pre, off, F(c, "n_freq_shift((DspState*)s, %s, %s)", x[0], x[1]));
+}
+static const char* s_midi_trig(Ctx* c, Scope* sc, Node* n, const char** x, Buf* pre, void* ud) {
+  (void)sc; (void)n; (void)ud;
+  const char* off = register_region(c, "midi_trig", 1, NULL);
+  return native_call(c, pre, off, F(c, "n_midi_trig((DspState*)s, (int)(%s))", x[0]));
+}
+typedef struct { const char* sym; long length; } WaveTable;
+static const char* s_wave(Ctx* c, Scope* sc, Node* n, const char** x, Buf* pre, void* ud) {
+  (void)sc;
+  WaveTable* w = ud;
+  const char* off = register_region(c, "wave", native_slot_size(c, "wave", n->kids), NULL);
+  return native_call(c, pre, off, F(c, "n_wave((DspState*)s, %s, (double*)%s, %ld)", x[0], w->sym, w->length));
+}
+/* A hoisted native: the coefficient once a block, the `_c` step here. */
+typedef struct { const char* coef; } Hoisted;
+static const char* s_lp1_c(Ctx* c, Scope* sc, Node* n, const char** x, Buf* pre, void* ud) {
+  (void)sc;
+  const char* off = register_region(c, n->str, native_slot_size(c, n->str, n->kids), NULL);
+  return native_call(c, pre, off, F(c, "n_%s_c((DspState*)s, %s, %s)", n->str, x[0], ((Hoisted*)ud)->coef));
+}
+static const char* s_reverb_c(Ctx* c, Scope* sc, Node* n, const char** x, Buf* pre, void* ud) {
+  (void)sc;
+  const char* off = register_region(c, "reverb", native_slot_size(c, "reverb", n->kids), NULL);
+  return native_call(c, pre, off, F(c, "n_reverb_c((DspState*)s, %s, %s, %s)", x[0], x[2], ((Hoisted*)ud)->coef));
+}
+static const char* s_native(Ctx* c, Scope* sc, Node* n, const char** x, Buf* pre, void* ud) {
+  (void)sc; (void)ud;
+  const char* off = register_region(c, n->str, native_slot_size(c, n->str, n->kids), NULL);
+  Buf call = {0};
+  badd(c, &call, "n_%s((DspState*)s", n->str);
+  for (int i = 0; i < n->nkids; i++) badd(c, &call, ", %s", x[i]);
+  bcat(c, &call, ")");
+  return native_call(c, pre, off, bstr(&call));
+}
+
+static void decide_var(Ctx* c, Node* st);
+static Node* file_var_decl(Ctx* c, const char* name);
+
+/* A name's value: a scope's binding, then the file's. */
+static V emit_ident(Ctx* c, Scope* sc, Node* n) {
+  const char* s = n->str;
+  if (eq(s, "t")) return mono("s->t");
+  if (eq(s, "sr")) return mono("s->sr");
+  if (eq(s, "dt")) return mono("s->dt");
+  if (eq(s, "start_t")) return mono("s->start_t");
+  if (eq(s, "PI")) return mono("3.14159265358979323846");
+  if (eq(s, "TAU")) return mono("(2.0 * 3.14159265358979323846)");
+  for (Scope* x = sc; x; x = x->parent) {
+    Ent* e = lfind(x->names, s);
+    if (e) return mono(e->a);
+    e = lfind(x->stereo, s);
+    if (e) return vpair(e->a, e->b);
+    if (lfind(x->arrays, s) || lfind(x->larrays, s) || lfind(x->sarrays, s)) break;
+  }
+  Ent* table = lookup_array(c, sc, s);
+  if (has(&c->stereo_lets, s)) return vpair(F(c, "l_%s_l", s), F(c, "l_%s_r", s));
+  if (table) fail(c, "%s is a table of %ld numbers, but one number is needed here — index it (%s[i]) "
+                  "or hand it to wave %s", s, table->n, s, err_loc(c, n));
+  if ((lookup_larray(c, sc, s) || lookup_sarray(c, sc, s)))
+    fail(c, "%s is an array, but one number is needed here — index it (%s[i]) %s", s, s, err_loc(c, n));
+  if (has(&c->play_set, s)) return vpair(F(c, "p_%s_l", s), F(c, "p_%s_r", s));
+  if (has(&c->pair_vars, s)) return vpair(pair_var_ref(c, s, 0), pair_var_ref(c, s, 1));
+  if (has(&c->top_lets, s)) {
+    if (!has(&c->lets_done, s)) {
+      Ent* ll = hfind(&c->let_lines, s);
+      fail(c, "'%s' is used before its `let` on line %ld: move that let above this line %s",
+           s, ll ? ll->n : 0L, err_loc(c, n));
+    }
+    return mono(F(c, "l_%s", s));
+  }
+  if (has(&c->top_var_set, s)) return mono(F(c, "s->v_%s", s));
+  if (has(&c->file_vars, s)) {
+    /* Read before the line that declares it (where it is set once):
+     * until then it reads 0. Its shape comes from how its first value is
+     * written, a pair literal or a pair builtin. */
+    decide_var(c, file_var_decl(c, s));
+    return emit_ident(c, sc, n);
+  }
+  fail(c, "unknown identifier: %s %s", s, err_loc(c, n));
+  return mono("");
+}
+
+/* An `if`: only the branch taken runs. Plain values pick with `?:`;
+ * a branch with statements becomes a real branch. */
+static V emit_if(Ctx* c, Scope* sc, Node* n, Buf* pre) {
+  const char* cond = emit1(c, sc, n->kids[0], pre, "the condition");
+  Buf pt = {0}, pe = {0};
+  V t = emit(c, sc, n->kids[1], &pt);
+  V e = n->kids[2] ? emit(c, sc, n->kids[2], &pe) : mono("0.0");
+  int pair = t.pair || e.pair;
+  if (!pt.n && !pe.n) {
+    const char* ct = pair ? once(c, pre, cond) : cond;
+    V r = {F(c, "((%s) != 0.0 ? (%s) : (%s))", ct, t.l, e.l),
+           F(c, "((%s) != 0.0 ? (%s) : (%s))", ct, t.r, e.r), pair};
+    if (!pair) r.r = r.l;
+    return r;
+  }
+  const char* vl = fresh(c, "ifv");
+  const char* vr = pair ? fresh(c, "ifv") : vl;
+  if (pair) badd(c, pre, "  double %s, %s;\n", vl, vr);
+  else badd(c, pre, "  double %s;\n", vl);
+  badd(c, pre, "  if ((%s) != 0.0) {\n%s", cond, bstr(&pt));
+  if (pair) badd(c, pre, "  %s = (%s); %s = (%s);\n  } else {\n%s  %s = (%s); %s = (%s);\n  }\n",
+                 vl, t.l, vr, t.r, bstr(&pe), vl, e.l, vr, e.r);
+  else badd(c, pre, "  %s = (%s);\n  } else {\n%s  %s = (%s);\n  }\n", vl, t.l, bstr(&pe), vl, e.l);
+  return pair ? vpair(vl, vr) : mono(vl);
+}
+
+static V emit_binop(Ctx* c, Scope* sc, Node* n, Buf* pre) {
+  V a = emit(c, sc, n->kids[0], pre);
+  V b = emit(c, sc, n->kids[1], pre);
+  const char* op = n->str;
+  const char* fmt = NULL;
+  if (eq(op, "+")) fmt = "((%1$s) + (%2$s))";
+  else if (eq(op, "-")) fmt = "((%1$s) - (%2$s))";
+  else if (eq(op, "*")) fmt = "((%1$s) * (%2$s))";
+  else if (eq(op, "/")) fmt = "((%2$s) == 0.0 ? 0.0 : (%1$s) / (%2$s))";
+  else if (eq(op, "mod")) fmt = "((%2$s) == 0.0 ? 0.0 : (%1$s) - floor((%1$s) / (%2$s)) * (%2$s))";
+  else if (eq(op, "==")) fmt = "((((%1$s) == (%2$s))) ? 1.0 : 0.0)";
+  else if (eq(op, "!=")) fmt = "((((%1$s) != (%2$s))) ? 1.0 : 0.0)";
+  else if (eq(op, "<")) fmt = "((((%1$s) < (%2$s))) ? 1.0 : 0.0)";
+  else if (eq(op, ">")) fmt = "((((%1$s) > (%2$s))) ? 1.0 : 0.0)";
+  else if (eq(op, "<=")) fmt = "((((%1$s) <= (%2$s))) ? 1.0 : 0.0)";
+  else if (eq(op, ">=")) fmt = "((((%1$s) >= (%2$s))) ? 1.0 : 0.0)";
+  /* `and` and `or` don't short-circuit: both sides always run. */
+  else if (eq(op, "and")) fmt = "((((%1$s) != 0.0) & ((%2$s) != 0.0)) ? 1.0 : 0.0)";
+  else if (eq(op, "or")) fmt = "((((%1$s) != 0.0) | ((%2$s) != 0.0)) ? 1.0 : 0.0)";
+  else fail(c, "bad binop: %s %s", op, err_loc(c, n));
+  if (!a.pair && !b.pair) return mono(F(c, fmt, a.l, b.l));
+  if (!a.pair) a = mono(once(c, pre, a.l));
+  if (!b.pair) b = mono(once(c, pre, b.l));
+  return vpair(F(c, fmt, a.l, b.l), F(c, fmt, a.r, b.r));
+}
+
+static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre);
+
+static V emit(Ctx* c, Scope* sc, Node* n, Buf* pre) {
   switch (n->kind) {
-  case nkNum:
-    return num_lit(c, n->num);
-  case nkIdent: {
-    const char* s = n->str;
-    if (eq(s, "t")) return "s->t";
-    if (eq(s, "sr")) return "s->sr";
-    if (eq(s, "dt")) return "s->dt";
-    if (eq(s, "start_t")) return "s->start_t";
-    if (eq(s, "PI")) return "3.14159265358979323846";
-    if (eq(s, "TAU")) return "(2.0 * 3.14159265358979323846)";
-    const char* scoped = lookup(sc, s);
-    Ent* table = lookup_array(c, sc, s);
-    if (scoped[0]) return scoped;
-    if (table && table->n != 2)
-      fail(c, "%s is a table of %ld numbers, but one number is needed here — index it (%s[i]) "
-           "or hand it to wave %s", s, table->n, s, err_loc(c, n));
-    if (lookup_stereo(sc, s) || has(&c->stereo_lets, s) || has(&c->pair_vars, s) || has(&c->play_set, s))
-      fail(c, "%s is a pair, but one number is needed here — pick a side with %s[0] / %s[1], "
-           "or use mono(%s) %s", s, s, s, s, err_loc(c, n));
-    if (has(&c->top_lets, s)) {
-      if (!has(&c->lets_done, s)) {
-        Ent* ll = hfind(&c->let_lines, s);
-        fail(c, "'%s' is used before its `let` on line %ld: move that let above this line %s",
-             s, ll ? ll->n : 0L, err_loc(c, n));
-      }
-      return F(c, "l_%s", s);
-    }
-    if (has(&c->top_var_set, s)) return F(c, "s->v_%s", s);
-    fail(c, "unknown identifier: %s %s", s, err_loc(c, n));
-    return NULL;
-  }
+  case nkNum: return mono(num_lit(c, n->num));
+  case nkIdent: return emit_ident(c, sc, n);
   case nkUnary: {
-    const char* v = emit_expr(c, sc, n->kids[0]);
-    if (eq(n->str, "-")) return F(c, "(-(%s))", v);
-    if (eq(n->str, "not")) return F(c, "((%s) == 0.0 ? 1.0 : 0.0)", v);
-    fail(c, "bad unary: %s %s", n->str, err_loc(c, n));
-    return NULL;
+    V v = emit(c, sc, n->kids[0], pre);
+    const char* fmt;
+    if (eq(n->str, "-")) fmt = "(-(%s))";
+    else if (eq(n->str, "not")) fmt = "((%s) == 0.0 ? 1.0 : 0.0)";
+    else { fail(c, "bad unary: %s %s", n->str, err_loc(c, n)); return mono(""); }
+    if (!v.pair) return mono(F(c, fmt, v.l));
+    return vpair(F(c, fmt, v.l), F(c, fmt, v.r));
   }
-  case nkBinOp: {
-    const char* a = emit_expr(c, sc, n->kids[0]);
-    const char* b = emit_expr(c, sc, n->kids[1]);
-    const char* op = n->str;
-    if (eq(op, "+")) return F(c, "((%s) + (%s))", a, b);
-    if (eq(op, "-")) return F(c, "((%s) - (%s))", a, b);
-    if (eq(op, "*")) return F(c, "((%s) * (%s))", a, b);
-    if (eq(op, "/")) return F(c, "((%s) == 0.0 ? 0.0 : (%s) / (%s))", b, a, b);
-    if (eq(op, "mod")) return F(c, "((%s) == 0.0 ? 0.0 : (%s) - floor((%s) / (%s)) * (%s))", b, a, a, b, b);
-    if (eq(op, "==")) return F(c, "(((%s) == (%s)) ? 1.0 : 0.0)", a, b);
-    if (eq(op, "!=")) return F(c, "(((%s) != (%s)) ? 1.0 : 0.0)", a, b);
-    if (eq(op, "<")) return F(c, "(((%s) < (%s)) ? 1.0 : 0.0)", a, b);
-    if (eq(op, ">")) return F(c, "(((%s) > (%s)) ? 1.0 : 0.0)", a, b);
-    if (eq(op, "<=")) return F(c, "(((%s) <= (%s)) ? 1.0 : 0.0)", a, b);
-    if (eq(op, ">=")) return F(c, "(((%s) >= (%s)) ? 1.0 : 0.0)", a, b);
-    /* `and` and `or` don't short-circuit: both sides always run, so a
-     * `prev(g)` on the right keeps stepping. */
-    if (eq(op, "and")) return F(c, "((((%s) != 0.0) & ((%s) != 0.0)) ? 1.0 : 0.0)", a, b);
-    if (eq(op, "or")) return F(c, "((((%s) != 0.0) | ((%s) != 0.0)) ? 1.0 : 0.0)", a, b);
-    fail(c, "bad binop: %s %s", op, err_loc(c, n));
-    return NULL;
+  case nkBinOp: return emit_binop(c, sc, n, pre);
+  case nkIf: return emit_if(c, sc, n, pre);
+  case nkCall: return emit_call(c, sc, n, pre);
+  case nkArr: {
+    if (n->nkids == 2) {
+      const char* l = emit1(c, sc, n->kids[0], pre, "a pair's side");
+      const char* r = emit1(c, sc, n->kids[1], pre, "a pair's side");
+      return vpair(l, r);
+    }
+    fail(c, "an array of %d can't be a value here %s — a pair is [L, R]; a table goes in a let, or to wave",
+         n->nkids, err_loc(c, n));
+    return mono("");
   }
-  case nkIf: {
-    const char* cond = emit_expr(c, sc, n->kids[0]);
-    const char* thn = emit_expr(c, sc, n->kids[1]);
-    const char* els = n->kids[2] ? emit_expr(c, sc, n->kids[2]) : "0.0";
-    return F(c, "((%s) != 0.0 ? (%s) : (%s))", cond, thn, els);
-  }
-  case nkCall: {
-    /* Costly pure maths over invariant inputs: once a block. */
-    if (c->hoist_on && !c->in_hoist && in(n->str, HOISTED_MATH) && !user_def(c, n->str) &&
-        !lookup_fn(sc, n->str)[0] && !lookup_lambda(sc, n->str) && is_invariant(c, sc, n) &&
-        !is_const(c, sc, n))
-      return hoist(c, emit_invariant(c, sc, n));
-    /* A lambda-valued param: inline its body. */
-    Node* lam = lookup_lambda(sc, n->str);
-    if (lam) {
-      if (n->nkids < lam->nparams)
-        fail(c, "lambda '%s' takes %d args, got %d %s", n->str, lam->nparams, n->nkids, err_loc(c, n));
-      Scope* inner = push(c, sc);
-      Buf preface = {0};
-      for (int i = 0; i < lam->nparams; i++) {
-        const char* p = lam->params[i];
-        const char* arg = emit_expr(c, sc, n->kids[i]);
-        const char* tmp = fresh(c, F(c, "p_%s", p));
-        badd(c, &preface, "double %s = (%s); ", tmp, arg);
-        lput(c, &inner->names, p)->a = tmp;
-        double cv;
-        if (const_value(c, sc, n->kids[i], &cv)) lput(c, &inner->numlits, p)->v = cv;
-        else note_invariant(c, inner, p, n->kids[i], sc);
-      }
-      Node* body = lam->kids[0];
-      const char* b = body->kind == nkBlock ? emit_block_expr(c, inner, body) : emit_expr(c, inner, body);
-      return F(c, "(({ %sdouble __r = (%s); __r; }))", bstr(&preface), b);
-    }
-    const char* resolved = lookup_fn(sc, n->str);
-    const char* name = resolved[0] ? resolved : n->str;
-    if (eq(name, "sum")) {
-      if (n->nkids != 2) fail(c, "sum takes 2 args: sum(N, fn) %s", err_loc(c, n));
-      Node* narg = n->kids[0];
-      Node* lamarg = n->kids[1];
-      double v;
-      if (!const_value(c, sc, narg, &v))
-        fail(c, "sum: first arg must be a compile-time-constant integer (a literal, a name bound "
-             "to one, or len(array)) %s", err_loc(c, narg));
-      long N = (long)v;
-      if ((double)N != v) fail(c, "sum: first arg must be an integer, got %s %s", nim_float(c, v), err_loc(c, narg));
-      if (N < 0) fail(c, "sum: first arg must be non-negative, got %ld %s", N, err_loc(c, narg));
-      if (lamarg->kind != nkLambda)
-        fail(c, "sum: second arg must be a lambda like `n => expr`, got %s %s", KIND_NAMES[lamarg->kind], err_loc(c, lamarg));
-      if (lamarg->nparams != 1) fail(c, "sum: lambda must take exactly one parameter %s", err_loc(c, lamarg));
-      if (N == 0) return "0.0";
-      const char* param = lamarg->params[0];
-      Node* body = lamarg->kids[0];
-      Buf terms = {0};
-      for (long k = 1; k <= N; k++) {
-        Scope* iter = push(c, sc);
-        lput(c, &iter->names, param)->a = num_lit(c, (double)k);
-        lput(c, &iter->numlits, param)->v = (double)k;
-        const char* b = body->kind == nkBlock ? emit_block_expr(c, iter, body) : emit_expr(c, iter, body);
-        if (k > 1) bcat(c, &terms, " + ");
-        bcat(c, &terms, b);
-      }
-      return F(c, "(%s)", bstr(&terms));
-    }
-    if (eq(name, "each")) {
-      if (n->nkids != 2 || n->kids[1]->kind != nkLambda || n->kids[1]->nparams != 1)
-        fail(c, "each takes a count and a one-parameter lambda: each(N, i => ...) %s", err_loc(c, n));
-      Node* narg = n->kids[0];
-      double v;
-      if (!const_value(c, sc, narg, &v))
-        fail(c, "each: the count must be a compile-time integer (a literal, a name bound to one, "
-             "or len(array)) %s", err_loc(c, narg));
-      long N = (long)v;
-      if ((double)N != v || N < 0)
-        fail(c, "each: the count must be a non-negative integer, got %s %s", nim_float(c, v), err_loc(c, narg));
-      Node* l = n->kids[1];
-      Buf saved = c->deferred;
-      c->deferred = (Buf){0};
-      c->each_depth++;
-      Buf body = {0};
-      for (long k = 0; k < N; k++) {
-        Scope* iter = push(c, sc);
-        lput(c, &iter->names, l->params[0])->a = num_lit(c, (double)k);
-        lput(c, &iter->numlits, l->params[0])->v = (double)k;
-        Node* b = l->kids[0];
-        if (b->kind == nkBlock) {
-          for (int i = 0; i < b->nkids - 1; i++) emit_local_stmt(c, iter, b->kids[i], &body);
-          Node* last = b->kids[b->nkids - 1];
-          if (!(last->kind == nkNum && last->num == 0.0)) {
-            const char* e = emit_expr(c, iter, last);
-            badd(c, &body, "  (void)(%s);\n", e);
-          }
-        } else {
-          const char* e = emit_expr(c, iter, b);
-          badd(c, &body, "  (void)(%s);\n", e);
-        }
-      }
-      c->each_depth--;
-      const char* commits = sdup(c, bstr(&c->deferred));
-      c->deferred = saved;
-      return F(c, "(({\n%s%s  0.0; }))", bstr(&body), commits);
-    }
-    if (eq(name, "len")) {
-      if (n->nkids == 1 && n->kids[0]->kind == nkIdent) {
-        const char* a = n->kids[0]->str;
-        Ent* e;
-        if ((e = lookup_sarray(c, sc, a))) return num_lit(c, (double)e->n);
-        if ((e = lookup_larray(c, sc, a))) return num_lit(c, (double)e->n);
-        if ((e = lookup_array(c, sc, a))) return num_lit(c, (double)e->n);
-      }
-      fail(c, "len takes the name of an array %s", err_loc(c, n));
-    }
-    if (eq(name, "array"))
-      fail(c, "array(N) declares an array: `$f = array(N)` for state that lasts, `let a = array(N)` "
-           "for this sample's scratch %s", err_loc(c, n));
-    if (eq(name, "phasor")) {
-      if (n->nkids != 1) fail(c, "phasor takes 1 arg %s", err_loc(c, n));
-      return emit_phasor(c, sc, n->kids[0]);
-    }
-    if (eq(name, "noise")) return emit_noise(c);
-    if (in(name, LIBM1) && n->nkids == 1) return F(c, "%s(%s)", name, emit_expr(c, sc, n->kids[0]));
-    if (eq(name, "abs") && n->nkids == 1) return F(c, "fabs(%s)", emit_expr(c, sc, n->kids[0]));
-    if ((eq(name, "saw") || eq(name, "tri") || eq(name, "sqr")) && n->nkids == 1)
-      return F(c, "shape_%s(%s)", name, emit_expr(c, sc, n->kids[0]));
-    if (eq(name, "pow") && n->nkids == 2) return F(c, "pow(%s)", call_args(c, sc, n->kids, n->nkids));
-    if ((eq(name, "min") || eq(name, "max")) && n->nkids >= 2) {
-      const char* acc = emit_expr(c, sc, n->kids[0]);
-      for (int i = 1; i < n->nkids; i++) {
-        const char* k = emit_expr(c, sc, n->kids[i]);
-        acc = F(c, "f%s(%s, %s)", name, acc, k);
-      }
-      return acc;
-    }
-    if (eq(name, "clamp") && n->nkids == 3) {
-      const char* v = emit_expr(c, sc, n->kids[0]);
-      const char* lo = emit_expr(c, sc, n->kids[1]);
-      const char* hi = emit_expr(c, sc, n->kids[2]);
-      return F(c, "fmin(fmax(%s, %s), %s)", v, lo, hi);
-    }
-    if (eq(name, "int") && n->nkids == 1) return F(c, "((double)(long)(%s))", emit_expr(c, sc, n->kids[0]));
-    if (in(name, PAIR_CALLS))
-      fail(c, "%s returns a pair — pick a side with `%s(...)[0]` / `[1]`, bind it with `let p = "
-           "%s(...)`, or pass it to `magnitude` / `phase` %s", name, name, name, err_loc(c, n));
-    if (in(name, PAIR_READERS)) {
-      Buf pre = {0};
-      const char** a = pair_operands(c, sc, n, &pre, 2, "one pair (or two numbers)");
-      const char* v = eq(name, "magnitude") ? F(c, "sqrt(%s * %s + %s * %s)", a[0], a[0], a[1], a[1])
-                                            : F(c, "atan2(%s, %s)", a[1], a[0]);
-      return F(c, "(({\n%s  double __m = %s; __m; }))", bstr(&pre), v);
-    }
-    if (eq(name, "freq_shift") && n->nkids == 2) {
-      const char* args[2];
-      args[0] = emit_expr(c, sc, n->kids[0]);
-      args[1] = emit_expr(c, sc, n->kids[1]);
-      const char* off = register_region(c, "freq_shift", 33, NULL);
-      return native_at(c, off, args, 2, "n_freq_shift((DspState*)s, $1, $2)");
-    }
-    if (eq(name, "freq_shift")) fail(c, "freq_shift(signal, hz) takes exactly 2 args %s", err_loc(c, n));
-    if (eq(name, "midi_cc") && n->nkids == 1) return F(c, "n_midi_cc((int)(%s))", emit_expr(c, sc, n->kids[0]));
-    if (eq(name, "midi_note") && n->nkids == 1) return F(c, "n_midi_note((int)(%s))", emit_expr(c, sc, n->kids[0]));
-    if (eq(name, "midi_freq") && n->nkids == 0) return "n_midi_freq()";
-    if (eq(name, "midi_gate") && n->nkids == 0) return "n_midi_gate()";
-    if (eq(name, "midi_trig") && n->nkids == 1) {
-      const char* off = register_region(c, "midi_trig", 1, NULL);
-      const char* args[1] = {emit_expr(c, sc, n->kids[0])};
-      return native_at(c, off, args, 1, "n_midi_trig((DspState*)s, (int)($1))");
-    }
-    if (eq(name, "midi_voice_freq") && n->nkids == 1) return F(c, "n_midi_voice_freq((int)(%s))", emit_expr(c, sc, n->kids[0]));
-    if (eq(name, "midi_voice_gate") && n->nkids == 1) return F(c, "n_midi_voice_gate((int)(%s))", emit_expr(c, sc, n->kids[0]));
-    if (eq(name, "midi_voice_vel") && n->nkids == 1) return F(c, "n_midi_voice_vel((int)(%s))", emit_expr(c, sc, n->kids[0]));
-    if (eq(name, "midi_voice_key") && n->nkids == 1) return F(c, "n_midi_voice_key((int)(%s))", emit_expr(c, sc, n->kids[0]));
-    if (eq(name, "midi_vel") && n->nkids == 0) return "n_midi_vel()";
-    if (in(name, MIDI_FNS)) fail(c, "%s: wrong arg count %s", name, err_loc(c, n));
-    if (eq(name, "wave")) {
-      if (n->nkids != 2) fail(c, "wave takes 2 args %s", err_loc(c, n));
-      const char* freq = emit_expr(c, sc, n->kids[0]);
-      Node* arr = n->kids[1];
-      const char* sym;
-      long length;
-      if (arr->kind == nkIdent) {
-        Ent* found = lookup_array(c, sc, arr->str);
-        if (!found)
-          fail(c, "wave: %s must be a constant table of numeric literals%s %s", arr->str,
-               lookup_larray(c, sc, arr->str) ? " (it holds runtime values)" : "", err_loc(c, arr));
-        sym = found->a;
-        length = found->n;
-      } else if (arr->kind == nkArr) {
-        sym = fresh(c, "arr");
-        length = arr->nkids;
-        Buf items = {0};
-        for (int i = 0; i < arr->nkids; i++) {
-          if (arr->kids[i]->kind != nkNum) fail(c, "wave array must be numeric literals only %s", err_loc(c, arr->kids[i]));
-          if (i) bcat(c, &items, ", ");
-          bcat(c, &items, num_lit(c, arr->kids[i]->num));
-        }
-        badd(c, &c->array_decls, "static const double %s[%ld] = {%s};\n", sym, length, bstr(&items));
-      } else {
-        fail(c, "wave: second arg must be an array literal or a let binding to one %s", err_loc(c, arr));
-        return NULL;
-      }
-      long size = native_slot_size(c, "wave", n->kids);
-      const char* off = register_region(c, "wave", size, NULL);
-      const char* args[1] = {freq};
-      return native_at(c, off, args, 1, F(c, "n_wave((DspState*)s, $1, (double*)%s, %ld)", sym, length));
-    }
-    /* Hoisted natives: the coefficients once, the `_c` step per sample. */
-    if (c->hoist_on && (eq(name, "lp1") || eq(name, "hp1")) && n->nkids == 2 && is_invariant(c, sc, n->kids[1])) {
-      const char* a = hoist(c, F(c, "n_lp1_coef(%s, s->sr)", emit_invariant(c, sc, n->kids[1])));
-      const char* off = register_region(c, name, native_slot_size(c, name, n->kids), NULL);
-      const char* args[1] = {emit_expr(c, sc, n->kids[0])};
-      return native_at(c, off, args, 1, F(c, "n_%s_c((DspState*)s, $1, %s)", name, a));
-    }
-    if (c->hoist_on && (eq(name, "lpf") || eq(name, "hpf") || eq(name, "bpf") || eq(name, "notch")) &&
-        n->nkids == 3 && is_invariant(c, sc, n->kids[1]) && is_invariant(c, sc, n->kids[2])) {
-      const char* k1 = emit_invariant(c, sc, n->kids[1]);
-      const char* k2 = emit_invariant(c, sc, n->kids[2]);
-      const char* h = hoist_arr(c, 4, F(c, "n_svf_coef(%s, %s, s->sr, $H)", k1, k2));
-      const char* off = register_region(c, name, native_slot_size(c, name, n->kids), NULL);
-      const char* args[1] = {emit_expr(c, sc, n->kids[0])};
-      return native_at(c, off, args, 1, F(c, "n_%s_c((DspState*)s, $1, %s)", name, h));
-    }
-    if (c->hoist_on && eq(name, "reverb") && n->nkids == 3 && is_invariant(c, sc, n->kids[1])) {
-      const char* h = hoist_arr(c, 4, F(c, "n_reverb_coef(%s, s->sr, $H)", emit_invariant(c, sc, n->kids[1])));
-      const char* off = register_region(c, name, native_slot_size(c, name, n->kids), NULL);
-      const char* args[2];
-      args[0] = emit_expr(c, sc, n->kids[0]);
-      args[1] = emit_expr(c, sc, n->kids[2]);
-      return native_at(c, off, args, 2, F(c, "n_reverb_c((DspState*)s, $1, $2, %s)", h));
-    }
-    /* Native DSP calls, each at its region. */
-    const NativeSpec* spec = native(name);
-    if (spec && !eq(name, "wave")) {
-      int arity = native_arity(spec);
-      if (n->nkids != arity) fail(c, "%s takes %d args, got %d %s", name, arity, n->nkids, err_loc(c, n));
-      long size = native_slot_size(c, name, n->kids);
-      const char* off = register_region(c, name, size, NULL);
-      const char** args = al(c, n->nkids * sizeof(char*));
-      Buf slots = {0};
-      for (int i = 0; i < n->nkids; i++) {
-        args[i] = emit_expr(c, sc, n->kids[i]);
-        badd(c, &slots, i ? ", $%d" : "$%d", i + 1);
-      }
-      return native_at(c, off, args, n->nkids, F(c, "n_%s((DspState*)s, %s)", name, bstr(&slots)));
-    }
-    Node* def = user_def(c, name);
-    if (def) {
-      if (has(&c->recursive, name)) {
-        Loop lp = emit_loop(c, sc, def, n, 0);
-        return F(c, "(({\n%s  %s; }))", lp.stmts, lp.l);
-      }
-      return emit_def_inline(c, sc, def, n);
-    }
-    fail(c, "unknown function: %s %s", name, err_loc(c, n));
-    return NULL;
-  }
-  case nkArr:
-    fail(c, "array value can't appear here %s — only numeric literals for wave() or top-level stereo return",
-         err_loc(c, n));
-    return NULL;
   case nkStr:
     fail(c, "a string is only an import path here %s", err_loc(c, n));
-    return NULL;
+    return mono("");
   case nkImport:
     fail(c, "import belongs at the top of the file %s", err_loc(c, n));
-    return NULL;
+    return mono("");
   case nkLambda:
     fail(c, "lambda `%s => ...` can only appear as a builtin argument (e.g. sum(N, n => expr)), "
          "not as a standalone value %s", n->nparams > 0 ? n->params[0] : "_", err_loc(c, n));
-    return NULL;
+    return mono("");
   case nkIdx: {
     Node* a = n->kids[0];
     Node* i = n->kids[1];
     if (a->kind == nkIdent) {
       Ent* sa = lookup_sarray(c, sc, a->str);
       if (sa) {
-        const char* ix = emit_expr(c, sc, i);
-        return F(c, "(({ long _i = (long)(%s); (_i >= 0 && _i < %ld) ? s->pool[%s + 1 + _i] : 0.0; }))",
-                 ix, sa->n, sa->a);
+        const char* ix = emit1(c, sc, i, pre, "an index");
+        const char* t = fresh(c, "ix");
+        badd(c, pre, "  long %s = (long)(%s);\n", t, ix);
+        return mono(F(c, "((%s >= 0 && %s < %ld) ? s->pool[%s + 1 + %s] : 0.0)", t, t, sa->n, sa->a, t));
       }
       Ent* la = lookup_larray(c, sc, a->str);
-      if (la) {
-        const char* ix = emit_expr(c, sc, i);
-        return F(c, "(({ long _i = (long)(%s) %% %ld; %s[_i < 0 ? _i + %ld : _i]; }))", ix, la->n, la->a, la->n);
-      }
-      Ent* found = lookup_array(c, sc, a->str);
-      if (found) {
-        const char* ix = emit_expr(c, sc, i);
-        return F(c, "(({ long _i = (long)(%s) %% %ld; %s[_i < 0 ? _i + %ld : _i]; }))",
-                 ix, found->n, found->a, found->n);
+      Ent* found = la ? la : lookup_array(c, sc, a->str);
+      if (found) {     /* local arrays and tables wrap round, as a table should */
+        const char* ix = emit1(c, sc, i, pre, "an index");
+        const char* t = fresh(c, "ix");
+        badd(c, pre, "  long %s = (long)(%s) %% %ld; if (%s < 0) %s += %ld;\n", t, ix, found->n, t, t, found->n);
+        return mono(F(c, "%s[%s]", found->a, t));
       }
     }
-    if (a->kind == nkIdent && i->kind == nkNum && ((int)i->num == 0 || (int)i->num == 1)) {
-      int k = (int)i->num;
-      Ent* st = lookup_stereo(sc, a->str);
-      if (st) return k == 0 ? st->a : st->b;
-      if (has(&c->pair_vars, a->str)) return pair_var_ref(c, a->str, k);
-      if (has(&c->play_set, a->str) || has(&c->stereo_lets, a->str)) return stereo_ref(c, a->str, k == 0 ? "l" : "r");
+    /* A pair indexes like a two-entry table: the left side for even i,
+     * the right for odd. */
+    V v = emit(c, sc, a, pre);
+    if (i->kind == nkNum) {
+      long k = (long)i->num % 2;
+      if (k < 0) k += 2;
+      return mono(side(v, (int)k));
     }
-    /* Any other index on a pair wraps at 2, as a table's at its length. */
-    Ent* bound = a->kind == nkIdent ? lookup_stereo(sc, a->str) : NULL;
-    if (bound || refs_stereo(c, sc, a)) {
-      Buf pre = {0};
-      const char* l = bound ? bound->a : "";
-      const char* r = bound ? bound->b : "";
-      if (!bound) {
-        SV v = emit_stereo(c, sc, a, &pre);
-        l = v.l; r = v.r;
-      }
-      const char* ix = emit_expr(c, sc, i);
-      return F(c, "(({\n%s  long _i = (long)(%s) %% 2; double __pick = (_i == 0) ? (%s) : (%s); __pick; }))",
-               bstr(&pre), ix, l, r);
-    }
-    if (a->kind == nkArr && i->kind == nkNum) {
-      int k = (int)i->num;
-      if (k < 0 || k >= a->nkids) fail(c, "array index out of range %s", err_loc(c, n));
-      return emit_expr(c, sc, a->kids[k]);
-    }
-    if (i->kind == nkNum && ((int)i->num == 0 || (int)i->num == 1) && refs_stereo(c, sc, a)) {
-      Buf pre = {0};
-      SV v = emit_stereo(c, sc, a, &pre);
-      return F(c, "(({\n%s  double __pick = (%s); __pick; }))", bstr(&pre), (int)i->num == 0 ? v.l : v.r);
-    }
-    fail(c, "indexing non-constant arrays not supported %s", err_loc(c, n));
-    return NULL;
+    const char* ix = emit1(c, sc, i, pre, "an index");
+    const char* t = fresh(c, "ix");
+    badd(c, pre, "  long %s = (long)(%s) %% 2;\n", t, ix);
+    return mono(F(c, "((%s == 0) ? (%s) : (%s))", t, v.l, v.r));
   }
   default:
     fail(c, "cannot emit expression node: %s %s", KIND_NAMES[n->kind], err_loc(c, n));
-    return NULL;
+    return mono("");
   }
 }
 
-static int is_shape_or_math(const char* name) {
-  static const char* const xs[] = {"pow", "min", "max", "clamp", "int", "saw", "tri", "sqr", "abs", NULL};
-  return in(name, LIBM1) || in(name, xs);
-}
-
-static SV emit_stereo(Ctx* c, Scope* sc, Node* n, Buf* pre) {
-  /* One value (no pair in it): emit it once, into a temp when it may
-   * have side effects, so both channels read the same sample. */
-  if (!refs_stereo(c, sc, n)) {
-    if (n->kind == nkNum) {
-      const char* s = num_lit(c, n->num);
-      return (SV){s, s, 0};
+static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
+  /* Costly pure maths over invariant inputs: once a block. */
+  if (c->hoist_on && !c->in_hoist && in(n->str, HOISTED_MATH) && !user_def(c, n->str) &&
+      !lookup_fn(sc, n->str)[0] && !lookup_lambda(sc, n->str) && is_invariant(c, sc, n) &&
+      !is_const(c, sc, n))
+    return mono(hoist(c, emit_invariant(c, sc, n)));
+  /* A lambda-valued param: its body inline. */
+  Node* lam = lookup_lambda(sc, n->str);
+  if (lam) {
+    if (n->nkids < lam->nparams)
+      fail(c, "lambda '%s' takes %d args, got %d %s", n->str, lam->nparams, n->nkids, err_loc(c, n));
+    Scope* inner = push(c, sc);
+    for (int i = 0; i < lam->nparams; i++) {
+      V v = emit(c, sc, n->kids[i], pre);
+      bind_value(c, inner, lam->params[i], v, v.pair, v.pair ? NULL : n->kids[i], sc, pre);
     }
-    if (n->kind == nkIdent) {
-      if (is_fn_name(c, sc, n->str)) return (SV){n->str, n->str, 0};
-      const char* s = emit_expr(c, sc, n);
-      return (SV){s, s, 0};
-    }
-    const char* s = emit_expr(c, sc, n);
-    const char* tmp = fresh(c, "sst");
-    badd(c, pre, "  double %s = (%s);\n", tmp, s);
-    return (SV){tmp, tmp, 0};
+    Node* body = lam->kids[0];
+    return body->kind == nkBlock ? emit_block(c, inner, body, pre) : emit(c, inner, body, pre);
   }
-  switch (n->kind) {
-  case nkIdent: {
-    Ent* st = lookup_stereo(sc, n->str);
-    if (st) return (SV){st->a, st->b, 1};
-    if (has(&c->pair_vars, n->str)) return (SV){pair_var_ref(c, n->str, 0), pair_var_ref(c, n->str, 1), 1};
-    if (has(&c->play_set, n->str) || has(&c->stereo_lets, n->str))
-      return (SV){stereo_ref(c, n->str, "l"), stereo_ref(c, n->str, "r"), 1};
-    fail(c, "internal: nkIdent '%s' flagged as stereo by refsStereo but no stereo binding found %s",
-         n->str, err_loc(c, n));
-    break;
+  const char* resolved = lookup_fn(sc, n->str);
+  const char* name = resolved[0] ? resolved : n->str;
+  if (eq(name, "sum")) {
+    if (n->nkids != 2) fail(c, "sum takes 2 args: sum(N, fn) %s", err_loc(c, n));
+    Node* narg = n->kids[0];
+    Node* lamarg = n->kids[1];
+    double v;
+    if (!const_value(c, sc, narg, &v))
+      fail(c, "sum: first arg must be a compile-time-constant integer (a literal, a name bound "
+           "to one, or len(array)) %s", err_loc(c, narg));
+    long N = (long)v;
+    if ((double)N != v) fail(c, "sum: first arg must be an integer, got %s %s", nim_float(c, v), err_loc(c, narg));
+    if (N < 0) fail(c, "sum: first arg must be non-negative, got %ld %s", N, err_loc(c, narg));
+    if (lamarg->kind != nkLambda)
+      fail(c, "sum: second arg must be a lambda like `n => expr`, got %s %s", KIND_NAMES[lamarg->kind], err_loc(c, lamarg));
+    if (lamarg->nparams != 1) fail(c, "sum: lambda must take exactly one parameter %s", err_loc(c, lamarg));
+    if (N == 0) return mono("0.0");
+    const char* param = lamarg->params[0];
+    Node* body = lamarg->kids[0];
+    V* terms = al(c, N * sizeof(V));
+    int pair = 0;
+    for (long k = 1; k <= N; k++) {
+      Scope* iter = push(c, sc);
+      lput(c, &iter->names, param)->a = num_lit(c, (double)k);
+      lput(c, &iter->numlits, param)->v = (double)k;
+      terms[k - 1] = body->kind == nkBlock ? emit_block(c, iter, body, pre) : emit(c, iter, body, pre);
+      if (terms[k - 1].pair) pair = 1;
+    }
+    Buf l = {0}, r = {0};
+    for (long k = 0; k < N; k++) {
+      if (k) { bcat(c, &l, " + "); bcat(c, &r, " + "); }
+      bcat(c, &l, terms[k].l);
+      bcat(c, &r, terms[k].r);
+    }
+    if (!pair) return mono(F(c, "(%s)", bstr(&l)));
+    return vpair(F(c, "(%s)", bstr(&l)), F(c, "(%s)", bstr(&r)));
   }
-  case nkArr: {
-    if (n->nkids == 2) {
-      const char* l = emit_expr(c, sc, n->kids[0]);
-      const char* r = emit_expr(c, sc, n->kids[1]);
-      return (SV){l, r, 1};
-    }
-    fail(c, "array literal with %d elements in stereo context (only [L,R] supported) %s", n->nkids, err_loc(c, n));
-    break;
-  }
-  case nkIdx: {
-    Node* base = n->kids[0];
-    Node* idx = n->kids[1];
-    if (base->kind == nkIdent && idx->kind == nkNum && ((int)idx->num == 0 || (int)idx->num == 1)) {
-      int k = (int)idx->num;
-      Ent* st = lookup_stereo(sc, base->str);
-      if (st) { const char* p = k == 0 ? st->a : st->b; return (SV){p, p, 0}; }
-      if (has(&c->pair_vars, base->str)) { const char* p = pair_var_ref(c, base->str, k); return (SV){p, p, 0}; }
-      if (has(&c->play_set, base->str) || has(&c->stereo_lets, base->str)) {
-        const char* p = stereo_ref(c, base->str, k == 0 ? "l" : "r");
-        return (SV){p, p, 0};
-      }
-    }
-    fail(c, "stereo-indexed expression must be base[0] or base[1] %s", err_loc(c, n));
-    break;
-  }
-  case nkBinOp: {
-    SV a = emit_stereo(c, sc, n->kids[0], pre);
-    SV b = emit_stereo(c, sc, n->kids[1], pre);
-    const char* op = n->str;
-    const char* fmt;
-    if (eq(op, "+")) fmt = "((%s) + (%s))";
-    else if (eq(op, "-")) fmt = "((%s) - (%s))";
-    else if (eq(op, "*")) fmt = "((%s) * (%s))";
-    else if (eq(op, "/")) {
-      return (SV){F(c, "((%s) == 0.0 ? 0.0 : (%s) / (%s))", b.l, a.l, b.l),
-                  F(c, "((%s) == 0.0 ? 0.0 : (%s) / (%s))", b.r, a.r, b.r), 1};
-    } else {
-      fail(c, "binop '%s' not allowed on stereo values %s", op, err_loc(c, n));
-      return (SV){0};
-    }
-    return (SV){F(c, fmt, a.l, b.l), F(c, fmt, a.r, b.r), 1};
-  }
-  case nkUnary: {
-    SV a = emit_stereo(c, sc, n->kids[0], pre);
-    if (eq(n->str, "-")) return (SV){F(c, "(-(%s))", a.l), F(c, "(-(%s))", a.r), 1};
-    fail(c, "unary '%s' not allowed on stereo %s", n->str, err_loc(c, n));
-    break;
-  }
-  case nkIf: {
-    /* The condition is one number, into a temp so it runs once. */
-    const char* cond = emit_expr(c, sc, n->kids[0]);
-    const char* ct = fresh(c, "ifc");
-    badd(c, pre, "  double %s = (%s);\n", ct, cond);
-    SV thn = emit_stereo(c, sc, n->kids[1], pre);
-    SV els = n->kids[2] ? emit_stereo(c, sc, n->kids[2], pre) : (SV){"0.0", "0.0", 0};
-    return (SV){F(c, "((%s) != 0.0 ? (%s) : (%s))", ct, thn.l, els.l),
-                F(c, "((%s) != 0.0 ? (%s) : (%s))", ct, thn.r, els.r), 1};
-  }
-  case nkCall: {
-    if (in(n->str, PAIR_CALLS)) {
-      const char* f = n->str;
-      if (eq(f, "cmul")) {
-        const char** a = pair_operands(c, sc, n, pre, 4, "two pairs (or four numbers)");
-        return (SV){F(c, "(%s * %s - %s * %s)", a[0], a[2], a[1], a[3]),
-                    F(c, "(%s * %s + %s * %s)", a[0], a[3], a[1], a[2]), 1};
-      }
-      if (eq(f, "cdiv")) {
-        const char** a = pair_operands(c, sc, n, pre, 4, "two pairs (or four numbers)");
-        const char* den = fresh(c, "cdiv_den");
-        badd(c, pre, "  double %s = %s * %s + %s * %s;\n", den, a[2], a[2], a[3], a[3]);
-        return (SV){F(c, "(%s == 0.0 ? 0.0 : (%s * %s + %s * %s) / %s)", den, a[0], a[2], a[1], a[3], den),
-                    F(c, "(%s == 0.0 ? 0.0 : (%s * %s - %s * %s) / %s)", den, a[1], a[2], a[0], a[3], den), 1};
-      }
-      if (eq(f, "cscale")) {
-        const char** a = pair_operands(c, sc, n, pre, 3, "a number and a pair (or three numbers)");
-        return (SV){F(c, "(%s * %s)", a[0], a[1]), F(c, "(%s * %s)", a[0], a[2]), 1};
-      }
-      if (eq(f, "rotate")) {
-        const char** a = pair_operands(c, sc, n, pre, 3, "a pair and an angle (or three numbers)");
-        const char* cs = fresh(c, "rot_c");
-        const char* sn = fresh(c, "rot_s");
-        badd(c, pre, "  double %s = cos(%s);\n", cs, a[2]);
-        badd(c, pre, "  double %s = sin(%s);\n", sn, a[2]);
-        return (SV){F(c, "(%s * %s - %s * %s)", a[0], cs, a[1], sn),
-                    F(c, "(%s * %s + %s * %s)", a[0], sn, a[1], cs), 1};
-      }
-      if (eq(f, "conj")) {
-        const char** a = pair_operands(c, sc, n, pre, 2, "one pair (or two numbers)");
-        return (SV){a[0], F(c, "(-%s)", a[1]), 1};
-      }
-      if (eq(f, "analytic")) {
-        const char** a = pair_operands(c, sc, n, pre, 1, "one signal");
-        const char* sig = a[0];
-        const char* off_a = register_region(c, "hilbert_a", 16, NULL);
-        const char* off_b = register_region(c, "hilbert_b", 16, NULL);
-        const char* re = fresh(c, "an_re");
-        const char* im = fresh(c, "an_im");
-        badd(c, pre, "  s->idx = %s;\n", off_a);
-        badd(c, pre, "  double %s = n_hilbert_a((DspState*)s, %s);\n", re, sig);
-        badd(c, pre, "  s->idx = %s;\n", off_b);
-        badd(c, pre, "  double %s = -n_hilbert_b((DspState*)s, %s);\n", im, sig);
-        return (SV){re, im, 1};
-      }
-      if (eq(f, "phasor_pair")) {
-        const char** a = pair_operands(c, sc, n, pre, 1, "a frequency");
-        const char* off = register_region(c, "phasor_pair", 1, NULL);
-        const char* ph = fresh(c, "ppair_ph");
-        badd(c, pre, "  s->pool[%s] = fmod(s->pool[%s] + (%s) / s->sr, 1.0);\n", off, off, a[0]);
-        badd(c, pre, "  if (s->pool[%s] < 0.0) s->pool[%s] += 1.0;\n", off, off);
-        badd(c, pre, "  double %s = s->pool[%s] * (2.0 * 3.14159265358979323846);\n", ph, off);
-        return (SV){F(c, "cos(%s)", ph), F(c, "sin(%s)", ph), 1};
-      }
-      if (eq(f, "input")) {
-        pair_operands(c, sc, n, pre, 0, "no arguments");
-        return (SV){"s->in_l", "s->in_r", 1};
-      }
-    }
-    /* A pair-returning def (haas, pan): inlined once, its two channels
-     * caught in temps. */
-    Node* sdef = user_def(c, n->str);
-    if (sdef && is_stereo_def(c, sdef)) {
-      if (in(n->str, MONO_ONLY_INPUT_DEFS) && n->nkids > 0 && refs_stereo(c, sc, n->kids[0]))
-        fail(c, "%s takes a mono signal — collapse the input via mono(x) or pick a channel via "
-             "x[0] / x[1] before piping %s", n->str, err_loc(c, n));
-      Node* def = sdef;
-      if (n->nkids != def->nparams)
-        fail(c, "wrong arg count for %s: expected %d got %d %s", n->str, def->nparams, n->nkids, err_loc(c, n));
-      if (has(&c->recursive, n->str)) {
-        Loop lp = emit_loop(c, sc, def, n, 1);
-        bcat(c, pre, lp.stmts);
-        return (SV){lp.l, lp.r, 1};
-      }
-      if (sfind(&c->def_stack, def->str) >= 0) cycle_error(c, def, n);
-      Scope* inner = push(c, sc);
-      const char* tl = fresh(c, F(c, "st_%s_l", n->str));
-      const char* tr = fresh(c, F(c, "st_%s_r", n->str));
-      Buf blk = {0};
-      badd(c, &blk, "  double %s, %s;\n", tl, tr);
-      bcat(c, &blk, "  {\n");
-      for (int i = 0; i < def->nparams; i++) {
-        const char* p = def->params[i];
-        Node* a = n->kids[i];
-        if (a->kind == nkIdent && is_fn_name(c, sc, a->str)) {
-          const char* resolved = lookup_fn(sc, a->str)[0] ? lookup_fn(sc, a->str) : a->str;
-          lput(c, &inner->fns, p)->a = resolved;
-          continue;
-        }
-        Buf sub = {0};
-        SV sv = emit_stereo(c, sc, a, &sub);
-        bcat(c, pre, bstr(&sub));
-        if (sv.stereo || pair_params(c, def)[i]) {
-          const char* pl = fresh(c, F(c, "p_%s_l", p));
-          const char* pr = fresh(c, F(c, "p_%s_r", p));
-          badd(c, &blk, "    double %s = (%s);\n", pl, sv.l);
-          badd(c, &blk, "    double %s = (%s);\n", pr, sv.r);
-          Ent* e = lput(c, &inner->stereo, p);
-          e->a = pl; e->b = pr;
-        } else {
-          const char* t = fresh(c, F(c, "p_%s", p));
-          badd(c, &blk, "    double %s = (%s);\n", t, sv.l);
-          lput(c, &inner->names, p)->a = t;
-          if (a->kind == nkNum) lput(c, &inner->numlits, p)->v = a->num;
-          else if (a->kind == nkIdent) {
-            double v;
-            if (lookup_num_lit(sc, a->str, &v)) lput(c, &inner->numlits, p)->v = v;
-          }
-          if (!lfind(inner->numlits, p)) note_invariant(c, inner, p, a, sc);
-        }
-      }
-      Node* body = def->kids[0];
-      Node** stmts = body->kind == nkBlock ? body->kids : &def->kids[0];
-      int nst = body->kind == nkBlock ? body->nkids : 1;
-      spush(c, &c->def_stack, def->str);
-      for (int si = 0; si < nst; si++) {
-        Node* st = stmts[si];
-        if (si == nst - 1 && st->kind != nkLet && st->kind != nkVar && st->kind != nkAssign && st->kind != nkIdxAssign) {
-          Buf sub = {0};
-          SV v = emit_stereo(c, inner, st, &sub);
-          bcat(c, &blk, bstr(&sub));
-          badd(c, &blk, "    %s = (%s);\n", tl, v.l);
-          badd(c, &blk, "    %s = (%s);\n", tr, v.r);
-        } else {
-          emit_local_stmt(c, inner, st, &blk);
-        }
-      }
-      c->def_stack.n--;
-      bcat(c, &blk, "  }\n");
-      bcat(c, pre, bstr(&blk));
-      return (SV){tl, tr, 1};
-    }
-    /* A def that reads some params as pairs: nothing to split when every
-     * pair lands on one of those, so it runs once. */
-    int* pairs = NULL;
-    int npairs = 0;
-    Node* udef = user_def(c, n->str);
-    if (udef) { pairs = takes_pair(c, udef); npairs = udef->nparams; }
-    int any_pair = 0;
-    for (int i = 0; i < npairs; i++) if (pairs[i]) any_pair = 1;
-    if (any_pair) {
-      int per_channel = 0;
-      for (int i = 0; i < n->nkids; i++)
-        if (i < npairs && !pairs[i] && refs_stereo(c, sc, n->kids[i])) per_channel = 1;
-      if (!per_channel) {
-        const char* v = emit_expr(c, sc, n);
-        const char* tmp = fresh(c, "pp");
-        badd(c, pre, "  double %s = (%s);\n", tmp, v);
-        return (SV){tmp, tmp, 0};
-      }
-    }
-    /* Otherwise split per channel: each side a call of its own. */
-    SV* argv = al(c, (n->nkids + 1) * sizeof(SV));
-    int any_stereo = 0;
-    for (int i = 0; i < n->nkids; i++) {
-      argv[i] = emit_stereo(c, sc, n->kids[i], pre);
-      if (argv[i].stereo) any_stereo = 1;
-    }
-    if (!any_stereo)
-      fail(c, "internal: nkCall '%s' flagged as stereo by refsStereo but no arg resolved to stereo %s",
-           n->str, err_loc(c, n));
-    const char* name = n->str;
-    int can_split = is_shape_or_math(name) || in(name, TRANSPARENT_HELPERS) ||
-                    (udef && is_pure_for_stereo(c, udef->kids[0]));
-    if (!can_split) {
-      const char* who = "x";
-      for (int i = 0; i < n->nkids; i++)
-        if (argv[i].stereo && n->kids[i]->kind == nkIdent) { who = n->kids[i]->str; break; }
-      fail(c, "stateful call '%s' receives a stereo value %s — split L/R first via %s[0] / %s[1], "
-           "or collapse it with mono(%s)", name, err_loc(c, n), who, who, who);
-    }
-    Scope* inl = push(c, sc);
-    Scope* inr = push(c, sc);
-    Node* cl = mknode(c, nkCall, n->line, n->source);
-    Node* cr = mknode(c, nkCall, n->line, n->source);
-    cl->str = n->str; cr->str = n->str;
-    for (int i = 0; i < n->nkids; i++) {
-      Node* k = n->kids[i];
-      if (i < npairs && pairs[i] && argv[i].stereo) {
-        const char* tmp = fresh(c, "spp");
-        Ent* e = lput(c, &inl->stereo, tmp); e->a = argv[i].l; e->b = argv[i].r;
-        e = lput(c, &inr->stereo, tmp); e->a = argv[i].l; e->b = argv[i].r;
-        add_kid(c, cl, mkident(c, tmp, n->line, n->source));
-        add_kid(c, cr, mkident(c, tmp, n->line, n->source));
-      } else if (argv[i].stereo) {
-        const char* tl = fresh(c, "stl");
-        const char* tr = fresh(c, "str");
-        lput(c, &inl->names, tl)->a = argv[i].l;
-        lput(c, &inr->names, tr)->a = argv[i].r;
-        add_kid(c, cl, mkident(c, tl, n->line, n->source));
-        add_kid(c, cr, mkident(c, tr, n->line, n->source));
-      } else if (k->kind == nkNum || k->kind == nkIdent) {
-        /* kept as written: delay and friends read a literal to size a buffer */
-        add_kid(c, cl, k);
-        add_kid(c, cr, k);
+  if (eq(name, "each")) {
+    if (n->nkids != 2 || n->kids[1]->kind != nkLambda || n->kids[1]->nparams != 1)
+      fail(c, "each takes a count and a one-parameter lambda: each(N, i => ...) %s", err_loc(c, n));
+    Node* narg = n->kids[0];
+    double v;
+    if (!const_value(c, sc, narg, &v))
+      fail(c, "each: the count must be a compile-time integer (a literal, a name bound to one, "
+           "or len(array)) %s", err_loc(c, narg));
+    long N = (long)v;
+    if ((double)N != v || N < 0)
+      fail(c, "each: the count must be a non-negative integer, got %s %s", nim_float(c, v), err_loc(c, narg));
+    Node* l = n->kids[1];
+    Buf saved = c->deferred;
+    c->deferred = (Buf){0};
+    c->each_depth++;
+    for (long k = 0; k < N; k++) {
+      Scope* iter = push(c, sc);
+      lput(c, &iter->names, l->params[0])->a = num_lit(c, (double)k);
+      lput(c, &iter->numlits, l->params[0])->v = (double)k;
+      Node* b = l->kids[0];
+      if (b->kind == nkBlock) {
+        for (int i = 0; i < b->nkids - 1; i++) emit_local_stmt(c, iter, b->kids[i], pre);
+        Node* last = b->kids[b->nkids - 1];
+        if (!(last->kind == nkNum && last->num == 0.0)) emit(c, iter, last, pre);
       } else {
-        const char* tmp = fresh(c, "ssa");
-        lput(c, &inl->names, tmp)->a = argv[i].l;
-        lput(c, &inr->names, tmp)->a = argv[i].l;
-        add_kid(c, cl, mkident(c, tmp, n->line, n->source));
-        add_kid(c, cr, mkident(c, tmp, n->line, n->source));
+        emit(c, iter, b, pre);
       }
     }
-    const char* le = emit_expr(c, inl, cl);
-    const char* re = emit_expr(c, inr, cr);
-    return (SV){le, re, 1};
+    c->each_depth--;
+    bcat(c, pre, bstr(&c->deferred));      /* the step lands together */
+    c->deferred = saved;
+    return mono("0.0");
   }
-  default: {
-    const char* s = emit_expr(c, sc, n);
-    return (SV){s, s, 0};
-  }
-  }
-  return (SV){0};
-}
-
-/* Does a subtree hold a pair (a play, a stereo let, a scope's pair, a
- * pair-returning def)? */
-static int refs_stereo(Ctx* c, Scope* sc, Node* n) {
-  if (!n) return 0;
-  switch (n->kind) {
-  case nkIdent:
-    if (sc && scalar_shadows(sc, n->str)) return 0;
-    if (has(&c->play_set, n->str) || has(&c->stereo_lets, n->str)) return 1;
-    if (has(&c->pair_vars, n->str)) return 1;
-    if (sc && lookup_stereo(sc, n->str)) return 1;
-    return 0;
-  case nkArr: return n->nkids == 2;
-  case nkLambda: return 0;
-  case nkIdx: {
-    Node* a = n->kids[0];
-    Node* i = n->kids[1];
-    if (a->kind == nkIdent && (lookup_sarray(c, sc, a->str) || lookup_larray(c, sc, a->str)))
-      return refs_stereo(c, sc, i);
-    if (a->kind == nkIdent && i->kind == nkNum && ((int)i->num == 0 || (int)i->num == 1)) {
-      int base = (!sc || !scalar_shadows(sc, a->str)) &&
-                 (has(&c->play_set, a->str) || has(&c->stereo_lets, a->str) || has(&c->pair_vars, a->str) ||
-                  (sc && lookup_stereo(sc, a->str)));
-      if (base) return 0;
+  if (eq(name, "len")) {
+    if (n->nkids == 1 && n->kids[0]->kind == nkIdent) {
+      const char* a = n->kids[0]->str;
+      Ent* e;
+      if ((e = lookup_sarray(c, sc, a))) return mono(num_lit(c, (double)e->n));
+      if ((e = lookup_larray(c, sc, a))) return mono(num_lit(c, (double)e->n));
+      if ((e = lookup_array(c, sc, a))) return mono(num_lit(c, (double)e->n));
     }
-    return refs_stereo(c, sc, i);
+    fail(c, "len takes the name of an array %s", err_loc(c, n));
   }
-  case nkCall: {
-    if (in(n->str, PAIR_CALLS)) return 1;
-    if (in(n->str, PAIR_READERS)) return 0;
-    if (eq(n->str, "wave")) return n->nkids > 0 && refs_stereo(c, sc, n->kids[0]);
-    Node* def = user_def(c, n->str);
-    if (def) {
-      if (is_stereo_def(c, def)) return 1;
-      int* pairs = takes_pair(c, def);
-      for (int i = 0; i < n->nkids; i++) {
-        if (i < def->nparams && pairs[i]) continue;
-        if (n->kids[i] && refs_stereo(c, sc, n->kids[i])) return 1;
-      }
-      return 0;
+  if (eq(name, "array"))
+    fail(c, "array(N) declares an array: `$f = array(N)` for state that lasts, `let a = array(N)` "
+         "for this sample's scratch %s", err_loc(c, n));
+  if (eq(name, "noise")) return mono(emit_noise(c, pre));
+  if (in(name, PAIR_CALLS)) {
+    const char* f = name;
+    if (eq(f, "cmul")) {
+      const char** a = pair_operands(c, sc, n, pre, 4, "two pairs (or four numbers)");
+      return vpair(F(c, "(%s * %s - %s * %s)", a[0], a[2], a[1], a[3]),
+                   F(c, "(%s * %s + %s * %s)", a[0], a[3], a[1], a[2]));
     }
-    for (int i = 0; i < n->nkids; i++) if (n->kids[i] && refs_stereo(c, sc, n->kids[i])) return 1;
-    return 0;
+    if (eq(f, "cdiv")) {
+      const char** a = pair_operands(c, sc, n, pre, 4, "two pairs (or four numbers)");
+      const char* den = fresh(c, "cdiv_den");
+      badd(c, pre, "  double %s = %s * %s + %s * %s;\n", den, a[2], a[2], a[3], a[3]);
+      return vpair(F(c, "(%s == 0.0 ? 0.0 : (%s * %s + %s * %s) / %s)", den, a[0], a[2], a[1], a[3], den),
+                   F(c, "(%s == 0.0 ? 0.0 : (%s * %s - %s * %s) / %s)", den, a[1], a[2], a[0], a[3], den));
+    }
+    if (eq(f, "cscale")) {
+      const char** a = pair_operands(c, sc, n, pre, 3, "a number and a pair (or three numbers)");
+      return vpair(F(c, "(%s * %s)", a[0], a[1]), F(c, "(%s * %s)", a[0], a[2]));
+    }
+    if (eq(f, "rotate")) {
+      const char** a = pair_operands(c, sc, n, pre, 3, "a pair and an angle (or three numbers)");
+      const char* cs = fresh(c, "rot_c");
+      const char* sn = fresh(c, "rot_s");
+      badd(c, pre, "  double %s = cos(%s);\n  double %s = sin(%s);\n", cs, a[2], sn, a[2]);
+      return vpair(F(c, "(%s * %s - %s * %s)", a[0], cs, a[1], sn),
+                   F(c, "(%s * %s + %s * %s)", a[0], sn, a[1], cs));
+    }
+    if (eq(f, "conj")) {
+      const char** a = pair_operands(c, sc, n, pre, 2, "one pair (or two numbers)");
+      return vpair(a[0], F(c, "(-%s)", a[1]));
+    }
+    if (eq(f, "analytic")) {
+      const char** a = pair_operands(c, sc, n, pre, 1, "one signal");
+      const char* off_a = register_region(c, "hilbert_a", 16, NULL);
+      const char* off_b = register_region(c, "hilbert_b", 16, NULL);
+      const char* re = fresh(c, "an_re");
+      const char* im = fresh(c, "an_im");
+      badd(c, pre, "  s->idx = %s; double %s = n_hilbert_a((DspState*)s, %s);\n", off_a, re, a[0]);
+      badd(c, pre, "  s->idx = %s; double %s = -n_hilbert_b((DspState*)s, %s);\n", off_b, im, a[0]);
+      return vpair(re, im);
+    }
+    if (eq(f, "phasor_pair")) {
+      const char** a = pair_operands(c, sc, n, pre, 1, "a frequency");
+      const char* off = register_region(c, "phasor_pair", 1, NULL);
+      const char* ph = fresh(c, "ppair_ph");
+      badd(c, pre, "  s->pool[%s] = fmod(s->pool[%s] + (%s) / s->sr, 1.0);\n", off, off, a[0]);
+      badd(c, pre, "  if (s->pool[%s] < 0.0) s->pool[%s] += 1.0;\n", off, off);
+      badd(c, pre, "  double %s = s->pool[%s] * (2.0 * 3.14159265358979323846);\n", ph, off);
+      return vpair(F(c, "cos(%s)", ph), F(c, "sin(%s)", ph));
+    }
+    pair_operands(c, sc, n, pre, 0, "no arguments");     /* input */
+    return vpair("s->in_l", "s->in_r");
   }
-  default:
-    for (int i = 0; i < n->nkids; i++) if (n->kids[i] && refs_stereo(c, sc, n->kids[i])) return 1;
-    return 0;
+  if (in(name, PAIR_READERS)) {
+    const char** a = pair_operands(c, sc, n, pre, 2, "one pair (or two numbers)");
+    if (eq(name, "magnitude")) return mono(F(c, "sqrt(%s * %s + %s * %s)", a[0], a[0], a[1], a[1]));
+    return mono(F(c, "atan2(%s, %s)", a[1], a[0]));
   }
+  if (eq(name, "wave")) {
+    if (n->nkids != 2) fail(c, "wave takes 2 args %s", err_loc(c, n));
+    V freq = emit(c, sc, n->kids[0], pre);
+    Node* arr = n->kids[1];
+    WaveTable w;
+    if (arr->kind == nkIdent) {
+      Ent* found = lookup_array(c, sc, arr->str);
+      if (!found)
+        fail(c, "wave: %s must be a constant table of numeric literals%s %s", arr->str,
+             lookup_larray(c, sc, arr->str) ? " (it holds runtime values)" : "", err_loc(c, arr));
+      w.sym = found->a; w.length = found->n;
+    } else if (arr->kind == nkArr) {
+      for (int i = 0; i < arr->nkids; i++)
+        if (arr->kids[i]->kind != nkNum) fail(c, "wave array must be numeric literals only %s", err_loc(c, arr->kids[i]));
+      w.sym = static_table(c, fresh(c, "arr"), arr, NULL);
+      w.length = arr->nkids;
+    } else {
+      fail(c, "wave: second arg must be an array literal or a let binding to one %s", err_loc(c, arr));
+      return mono("");
+    }
+    return per_side(c, sc, n, &freq, freq.pair, s_wave, pre, &w);
+  }
+  /* Builtins and natives: arguments first, then once, or per side. */
+  int any = 0;
+  if (eq(name, "phasor")) {
+    if (n->nkids != 1) fail(c, "phasor takes 1 arg %s", err_loc(c, n));
+    V* a = emit_args(c, sc, n, pre, &any);
+    return per_side(c, sc, n, a, any, s_phasor, pre, NULL);
+  }
+  if (in(name, LIBM1) && n->nkids == 1) { V* a = emit_args(c, sc, n, pre, &any); return map_pure(c, name, a, 1, any, b_fn1, pre); }
+  if (eq(name, "abs") && n->nkids == 1) { V* a = emit_args(c, sc, n, pre, &any); return map_pure(c, name, a, 1, any, b_abs, pre); }
+  if ((eq(name, "saw") || eq(name, "tri") || eq(name, "sqr")) && n->nkids == 1) {
+    V* a = emit_args(c, sc, n, pre, &any);
+    return map_pure(c, name, a, 1, any, b_shape, pre);
+  }
+  if (eq(name, "pow") && n->nkids == 2) { V* a = emit_args(c, sc, n, pre, &any); return map_pure(c, name, a, 2, any, b_pow, pre); }
+  if ((eq(name, "min") || eq(name, "max")) && n->nkids >= 2) {
+    V* a = emit_args(c, sc, n, pre, &any);
+    return map_pure(c, name, a, n->nkids, any, b_minmax, pre);
+  }
+  if (eq(name, "clamp") && n->nkids == 3) { V* a = emit_args(c, sc, n, pre, &any); return map_pure(c, name, a, 3, any, b_clamp, pre); }
+  if (eq(name, "int") && n->nkids == 1) { V* a = emit_args(c, sc, n, pre, &any); return map_pure(c, name, a, 1, any, b_int, pre); }
+  if (eq(name, "freq_shift")) {
+    if (n->nkids != 2) fail(c, "freq_shift(signal, hz) takes exactly 2 args %s", err_loc(c, n));
+    V* a = emit_args(c, sc, n, pre, &any);
+    return per_side(c, sc, n, a, any, s_freq_shift, pre, NULL);
+  }
+  if (eq(name, "midi_trig") && n->nkids == 1) {
+    V* a = emit_args(c, sc, n, pre, &any);
+    return per_side(c, sc, n, a, any, s_midi_trig, pre, NULL);
+  }
+  if (((eq(name, "midi_cc") || eq(name, "midi_note") || eq(name, "midi_voice_freq") ||
+        eq(name, "midi_voice_gate") || eq(name, "midi_voice_vel") || eq(name, "midi_voice_key")) && n->nkids == 1) ||
+      ((eq(name, "midi_freq") || eq(name, "midi_gate") || eq(name, "midi_vel")) && n->nkids == 0)) {
+    V* a = emit_args(c, sc, n, pre, &any);
+    return map_pure(c, name, a, n->nkids, any, b_midi, pre);
+  }
+  if (in(name, MIDI_FNS)) fail(c, "%s: wrong arg count %s", name, err_loc(c, n));
+  /* Hoisted natives: the coefficients once a block, the step per sample. */
+  if (c->hoist_on && (eq(name, "lp1") || eq(name, "hp1")) && n->nkids == 2 && is_invariant(c, sc, n->kids[1])) {
+    Hoisted h = {hoist(c, F(c, "n_lp1_coef(%s, s->sr)", emit_invariant(c, sc, n->kids[1])))};
+    V* a = emit_args(c, sc, n, pre, &any);
+    return per_side(c, sc, n, a, a[0].pair, s_lp1_c, pre, &h);
+  }
+  if (c->hoist_on && (eq(name, "lpf") || eq(name, "hpf") || eq(name, "bpf") || eq(name, "notch")) &&
+      n->nkids == 3 && is_invariant(c, sc, n->kids[1]) && is_invariant(c, sc, n->kids[2])) {
+    const char* k1 = emit_invariant(c, sc, n->kids[1]);
+    const char* k2 = emit_invariant(c, sc, n->kids[2]);
+    Hoisted h = {hoist_arr(c, 4, F(c, "n_svf_coef(%s, %s, s->sr, $H)", k1, k2))};
+    V* a = emit_args(c, sc, n, pre, &any);
+    return per_side(c, sc, n, a, a[0].pair, s_lp1_c, pre, &h);
+  }
+  if (c->hoist_on && eq(name, "reverb") && n->nkids == 3 && is_invariant(c, sc, n->kids[1])) {
+    Hoisted h = {hoist_arr(c, 4, F(c, "n_reverb_coef(%s, s->sr, $H)", emit_invariant(c, sc, n->kids[1])))};
+    V* a = emit_args(c, sc, n, pre, &any);
+    return per_side(c, sc, n, a, a[0].pair || a[2].pair, s_reverb_c, pre, &h);
+  }
+  const NativeSpec* spec = native(name);
+  if (spec && !eq(name, "wave")) {
+    int arity = native_arity(spec);
+    if (n->nkids != arity) fail(c, "%s takes %d args, got %d %s", name, arity, n->nkids, err_loc(c, n));
+    V* a = emit_args(c, sc, n, pre, &any);
+    return per_side(c, sc, n, a, any, s_native, pre, NULL);
+  }
+  Node* def = user_def(c, name);
+  if (def) {
+    if (has(&c->recursive, name)) return emit_loop(c, sc, def, n, pre);
+    return emit_def(c, sc, def, n, pre);
+  }
+  fail(c, "unknown function: %s %s", name, err_loc(c, n));
+  return mono("");
 }
 
 /* ------------------------------------------------- top-level emission */
@@ -2465,11 +2114,13 @@ static const char* stmt_scope(Ctx* c, Node* s, int is_final) {
   }
 }
 
-/* A file-level `$x = init`; the first declaration wins. */
+/* A file-level `$x = init` (top level or play body): its name is known
+ * from the start; whether it is a pair, from its first value. */
 static void declare_var(Ctx* c, Node* n) {
   if (has(&c->play_set, n->str))
     fail(c, "'%s' is the name of a play block — choose a different variable name %s", n->str, err_loc(c, n));
-  if (has(&c->top_var_set, n->str) || has(&c->pair_vars, n->str) || has(&c->top_sarray_names, n->str)) return;
+  if (has(&c->file_vars, n->str)) return;
+  incl(c, &c->file_vars, n->str);
   if (c->nvar_decls == c->cap_var_decls) {
     int cap = c->cap_var_decls ? c->cap_var_decls * 2 : 32;
     Node** v = al(c, cap * sizeof(Node*));
@@ -2477,16 +2128,6 @@ static void declare_var(Ctx* c, Node* n) {
     c->var_decls = v; c->cap_var_decls = cap;
   }
   c->var_decls[c->nvar_decls++] = n;
-  if (is_array_make(n->kids[0])) {
-    incl(c, &c->top_sarray_names, n->str);
-  } else if (is_stereo_return(c, n->kids[0])) {
-    incl(c, &c->pair_vars, n->str);
-    spush(c, &c->top_var_names, pair_var_field(c, n->str, 0));
-    spush(c, &c->top_var_names, pair_var_field(c, n->str, 1));
-  } else {
-    incl(c, &c->top_var_set, n->str);
-    spush(c, &c->top_var_names, n->str);
-  }
 }
 
 static void scan_vars(Ctx* c, Node* n) {
@@ -2499,29 +2140,80 @@ static void scan_vars(Ctx* c, Node* n) {
   }
 }
 
-/* A file-level `$x = init` lazy-inits where it is declared; only the
- * first declaration of a name inits. */
+/* A file-level `$x`'s struct field(s): two for a pair. */
+static void make_var(Ctx* c, const char* name, int pair) {
+  if (pair) {
+    incl(c, &c->pair_vars, name);
+    spush(c, &c->top_var_names, pair_var_field(c, name, 0));
+    spush(c, &c->top_var_names, pair_var_field(c, name, 1));
+  } else {
+    incl(c, &c->top_var_set, name);
+    spush(c, &c->top_var_names, name);
+  }
+}
+
+static Node* file_var_decl(Ctx* c, const char* name) {
+  for (int i = 0; i < c->nvar_decls; i++) if (eq(c->var_decls[i]->str, name)) return c->var_decls[i];
+  return NULL;
+}
+
+/* Shape a file-level `$x` read before its declaration: from how its
+ * value is written. */
+static void decide_var(Ctx* c, Node* st) {
+  Node* v = st->kids[0];
+  int pair = (v->kind == nkArr && v->nkids == 2) || (v->kind == nkCall && in(v->str, PAIR_CALLS));
+  make_var(c, st->str, pair);
+}
+
+/* A file-level `$x = init`, where its first declaration is: a struct
+ * field (two for a pair), set once from its first value. */
 static const char* var_init(Ctx* c, Scope* sc, Node* st) {
   int first = 0;
   for (int i = 0; i < c->nvar_decls; i++) if (c->var_decls[i] == st) first = 1;
   if (!first) return "";
   Buf init_pre = {0};
-  if (has(&c->top_sarray_names, st->str)) {
+  if (is_array_make(st->kids[0])) {
     declare_state_array(c, sc, st, &init_pre, 1);
     return sdup(c, bstr(&init_pre));
   }
-  if (has(&c->pair_vars, st->str)) {
+  V v = emit(c, sc, st->kids[0], &init_pre);
+  int decided = has(&c->pair_vars, st->str) || has(&c->top_var_set, st->str);
+  if (!decided) make_var(c, st->str, v.pair);
+  else if (has(&c->pair_vars, st->str) != v.pair)
+    fail(c, "$%s is read above as %s, but its first value here is %s: write it as [l, r] there, "
+         "or declare it before it is read %s", st->str, v.pair ? "a number" : "a pair",
+         v.pair ? "a pair" : "a number", err_loc(c, st));
+  if (v.pair) {
     int i0 = sfind(&c->top_var_names, pair_var_field(c, st->str, 0));
-    int i1 = i0 + 1;
-    SV v = emit_stereo(c, sc, st->kids[0], &init_pre);
     return F(c, "  if (!(s->inited[%d] & 1)) {\n%s    %s = (%s);\n    %s = (%s);\n"
              "    s->inited[%d] |= 1; s->inited[%d] |= 1;\n  }\n",
-             i0, bstr(&init_pre), pair_var_ref(c, st->str, 0), v.l, pair_var_ref(c, st->str, 1), v.r, i0, i1);
+             i0, bstr(&init_pre), pair_var_ref(c, st->str, 0), v.l, pair_var_ref(c, st->str, 1), v.r, i0, i0 + 1);
   }
   int i = sfind(&c->top_var_names, st->str);
-  const char* init = scalar_value(c, sc, st->kids[0], &init_pre, F(c, "$%s", st->str));
   return F(c, "  if (!(s->inited[%d] & 1)) {\n%s    s->v_%s = (%s); s->inited[%d] |= 1;\n  }\n",
-           i, bstr(&init_pre), st->str, init, i);
+           i, bstr(&init_pre), st->str, v.l, i);
+}
+
+/* `$x = rhs` at file level (top or in a play). */
+static void file_assign(Ctx* c, Scope* sc, Node* st, Buf* body) {
+  if (has(&c->pair_vars, st->str)) {
+    bcat(c, body, assign_pair(c, sc, pair_var_ref(c, st->str, 0), pair_var_ref(c, st->str, 1), st->kids[0]));
+    return;
+  }
+  const char* target;
+  if (has(&c->top_var_set, st->str)) target = F(c, "s->v_%s", st->str);
+  else if (lookup(sc, st->str)[0]) target = lookup(sc, st->str);
+  else if (has(&c->top_lets, st->str)) target = F(c, "l_%s", st->str);
+  else if (has(&c->file_vars, st->str)) {
+    decide_var(c, file_var_decl(c, st->str));
+    file_assign(c, sc, st, body);
+    return;
+  } else {
+    fail(c, "unknown assignment target '%s' %s", st->str, err_loc(c, st));
+    return;
+  }
+  const char* rhs = emit1(c, sc, st->kids[0], body, F(c, "$%s", st->str));
+  badd(c, body, "  %s = (%s);\n", target, rhs);
 }
 
 static const char* escape_prof(Ctx* c, const char* s) {
@@ -2555,12 +2247,157 @@ static const char* emit_program(Ctx* c, Node* program) {
       incl(c, &c->top_lets, s->str);
       if (!has(&c->let_lines, s->str)) hput(c, &c->let_lines, s->str)->n = s->line;
     } else if (s->kind == nkPlay) {
-      Node* body = s->kids[0];
-      if (body->kind == nkBlock) for (int k = 0; k < body->nkids; k++) scan_vars(c, body->kids[k]);
-      else scan_vars(c, body);
+      scan_vars(c, s);
     }
   }
 
+  Buf body = {0};
+  bcat(c, &body, "static void tick1(VoiceState* s, double* outL, double* outR) {\n");
+  bcat(c, &body, "  s->idx = 0;\n");
+  bcat(c, &body, "  double prof_last = 0.0;\n");
+  bcat(c, &body, "  if (s->profiling) { prof_last = n_now(); s->prof_ticks++; }\n");
+  Strs prof_names = {0};
+  Scope* top = push(c, NULL);
+
+  int final_idx = -1;
+  for (int i = program->nkids - 1; i >= 0; i--) {
+    Node* s = program->kids[i];
+    int is_each = s->kind == nkCall && eq(s->str, "each");
+    if (s->kind != nkDef && s->kind != nkVar && s->kind != nkLet && s->kind != nkAssign &&
+        s->kind != nkIdxAssign && s->kind != nkPlay && s->kind != nkImport && !is_each) {
+      final_idx = i;
+      break;
+    }
+  }
+
+  for (int i = 0; i < program->nkids; i++) {
+    Node* s = program->kids[i];
+    const char* src = s->source[0] ? s->source : c->patch_path;
+    if (src[0] && s->line > 0) badd(c, &body, "#line %d \"%s\"\n", s->line, src);
+    c->scope = stmt_scope(c, s, i == final_idx);
+    if (i > 0 && program->kids[i - 1]->kind == nkLet) incl(c, &c->lets_done, program->kids[i - 1]->str);
+    switch (s->kind) {
+    case nkDef: break;
+    case nkImport:
+      fail(c, "import \"%s\" was not resolved — the program was built without import expansion %s",
+           s->str, err_loc(c, s));
+      break;
+    case nkVar: bcat(c, &body, var_init(c, top, s)); break;
+    case nkLet: {
+      Node* rhs = s->kids[0];
+      int numeric = rhs->kind == nkArr && all_nums(rhs);
+      if ((rhs->kind == nkArr && rhs->nkids != 2 && rhs->nkids > 0 && !numeric) || is_array_make(rhs)) {
+        declare_local_array(c, top, s->str, rhs, &body, 1);
+      } else if (numeric) {
+        const char** items = al(c, (rhs->nkids + 1) * sizeof(char*));
+        Ent* e = hput(c, &c->top_arrays, s->str);
+        e->a = static_table(c, F(c, "arr_%s", s->str), rhs, items);
+        e->n = rhs->nkids;
+        if (rhs->nkids == 2) {
+          badd(c, &body, "  double l_%s_l = %s;\n  double l_%s_r = %s;\n", s->str, items[0], s->str, items[1]);
+          incl(c, &c->stereo_lets, s->str);
+        }
+      } else {
+        V v = emit(c, top, rhs, &body);
+        if (v.pair) {
+          badd(c, &body, "  double l_%s_l = (%s);\n  double l_%s_r = (%s);\n", s->str, v.l, s->str, v.r);
+          incl(c, &c->stereo_lets, s->str);
+        } else {
+          badd(c, &body, "  double l_%s = (%s);\n", s->str, v.l);
+          double cv;
+          if (const_value(c, top, rhs, &cv)) lput(c, &top->numlits, s->str)->v = cv;
+          else note_invariant(c, top, s->str, rhs, top);
+        }
+      }
+      break;
+    }
+    case nkAssign: file_assign(c, top, s, &body); break;
+    case nkIdxAssign: bcat(c, &body, emit_idx_assign(c, top, s)); break;
+    case nkPlay: {
+      int part = c->play_names.n;
+      spush(c, &c->play_names, s->str);
+      Scope* inner = push(c, top);
+      const char* nm = s->str;
+      badd(c, &body, "  double p_%s_l, p_%s_r;\n", nm, nm);
+      badd(c, &body, "  if (s->part_park && s->part_park[%d] != 0.0) {\n    p_%s_l = 0.0; p_%s_r = 0.0;\n"
+           "    if (s->part_out) { s->part_out[%d] = 0.0; s->part_out[%d] = 0.0; }\n  } else {\n",
+           part, nm, nm, 2 * part, 2 * part + 1);
+      Node* bn = s->kids[0];
+      Node** stmts = bn->kind == nkBlock ? bn->kids : &s->kids[0];
+      int nst = bn->kind == nkBlock ? bn->nkids : 1;
+      for (int si = 0; si < nst; si++) {
+        Node* st = stmts[si];
+        c->scope = F(c, "play %s/%s", nm, stmt_scope(c, st, si == nst - 1));
+        if (si == nst - 1 && st->kind != nkLet && st->kind != nkVar && st->kind != nkAssign && st->kind != nkIdxAssign) {
+          V v = emit(c, inner, st, &body);
+          const char* l = v.pair ? v.l : once(c, &body, v.l);
+          const char* r = v.pair ? v.r : l;
+          badd(c, &body, "    p_%s_l = (%s) * s->part_gains[%d];\n", nm, l, part);
+          badd(c, &body, "    p_%s_r = (%s) * s->part_gains[%d];\n", nm, r, part);
+          badd(c, &body, "    if (s->part_out) { s->part_out[%d] = p_%s_l; s->part_out[%d] = p_%s_r; }\n",
+               2 * part, nm, 2 * part + 1, nm);
+          continue;
+        }
+        switch (st->kind) {
+        case nkLet:
+          if (has(&c->play_set, st->str))
+            fail(c, "'%s' is the name of a play block — choose a different local variable name %s",
+                 st->str, err_loc(c, st));
+          emit_let(c, inner, st->str, st->kids[0], &body, NULL);
+          break;
+        case nkVar: bcat(c, &body, var_init(c, inner, st)); break;
+        case nkAssign: file_assign(c, inner, st, &body); break;
+        case nkIdxAssign: bcat(c, &body, emit_idx_assign(c, inner, st)); break;
+        default: emit(c, inner, st, &body);
+        }
+      }
+      bcat(c, &body, "  }\n");
+      break;
+    }
+    default:
+      if (i == final_idx) {
+        V v = emit(c, top, s, &body);
+        const char* l = v.pair ? v.l : once(c, &body, v.l);
+        badd(c, &body, "  *outL = (%s); *outR = (%s);\n", l, v.pair ? v.r : l);
+      } else {
+        emit(c, top, s, &body);
+      }
+    }
+    if (s->kind != nkDef && s->kind != nkImport) {
+      const char* loc = (s->source[0] && !eq(s->source, c->patch_path))
+                          ? F(c, "%s %d", s->source, s->line) : F(c, "line %d", s->line);
+      if (prof_names.n < MAX_PROF_SLOTS) spush(c, &prof_names, F(c, "%s (%s)", stmt_scope(c, s, i == final_idx), loc));
+      badd(c, &body, "  if (s->profiling) { double prof_now = n_now(); s->prof[%d] += prof_now - prof_last; "
+           "prof_last = prof_now; }\n", prof_names.n - 1);
+    }
+  }
+  /* The parts the output reaches, by name, and so the ones it doesn't. */
+  c->unheard = (Strs){0};
+  if (final_idx >= 0 && c->play_names.n > 0) {
+    Map plays = {{0}, 0}, reached = {{0}, 0};
+    for (int i = 0; i < program->nkids; i++)
+      if (program->kids[i]->kind == nkPlay) hput(c, &plays, program->kids[i]->str)->node = program->kids[i];
+    mention(c, program->kids[final_idx], &plays, &reached);
+    for (int i = 0; i < c->play_names.n; i++)
+      if (!has(&reached, c->play_names.v[i])) spush(c, &c->unheard, c->play_names.v[i]);
+  }
+  /* No final expression: a file of plays plays them all. */
+  if (final_idx < 0 && c->play_names.n > 0) {
+    bcat(c, &body, "  *outL = ");
+    for (int i = 0; i < c->play_names.n; i++) badd(c, &body, i ? " + p_%s_l" : "p_%s_l", c->play_names.v[i]);
+    bcat(c, &body, ";\n  *outR = ");
+    for (int i = 0; i < c->play_names.n; i++) badd(c, &body, i ? " + p_%s_r" : "p_%s_r", c->play_names.v[i]);
+    bcat(c, &body, ";\n");
+  }
+  bcat(c, &body, "}\n\n");
+  bcat(c, &body, "const char* const prof_names[] = {");
+  for (int i = 0; i < prof_names.n; i++) badd(c, &body, i ? ", \"%s\"" : "\"%s\"", escape_prof(c, prof_names.v[i]));
+  if (prof_names.n == 0) bcat(c, &body, "0");
+  bcat(c, &body, "};\n");
+  badd(c, &body, "const long prof_count = %d;\n\n", prof_names.n);
+  bcat(c, &body, BLOCK_TEMPLATE);
+
+  /* The prelude, now that the state's shape is known. */
   Buf pre = {0};
   bcat(c, &pre, "#include <math.h>\n");
   bcat(c, &pre, "typedef struct DspState DspState;\n");
@@ -2635,246 +2472,6 @@ static const char* emit_program(Ctx* c, Node* program) {
   for (int i = 0; i < c->top_var_names.n; i++) badd(c, &pre, "  double v_%s;\n", c->top_var_names.v[i]);
   badd(c, &pre, "  unsigned char inited[%d];\n", c->top_var_names.n > 1 ? c->top_var_names.n : 1);
   bcat(c, &pre, "} VoiceState;\n\n");
-
-  Buf body = {0};
-  bcat(c, &body, "static void tick1(VoiceState* s, double* outL, double* outR) {\n");
-  bcat(c, &body, "  s->idx = 0;\n");
-  bcat(c, &body, "  double prof_last = 0.0;\n");
-  bcat(c, &body, "  if (s->profiling) { prof_last = n_now(); s->prof_ticks++; }\n");
-  Strs prof_names = {0};
-  Scope* top = push(c, NULL);
-
-  int final_idx = -1;
-  for (int i = program->nkids - 1; i >= 0; i--) {
-    Node* s = program->kids[i];
-    int is_each = s->kind == nkCall && eq(s->str, "each");
-    if (s->kind != nkDef && s->kind != nkVar && s->kind != nkLet && s->kind != nkAssign &&
-        s->kind != nkIdxAssign && s->kind != nkPlay && s->kind != nkImport && !is_each) {
-      final_idx = i;
-      break;
-    }
-  }
-
-  for (int i = 0; i < program->nkids; i++) {
-    Node* s = program->kids[i];
-    const char* src = s->source[0] ? s->source : c->patch_path;
-    if (src[0] && s->line > 0) badd(c, &body, "#line %d \"%s\"\n", s->line, src);
-    c->scope = stmt_scope(c, s, i == final_idx);
-    if (i > 0 && program->kids[i - 1]->kind == nkLet) incl(c, &c->lets_done, program->kids[i - 1]->str);
-    switch (s->kind) {
-    case nkDef: break;
-    case nkImport:
-      fail(c, "import \"%s\" was not resolved — the program was built without import expansion %s",
-           s->str, err_loc(c, s));
-      break;
-    case nkVar: bcat(c, &body, var_init(c, top, s)); break;
-    case nkLet: {
-      Node* rhs = s->kids[0];
-      if ((rhs->kind == nkArr && rhs->nkids != 2 && rhs->nkids > 0 && !all_nums(rhs)) || is_array_make(rhs)) {
-        declare_local_array(c, top, s->str, rhs, &body, 1);
-      } else if (rhs->kind == nkArr && all_nums(rhs)) {
-        const char* sym = F(c, "arr_%s", s->str);
-        const char** items = al(c, (rhs->nkids + 1) * sizeof(char*));
-        Buf list = {0};
-        for (int k = 0; k < rhs->nkids; k++) {
-          items[k] = num_lit(c, rhs->kids[k]->num);
-          if (k) bcat(c, &list, ", ");
-          bcat(c, &list, items[k]);
-        }
-        badd(c, &c->array_decls, "static const double %s[%d] = {%s};\n", sym, rhs->nkids, bstr(&list));
-        Ent* e = hput(c, &c->top_arrays, s->str);
-        e->a = sym; e->n = rhs->nkids;
-        if (rhs->nkids == 2) {
-          badd(c, &body, "  double l_%s_l = %s;\n", s->str, items[0]);
-          badd(c, &body, "  double l_%s_r = %s;\n", s->str, items[1]);
-          incl(c, &c->stereo_lets, s->str);
-        }
-      } else if (refs_stereo(c, top, rhs)) {
-        Buf p2 = {0};
-        SV v = emit_stereo(c, top, rhs, &p2);
-        bcat(c, &body, bstr(&p2));
-        badd(c, &body, "  double l_%s_l = (%s);\n", s->str, v.l);
-        badd(c, &body, "  double l_%s_r = (%s);\n", s->str, v.r);
-        incl(c, &c->stereo_lets, s->str);
-      } else {
-        const char* v = emit_expr(c, top, rhs);
-        badd(c, &body, "  double l_%s = (%s);\n", s->str, v);
-        if (rhs->kind == nkNum) lput(c, &top->numlits, s->str)->v = rhs->num;
-        else if (rhs->kind == nkIdent) {
-          double nv;
-          if (lookup_num_lit(top, rhs->str, &nv)) lput(c, &top->numlits, s->str)->v = nv;
-        }
-        if (!lfind(top->numlits, s->str)) note_invariant(c, top, s->str, rhs, top);
-      }
-      break;
-    }
-    case nkAssign:
-      if (has(&c->pair_vars, s->str)) {
-        bcat(c, &body, assign_pair(c, top, pair_var_ref(c, s->str, 0), pair_var_ref(c, s->str, 1), s->kids[0]));
-      } else {
-        const char* target;
-        if (has(&c->top_var_set, s->str)) target = F(c, "s->v_%s", s->str);
-        else if (has(&c->top_lets, s->str)) target = F(c, "l_%s", s->str);
-        else { fail(c, "unknown assign: %s %s", s->str, err_loc(c, s)); target = ""; }
-        Buf p2 = {0};
-        const char* rhs = scalar_value(c, top, s->kids[0], &p2, F(c, "$%s", s->str));
-        bcat(c, &body, bstr(&p2));
-        badd(c, &body, "  %s = (%s);\n", target, rhs);
-      }
-      break;
-    case nkIdxAssign:
-      bcat(c, &body, emit_idx_assign(c, top, s));
-      break;
-    case nkPlay: {
-      int part = c->play_names.n;
-      spush(c, &c->play_names, s->str);
-      incl(c, &c->play_set, s->str);
-      Scope* inner = push(c, top);
-      const char* nm = s->str;
-      badd(c, &body, "  double p_%s_l, p_%s_r;\n", nm, nm);
-      badd(c, &body, "  if (s->part_park && s->part_park[%d] != 0.0) {\n    p_%s_l = 0.0; p_%s_r = 0.0;\n"
-           "    if (s->part_out) { s->part_out[%d] = 0.0; s->part_out[%d] = 0.0; }\n  } else {\n",
-           part, nm, nm, 2 * part, 2 * part + 1);
-      Node* bn = s->kids[0];
-      Node** stmts = bn->kind == nkBlock ? bn->kids : &s->kids[0];
-      int nst = bn->kind == nkBlock ? bn->nkids : 1;
-      for (int si = 0; si < nst; si++) {
-        Node* st = stmts[si];
-        c->scope = F(c, "play %s/%s", nm, stmt_scope(c, st, si == nst - 1));
-        if (si == nst - 1 && st->kind != nkLet && st->kind != nkVar && st->kind != nkAssign && st->kind != nkIdxAssign) {
-          Buf sub = {0};
-          SV v = emit_stereo(c, inner, st, &sub);
-          bcat(c, &body, bstr(&sub));
-          badd(c, &body, "    p_%s_l = (%s) * s->part_gains[%d];\n", nm, v.l, part);
-          badd(c, &body, "    p_%s_r = (%s) * s->part_gains[%d];\n", nm, v.r, part);
-          badd(c, &body, "    if (s->part_out) { s->part_out[%d] = p_%s_l; s->part_out[%d] = p_%s_r; }\n",
-               2 * part, nm, 2 * part + 1, nm);
-          continue;
-        }
-        switch (st->kind) {
-        case nkLet: {
-          if (has(&c->play_set, st->str))
-            fail(c, "'%s' is the name of a play block — choose a different local variable name %s",
-                 st->str, err_loc(c, st));
-          Node* rhs = st->kids[0];
-          int numeric = rhs->kind == nkArr && rhs->nkids > 0 && all_nums(rhs);
-          if (numeric) {
-            const char* sym = fresh(c, F(c, "arr_%s_%s", nm, st->str));
-            Buf list = {0};
-            for (int k = 0; k < rhs->nkids; k++) {
-              if (k) bcat(c, &list, ", ");
-              bcat(c, &list, num_lit(c, rhs->kids[k]->num));
-            }
-            badd(c, &c->array_decls, "static const double %s[%d] = {%s};\n", sym, rhs->nkids, bstr(&list));
-            Ent* e = lput(c, &inner->arrays, st->str);
-            e->a = sym; e->n = rhs->nkids;
-          }
-          if ((rhs->kind == nkArr && rhs->nkids != 2 && rhs->nkids > 0 && !numeric) || is_array_make(rhs)) {
-            declare_local_array(c, inner, st->str, rhs, &body, 0);
-          } else if (numeric && rhs->nkids != 2) {
-            /* a table, nothing more */
-          } else if (refs_stereo(c, inner, st->kids[0])) {
-            Buf sub = {0};
-            SV v = emit_stereo(c, inner, st->kids[0], &sub);
-            bcat(c, &body, bstr(&sub));
-            badd(c, &body, "    double l_%s_l = (%s);\n", st->str, v.l);
-            badd(c, &body, "    double l_%s_r = (%s);\n", st->str, v.r);
-            incl(c, &c->stereo_lets, st->str);
-          } else {
-            const char* v = emit_expr(c, inner, st->kids[0]);
-            const char* tmp = F(c, "l_%s", st->str);
-            badd(c, &body, "    double %s = (%s);\n", tmp, v);
-            lput(c, &inner->names, st->str)->a = tmp;
-            double cv;
-            if (const_value(c, inner, st->kids[0], &cv)) lput(c, &inner->numlits, st->str)->v = cv;
-            else note_invariant(c, inner, st->str, st->kids[0], inner);
-          }
-          break;
-        }
-        case nkVar:
-          bcat(c, &body, var_init(c, inner, st));
-          break;
-        case nkAssign:
-          if (has(&c->pair_vars, st->str)) {
-            bcat(c, &body, assign_pair(c, inner, pair_var_ref(c, st->str, 0), pair_var_ref(c, st->str, 1), st->kids[0]));
-          } else {
-            const char* target;
-            if (has(&c->top_var_set, st->str)) target = F(c, "s->v_%s", st->str);
-            else if (lookup(inner, st->str)[0]) target = lookup(inner, st->str);
-            else { fail(c, "unknown assignment target '%s' %s", st->str, err_loc(c, st)); target = ""; }
-            Buf sub = {0};
-            const char* rhs = scalar_value(c, inner, st->kids[0], &sub, F(c, "$%s", st->str));
-            bcat(c, &body, bstr(&sub));
-            badd(c, &body, "    %s = (%s);\n", target, rhs);
-          }
-          break;
-        case nkIdxAssign:
-          bcat(c, &body, emit_idx_assign(c, inner, st));
-          break;
-        default:
-          if (refs_stereo(c, inner, st)) {
-            Buf sub = {0};
-            SV v = emit_stereo(c, inner, st, &sub);
-            bcat(c, &body, bstr(&sub));
-            badd(c, &body, "    (void)(%s); (void)(%s);\n", v.l, v.r);
-          } else {
-            const char* v = emit_expr(c, inner, st);
-            badd(c, &body, "    (void)(%s);\n", v);
-          }
-        }
-      }
-      bcat(c, &body, "  }\n");
-      break;
-    }
-    default:
-      if (i == final_idx) {
-        Buf p2 = {0};
-        SV v = emit_stereo(c, top, s, &p2);
-        bcat(c, &body, bstr(&p2));
-        badd(c, &body, "  *outL = (%s); *outR = (%s);\n", v.l, v.r);
-      } else if (refs_stereo(c, top, s)) {
-        Buf p2 = {0};
-        SV v = emit_stereo(c, top, s, &p2);
-        bcat(c, &body, bstr(&p2));
-        badd(c, &body, "  (void)(%s); (void)(%s);\n", v.l, v.r);
-      } else {
-        const char* v = emit_expr(c, top, s);
-        badd(c, &body, "  (void)(%s);\n", v);
-      }
-    }
-    if (s->kind != nkDef && s->kind != nkImport) {
-      const char* loc = (s->source[0] && !eq(s->source, c->patch_path))
-                          ? F(c, "%s %d", s->source, s->line) : F(c, "line %d", s->line);
-      if (prof_names.n < MAX_PROF_SLOTS) spush(c, &prof_names, F(c, "%s (%s)", stmt_scope(c, s, i == final_idx), loc));
-      badd(c, &body, "  if (s->profiling) { double prof_now = n_now(); s->prof[%d] += prof_now - prof_last; "
-           "prof_last = prof_now; }\n", prof_names.n - 1);
-    }
-  }
-  /* The parts the output reaches, by name, and so the ones it doesn't. */
-  c->unheard = (Strs){0};
-  if (final_idx >= 0 && c->play_names.n > 0) {
-    Map plays = {{0}, 0}, reached = {{0}, 0};
-    for (int i = 0; i < program->nkids; i++)
-      if (program->kids[i]->kind == nkPlay) hput(c, &plays, program->kids[i]->str)->node = program->kids[i];
-    mention(c, program->kids[final_idx], &plays, &reached);
-    for (int i = 0; i < c->play_names.n; i++)
-      if (!has(&reached, c->play_names.v[i])) spush(c, &c->unheard, c->play_names.v[i]);
-  }
-  /* No final expression: a file of plays plays them all. */
-  if (final_idx < 0 && c->play_names.n > 0) {
-    bcat(c, &body, "  *outL = ");
-    for (int i = 0; i < c->play_names.n; i++) badd(c, &body, i ? " + p_%s_l" : "p_%s_l", c->play_names.v[i]);
-    bcat(c, &body, ";\n  *outR = ");
-    for (int i = 0; i < c->play_names.n; i++) badd(c, &body, i ? " + p_%s_r" : "p_%s_r", c->play_names.v[i]);
-    bcat(c, &body, ";\n");
-  }
-  bcat(c, &body, "}\n\n");
-  bcat(c, &body, "const char* const prof_names[] = {");
-  for (int i = 0; i < prof_names.n; i++) badd(c, &body, i ? ", \"%s\"" : "\"%s\"", escape_prof(c, prof_names.v[i]));
-  if (prof_names.n == 0) bcat(c, &body, "0");
-  bcat(c, &body, "};\n");
-  badd(c, &body, "const long prof_count = %d;\n\n", prof_names.n);
-  bcat(c, &body, BLOCK_TEMPLATE);
 
   Buf hoistc = {0};
   for (int i = 0; i < c->hoist_decls.n; i++) bcat(c, &hoistc, c->hoist_decls.v[i]);

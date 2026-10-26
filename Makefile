@@ -5,7 +5,7 @@ FLAGS := --mm:arc --threads:on --opt:speed -d:danger \
 
 all: aither
 
-aither: aither.nim engine.nim engine_types.nim cli_output.nim analysis.nim render.nim voice.nim codegen.nim tcc.nim parser.nim imports.nim dsp.nim dsp.c dsp.h midi.nim alsa_midi.c realtime.c stdlib.aither
+aither: aither.nim engine.nim engine_types.nim cli_output.nim analysis.nim render.nim voice.nim codegen.nim tcc.nim parser.nim imports.nim dsp.nim dsp.c dsp.h ccompile.nim codegen.c codegen.h parser.c parser.h imports.c imports.h midi.nim alsa_midi.c realtime.c stdlib.aither
 	$(NIM) c $(FLAGS) --out:aither aither.nim
 
 tools/play: tools/play.c realtime.c
@@ -64,22 +64,6 @@ parse-check:
 	  cmp nimcache/parse-check/c.txt nimcache/parse-check/nim.txt && \
 	  echo "parse-check ok ($$(grep -c '^==' nimcache/parse-check/c.txt) files)"
 .PHONY: parse-check
-
-# codegen.c against codegen.nim: the C every tracked patch compiles to,
-# and its state layout, written by each, must be the same text.
-codegen-check:
-	mkdir -p nimcache/codegen-check
-	cc -O2 -Wall -Wno-unused-function -o nimcache/codegen-check/cgdump_c \
-	  tools/codegen-check/cgdump.c codegen.c imports.c parser.c dsp.c -lm
-	$(NIM) c --hints:off --warnings:off -d:release --mm:arc --threads:on \
-	  --passL:"-ltcc -ldl -lasound" --nimcache:nimcache/codegen-check \
-	  --out:nimcache/codegen-check/cgdump_nim tools/codegen-check/cgdump.nim
-	files="$$(git ls-files '*.aither')"; \
-	  nimcache/codegen-check/cgdump_c stdlib.aither $$files > nimcache/codegen-check/c.txt && \
-	  nimcache/codegen-check/cgdump_nim stdlib.aither $$files > nimcache/codegen-check/nim.txt && \
-	  cmp nimcache/codegen-check/c.txt nimcache/codegen-check/nim.txt && \
-	  echo "codegen-check ok ($$(grep -c '^==' nimcache/codegen-check/c.txt) files)"
-.PHONY: codegen-check
 
 # The C compiler against the Nim one by ear: every tracked patch rendered
 # briefly through each must give the same bits (a fast make corpus).

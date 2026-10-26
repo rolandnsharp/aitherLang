@@ -15,7 +15,9 @@ output.
 | function | `sin`, `saw`, `my_shape`   |
 | array    | `[220, 330, 440]`          |
 
-Float is the default. Function values exist so a shape can
+Float is the default, and a float is a pair whose two sides
+are equal: every value is a pair (see "Pairs"), and a number is
+the pair computed once. Function values exist so a shape can
 be passed to a def (`osc(shape, freq)`, `sum(N, fn)`).
 Arrays hold data: lookup tables, `wave` note lists,
 delay/reverb/wavetable buffers, per-sample scratch
@@ -594,7 +596,27 @@ So a two-element array means the same thing everywhere it
 can legally appear: a table of two, or a stereo pair when
 it is returned (below).
 
-### Stereo (arrays as output)
+### Pairs
+
+Every value is a pair, its two sides; a number is a pair whose
+sides are equal, worked out once. So anything takes a pair:
+**a function given a pair where it takes a number runs once per
+side, each side with its own state.**
+
+```
+osc(saw, [55, 55.3])               # a detuned stereo saw: two phasors
+lpf(stereo, 800, 0.5)              # two filters, one a side
+dho(strike, [440, 442], 0.005)     # a bell whose sides beat
+phasor([1, 1.01])                  # two LFOs drifting apart
+```
+
+A number given to the same call runs it once and both sides
+read it. A def's own pair parameters (see "Array parameters":
+`p[0]`, `cmul(p, q)`, arithmetic with a pair) take a pair whole
+instead, so `mono(x)` and `cmul(z, z)` see both sides. A def that
+makes a pair from a number (`pan`) given a pair on that number
+would make a pair of pairs, and says so. A condition is one
+number; an `if` runs only the branch it takes.
 
 A pair indexes like a two-entry table: `p[i]` truncates `i`
 and wraps at 2, so `p[0]` is the left side, `p[1]` the right,
@@ -1290,9 +1312,13 @@ operators, function calls, `$state`, `let`, `def`, `play`,
 `lambda`, `if/then/else`, `else if` chains, `|>`, arrays,
 array indexing, comments. Precedence climbing for expressions.
 
-### Codegen (`codegen.nim`, ~1350 lines)
+### Codegen (`codegen.c`, ~2600 lines)
 
-AST → C source. Each patch transpiles to a single C source
+AST → C source, in C (parser.c and imports.c before it; the
+Nim codegen.nim is the reference the corpus and render-check
+compare it with until it goes). Every value is emitted as its
+two sides, pure C expressions; what has state is a statement
+leaving its result in a temporary. Each patch transpiles to a single C source
 string containing `tick(state, t)` and `init(state)`. The C
 is compiled in-process by TCC (~milliseconds). Per-helper-type
 state region tracking lets hot reload migrate state across
