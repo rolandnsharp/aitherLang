@@ -36,10 +36,7 @@ doAssert s.addSymbol("n_delay",    cast[pointer](nDelay)) == 0
 doAssert s.addSymbol("n_fbdelay",  cast[pointer](nFbdelay)) == 0
 doAssert s.addSymbol("n_reverb",   cast[pointer](nReverb)) == 0
 doAssert s.addSymbol("n_impulse",  cast[pointer](nImpulse)) == 0
-doAssert s.addSymbol("n_resonator",cast[pointer](nResonator)) == 0
 doAssert s.addSymbol("n_discharge",cast[pointer](nDischarge)) == 0
-doAssert s.addSymbol("n_tremolo",  cast[pointer](nTremolo)) == 0
-doAssert s.addSymbol("n_slew",     cast[pointer](nSlew)) == 0
 doAssert s.addSymbol("n_wave",     cast[pointer](nWave)) == 0
 doAssert s.addSymbol("shape_saw",  cast[pointer](shapeSaw)) == 0
 doAssert s.addSymbol("shape_tri",  cast[pointer](shapeTri)) == 0

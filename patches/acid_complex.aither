@@ -101,7 +101,7 @@ play acid:
   let kickA    = sin(TAU * phasor(pSweep)) * kEnv
 
   let bodyDamp = 0.04 - kickPunch * 0.025
-  let kickB    = dho(kTrig * 50000000.0, 200, bodyDamp) * 0.5
+  let kickB    = dho(kTrig * 50000000.0, 200, bodyDamp)[0] * 0.5
 
   let fmDepth  = 0.5 + kickPunch * 4.0
   let modSig   = sin(TAU * phasor(pSweep * 1.5)) * fmDepth
@@ -120,13 +120,13 @@ play acid:
   # ===== BASS =====
   let saw   = additive(bFreq, saw_shape, 10)
   let cutA  = 600 + bEnv * 3200 * (0.5 + bAcc * 0.5)
-  let bassA = dho(saw * 80000.0, cutA, 0.025) * bEnv * (0.4 + bAcc * 0.6)
+  let bassA = dho(saw * 80000.0, cutA, 0.025)[0] * bEnv * (0.4 + bAcc * 0.6)
 
   let bForceB = 22000.0 * bFreq
-  let bassB   = dho(bTrig * bForceB, bFreq, 0.008) * bEnv * (0.5 + bAcc * 0.5) * 0.4
+  let bassB   = dho(bTrig * bForceB, bFreq, 0.008)[0] * bEnv * (0.5 + bAcc * 0.5) * 0.4
 
   let nAmp  = bEnv * (0.3 + bAcc * 0.7) * 6000000.0
-  let bassC = dho(noise() * nAmp, bFreq * 3, 0.025) * 6.0
+  let bassC = dho(noise() * nAmp, bFreq * 3, 0.025)[0] * 6.0
 
   let bwA = max(0, 1 - bassParadigm * 2)
   let bwB = (if bassParadigm < 0.5
@@ -255,7 +255,7 @@ play flute:
     # without this it sounds like pure synthesis. Same trick as
     # cello_max's body BPFs, applied to the flute's signature
     # resonance frequency.
-    let body = dho(voice * 6000.0, 1400, 0.12) * 0.18
+    let body = dho(voice * 6000.0, 1400, 0.12)[0] * 0.18
 
     (voice * 0.18 + breath + body + chiff) * env * fluteVol)
 
@@ -300,11 +300,11 @@ def handPan(trig, fund):
   let d2 = 1 + 0.0008 * sin(t * 1.13 + 1.7)
   let d3 = 1 + 0.0012 * sin(t * 1.39 + 2.4)
   let d4 = 1 + 0.0015 * sin(t * 1.91 + 0.9)
-  let body = dho(trig * 4000.0 * fund,  fund * 0.5,         0.0035) * 0.22
-  let f1   = dho(force,                 fund * d1,           0.00020)
-  let f2   = dho(force * 0.55,          fund * 1.998 * d2,   0.00050) * 0.55
-  let f3   = dho(force * 0.32,          fund * 3.0 * d3,     0.00170) * 0.40
-  let f4   = dho(force * 0.16,          fund * 4.0 * d4,     0.00500) * 0.22
+  let body = dho(trig * 4000.0 * fund,  fund * 0.5,         0.0035)[0] * 0.22
+  let f1   = dho(force,                 fund * d1,           0.00020)[0]
+  let f2   = dho(force * 0.55,          fund * 1.998 * d2,   0.00050)[0] * 0.55
+  let f3   = dho(force * 0.32,          fund * 3.0 * d3,     0.00170)[0] * 0.40
+  let f4   = dho(force * 0.16,          fund * 4.0 * d4,     0.00500)[0] * 0.22
   # Mallet attack — brief inharmonic chirp via additive sines at
   # phi-spaced ratios well above the fundamental. Metallic "ping"
   # that decays in ~40ms, leaving the tongue's ring to take over.
@@ -332,7 +332,7 @@ play pads:
   # 5-up A's overtones, etc.), this resonator picks up the energy
   # and rings, creating the "wash of sympathetic vibration" you hear
   # from a real expensive hand pan when neighbouring tongues vibrate.
-  let halo = dho(mix * 25.0, 146.83, 0.0006) * 0.5
+  let halo = dho(mix * 25.0, 146.83, 0.0006)[0] * 0.5
   let out  = mix + halo
   [out, out]
 

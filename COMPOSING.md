@@ -168,6 +168,24 @@ aither sweep cathedral 0        # from the top
 It is `t` less the moment the beam was last set, so it is exact, and
 moving it costs nothing.
 
+**Waves from `t` or `phasor`, arrangement from `sweep`.** Both are
+sound as a function of time, at two scales, as a studio has house sync
+and each tape's timecode. A line usually uses both:
+
+```
+osc(saw, 55) * ease(sweep / 20)          # the wave from the clock, the fade from the sweep
+let beat = phasor(124 / 60)              # shared and continuous
+let section = if sweep < 60 then a else b
+```
+
+It goes wrong when one does the other's job:
+
+- **A wave from `sweep`** (`sin(TAU * 440 * sweep)`) clicks when you move
+  the sweep, because its phase leaps, and two pieces' beats built on
+  their sweeps drift apart, each having started at its own moment.
+- **An arrangement from `t`** depends on how long the engine has been
+  up, and `aither sweep` can't move it.
+
 **Time as lived state.** Sometimes a piece wants a time a jump
 shouldn't touch: how long this voice has really been playing, so a
 slow drift carries on however you move around the piece. That is state,
@@ -528,8 +546,9 @@ extremes.
 
 ## DHO — the universal oscillator
 
-`dho(force, freq, damp)` is one primitive that integrates the
-damped harmonic oscillator:
+`dho(force, freq, damp)` is one def that integrates the
+damped harmonic oscillator, and returns its phasor `[x, v / w]`: `[0]`
+is the position, the sound, `[1]` the velocity in the same units:
 
 ```
 ddx = -k*x - c*dx + force      with k = (TAU*freq)^2, c = 2*damp*omega
@@ -553,13 +572,13 @@ sounds:
 
 ```
 # Bell strike — long ring at 440 Hz
-dho(if t < dt then 100000000 else 0, 440, 0.005)
+dho(if t < dt then 100000000 else 0, 440, 0.005)[0]
 
 # Resonant filter — narrow bandpass at 800 Hz, driven by external audio
-dho(audio_in * 50000, 800, 0.2)
+dho(audio_in * 50000, 800, 0.2)[0]
 
 # Slow envelope — sub-audio critically-damped slew driven by gate
-dho(g * 1500, 5, 1.0)
+dho(g * 1500, 5, 1.0)[0]
 ```
 
 For demonstration, `patches/dho_walk.aither` wires K1 to `damp` on
@@ -567,11 +586,14 @@ a struck DHO. Holding a key and turning the knob walks audibly
 from sustained sine → bell → pluck → thunk → silence — one
 oscillator, one parameter, every paradigm.
 
-`dho_v(force, freq, damp)` returns the velocity (`dx`) of the same
-equation at its own call site. Useful for chained physics (one
-oscillator's velocity drives another's force) and as an audio
-output — velocity sounds different from position for resonant
-systems (it's a 90°-shifted, frequency-emphasised view).
+`dho(...)[1]` is the velocity divided by `w`, the same oscillator a
+quarter turn on: the whole pair is a phasor, round when `damp` is
+small, so it goes straight into `cmul`, `rotate` or `tv`. The raw
+velocity is `TAU * freq * dho(...)[1]`: chained physics (a damping
+force, one oscillator's velocity driving another) uses it, and as
+audio it is the brighter view, frequency-emphasised. A pair given where
+`dho` takes a number would make a pair of pairs, which is an error:
+use two, or `resonator`, which returns a number.
 
 **Why this is `f(state)`-native.** In a modular synth you pick a
 "filter module" or an "FM module"; the paradigm is baked into
@@ -646,9 +668,9 @@ play coupled:
   $bus        = $bus * 0.95 + strike * 0.1
 
   let drive = $bus * 1.0
-  let v1 = dho(trig * 1e7 + drive, 220.0,  0.001)   # struck
-  let v2 = dho(            drive,  277.18, 0.001)   # sympathising
-  let v3 = dho(            drive,  329.63, 0.001)   # sympathising
+  let v1 = dho(trig * 1e7 + drive, 220.0,  0.001)[0]   # struck
+  let v2 = dho(            drive,  277.18, 0.001)[0]   # sympathising
+  let v3 = dho(            drive,  329.63, 0.001)[0]   # sympathising
   (v1 + v2 + v3) * 0.15
 ```
 
@@ -695,29 +717,29 @@ then use `p[0]`, `p[1]`):
 |--------------------------------|-----------------------------------------------|
 | `cmul(a_re, a_im, b_re, b_im)` | complex multiplication: `(ac − bd, ad + bc)`  |
 | `cdiv(a_re, a_im, b_re, b_im)` | complex division                              |
-| `cscale(s, re, im)`            | scalar × pair                                 |
 | `rotate(re, im, omega)`        | rotate by `omega` radians                     |
 | `analytic(signal)`             | `(signal, hilbert(signal))` — Hilbert pair    |
-| `phasor_pair(rate)`            | `(cos, sin)` rotating at `rate` Hz            |
+| `spin(rate)`                   | `(cos, sin)` rotating at `rate` Hz            |
 
 `+` and `*` are NOT overloaded for complex. `(re, im) * (re', im')`
 does componentwise multiplication (Hadamard product, NOT `cmul`).
-Reach for the named functions when you mean the algebra.
+Reach for the named functions when you mean the algebra. A number
+times a pair scales it: `0.5 * p`.
 
-### Pair producers — start with `phasor_pair`, not `sin(TAU * phasor(…))`
+### Pair producers — start with `spin`, not `sin(TAU * phasor(…))`
 
 When the next step in your signal chain is a pair operation (`cmul`,
 `rotate`, `freq_shift`, or feeding `cmul(p, p)` for octave doubling),
-**produce the rotation directly with `phasor_pair(rate)`** rather than
+**produce the rotation directly with `spin(rate)`** rather than
 building a scalar sine and then converting to analytic. Two reasons:
 
-1. **One trig pair instead of two.** `phasor_pair(rate)` advances one
+1. **One trig pair instead of two.** `spin(rate)` advances one
    phase accumulator and emits `(cos(TAU*ph), sin(TAU*ph))` from it.
    Writing `sin(TAU * phasor(rate))` and then needing the cosine
    later costs you a second `phasor` call (with its own state slot)
    plus another sine.
 2. **Intent reads correctly.** A line that opens with
-   `let drone = phasor_pair(220)` says "I have a rotating thing at
+   `let drone = spin(220)` says "I have a rotating thing at
    220 Hz." A line that opens with `let drone = sin(TAU * phasor(220))`
    says "I have a sine wave at 220 Hz" — and then the reader has to
    do extra work when the next operation treats it as a pair.
@@ -725,12 +747,12 @@ building a scalar sine and then converting to analytic. Two reasons:
 The historical `phasor(rate)` (returning a 0..1 ramp) stays. It's
 still right when the consumer is a `sin`/`cos` shape, an
 `if phasor < width` pulse, an `int(phasor * N)` step counter, or
-anything else that needs the angle-as-scalar. Use `phasor_pair`
+anything else that needs the angle-as-scalar. Use `spin`
 **when the rotation itself is what you want**.
 
-### `phasor_pair` × `cmul` is a single-sideband mixer
+### `spin` × `cmul` is a single-sideband mixer
 
-`cmul(phasor_pair(220), phasor_pair(50))` produces a clean tone at
+`cmul(spin(220), spin(50))` produces a clean tone at
 **270 Hz only** — the sum frequency. There is no 170 Hz lower
 sideband, no DC, nothing else of significance. The lower sideband is
 suppressed by construction because both inputs are analytic-signal
@@ -738,8 +760,8 @@ rotations, not scalar sines, and the algebra cancels the unwanted
 component.
 
 ```
-let carrier = phasor_pair(220)
-let modulator = phasor_pair(midi_cc(74) * 200)   # K1 sweeps modulator
+let carrier = spin(220)
+let modulator = spin(midi_cc(74) * 200)   # K1 sweeps modulator
 let mixed = cmul(carrier[0], carrier[1], modulator[0], modulator[1])
 mixed[0] * 0.3
 ```
@@ -753,7 +775,7 @@ composition.
 
 ### Phase-coherent octave stack via `cmul(p, p)`
 
-Squaring a `phasor_pair` doubles its phase angle by construction —
+Squaring a `spin` doubles its phase angle by construction —
 `(cos θ + i sin θ)² = cos 2θ + i sin 2θ`. That is, mathematically and
 not via pitch detection, an octave up. Cube it for a perfect fifth +
 octave, take the fourth power for two octaves up. All layers come from
@@ -761,7 +783,7 @@ the same phase accumulator, so they NEVER drift out of phase relative
 to each other.
 
 ```
-let p  = phasor_pair(220)
+let p  = spin(220)
 let p2 = cmul(p[0],  p[1],  p[0],  p[1])     # 440 Hz, phase-locked
 let p4 = cmul(p2[0], p2[1], p2[0], p2[1])    # 880 Hz, phase-locked
 (p[0] + p2[0] * 0.5 + p4[0] * 0.25) * 0.3
@@ -772,7 +794,7 @@ two independent 220/440 oscillators always drift slightly out of
 phase as their accumulators accumulate floating-point error
 differently. The squared-pair stack derives every octave from one
 phase, so the relative phase relationships are exact for the lifetime
-of the voice. The patch `phasor_pair_demo.aither` plays this side-by-
+of the voice. The patch `spin_demo.aither` plays this side-by-
 side with the heterodyne and the freq_shift halo so the difference is
 audible.
 
@@ -1084,7 +1106,7 @@ let kickA    = sin(TAU * phasor(pSweep)) * kEnv
 
 # B — DHO body strike: damp tightens with K2
 let bodyDamp = 0.04 - kickPunch * 0.025
-let kickB    = dho(kTrig * 50000000.0, 200, bodyDamp) * 0.5
+let kickB    = dho(kTrig * 50000000.0, 200, bodyDamp)[0] * 0.5
 
 # C — FM-distorted boom: sine modulating sine, deeper with K2
 let fmDepth  = 0.5 + kickPunch * 4.0
@@ -1118,16 +1140,16 @@ subterranean-thud territory without changing the recipe.
 # A — Acid: saw → DHO resonant LPF
 let saw   = additive(bFreq, saw_shape, 10)
 let cutA  = 600 + bEnv * 3200 * (0.5 + bAcc * 0.5)
-let bassA = dho(saw * 80000.0, cutA, 0.025) * bEnv * (0.4 + bAcc * 0.6)
+let bassA = dho(saw * 80000.0, cutA, 0.025)[0] * bEnv * (0.4 + bAcc * 0.6)
 
 # B — Bell-bass: struck DHO at the note pitch (force scaled by
 # frequency so peak amplitude stays consistent across notes)
 let bForceB = 22000.0 * bFreq
-let bassB   = dho(bTrig * bForceB, bFreq, 0.008) * bEnv * (0.5 + bAcc * 0.5) * 0.4
+let bassB   = dho(bTrig * bForceB, bFreq, 0.008)[0] * bEnv * (0.5 + bAcc * 0.5) * 0.4
 
 # C — Noise-formant: white noise into resonant DHO BPF at 3rd harmonic
 let nAmp  = bEnv * (0.3 + bAcc * 0.7) * 6000000.0
-let bassC = dho(noise() * nAmp, bFreq * 3, 0.025) * 6.0
+let bassC = dho(noise() * nAmp, bFreq * 3, 0.025)[0] * 6.0
 
 # Same triangular crossfade
 let bwA = max(0, 1 - bassParadigm * 2)
@@ -1548,7 +1570,8 @@ Signal sources: `phasor(f)`, `noise()`, `osc(shape, f)`,
 `pulse(f, w)`, `wave(f, arr)`.
 Shapes: `sin`, `cos`, `tan`, `saw`, `tri`, `sqr`.
 Filters: `lp1`, `hp1`, `lpf`, `hpf`, `bpf`, `notch`.
-Delays: `delay`, `fbdelay`. Reverb: `reverb(sig, rt60, wet)`.
+Delays: `delay`, `fbdelay`, `tape`. Reverb: `reverb(signal, rt60, wet)`.
+Oscillators: `spin`, `dho`, `vdp`.
 Physics: `impulse`, `resonator`, `discharge`.
 Helpers: `gain`, `fold`, `tremolo`, `slew`, `prev`, `ease`.
 Envelopes: `discharge`, `pluck`, `swell`, `adsr`.

@@ -163,7 +163,7 @@ proc spam() {.thread.} =
     spamDone = true
 
 block gapless:
-  writeFile(dir / "clock.aither", "[((t * sr) % 65536) / 65536, 0]\n")
+  writeFile(dir / "clock.aither", "[((t * sr) mod 65536) / 65536, 0]\n")
   let g = start("clock.aither")
   g.inputStream.close()
   waitUp()

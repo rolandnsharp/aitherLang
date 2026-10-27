@@ -16,7 +16,7 @@
 def didge_bore(mouth, lipF, lipD, f0):
   $pm = 0.0                             # wave arriving back at the lips
   $dp = 0.0                             # pressure drop across the lips
-  let lip = dho($dp * 1200000.0, lipF, lipD)
+  let lip = dho($dp * 1200000.0, lipF, lipD)[0]
   let a   = clamp(0.05 + lip, 0.0, 1.0) # lip opening; 0 = lips shut
   let u   = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp))   # Bernoulli flow
   let pplus = u * 0.8 + $pm             # outgoing wave: injected flow + reflection

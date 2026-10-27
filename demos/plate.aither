@@ -30,7 +30,7 @@ import "lib/notes.aither"
 let w = 48
 let h = 27
 let k = pixel_index(w, h)
-let x = k % w
+let x = k mod w
 let y = int(k / w)
 
 # The figure each note rings: mode (m, n) of a 48x27 plate clamped at its

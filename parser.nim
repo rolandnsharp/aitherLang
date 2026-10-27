@@ -36,13 +36,7 @@ type
 
   ParseError* = object of CatchableError
 
-# `var` lives on as a reserved keyword purely so parseStmt can produce a
-# focused migration error — the language no longer has a var keyword;
-# state is declared with the `$` sigil. Removing `var` from this list
-# would let it be parsed as a plain identifier, which is friendlier for
-# new code but loses the chance to redirect users running pre-sigil
-# patches with a clear message.
-const Keywords = ["var", "let", "def", "rec", "play", "if", "then", "else",
+const Keywords = ["let", "def", "rec", "play", "if", "then", "else",
                   "mod", "and", "or", "not", "import"]
 
 # ----------------------------------------------------------------- tokenizer
@@ -56,7 +50,7 @@ proc startsClosed(s: string; i: int): bool =
   ## A statement can't begin at s[i]: an infix operator, `then` or
   ## `else`. `-` (negation), `not`, `(` and `[` can begin one, so they
   ## don't count; there is no unary `+`, so it does.
-  for op in ["|>", "==", "!=", "<", ">", "+", "*", "/", "%", "=>"]:
+  for op in ["|>", "==", "!=", "<", ">", "+", "*", "/", "=>"]:
     if s.continuesWith(op, i): return true
   for word in ["mod", "and", "or", "then", "else"]:
     let j = i + word.len
@@ -246,8 +240,8 @@ proc tokenize*(source: string): seq[Token] =
       else:
         emit(tkOp, $c); i += 1; col += 1
     of '%':
-      # `%` is `mod` spelled the way most languages do.
-      emit(tkKeyword, "mod"); i += 1; col += 1
+      raise newException(ParseError,
+        "'%' is spelled `mod` in aither (`a mod b`) at " & $line & ":" & $col)
     else:
       raise newException(ParseError,
         "unexpected char '" & $c & "' at " & $line & ":" & $col)
@@ -695,23 +689,15 @@ proc parsePlay(p: var Parser): Node =
   let line = p.peek().line
   discard p.expect(tkKeyword)                 # 'play'
   let name = p.expect(tkIdent, "part name").str
-  # Modifiers (off, fade X, fade-in X, fade-out X) come after name, before ':'.
-  # Parser captures them as a whitespace-joined string in `params[0]`; compiler
-  # doesn't interpret yet. Phase 1 just tolerates them.
-  var mods: seq[string]
-  while p.peek().kind == tkIdent:
-    mods.add p.advance().str
   discard p.expect(tkColon)
 
   let body = p.parseBody(line, "play " & name)
-  Node(kind: nkPlay, str: name, params: mods, kids: @[body], line: line)
+  Node(kind: nkPlay, str: name, kids: @[body], line: line)
 
 proc parseStmt(p: var Parser): Node =
   let t = p.peek()
   var n: Node
-  if t.kind == tkKeyword and t.str == "var":
-    p.fail("'var' keyword removed; use `$" & "name = ...` for state declarations")
-  elif t.kind == tkStateIdent and
+  if t.kind == tkStateIdent and
        p.idx + 1 < p.toks.len and
        p.toks[p.idx + 1].kind == tkAssign:
     # `$name = expr` — declaration on first sight, assignment thereafter.

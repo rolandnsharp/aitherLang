@@ -133,26 +133,26 @@ play coupled:
 
   # 3 poles. v1 hit by impulse + field; v2/v3 only by the field.
   # variant B (tuned coupling) — swap these three lines:
-  #   let v1 = dho(trig * driveAmp + fA  * coupling, 220.0,  damping)
-  #   let v2 = dho(                  fCs * coupling, 277.18, damping)
-  #   let v3 = dho(                  fE  * coupling, 329.63, damping)
+  #   let v1 = dho(trig * driveAmp + fA  * coupling, 220.0,  damping)[0]
+  #   let v2 = dho(                  fCs * coupling, 277.18, damping)[0]
+  #   let v3 = dho(                  fE  * coupling, 329.63, damping)[0]
   # variant C (broadband seed) — swap to:
-  #   let v1 = dho(fA  * coupling, 220.0,  damping)
-  #   let v2 = dho(fCs * coupling, 277.18, damping)
-  #   let v3 = dho(fE  * coupling, 329.63, damping)
+  #   let v1 = dho(fA  * coupling, 220.0,  damping)[0]
+  #   let v2 = dho(fCs * coupling, 277.18, damping)[0]
+  #   let v3 = dho(fE  * coupling, 329.63, damping)[0]
   #   let bankInput = trig * driveAmp + (v1 + v2 + v3) * fieldGain
-  let v1 = dho(trig * driveAmp + f * coupling, 220.0,  damping)
-  let v2 = dho(                  f * coupling, 277.18, damping)
-  let v3 = dho(                  f * coupling, 329.63, damping)
+  let v1 = dho(trig * driveAmp + f * coupling, 220.0,  damping)[0]
+  let v2 = dho(                  f * coupling, 277.18, damping)[0]
+  let v3 = dho(                  f * coupling, 329.63, damping)[0]
 
   # Bank — driven by sum of pole outputs only (variant A and B).
   let bankInput = (v1 + v2 + v3) * fieldGain
-  $bankAout  = dho(bankInput, 220.0,  bankDamp)
-  $bankCsout = dho(bankInput, 277.18, bankDamp)
-  $bankEout  = dho(bankInput, 329.63, bankDamp)
+  $bankAout  = dho(bankInput, 220.0,  bankDamp)[0]
+  $bankCsout = dho(bankInput, 277.18, bankDamp)[0]
+  $bankEout  = dho(bankInput, 329.63, bankDamp)[0]
 
   # Monopole control — same impulse, no field
-  let mv1 = dho(trig * driveAmp, 220.0, damping)
+  let mv1 = dho(trig * driveAmp, 220.0, damping)[0]
 
   # Diagnostic: difference exposes what the field contributed
   let coupledTotal  = (v1 + v2 + v3) * 0.15

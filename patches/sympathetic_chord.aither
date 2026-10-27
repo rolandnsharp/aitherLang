@@ -77,9 +77,9 @@ play coupled:
   let trig = impulse(2)        # 2 strikes per second, self-running
   let f    = $fieldA           # one-sample-delayed field read
 
-  let v1 = dho(trig * driveAmp + f * coupling, 220.0,  damping)
-  let v2 = dho(                  f * coupling, 277.18, damping)
-  let v3 = dho(                  f * coupling, 329.63, damping)
+  let v1 = dho(trig * driveAmp + f * coupling, 220.0,  damping)[0]
+  let v2 = dho(                  f * coupling, 277.18, damping)[0]
+  let v3 = dho(                  f * coupling, 329.63, damping)[0]
 
   $next_fieldA = $next_fieldA + (v1 + v2 + v3) * fieldGain
   $fieldA      = $next_fieldA * fieldDamp

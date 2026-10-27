@@ -43,7 +43,7 @@ def lips_into(mouth, lipF, f0, shape, bright):
   let ratios = [1, 2.0, 2.4, 3.0, 4.0, 5.33]
   let bellP  = sum(6, k =>
     let fk = f0 * ratios[k - 1]
-    (if k == 1 then 4 else 2.5 / k) * 2 * 0.0015 * TAU * fk * dho_v(buzz * 300, fk, 0.0015))
+    (if k == 1 then 4 else 2.5 / k) * 2 * 0.0015 * TAU * fk * TAU * fk * dho(buzz * 300, fk, 0.0015)[1])
   let bellR  = clamp(bellP, -20, 20)
   # the morph: hat weights over shape
   let wT = max(0, 1 - abs(shape))

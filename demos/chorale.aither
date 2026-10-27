@@ -33,7 +33,7 @@ let order = [0, 1, 2, 1]
 let which = order[step]
 let hit = impulse(2)
 def bell(freq, strike):
-  dho(force = strike * 9000 * freq, freq = freq, damp = 0.0015) * 0.35
+  dho(force = strike * 9000 * freq, freq = freq, damp = 0.0015)[0] * 0.35
 let bells = bell(low, hit * (which == 0)) + bell(mid, hit * (which == 1)) +
             bell(high, hit * (which == 2))
 

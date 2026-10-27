@@ -17,7 +17,7 @@ struct Node {
   NodeKind kind;
   const char* str;        /* name / op ("" when none) */
   double num;             /* literal value */
-  const char** params;    /* def parameters, lambda parameters, play modifiers */
+  const char** params;    /* def parameters, lambda parameters */
   Node** defaults;        /* def parameter defaults, parallel to params (NULL: none) */
   int nparams;
   int is_rec;             /* `def rec`: the def may call itself, and repeats */

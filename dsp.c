@@ -280,62 +280,9 @@ double n_impulse(DspState* s, double freq) {
 
 /* A driven damped oscillator ringing at `freq` Hz; `decay` is its damping
  * rate (larger dies faster). */
-double n_resonator(DspState* s, double sig, double freq, double decay) {
-  long i = claim(s, 2);
-  double omega = 2.0 * PI_ * freq;
-  double omega2 = omega * omega;
-  double inv_sr = 1.0 / s->sr;
-  s->pool[i + 1] += (-decay * s->pool[i + 1] - omega2 * s->pool[i] + sig * omega2) * inv_sr;
-  s->pool[i] += s->pool[i + 1] * inv_sr;
-  return s->pool[i];
-}
-
-/* The damped harmonic oscillator: ddx = -k x - c dx + force, k = omega^2,
- * c = 2 damp omega, omega = TAU freq. Sweep `damp` and it walks through
- * sustained sine (0), bell (~0.005), pluck (~0.2), critical (1) and
- * silence (>1). Semi-implicit (symplectic) Euler. */
-static inline void dho_step(DspState* s, long i, double force, double freq, double damp) {
-  double omega = TAU_ * freq;
-  double k = omega * omega;
-  double c = 2.0 * damp * omega;
-  double inv_sr = 1.0 / s->sr;
-  s->pool[i + 1] += (-c * s->pool[i + 1] - k * s->pool[i] + force) * inv_sr;
-  s->pool[i] += s->pool[i + 1] * inv_sr;
-}
-
-double n_dho(DspState* s, double force, double freq, double damp) {
-  long i = claim(s, 2);
-  dho_step(s, i, force, freq, damp);
-  return s->pool[i];
-}
-
-/* Its velocity: a call site of its own, with its own (x, dx). */
-double n_dho_v(DspState* s, double force, double freq, double damp) {
-  long i = claim(s, 2);
-  dho_step(s, i, force, freq, damp);
-  return s->pool[i + 1];
-}
-
 double n_discharge(DspState* s, double sig, double rate) {
   long i = claim(s, 1);
   s->pool[i] = max_(sig, s->pool[i] * (1.0 - rate / s->sr));
-  return s->pool[i];
-}
-
-/* ------------------------------------------------------ modulation, effects */
-
-double n_tremolo(DspState* s, double sig, double rate, double depth) {
-  long i = claim(s, 1);
-  s->pool[i] = fmod(s->pool[i] + rate / s->sr, 1.0);
-  if (s->pool[i] < 0.0) s->pool[i] += 1.0;
-  double lfo = (sin(TAU_ * s->pool[i]) + 1.0) * 0.5;
-  return sig * (1.0 - depth + lfo * depth);
-}
-
-double n_slew(DspState* s, double sig, double time) {
-  long i = claim(s, 1);
-  double a = time > 0.0 ? min_(1.0, (1.0 / s->sr) / time) : 1.0;
-  s->pool[i] += (sig - s->pool[i]) * a;
   return s->pool[i];
 }
 
@@ -393,23 +340,18 @@ double n_input_r(void) { return dsp_input_r; }
 #define REVERB_SLOTS ((2 + 1557) + (2 + 1617) + (2 + 1491) + (2 + 1422) + (1 + 225) + (1 + 556))
 
 const NativeSpec dsp_natives[] = {
-  {"lp1", "sig,cut", 1, -1, (void*)n_lp1},
-  {"hp1", "sig,cut", 1, -1, (void*)n_hp1},
-  {"lpf", "sig,cut,res", 2, -1, (void*)n_lpf},
-  {"hpf", "sig,cut,res", 2, -1, (void*)n_hpf},
-  {"bpf", "sig,cut,res", 2, -1, (void*)n_bpf},
-  {"notch", "sig,cut,res", 2, -1, (void*)n_notch},
-  {"delay", "sig,time,max_time", 1, 2, (void*)n_delay},
-  {"fbdelay", "sig,time,max_time,fb", 1, 2, (void*)n_fbdelay},
-  {"tape", "sig,on,w,r,max_time,keep=0", 0, 4, (void*)n_tape},
-  {"reverb", "sig,rt60,wet", REVERB_SLOTS, -1, (void*)n_reverb},
+  {"lp1", "signal,cut", 1, -1, (void*)n_lp1},
+  {"hp1", "signal,cut", 1, -1, (void*)n_hp1},
+  {"lpf", "signal,cut,res", 2, -1, (void*)n_lpf},
+  {"hpf", "signal,cut,res", 2, -1, (void*)n_hpf},
+  {"bpf", "signal,cut,res", 2, -1, (void*)n_bpf},
+  {"notch", "signal,cut,res", 2, -1, (void*)n_notch},
+  {"delay", "signal,time,max_time", 1, 2, (void*)n_delay},
+  {"fbdelay", "signal,time,max_time,fb", 1, 2, (void*)n_fbdelay},
+  {"tape", "signal,on,w,r,max_time,keep=0", 0, 4, (void*)n_tape},
+  {"reverb", "signal,rt60,wet", REVERB_SLOTS, -1, (void*)n_reverb},
   {"impulse", "freq", 1, -1, (void*)n_impulse},
-  {"resonator", "sig,freq,decay", 2, -1, (void*)n_resonator},
-  {"dho", "force,freq,damp", 2, -1, (void*)n_dho},
-  {"dho_v", "force,freq,damp", 2, -1, (void*)n_dho_v},
-  {"discharge", "sig,rate", 1, -1, (void*)n_discharge},
-  {"tremolo", "sig,rate,depth", 1, -1, (void*)n_tremolo},
-  {"slew", "sig,time", 1, -1, (void*)n_slew},
+  {"discharge", "signal,rate", 1, -1, (void*)n_discharge},
   {"wave", "freq,arr", 1, -1, (void*)n_wave},     /* its table is emitted (codegen) */
   {0, 0, 0, 0, 0}
 };

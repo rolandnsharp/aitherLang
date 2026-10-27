@@ -24,7 +24,7 @@
 let w = 48
 let h = 27
 let k = pixel_index(w, h)
-let x = k % w
+let x = k mod w
 let y = int(k / w)
 let pos = sweep
 let edge = x == 0 or y == 0 or x == w - 1 or y == h - 1    # clamped

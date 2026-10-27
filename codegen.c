@@ -531,15 +531,13 @@ static const char* const BUILTIN_FNS[] = {
   "magnitude", "phase", "freq_shift", NULL};
 
 /* Pair-returning builtins, and the reductions of a pair to a number. */
-static const char* const PAIR_CALLS[] = {"cmul", "cdiv", "cscale", "rotate", "analytic",
-                                         "phasor_pair", "conj", "input", NULL};
+static const char* const PAIR_CALLS[] = {"cmul", "cdiv", "rotate", "analytic", "conj", "input", NULL};
 static const char* const PAIR_READERS[] = {"magnitude", "phase", NULL};
 
 /* Whether argument j of a pair builtin (called with n) is a pair. */
 static int takes_pair_at(const char* name, int j, int n) {
   if (eq(name, "rotate")) return !(n == 2 && j == 1);
-  if (eq(name, "cscale")) return !(n == 2 && j == 0);
-  if (eq(name, "analytic") || eq(name, "phasor_pair") || eq(name, "input")) return 0;
+  if (eq(name, "analytic") || eq(name, "input")) return 0;
   return 1;
 }
 
@@ -2009,10 +2007,6 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
       return vpair(F(c, "(%s == 0.0 ? 0.0 : (%s * %s + %s * %s) / %s)", den, a[0], a[2], a[1], a[3], den),
                    F(c, "(%s == 0.0 ? 0.0 : (%s * %s - %s * %s) / %s)", den, a[1], a[2], a[0], a[3], den));
     }
-    if (eq(f, "cscale")) {
-      const char** a = pair_operands(c, sc, n, pre, 3, "a number and a pair (or three numbers)");
-      return vpair(F(c, "(%s * %s)", a[0], a[1]), F(c, "(%s * %s)", a[0], a[2]));
-    }
     if (eq(f, "rotate")) {
       const char** a = pair_operands(c, sc, n, pre, 3, "a pair and an angle (or three numbers)");
       const char* cs = fresh(c, "rot_c");
@@ -2034,15 +2028,6 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
       badd(c, pre, "  s->idx = %s; double %s = n_hilbert_a((DspState*)s, %s);\n", off_a, re, a[0]);
       badd(c, pre, "  s->idx = %s; double %s = -n_hilbert_b((DspState*)s, %s);\n", off_b, im, a[0]);
       return vpair(re, im);
-    }
-    if (eq(f, "phasor_pair")) {
-      const char** a = pair_operands(c, sc, n, pre, 1, "a frequency");
-      const char* off = register_region(c, "phasor_pair", 1, NULL);
-      const char* ph = fresh(c, "ppair_ph");
-      badd(c, pre, "  s->pool[%s] = fmod(s->pool[%s] + (%s) / s->sr, 1.0);\n", off, off, a[0]);
-      badd(c, pre, "  if (s->pool[%s] < 0.0) s->pool[%s] += 1.0;\n", off, off);
-      badd(c, pre, "  double %s = s->pool[%s] * (2.0 * 3.14159265358979323846);\n", ph, off);
-      return vpair(F(c, "cos(%s)", ph), F(c, "sin(%s)", ph));
     }
     pair_operands(c, sc, n, pre, 0, "no arguments");     /* input */
     return vpair("s->in_l", "s->in_r");

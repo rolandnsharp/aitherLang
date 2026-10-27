@@ -312,7 +312,7 @@ internally).
 
 The aither stdlib contains things expressible as pure aither defs:
 
-- Oscillator wrappers (`osc`, `pulse`)
+- Oscillators (`osc`, `pulse`, `spin`, `dho`, `resonator`, `vdp`)
 - Spectral synthesis (`additive`, `inharmonic`, plus the shape
   / ratio / amp library: `saw_shape`, `cello_shape`, `vowel_ah`,
   `stiff_string`, `bar_partials`, `phi_partials`, `bell_decay`,
@@ -321,10 +321,10 @@ The aither stdlib contains things expressible as pure aither defs:
   `dropout`, `fold`)
 - Envelopes (`pluck`, `swell`, `adsr`)
 - Stereo helpers (`pan`, `haas`, `width`, `mono`)
-- Misc (`gain`, `prev`, `ease`)
+- Misc (`gain`, `prev`, `slew`, `tremolo`, `ease`)
 
-Heavier DSP (SVF filters, Schroeder reverb, ring-buffer delay,
-resonator, discharge, `wave`) lives in `dsp.c`, plain C compiled into
+Heavier DSP (SVF filters, Schroeder reverb, ring-buffer delay and
+tape, impulse, discharge, `wave`) lives in `dsp.c`, plain C compiled into
 aither with no fused multiply-adds, called from generated C.
 
 ## Analysis CLI

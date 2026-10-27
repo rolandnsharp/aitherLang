@@ -38,7 +38,7 @@
 # ▶ SHORTCUTS FROM THE STDLIB
 #
 #   dho(force, freq, damp)  the same damped spring, done
-#                           for you. Small damp = long ring.
+#                           for you; [0] is where it is. Small damp = long ring.
 #                           The "marimba" part hits one with
 #                           a different stiffness per note.
 #                           Force is in acceleration units,
@@ -59,13 +59,13 @@ play spring:
   $x * 0.5
 
 play bar:
-  dho(impulse(beat / 4) * 40000000, 660, 0.002)
+  dho(impulse(beat / 4) * 40000000, 660, 0.002)[0]
 
 play marimba:
   let notes = [440, 523, 587, 659, 784, 659, 587, 523]
   let idx   = int(phasor(beat * 2 / 8) * 8)
   let f     = notes[idx]
-  dho(impulse(beat * 2) * 40000 * f, f, 0.006) * 1.5
+  dho(impulse(beat * 2) * 40000 * f, f, 0.006)[0] * 1.5
 
 spring + bar + marimba
 

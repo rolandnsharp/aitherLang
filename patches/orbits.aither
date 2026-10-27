@@ -24,8 +24,8 @@ let span = 24
 let sec = int(pos / span)
 let into = pos - sec * span
 let u = ease((into - 16) / 8)                     # 0 holding, 0..1 moving on
-let a = sec % 4
-let b = (sec + 1) % 4
+let a = sec mod 4
+let b = (sec + 1) mod 4
 
 # Each voice: its pitch, and its bulb's rotation number p/q.
 let pitch1 = [110, 92.5, 73.42, 82.41]           # A  F#  D  E

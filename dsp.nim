@@ -44,12 +44,7 @@ proc nReverb*(s: var DspState; signal, rt60, wet: float64): float64 {.importc: "
 proc nReverbC*(s: var DspState; signal, wet: float64; g: ptr UncheckedArray[float64]): float64 {.importc: "n_reverb_c".}
 proc dspReverbSlots*(): clong {.importc: "dsp_reverb_slots".}
 proc nImpulse*(s: var DspState; freq: float64): float64 {.importc: "n_impulse".}
-proc nResonator*(s: var DspState; input, freq, decay: float64): float64 {.importc: "n_resonator".}
-proc nDho*(s: var DspState; force, freq, damp: float64): float64 {.importc: "n_dho".}
-proc nDhoV*(s: var DspState; force, freq, damp: float64): float64 {.importc: "n_dho_v".}
 proc nDischarge*(s: var DspState; input, rate: float64): float64 {.importc: "n_discharge".}
-proc nTremolo*(s: var DspState; signal, rate, depth: float64): float64 {.importc: "n_tremolo".}
-proc nSlew*(s: var DspState; signal, time: float64): float64 {.importc: "n_slew".}
 proc nHilbertA*(s: var DspState; signal: float64): float64 {.importc: "n_hilbert_a".}
 proc nHilbertB*(s: var DspState; signal: float64): float64 {.importc: "n_hilbert_b".}
 proc nFreqShift*(s: var DspState; signal, hz: float64): float64 {.importc: "n_freq_shift".}

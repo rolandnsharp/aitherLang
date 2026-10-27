@@ -130,16 +130,10 @@ sum(1, n =>
   doAssert maxAbs > 0.001 and maxAbs < 1e6,
     "inline DHO should ring audibly without blowing up, maxAbs=" & $maxAbs
 
-# --- 7. The `var` keyword is removed. A patch that uses it should
-# error with a migration message pointing at the new syntax.
-block varKeywordRejected:
-  try:
-    discard parseProgram("var x = 0\nx")
-    doAssert false, "old `var` syntax should error"
-  except ParseError as e:
-    let m = e.msg.toLowerAscii()
-    doAssert "var" in m and ("$" in m or "removed" in m),
-      "error should mention var/$, got: " & e.msg
+# --- 7. `var` is an ordinary name: state is written `$name`, and the
+# word is no longer reserved for a migration message.
+block varIsAName:
+  discard parseProgram("let var = 0.5\nvar")
 
 # --- 8. `$ name` (with space between `$` and ident) is invalid. The
 # tokenizer rejects it so the surface rule "the sigil hugs its name"

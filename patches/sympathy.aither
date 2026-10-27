@@ -58,12 +58,12 @@ play coupled:
 
   let bRead = $bus * coupling
 
-  let v1 = dho(trig * driveAmp + bRead,        220.0,  damping)
-  let v2 = dho(           bRead * v2v3Couple,  277.18, damping)
-  let v3 = dho(           bRead * v2v3Couple,  329.63, damping)
+  let v1 = dho(trig * driveAmp + bRead,        220.0,  damping)[0]
+  let v2 = dho(           bRead * v2v3Couple,  277.18, damping)[0]
+  let v3 = dho(           bRead * v2v3Couple,  329.63, damping)[0]
 
   # monopole control — same input as v1, separate state slot
-  let mv1 = dho(trig * driveAmp + bRead, 220.0, damping)
+  let mv1 = dho(trig * driveAmp + bRead, 220.0, damping)[0]
 
   let coupledTotal  = (v1 + v2 + v3) * 0.15
   let monopoleTotal = mv1 * 0.15

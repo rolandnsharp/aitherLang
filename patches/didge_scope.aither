@@ -44,7 +44,7 @@ def bar(force, f1, t60, a2, a3):
 def didge_bore(mouth, lipF, lipD, f0):
   $pm = 0.0                             # wave arriving back at the lips
   $dp = 0.0                             # pressure drop across the lips
-  let lip = dho($dp * 1200000.0, lipF, lipD)
+  let lip = dho($dp * 1200000.0, lipF, lipD)[0]
   let a   = clamp(0.05 + lip, 0.0, 1.0) # lip opening; 0 = lips shut
   let u   = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp))   # Bernoulli flow
   let pplus = u * 0.8 + $pm             # outgoing wave: injected flow + reflection
@@ -78,7 +78,7 @@ def didge3(mouth, voiceP, lipF, f0, ft1, ft2, zt, modeAmt, turb):
   let pT = lp1(sum(2, j =>
     let fj = if j == 1 then ft1 else ft2
     let zj = if j == 1 then 0.09 else 0.07
-    zt * 2 * zj * TAU * fj * dho_v(uS, fj, zj)), 493.04)
+    zt * 2 * zj * TAU * fj * TAU * fj * dho(uS, fj, zj)[1]), 493.04)
   let wl = TAU * lipF
   $lv = clamp($lv + (-2 * 0.1 * wl * $lv - wl * wl * $lx + $dp * 0.6 * wl * wl) * dt, -3000, 3000)
   $lx = clamp($lx + $lv * dt, -2, 3)
@@ -87,7 +87,7 @@ def didge3(mouth, voiceP, lipF, f0, ft1, ft2, zt, modeAmt, turb):
   $u  = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp)) * (1 + br * turb)
   let pM = sum(2, k =>
     let fk = f0 * (if k == 1 then 2.65 else 4.35)
-    modeAmt * (if k == 1 then 4.0 else 2.5) * 2 * 0.05 * TAU * fk * dho_v(uS, fk, 0.05))
+    modeAmt * (if k == 1 then 4.0 else 2.5) * 2 * 0.05 * TAU * fk * TAU * fk * dho(uS, fk, 0.05)[1])
   let pplus = $u * 0.8 + $pm
   let p   = pplus + $pm + pM
   $dp = clamp(lp1(mouth * (1 + voiceP) - pT - p, 840.34), -4, 4)

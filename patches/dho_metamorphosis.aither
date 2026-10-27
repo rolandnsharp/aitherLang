@@ -83,7 +83,7 @@ play metamorphosis:
 
   # A — protagonist DHO. Reads (force_A, freq_A, damp_A) which all
   # walk slowly through paradigm space.
-  let A = dho(force_A, freq_A, damp_A)
+  let A = dho(force_A, freq_A, damp_A)[0]
 
   # B's force: free oscillation early, A's output mid, then fade to
   # zero past pos 78 so B can settle gracefully while A becomes a
@@ -93,13 +93,13 @@ play metamorphosis:
                  else A * 5000.0
                       * ease((pos - 20) / 10)
                       * (1 - ease((pos - 78) / 5)))
-  let B = dho(force_B, freq_B, damp_B)
+  let B = dho(force_B, freq_B, damp_B)[0]
 
   # C — second formant, fades in around pos 25, fades out by 88.
   let force_C = (A * 3000.0
                  * ease((pos - 25) / 10)
                  * (1 - ease((pos - 80) / 8)))
-  let C = dho(force_C, freq_C, damp_C)
+  let C = dho(force_C, freq_C, damp_C)[0]
 
   let mix = (A * 0.4 + B * 0.3 + C * 0.3) * lifetime
   [mix, mix]

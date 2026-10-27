@@ -1,4 +1,4 @@
-## dho(force, freq, damp) — universal second-order oscillator. Three
+## dho(force, freq, damp) — universal second-order oscillator, its phasor [x, v/w]. Three
 ## invariants pin the math: (1) struck DHO rings at the requested
 ## frequency and decays at the predicted timescale, (2) under a
 ## constant force at critical damping, x approaches force/k, (3)
@@ -39,7 +39,7 @@ block impulseRingdown:
   let omega = 2.0 * PI * Freq
   let tauExpected = 1.0 / (Damp * omega)        # ≈ 0.0362 s
   let buf = renderMono(
-    "dho(if t < dt then 100000000 else 0, " & $Freq & ", " & $Damp & ")",
+    "dho(if t < dt then 100000000 else 0, " & $Freq & ", " & $Damp & ")[0]",
     int(0.4 * SR))
 
   # Sanity: there must actually be signal to autocorrelate.
@@ -101,7 +101,7 @@ block steadyStateUnderForce:
   let xExpected = Force / k                     # ≈ 0.02533
   # Settling time at critical damping: well within 1 second for f=10 Hz.
   let buf = renderMono(
-    "dho(" & $Force & ", " & $Freq & ", 1.0)",
+    "dho(" & $Force & ", " & $Freq & ", 1.0)[0]",
     int(1.0 * SR))
   let final = buf[^1]
   doAssert abs(final - xExpected) < xExpected * 0.05,
@@ -118,7 +118,7 @@ block criticalDampingNoOvershoot:
   let k = omega * omega
   let xExpected = Force / k
   let buf = renderMono(
-    "dho(" & $Force & ", " & $Freq & ", 1.0)",
+    "dho(" & $Force & ", " & $Freq & ", 1.0)[0]",
     int(0.5 * SR))
   var prev = buf[0]
   var maxVal = buf[0]
@@ -134,18 +134,18 @@ block criticalDampingNoOvershoot:
   doAssert minDelta > -1e-9,
     "dho critical: non-monotonic step (worst dip = " & $minDelta & ")"
 
-# --- 4. dho_v exposes velocity: dx of the same equation. Under a
-# step force at low damping, dx oscillates around 0 with the same
-# period as x. Verify it's not constant zero and ticks NaN-free.
-block velocityVariant:
+# --- 4. dho returns its phasor [x, v / w]: the velocity in the units
+# of the position, so a lightly damped ring traces a circle and both
+# sides peak alike.
+block phasorPair:
   const SR = 48000.0
-  let buf = renderMono(
-    "dho_v(if t < dt then 100000000 else 0, 440, 0.01)",
-    int(0.1 * SR))
-  var maxAbs = 0.0
-  for v in buf:
-    if abs(v) > maxAbs: maxAbs = abs(v)
-  doAssert maxAbs > 100.0,
-    "dho_v: velocity output too small (" & $maxAbs & ")"
+  let x = renderMono("dho(if t < dt then 100000000 else 0, 440, 0.01)[0]", int(0.1 * SR))
+  let v = renderMono("dho(if t < dt then 100000000 else 0, 440, 0.01)[1]", int(0.1 * SR))
+  var mx, mv = 0.0
+  for i in 0 ..< x.len:
+    mx = max(mx, abs(x[i]))
+    mv = max(mv, abs(v[i]))
+  doAssert mx > 0.01 and abs(mv - mx) / mx < 0.05,
+    "dho phasor: |x| peaks at " & $mx & ", |v/w| at " & $mv
 
 echo "dho ok"

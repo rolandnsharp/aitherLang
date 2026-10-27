@@ -100,8 +100,7 @@ static void add_tok(Toks* ts, Token t) {
   ts->t[ts->n++] = t;
 }
 
-/* `var` stays reserved only so a pre-sigil patch gets a clear error. */
-static const char* keywords[] = {"var", "let", "def", "rec", "play", "if", "then", "else",
+static const char* keywords[] = {"let", "def", "rec", "play", "if", "then", "else",
                                  "mod", "and", "or", "not", "import", NULL};
 
 static int is_keyword(const char* s) {
@@ -130,7 +129,7 @@ static int continues_with(const char* s, long n, long i, const char* w) {
 /* A statement can't begin at s[i]: an infix operator, `then` or `else`.
  * `-`, `not`, `(` and `[` can begin one; there is no unary `+`. */
 static int starts_closed(const char* s, long n, long i) {
-  static const char* ops[] = {"|>", "==", "!=", "<", ">", "+", "*", "/", "%", "=>", NULL};
+  static const char* ops[] = {"|>", "==", "!=", "<", ">", "+", "*", "/", "=>", NULL};
   static const char* words[] = {"mod", "and", "or", "then", "else", NULL};
   for (int k = 0; ops[k]; k++) if (continues_with(s, n, i, ops[k])) return 1;
   for (int k = 0; words[k]; k++) {
@@ -262,7 +261,7 @@ static Toks tokenize(Ctx* c, const char* src) {
         EMIT(tkOp, dup(c->a, buf, 1), 0); i++; col++;
       }
     } else if (ch == '%') {
-      EMIT(tkKeyword, "mod", 0); i++; col++;     /* `mod`, spelled as most languages do */
+      fail_at(c, "'%%' is spelled `mod` in aither (`a mod b`) at %d:%d", line, col);
     } else {
       fail_at(c, "unexpected char '%c' at %d:%d", ch, line, col);
     }
@@ -726,25 +725,18 @@ static Node* parse_play(P* p) {
   int line = peek(p).line;
   expect(p, tkKeyword, NULL);                   /* play */
   const char* name = expect(p, tkIdent, "part name").str;
-  Vec mods = {0};                               /* modifiers before `:`, kept, not read */
-  while (peek(p).kind == tkIdent) push(&mods, (void*)advance(p).str);
   expect(p, tkColon, NULL);
   char what[200];
   snprintf(what, sizeof what, "play %s", name);
   Node* body = parse_body(p, line, what);
   Node* n = node1(p, nkPlay, name, body, line);
-  n->nparams = mods.n;
-  n->params = (const char**)keep(p->c->a, &mods);
   return n;
 }
 
 static Node* parse_stmt(P* p) {
   Token t = peek(p);
   Node* n;
-  if (t.kind == tkKeyword && eq(t.str, "var")) {
-    fail(p, "'var' keyword removed; use `$name = ...` for state declarations");
-    return NULL;
-  } else if (t.kind == tkStateIdent && p->idx + 1 < p->ts.n && p->ts.t[p->idx + 1].kind == tkAssign) {
+  if (t.kind == tkStateIdent && p->idx + 1 < p->ts.n && p->ts.t[p->idx + 1].kind == tkAssign) {
     /* `$name = expr`: a declaration on first sight in its scope, then an
      * assignment. */
     advance(p);

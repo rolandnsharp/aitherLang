@@ -25,7 +25,7 @@
 let w = 48
 let h = 27
 let k = pixel_index(w, h)
-let x = k % w
+let x = k mod w
 let y = int(k / w)
 let f = frame_number(w, h)              # field time: one step a frame
 let pos = sweep

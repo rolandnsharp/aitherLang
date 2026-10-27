@@ -1,4 +1,4 @@
-# zero_crossing_sweep — the demo that makes the case for phasor_pair.
+# zero_crossing_sweep — the demo that makes the case for spin.
 #
 # A sustained tone whose pitch walks continuously from +SWEEP Hz through
 # zero down to -SWEEP Hz and back, via single-sideband heterodyne. At
@@ -12,7 +12,7 @@
 # happens when you rotate a complex pair at a varying rate. No
 # oscillator can do this — oscillators don't have negative frequencies,
 # and pitch shifters introduce grain artifacts at the slow end. Pure
-# phasor_pair × cmul produces a glassy, artifact-free glide that
+# spin × cmul produces a glassy, artifact-free glide that
 # disappears into silence and re-emerges at a new pitch.
 #
 # Two voices side by side so the contrast is audible:
@@ -43,10 +43,10 @@ let revAmt     = midi_cc(19)
 let CARRIER = 440.0
 
 # ===== REFERENCE — static 440 Hz carrier =====
-# Pure phasor_pair, real component, no further processing. The "before"
+# Pure spin, real component, no further processing. The "before"
 # tone the ear uses as a reference while the sweeper passes through zero.
 play reference:
-  let p = phasor_pair(CARRIER)
+  let p = spin(CARRIER)
   let s = p[0] * 0.18 * refVol
   [s, s]
 
@@ -57,7 +57,7 @@ play reference:
 # tone IS silence (DC); on the other side it re-emerges as a pitched
 # tone whose audible frequency is |CARRIER + modRate|.
 #
-# Because the inputs are both phasor_pairs, the lower sideband is
+# Because the inputs are both spins, the lower sideband is
 # suppressed by construction. There is no "ghost" frequency at
 # CARRIER - modRate to confuse the ear — the sweep is the only thing
 # you hear besides the reference.
@@ -67,8 +67,8 @@ play sweeper:
   let lfo = sin(TAU * phasor(rate))     # -1 → +1
   let modRate = lfo * depth             # ±depth Hz, smoothly
 
-  let carrier = phasor_pair(CARRIER)
-  let modu = phasor_pair(modRate)
+  let carrier = spin(CARRIER)
+  let modu = spin(modRate)
   let mixed = cmul(carrier[0], carrier[1], modu[0], modu[1])
 
   let s = mixed[0] * 0.18 * sweepVol

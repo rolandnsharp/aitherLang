@@ -11,12 +11,12 @@
 #   filters:   lp1 hp1 lpf hpf bpf notch
 #   delays:    delay fbdelay tape
 #   reverb:    reverb
-#   physics:   impulse resonator discharge
-#   modulation: tremolo slew
+#   physics:   impulse discharge
 #   sequence:  wave
 #
-# This file holds only the tiny composition helpers — anything heavy
-# enough to be a hot-loop bottleneck is native.
+# Natives are only what needs a buffer or a C loop. Everything a few
+# lines of aither can say is said here, in aither: the oscillators
+# (spin, dho, vdp) and the helpers over them.
 
 # ---------------------------------------------------------------- oscillator
 # osc(shape, freq) — run a clock at freq Hz, view it through shape.
@@ -26,6 +26,35 @@ def osc(shape, freq): shape(TAU * phasor(freq))
 
 # Pulse with adjustable width (0..1).
 def pulse(freq, width): if phasor(freq) < width then 1 else -1
+
+# The unit pair turning at freq Hz: [cos, sin], one phase for both. The
+# complex exponential, the plainest rotating thing; multiply pairs by
+# it to turn them (cmul), square it to double its rate.
+def spin(freq):
+  let a = TAU * phasor(freq)
+  [cos(a), sin(a)]
+
+# The damped harmonic oscillator, the spring every resonance is:
+#   x'' = force - 2 damp w x' - w^2 x,   w = TAU freq
+# Sweep `damp` and it walks through sustained sine (0), bell (~0.005),
+# pluck (~0.2), critical (1) and silence (>1). Returns the pair
+# [x, v / w], its phasor: [0] is the position, the sound; [1] the
+# velocity in the same units, a quarter turn behind. Semi-implicit
+# (symplectic) Euler, so an undamped one keeps its energy.
+def dho(force, freq, damp):
+  $x = 0.0
+  $v = 0.0
+  let w = TAU * freq
+  $v = $v + (-(2 * damp * w) * $v - w * w * $x + force) * dt
+  $x = $x + $v * dt
+  [$x, $v / w]
+
+# A signal through a resonance at freq Hz: a dho driven by it, scaled so
+# a steady signal comes out at its own level. `decay` is the damping
+# rate per second (2 damp w): higher, shorter ring.
+def resonator(signal, freq, decay):
+  let w = TAU * freq
+  dho(signal * w * w, freq, decay / (2 * w))[0]
 
 # An oscillator that keeps itself alive (Van der Pol), as a bow, a reed
 # or lips do: it feeds energy in while it is small and takes it out
@@ -60,11 +89,21 @@ def ease(x):
 # Previous-sample memory. `prev(x)` is x delayed by one sample.
 # Each call site gets its own 1-sample buffer via call-site state,
 # so `prev(a) + prev(b)` are independent.
-def prev(x):
+def prev(signal):
   $last = 0.0
   let out = $last
-  $last = x
+  $last = signal
   out
+
+# Follow a signal, taking about `time` seconds to catch up: a one-pole
+# low-pass, its time constant written instead of its cutoff. 0: none.
+def slew(signal, time):
+  if time > 0 then lp1(signal, 1 / (TAU * time)) else signal
+
+# Amplitude wobble: `rate` Hz, `depth` 0..1 (1 dips to silence).
+def tremolo(signal, rate, depth):
+  let lfo = (sin(TAU * phasor(rate)) + 1) * 0.5
+  signal * (1 - depth + lfo * depth)
 
 def fold(signal, amount):
   let x = ((signal * amount) mod 4 + 4) mod 4
@@ -141,22 +180,22 @@ def pan(signal, pos):
 # `ms` in roughly -30..30. Positive delays right channel, negative delays left.
 # Works because the ear localises by first-arrival time for short delays.
 # Takes a mono signal (both sides start equal) or a stereo pair.
-def haas(s, ms):
+def haas(signal, ms):
   let absMs = abs(ms)
-  let dl = delay(s[0], absMs * 0.001, 0.05)
-  let dr = delay(s[1], absMs * 0.001, 0.05)
-  if ms >= 0 then [s[0], dr] else [dl, s[1]]
+  let dl = delay(signal[0], absMs * 0.001, 0.05)
+  let dr = delay(signal[1], absMs * 0.001, 0.05)
+  if ms >= 0 then [signal[0], dr] else [dl, signal[1]]
 
 # Mid-side width. Takes a stereo [L, R]; `amount` = 0 collapses to mono,
 # 1 is unchanged, >1 widens (diverges L and R). Classic tool for "spread."
-def width(s, amount):
-  let mid  = (s[0] + s[1]) * 0.5
-  let side = (s[0] - s[1]) * 0.5
+def width(signal, amount):
+  let mid  = (signal[0] + signal[1]) * 0.5
+  let side = (signal[0] - signal[1]) * 0.5
   [mid + side * amount, mid - side * amount]
 
 # Collapse stereo to mono. Useful when a play returns [L, R] but you want
 # to feed a single-channel signal into another process (e.g. sidechain).
-def mono(s): (s[0] + s[1]) * 0.5
+def mono(signal): (signal[0] + signal[1]) * 0.5
 
 # ---------------------------------------------------------------- raster (tv)
 
@@ -284,8 +323,7 @@ def bright_decay(n, pf):  1.0 / pow(n, 0.3)
 # character. The defs below are the right shape; they need a sound-
 # designer's hand to reach instrument quality.
 #
-# Hot-reload caveat: these defs use stateful primitives (var, delay,
-# resonator). On reload with parameter changes, the system can
+# Hot-reload caveat: these defs use stateful primitives ($state, delay). On reload with parameter changes, the system can
 # transiently re-equilibrate (audible click on big jumps). Drive
 # parameters from `midi_cc` for smooth changes; large code edits to
 # a ringing instrument may pop.
@@ -333,7 +371,7 @@ def pluck_string(strike, freq, brightness):
 # scales with mode frequency (light, ω·γ ≈ 0.0003·modeF) so all
 # modes ring well past the bow's transients. With $-state allowed
 # in lambda bodies the integrator can live inline rather than
-# delegating to `resonator`, so the equation reads at the call site.
+# delegating to `dho`, so the equation reads at the call site.
 def bowed_string(bow, freq):
   let damping = 0.0003
   sum(8, n =>

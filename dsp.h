@@ -34,12 +34,7 @@ double n_fbdelay(DspState* s, double sig, double time, double max_time, double f
 double n_tape(DspState* s, double sig, double on, double w, double r, double max_time, double keep);
 double n_reverb(DspState* s, double sig, double rt60, double wet);
 double n_impulse(DspState* s, double freq);
-double n_resonator(DspState* s, double sig, double freq, double decay);
-double n_dho(DspState* s, double force, double freq, double damp);
-double n_dho_v(DspState* s, double force, double freq, double damp);
 double n_discharge(DspState* s, double sig, double rate);
-double n_tremolo(DspState* s, double sig, double rate, double depth);
-double n_slew(DspState* s, double sig, double time);
 double n_wave(DspState* s, double freq, double* values, int n);
 
 /* What codegen calls itself: hoisted coefficients and their steps, the

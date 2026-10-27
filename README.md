@@ -235,8 +235,9 @@ anything you want N copies of (additive partials, modal banks,
 voice pools).
 
 **Native DSP** in `dsp.c`, callable from any patch: `lpf hpf bpf
-notch lp1 hp1 delay fbdelay reverb impulse resonator discharge
-tremolo slew wave`.
+notch lp1 hp1 delay fbdelay tape reverb impulse discharge wave`: only
+what needs a buffer or a C loop. The oscillators (`spin`, `dho`, `vdp`)
+and the helpers over them are aither, in the stdlib.
 
 **Stdlib starter kits** (pure aither, in `stdlib.aither`):
 

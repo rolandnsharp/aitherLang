@@ -53,9 +53,9 @@ const NativeCases = [
   ("hp1",       "let s = [sin(t), cos(t)]\ns |> hp1(200)\n",            "hp1"),
   ("delay",     "let s = [sin(t), cos(t)]\ns |> delay(0.01, 0.05)\n",   "delay"),
   ("fbdelay",   "let s = [sin(t), cos(t)]\ns |> fbdelay(0.01, 0.05, 0.3)\n", "fbdelay"),
-  ("slew",      "let s = [sin(t), cos(t)]\ns |> slew(0.01)\n",          "slew"),
+  ("slew",      "let s = [sin(t), cos(t)]\ns |> slew(0.01)\n",          "lp1"),
   ("discharge", "let s = [sin(t), cos(t)]\ns |> discharge(20)\n",       "discharge"),
-  ("tremolo",   "let s = [sin(t), cos(t)]\ns |> tremolo(5, 0.5)\n",     "tremolo"),
+  ("tremolo",   "let s = [sin(t), cos(t)]\ns |> tremolo(5, 0.5)\n",     "phasor"),
 ]
 
 for (name, src, region) in NativeCases:

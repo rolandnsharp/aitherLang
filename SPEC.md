@@ -86,7 +86,7 @@ Arithmetic (precedence high to low):
 | Operator       | Description              |
 |----------------|--------------------------|
 | `-x`, `not x`  | unary                    |
-| `*`, `/`, `mod`, `%` | multiplicative     |
+| `*`, `/`, `mod` | multiplicative          |
 | `+`, `-`       | additive                 |
 | `==`, `<`, `>`, `<=`, `>=`, `!=` | comparison |
 | `and`, `or`    | logical                  |
@@ -101,6 +101,10 @@ Arithmetic is polymorphic for length-2 arrays (stereo pairs):
   hand it to `wave`
 
 Same for `-`, `*`, `/`.
+
+`a mod b` is floored: it takes the sign of `b`, so `-1 mod 4` is 3,
+and `mod 0` is 0. `%` is not an operator; written, it is an error that
+says to write `mod`.
 
 True is non-zero. False is zero. Conditional results are `1`
 or `0`.
@@ -209,18 +213,18 @@ Any call can name its arguments, a builtin's as well as a def's:
 
 ```
 reverb(x, rt60 = 2.4, wet = 0.3)
-x |> lpf(cut = 800, res = 0.5)      # the pipe fills the first, sig
+x |> lpf(cut = 800, res = 0.5)      # the pipe fills the first, signal
 $u = array(w * h, every = w * h)
 ```
 
 A builtin's parameters have the names SPEC writes them with:
-`lp1`/`hp1(sig, cut)`, `lpf`/`hpf`/`bpf`/`notch(sig, cut, res)`,
-`delay(sig, time, max_time)`, `fbdelay(sig, time, max_time, fb)`,
-`tape(sig, on, w, r, max_time, keep = 0)`, `reverb(sig, rt60, wet)`, `resonator(sig, freq, decay)`,
-`dho`/`dho_v(force, freq, damp)`, `impulse(freq)`, `phasor(freq)`,
-`discharge(sig, rate)`, `slew(sig, time)`,
-`tremolo(sig, rate, depth)`, `wave(freq, arr)`, `pow`/`min`/`max(a, b)`,
-`clamp(x, l, h)`, `array(n, init = 0, every = 0)`. One-argument
+`lp1`/`hp1(signal, cut)`, `lpf`/`hpf`/`bpf`/`notch(signal, cut, res)`,
+`delay(signal, time, max_time)`, `fbdelay(signal, time, max_time, fb)`,
+`tape(signal, on, w, r, max_time, keep = 0)`, `reverb(signal, rt60, wet)`,
+`impulse(freq)`, `phasor(freq)`, `discharge(signal, rate)`,
+`wave(freq, arr)`, `pow`/`min`/`max(a, b)`,
+`clamp(x, l, h)`, `array(n, init = 0, every = 0)`. A parameter
+that takes the sound is called `signal` wherever it appears. One-argument
 builtins (`sin`, `midi_cc`, …) take theirs by position. Stdlib
 functions are defs and name theirs. A named call compiles to exactly
 the positional one. An unknown name says what the function takes. A
@@ -257,8 +261,8 @@ return.
 
 A def uses a parameter as a pair when it indexes it (`p[0]`),
 hands it to a pair operation where that takes a pair (`cmul(p, q)`,
-`magnitude(p)`; `rotate`'s angle, `cscale`'s factor, `analytic`'s
-signal and `phasor_pair`'s frequency are numbers),
+`magnitude(p)`; `rotate`'s angle and `analytic`'s signal are
+numbers),
 passes it to a def that takes a pair there, or does
 arithmetic with it and a pair (`cmul(z, z) + c`); a `def rec`
 that passes itself a pair there counts too. Such a parameter
@@ -609,7 +613,7 @@ side, each side with its own state.**
 ```
 osc(saw, [55, 55.3])               # a detuned stereo saw: two phasors
 lpf(stereo, 800, 0.5)              # two filters, one a side
-dho(strike, [440, 442], 0.005)     # a bell whose sides beat
+resonator(strike, [440, 442], 0.5) # a bell whose sides beat
 phasor([1, 1.01])                  # two LFOs drifting apart
 ```
 
@@ -888,7 +892,9 @@ unless you have a reason to push higher.
 ### Native DSP functions
 
 These are C (in `dsp.c`) called from a patch's generated C; `dsp.nim`
-lists them for the compiler.
+lists them for the compiler. A function is native only when it needs
+a buffer or a C loop; whatever a few lines of aither can say (the
+oscillators, `slew`, `tremolo`, `resonator`) is a stdlib def.
 Each call-site gets its own state slots from a per-voice
 float64 pool. The pool is as big as the patch needs: every delay,
 tape, reverb and state array is added up when the patch compiles,
@@ -896,15 +902,15 @@ and the voice gets that much, up to 512 MB (a 30-second stereo tape
 is about 23 MB). An edit that needs more gets a bigger pool, and
 hot-reload carries the state across as ever.
 
-**Filters**: `lp1(sig, cut)`, `hp1(sig, cut)`,
-`lpf(sig, cut, res)`, `hpf(sig, cut, res)`,
-`bpf(sig, cut, res)`, `notch(sig, cut, res)`. Every `cut` is in Hz.
+**Filters**: `lp1(signal, cut)`, `hp1(signal, cut)`,
+`lpf(signal, cut, res)`, `hpf(signal, cut, res)`,
+`bpf(signal, cut, res)`, `notch(signal, cut, res)`. Every `cut` is in Hz.
 `lp1`/`hp1` are one-pole filters with the -3 dB point at `cut`
 (`a = 1 - exp(-2 pi cut / sr)`; before 2026-10-12 it was `cut / sr`,
 which put `lp1(x, 4000)` at 665 Hz, and patches were converted).
 
-**Delays**: `delay(sig, time, max_time)`,
-`fbdelay(sig, time, max_time, fb)`. `time` is in seconds and need
+**Delays**: `delay(signal, time, max_time)`,
+`fbdelay(signal, time, max_time, fb)`. `time` is in seconds and need
 not be a whole number of samples: the read point is interpolated
 linearly between the two nearest samples, so a tube, string or
 comb tunes to its length rather than to the sample grid. `delay`
@@ -913,9 +919,9 @@ with `time` 0 is the current input; `fbdelay` starts at one sample
 literal (it sizes the buffer) and the longest delay is one sample
 under it.
 
-**Tape**: `tape(sig, on, w, r, max_time, keep = 0)`. A piece of tape
+**Tape**: `tape(signal, on, w, r, max_time, keep = 0)`. A piece of tape
 `max_time` seconds long, with a write head and a read head. While
-`on` > 0 it records `sig` at `w`; it always plays what is under `r`.
+`on` > 0 it records `signal` at `w`; it always plays what is under `r`.
 Both heads are positions in seconds, any signal, wrapping round the
 tape, so the tape machine's moves are choices of them:
 
@@ -931,7 +937,7 @@ tape(x, 1, t, t, 8, keep = 0.8)           # sound on sound, old passes fading
 The controls are signals like any other, so the pedal is whatever
 you write: `midi_cc(64) > 0.5`, a key, `bar < 0.25`, the loudness of
 the mic. A loop pedal is a def over `tape` (COMPOSING.md, "Looping
-your playing"). `sig` may be a pair: two tapes on the same heads,
+your playing"). `signal` may be a pair: two tapes on the same heads,
 which keeps a frequency and its gate together. What is looped is a
 signal, so a loop of `[midi_freq(), midi_gate()]` loops the playing,
 not the sound: it plays through whatever patch it feeds, as you edit
@@ -943,7 +949,7 @@ trip round the tape ago, which is what a loop recording over itself
 must play. The read is between samples (linear, as `delay`), and a
 head within a millionth of a sample of one reads that sample, so a
 loop comes back exact. The write lands on the nearest sample, as
-`sig` plus what was there times `keep` (the erase head: 0 records
+`signal` plus what was there times `keep` (the erase head: 0 records
 over, 1 adds, between lets old passes fade). A fresh tape is silence.
 `max_time` must be a literal (it sizes the tape); a pair takes twice
 the memory. `delay` is a tape whose write head stays at now.
@@ -954,16 +960,10 @@ middle.** Whatever touches a device or a file (`play`, `card`,
 `scope`, `tv`, a recording with `tee`) is a tool in the pipe; whatever
 is steered by signals or feeds back is a function in aither.
 
-**Reverb**: `reverb(sig, rt60, wet)` (Schroeder); a pair in runs one
+**Reverb**: `reverb(signal, rt60, wet)` (Schroeder); a pair in runs one
 reverb per side.
 
-**Physics**: `impulse(freq)`, `resonator(sig, freq, decay)` (a
-driven damped oscillator ringing at `freq` Hz, like every frequency in
-aither; `decay` is its damping rate, larger dies faster),
-`discharge(sig, rate)`.
-
-**Modulation**: `tremolo(sig, rate, depth)`,
-`slew(sig, time)`.
+**Physics**: `impulse(freq)`, `discharge(signal, rate)`.
 
 **Sequence**: `wave(freq, arr)` — wavetable oscillator;
 with low freq it's a step sequencer, with audio freq it's
@@ -1032,7 +1032,36 @@ every user patch. Source: `stdlib.aither`.
 ```
 def osc(shape, freq):  shape(TAU * phasor(freq))
 def pulse(freq, width): if phasor(freq) < width then 1 else -1
+def spin(freq):                           # the unit pair turning at freq Hz
+  let a = TAU * phasor(freq)
+  [cos(a), sin(a)]
 ```
+
+`spin` is the complex exponential: one phase, both sides. Multiply a
+pair by it to turn the pair (`cmul`), square it to double its rate;
+`cmul(spin(220), spin(50))` is a single tone at 270 Hz.
+
+### Damped oscillator
+
+```
+def dho(force, freq, damp)                # x'' = force - 2 damp w x' - w^2 x
+def resonator(signal, freq, decay)        # a signal through a resonance
+```
+
+`dho` is the spring every resonance is (`w = TAU freq`). Sweep `damp`
+and it walks through sustained sine (0), bell (~0.005), pluck (~0.2),
+critical (1) and silence (>1); `force` is an acceleration, so a strike
+is a big number. It returns its phasor, the pair `[x, v / w]`: `[0]` is
+the position, the sound; `[1]` the velocity in the same units, a
+quarter turn behind, so a lightly damped one traces a circle. Given a
+pair where it takes a number it would make a pair of pairs, and says
+so: two of them, or `resonator`, make a stereo pair.
+
+`resonator` is a `dho` driven by a signal and scaled so a steady signal
+comes out at its own level, returning the position: `decay` is the
+damping rate per second (`2 damp w`), larger dies faster. A number in,
+a number out, so `resonator(strike, [440, 442], 0.5)` is a bell whose
+sides beat.
 
 ### Self-sustaining oscillator
 
@@ -1109,20 +1138,25 @@ paradigm-choice rationale.
 def gain(signal, amount): signal * amount
 def fold(signal, amount): ...             # triangle wrap
 def ease(x): ...                          # smoothstep: canonical fade curve
-def prev(x):                              # one-sample memory
+def prev(signal):                         # one-sample memory
   $last = 0.0
   let out = $last
-  $last = x
+  $last = signal
   out
+def slew(signal, time):                   # follow, catching up in about `time` s
+  if time > 0 then lp1(signal, 1 / (TAU * time)) else signal
+def tremolo(signal, rate, depth): ...     # amplitude wobble, depth 0..1
 ```
+
+`slew` is `lp1` with its time constant written instead of its cutoff.
 
 ### Character effects
 
-- `drive(sig, amount)` — soft-clip saturation
-- `wrap(sig, amount)` — hard wrap to ±1
-- `bitcrush(sig, bits)` — bit-depth reduction
-- `downsample(sig, rate)` — sample-rate reduction via hold
-- `dropout(sig, rate, duty)` — periodic gate
+- `drive(signal, amount)` — soft-clip saturation
+- `wrap(signal, amount)` — hard wrap to ±1
+- `bitcrush(signal, bits)` — bit-depth reduction
+- `downsample(signal, rate)` — sample-rate reduction via hold
+- `dropout(signal, rate, duty)` — periodic gate
 
 ### Envelopes
 
@@ -1132,10 +1166,10 @@ def prev(x):                              # one-sample memory
 
 ### Stereo
 
-- `pan(mono_sig, pos)` — equal-power pan, pos in [-1, 1]
-- `haas(sig, ms)` — 1-30 ms delay on one channel for width; mono in (both sides start equal) or a pair
-- `width(stereo_sig, amount)` — mid-side width (0 mono, 1 unchanged, >1 exaggerated)
-- `mono(stereo_sig)` — collapse to single channel
+- `pan(signal, pos)` — equal-power pan, pos in [-1, 1]
+- `haas(signal, ms)` — 1-30 ms delay on one channel for width; mono in (both sides start equal) or a pair
+- `width(signal, amount)` — mid-side width (0 mono, 1 unchanged, >1 exaggerated)
+- `mono(signal)` — collapse to single channel
 
 ### Raster (`tv`)
 
@@ -1344,8 +1378,8 @@ compile under a brief mutex, migrates state by region identity
 
 ### Native DSP (`dsp.c`, ~330 lines)
 
-Filters, delays, tape, reverb, resonator, discharge, tremolo, slew,
-wave. Each function claims state slots from the per-voice pool.
+Filters, delays, tape, reverb, impulse, discharge, wave, the Hilbert
+pair behind `analytic`. Each function claims state slots from the per-voice pool.
 Pool access is bounds-checked — overflow degrades to a shared
 safe slot rather than segfaulting.
 

@@ -1,7 +1,7 @@
 ## Geometric/spectral operations on float pairs.
 ##
 ## Two-arg builtins return scalars (magnitude, phase). Four pair-returning
-## builtins (cmul, cdiv, cscale, rotate) and one stateful one (analytic)
+## builtins (cmul, cdiv, rotate) and one stateful one (analytic)
 ## piggy-back on aither's existing 2-element-pair plumbing — composers
 ## destructure with `out[0]` (real) / `out[1]` (imag), the same way they
 ## index a stereo-returning def.
@@ -102,14 +102,14 @@ let z = cdiv(1, 1, 0, 0)
   doAssert p.l == 0.0 and p.r == 0.0,
     "cdiv by zero should give (0, 0), got (" & $p.l & ", " & $p.r & ")"
 
-# --- 7. cscale broadcasts a scalar over a pair.
-block cscaleSimple:
+# --- 7. A number scales a pair: `*` does it, no builtin needed.
+block scaleSimple:
   let p = evalLR("""
-let z = cscale(2.5, 1, -3)
+let z = 2.5 * [1, -3]
 [z[0], z[1]]
 """)
-  doAssert abs(p.l - 2.5) < 1e-12, "cscale re " & $p.l
-  doAssert abs(p.r - (-7.5)) < 1e-12, "cscale im " & $p.r
+  doAssert abs(p.l - 2.5) < 1e-12, "scale re " & $p.l
+  doAssert abs(p.r - (-7.5)) < 1e-12, "scale im " & $p.r
 
 # --- 8. Pair calls passed to a scalar-only consumer error out. The
 # canonical user mistake is `magnitude(cmul(...))` (single-arg) — the

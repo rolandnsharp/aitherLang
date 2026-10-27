@@ -39,13 +39,13 @@ let h = 112
 let frame = w * h
 let s = floor(t * sr + 0.5)                   # the sample, as tv counts it
 let beat = frame_number(w, h)                 # one frame, one beat
-let inBeat = (s % frame) / frame              # 0..1 down the screen
+let inBeat = (s mod frame) / frame              # 0..1 down the screen
 
 # A tone: harmonic n of the row rate, nudged m frame rates sharp. That's
 # harmonic n·h + m of the frame rate, so its phase comes from the sample
 # count exactly and its picture stands still.
 def tone(n, m, amp, s, frame, h = 112):
-  let ph = TAU * (((n * h + m) * s) % frame) / frame
+  let ph = TAU * (((n * h + m) * s) mod frame) / frame
   [cos(ph), sin(ph)] * amp
 
 # The drone: A3 and A4, the one-rainbow sweep everything else sits on.
@@ -55,8 +55,8 @@ let drone = tone(1, 0, 0.2, s, frame) + tone(2, 0, 0.08, s, frame)
 # twice, `spread` nudges apart (0: once, as one). The leans make a
 # crystal; the spread, bands. In turn: the bare series (columns), a
 # leaning lattice, a shimmering beat, and both.
-let sec = int(beat / 16) % 4
-let inSec = beat % 16 + inBeat
+let sec = int(beat / 16) mod 4
+let inSec = beat mod 16 + inBeat
 let noteA = [4, 6, 8, 5]
 let noteB = [5, 7, 10, 6]
 let noteC = [6, 9, 12, 8]
@@ -77,8 +77,8 @@ let tune = [12, 0, 10, 0, 8, 0, 10, 12, 16, 0, 12, 0, 10, 0, 0, 0,
             16, 0, 15, 0, 16, 12, 0, 10, 12, 0, 8, 10, 12, 0, 0, 0,
             10, 0, 12, 0, 13, 12, 0, 10, 8, 0, 10, 0, 8, 0, 0, 0]
 let tilt = [0, 1, -1, 2]
-let now = tune[beat % 64]
-let before = tune[(beat + 63) % 64]
+let now = tune[beat mod 64]
+let before = tune[(beat + 63) mod 64]
 let bn = if now > 0 then now else before
 let age = inBeat + (if now > 0 then 0 else 1)  # in beats since the strike
 let bm = tilt[sec]
