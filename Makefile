@@ -26,20 +26,22 @@ tools/tv: tools/tv.c tools/display.h
 # One binary for every test that doesn't touch the engine's voice
 # table (tests/all.nim), then the ones that do, each on its own;
 # engine_live runs ./aither itself, so make builds it first.
+# Each binary its own cache: binaries sharing one don't re-link when another
+# has already rebuilt a C file they {.compile.} (codegen.c), and ran stale.
 TESTFLAGS := --mm:arc --threads:on --hints:off --warnings:off \
-             --nimcache:nimcache/tests --passL:"-ltcc -ldl -lasound"
+             --passL:"-ltcc -ldl -lasound"
 test: aither
-	$(NIM) c -r $(TESTFLAGS) --out:tests/all tests/all.nim
+	$(NIM) c -r $(TESTFLAGS) --nimcache:nimcache/tests/all --out:tests/all tests/all.nim
 	for t in cli_output_format midi_resilience slot_sweep solo_mutes engine_live; do \
-	  $(NIM) c -r $(TESTFLAGS) --out:tests/$$t tests/$$t.nim || exit 1; done
+	  $(NIM) c -r $(TESTFLAGS) --nimcache:nimcache/tests/$$t --out:tests/$$t tests/$$t.nim || exit 1; done
 
 # Every tracked patch rendered and fingerprinted against tests/corpus.golden
 # (tests/corpus.nim). After an intended change: make corpus-update.
 corpus:
-	$(NIM) c -r $(TESTFLAGS) --out:tests/corpus tests/corpus.nim
+	$(NIM) c -r $(TESTFLAGS) --nimcache:nimcache/tests/corpus --out:tests/corpus tests/corpus.nim
 
 corpus-update:
-	$(NIM) c -r $(TESTFLAGS) --out:tests/corpus tests/corpus.nim update
+	$(NIM) c -r $(TESTFLAGS) --nimcache:nimcache/tests/corpus --out:tests/corpus tests/corpus.nim update
 
 # Every patch rendered with TCC's code and with the cc -O2 build: the bits
 # must match (tests/exact_builds.nim). About 10 minutes on the uConsole.

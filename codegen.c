@@ -710,6 +710,25 @@ static const char* once(Ctx* c, Buf* pre, const char* s) {
   return t;
 }
 
+/* A value fixed now: each side not already one word into a temporary,
+ * so statements that come after (a store into a state array, in a sum
+ * or each body) can't change what it reads. */
+static V capture(Ctx* c, Buf* pre, V v) {
+  if (!v.pair) return mono(once(c, pre, v.l));
+  return vpair(once(c, pre, v.l), once(c, pre, v.r));
+}
+
+/* Operands left to right, as written: when one needs statements, the
+ * ones before it are captured first. */
+static void emit_seq(Ctx* c, Scope* sc, Node** kids, int n, V* out, Buf* pre) {
+  for (int i = 0; i < n; i++) {
+    Buf own = {0};
+    out[i] = emit(c, sc, kids[i], &own);
+    if (own.n) for (int k = 0; k < i; k++) out[k] = capture(c, pre, out[k]);
+    bcat(c, pre, bstr(&own));
+  }
+}
+
 /* `n` where one number is needed. */
 static const char* emit1(Ctx* c, Scope* sc, Node* n, Buf* pre, const char* what) {
   V v = emit(c, sc, n, pre);
@@ -965,7 +984,10 @@ static V emit_def(Ctx* c, Scope* sc, Node* def, Node* call, Buf* pre) {
   int split = 0;
   for (int i = 0; i < np; i++) {
     if (bind_by_name(c, sc, names, def->params[i], call->kids[i], pre)) { bound[i] = 1; continue; }
-    args[i] = emit(c, sc, call->kids[i], pre);
+    Buf own = {0};
+    args[i] = emit(c, sc, call->kids[i], &own);
+    if (own.n) for (int k = 0; k < i; k++) if (!bound[k]) args[k] = capture(c, pre, args[k]);
+    bcat(c, pre, bstr(&own));
     if (args[i].pair && !whole[i]) split = 1;
   }
   Node* body = def->kids[0];
@@ -1511,7 +1533,10 @@ static V emit_loop(Ctx* c, Scope* sc, Node* def, Node* call, Buf* pre) {
   Scope* names = push(c, sc);
   for (int i = 0; i < def->nparams; i++) {
     if (bind_by_name(c, sc, names, def->params[i], call->kids[i], pre)) { bound[i] = 1; continue; }
-    args[i] = emit(c, sc, call->kids[i], pre);
+    Buf own = {0};
+    args[i] = emit(c, sc, call->kids[i], &own);
+    if (own.n) for (int k = 0; k < i; k++) if (!bound[k]) args[k] = capture(c, pre, args[k]);
+    bcat(c, pre, bstr(&own));
     if (args[i].pair && !whole[i]) split = 1;
   }
   if (!split) return emit_loop_side(c, names, def, call, args, bound, 0, pre);
@@ -1582,11 +1607,9 @@ static const char* const MIDI_FNS[] = {"midi_cc", "midi_note", "midi_trig", "mid
 /* A call's arguments, each a value. */
 static V* emit_args(Ctx* c, Scope* sc, Node* n, Buf* pre, int* any_pair) {
   V* a = al(c, (n->nkids + 1) * sizeof(V));
+  emit_seq(c, sc, n->kids, n->nkids, a, pre);
   *any_pair = 0;
-  for (int i = 0; i < n->nkids; i++) {
-    a[i] = emit(c, sc, n->kids[i], pre);
-    if (a[i].pair) *any_pair = 1;
-  }
+  for (int i = 0; i < n->nkids; i++) if (a[i].pair) *any_pair = 1;
   return a;
 }
 
@@ -1761,8 +1784,9 @@ static V emit_if(Ctx* c, Scope* sc, Node* n, Buf* pre) {
 }
 
 static V emit_binop(Ctx* c, Scope* sc, Node* n, Buf* pre) {
-  V a = emit(c, sc, n->kids[0], pre);
-  V b = emit(c, sc, n->kids[1], pre);
+  V ab[2];
+  emit_seq(c, sc, n->kids, 2, ab, pre);
+  V a = ab[0], b = ab[1];
   const char* op = n->str;
   const char* fmt = NULL;
   if (eq(op, "+")) fmt = "((%1$s) + (%2$s))";
@@ -1806,9 +1830,11 @@ static V emit(Ctx* c, Scope* sc, Node* n, Buf* pre) {
   case nkCall: return emit_call(c, sc, n, pre);
   case nkArr: {
     if (n->nkids == 2) {
-      const char* l = emit1(c, sc, n->kids[0], pre, "a pair's side");
-      const char* r = emit1(c, sc, n->kids[1], pre, "a pair's side");
-      return vpair(l, r);
+      V lr[2];
+      emit_seq(c, sc, n->kids, 2, lr, pre);
+      if (lr[0].pair || lr[1].pair)
+        fail(c, "a pair's side needs one number but gets a pair — pick a side with [0] / [1] %s", err_loc(c, n));
+      return vpair(lr[0].l, lr[1].l);
     }
     fail(c, "an array of %d can't be a value here %s — a pair is [L, R]; a table goes in a let, or to wave",
          n->nkids, err_loc(c, n));
@@ -1907,7 +1933,10 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
       Scope* iter = push(c, sc);
       lput(c, &iter->names, param)->a = num_lit(c, (double)k);
       lput(c, &iter->numlits, param)->v = (double)k;
-      terms[k - 1] = body->kind == nkBlock ? emit_block(c, iter, body, pre) : emit(c, iter, body, pre);
+      Buf own = {0};
+      terms[k - 1] = body->kind == nkBlock ? emit_block(c, iter, body, &own) : emit(c, iter, body, &own);
+      if (own.n) for (long j = 0; j < k - 1; j++) terms[j] = capture(c, pre, terms[j]);
+      bcat(c, pre, bstr(&own));
       if (terms[k - 1].pair) pair = 1;
     }
     Buf l = {0}, r = {0};
