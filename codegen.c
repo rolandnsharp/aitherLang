@@ -858,7 +858,10 @@ static int bind_by_name(Ctx* c, Scope* sc, Scope* inner, const char* p, Node* a,
     lput(c, &inner->fns, p)->a = resolved;
     return 1;
   }
-  if (a->kind == nkIdent && !lookup(sc, a->str)[0] && !lookup_stereo(sc, a->str)) {
+  /* An array by name; two numbers at file level are a pair, a value
+   * (indexed, a pair reads as the two-entry table anyway). */
+  if (a->kind == nkIdent && !lookup(sc, a->str)[0] && !lookup_stereo(sc, a->str) &&
+      !has(&c->stereo_lets, a->str)) {
     Ent* e;
     if ((e = lookup_sarray(c, sc, a->str))) {
       Ent* d = lput(c, &inner->sarrays, p);
