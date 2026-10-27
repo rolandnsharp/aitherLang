@@ -20,20 +20,20 @@
 ##    stateful helpers.
 
 import std/strutils
-import ../parser, ../voice, ../codegen
+import ../ccompile, ../voice
 const stdlibSrc = staticRead("../stdlib.aither")
 
-proc parseFull(src: string): Node =
-  parseProgram(stdlibSrc & "\n" & src)
+proc parseFull(src: string): string =
+  src
 
 proc countRegions(src, typeName: string): int =
-  let (_, _, _, regions) = generate(parseFull(src), "", 48000.0)
+  let regions = compile(parseFull(src), "", 48000.0).regions
   for r in regions:
     if r.typeName == typeName: inc result
 
 proc shouldFail(src, expectedSubstr: string) =
   try:
-    discard generate(parseFull(src), "", 48000.0)
+    discard compile(parseFull(src), "", 48000.0)
     doAssert false,
       "expected error containing '" & expectedSubstr & "', got success"
   except ValueError as e:
@@ -88,15 +88,15 @@ doAssert countRegions(
 # Pure aither defs (drive, fold, gain) have no state, but they're in
 # the allowlist so the path is uniform. Just verify they compile in
 # stereo context — region count is irrelevant.
-discard generate(parseFull(
+discard compile(parseFull(
   "let s = [sin(t), cos(t)]\ns |> drive(1.5)\n"), "", 48000.0)
-discard generate(parseFull(
+discard compile(parseFull(
   "let s = [sin(t), cos(t)]\ns |> fold(1.5)\n"), "", 48000.0)
-discard generate(parseFull(
+discard compile(parseFull(
   "let s = [sin(t), cos(t)]\ns |> gain(0.5)\n"), "", 48000.0)
 
 # ---- 3. Pipe chain from the task definition-of-done --------------------
-discard generate(parseFull(
+discard compile(parseFull(
   "let s = [sin(t), cos(t)]\ns |> lpf(800, 0.5) |> drive(1.2) |> fold(0.7)\n"
 ), "", 48000.0)
 doAssert countRegions(
@@ -116,7 +116,7 @@ let asymStereo = [sin(TAU * phasor(110)) * 0.5, 0]
 asymStereo |> lpf(2000, 0.3)
 """
   let v = newVoice(48000.0)
-  v.load(parseProgram(Patch), 48000.0)
+  v.load((Patch), 48000.0)
   var sumLsq = 0.0
   var sumRsq = 0.0
   for i in 0 ..< 24000:
@@ -142,7 +142,7 @@ let s = [sin(TAU * phasor(220)), sin(TAU * phasor(440))]
 s |> delay(0.001, 0.05)
 """
   let v = newVoice(48000.0)
-  v.load(parseProgram(Patch), 48000.0)
+  v.load((Patch), 48000.0)
   # Skip past the delay buffer fill so we observe the steady-state
   # filtered output, then accumulate channel energy.
   for i in 0 ..< 1024:
@@ -180,7 +180,7 @@ doAssert countRegions(
 # ---- 6. pan refuses stereo input with a clear error --------------------
 # (haas takes a pair since 2026-10-12: see tests/stereo_haas_reverb.nim.)
 shouldFail("let s = [sin(t), cos(t)]\ns |> pan(0)\n",
-           "pan takes a mono signal")
+           "a pair of pairs")
 
 # ---- 7. Migration identity preserved across mono → mono reload ---------
 # A patch that uses a transparent helper on mono input must still match
@@ -190,9 +190,10 @@ block migrationStability:
 let s = sin(TAU * phasor(220))
 s |> lpf(800, 0.5)
 """
-  let prog = parseProgram(Patch)
-  let (_, _, _, r1) = generate(prog, "", 48000.0)
-  let (_, _, _, r2) = generate(prog, "", 48000.0)
+  let prog = (Patch)
+  let r1 = compile(prog, "", 48000.0).regions
+  let gen = compile(prog, "", 48000.0)
+  let r2 = gen.regions
   doAssert r1.len == r2.len
   for i in 0 ..< r1.len:
     doAssert r1[i].typeName == r2[i].typeName

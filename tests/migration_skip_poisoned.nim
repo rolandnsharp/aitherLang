@@ -10,7 +10,7 @@
 ## the next tick produces a finite sample.
 
 import std/[math]
-import ../parser, ../voice
+import ../ccompile, ../voice
 
 const PatchA = """
 sqrt(-1) |> lpf(800, 0.5)
@@ -21,7 +21,7 @@ sin(TAU * phasor(220)) |> lpf(800, 0.5)
 """
 
 let v = newVoice(48000.0)
-v.load(parseProgram(PatchA), 48000.0)
+v.load((PatchA), 48000.0)
 for i in 1 .. 4:
   discard v.tick(float64(i) / 48000.0)
 
@@ -34,7 +34,7 @@ for r in v.regions:
       if pool[r.offset + k] != pool[r.offset + k]: foundNaN = true
 doAssert foundNaN, "test setup failed: lpf pool not poisoned"
 
-v.load(parseProgram(PatchB), 48000.0)
+v.load((PatchB), 48000.0)
 let s = v.tick(0.0)
 doAssert s.l == s.l and s.r == s.r,
   "expected clean output after migrating away from poisoned pool, got " &

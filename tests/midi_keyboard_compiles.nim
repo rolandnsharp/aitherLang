@@ -5,14 +5,11 @@
 ## notes held.
 
 import std/math
-import ../parser, ../voice, ../codegen, ../midi
+import ../ccompile, ../voice, ../midi
 
-const Stdlib = staticRead("../stdlib.aither")
 
-proc program(src: string): Node =
-  let stdAst = parseProgram(Stdlib)
-  let userAst = parseProgram(src)
-  Node(kind: nkBlock, kids: stdAst.kids & userAst.kids, line: 1)
+proc program(src: string): string =
+  src
 
 # 1. midi_keyboard with a phasor voice — 8 voices means 8 phasor regions.
 block fanout:
@@ -21,7 +18,9 @@ play kbd:
   midi_keyboard((f, g) => sin(TAU * phasor(f)) * g)
 kbd
 """)
-  let (_, _, parts, regions) = generate(p, "", 48000.0)
+  let gen = compile(p, "", 48000.0)
+  let parts = gen.partNames
+  let regions = gen.regions
   var phasorCount = 0
   for r in regions:
     if r.typeName == "phasor": inc phasorCount
@@ -36,7 +35,7 @@ play kbd:
   poly(4, (f, g) => sin(TAU * phasor(f)) * g)
 kbd
 """)
-  let (_, _, _, regions) = generate(p, "", 48000.0)
+  let regions = compile(p, "", 48000.0).regions
   var phasorCount = 0
   for r in regions:
     if r.typeName == "phasor": inc phasorCount

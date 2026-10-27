@@ -7,7 +7,7 @@
 ## must agree exactly, or offline and live would drift apart.
 
 import std/[math]
-import ../parser, ../voice, ../dsp, ../engine_types
+import ../ccompile, ../voice, ../dsp, ../engine_types
 
 const Patch = """
 let tempo = 2
@@ -30,7 +30,7 @@ const Block = 512
 # One voice, sample by sample, with the engine's clock arithmetic.
 proc single(): seq[float64] =
   let v = newVoice(Sr)
-  v.load(parseProgram(Patch), Sr)
+  v.load((Patch), Sr)
   var sec, frac = 0.0
   let dt = 1.0 / Sr
   for i in 0 ..< N:
@@ -49,7 +49,7 @@ proc single(): seq[float64] =
 # The same voice, in blocks, through tick_block.
 proc blocks(): seq[float64] =
   let v = newVoice(Sr)
-  v.load(parseProgram(Patch), Sr)
+  v.load((Patch), Sr)
   let hdr = cast[ptr VoiceHeader](v.state)
   hdr.timeSec = 0.0
   hdr.timeFrac = 0.0

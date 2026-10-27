@@ -6,7 +6,7 @@
 ## delay continue from their old state.
 
 import std/[math, strutils]
-import ../parser, ../voice, ../codegen
+import ../ccompile, ../voice
 
 const PatchA = """
 let sig = phasor(110) * 2 - 1
@@ -29,8 +29,9 @@ echoed * 0.3
 # ---- structural layout checks ------------------------------------------
 # Regions produced by codegen should group by helper type.
 
-let (_, _, _, regionsA) = generate(parseProgram(PatchA), "", 48000.0)
-let (_, _, _, regionsB) = generate(parseProgram(PatchB), "", 48000.0)
+let regionsA = compile((PatchA), "", 48000.0).regions
+let gen = compile((PatchB), "", 48000.0)
+let regionsB = gen.regions
 
 proc dump(rs: seq[Region]): string =
   var parts: seq[string]
@@ -54,7 +55,7 @@ doAssert find(regionsA, "phasor", 0).size == find(regionsB, "phasor", 0).size
 
 # Audible test -----------------------------------------------------------
 let v = newVoice(48000.0)
-v.load(parseProgram(PatchA), 48000.0)
+v.load((PatchA), 48000.0)
 
 # Run long enough to fully load the delay buffer (>0.2s).
 var lastA: tuple[l, r: float64] = (0.0, 0.0)
@@ -72,7 +73,7 @@ echo "phasor before = ", phasorBefore, "  delay-buf@100 = ", delayBufSample
 doAssert phasorBefore != 0.0,   "phasor slot should be non-zero after ticks"
 doAssert delayBufSample != 0.0, "delay buffer should contain audio"
 
-v.load(parseProgram(PatchB), 48000.0)
+v.load((PatchB), 48000.0)
 
 let newPhasorOff = find(regionsB, "phasor", 0).offset
 let newDelayOff = find(regionsB, "delay", 0).offset

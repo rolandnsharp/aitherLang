@@ -3,11 +3,10 @@
 ## engine underrunning on 21 muted parts that still computed.)
 
 import std/strutils
-import ../parser, ../voice
+import ../ccompile, ../voice
 
-const Stdlib = staticRead("../stdlib.aither")
-proc prog(src: string): Node =
-  Node(kind: nkBlock, kids: parseProgram(Stdlib).kids & parseProgram(src).kids)
+proc prog(src: string): string =
+  src
 
 const Patch = """
 play count:

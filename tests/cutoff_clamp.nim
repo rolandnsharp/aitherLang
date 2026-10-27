@@ -5,7 +5,7 @@
 ## quiet rather than producing NaN.
 
 import std/[math]
-import ../parser, ../voice
+import ../ccompile, ../voice
 
 const Patch = """
 let cut = -300
@@ -14,7 +14,7 @@ filtered * 0.1
 """
 
 let v = newVoice(48000.0)
-v.load(parseProgram(Patch), 48000.0)
+v.load((Patch), 48000.0)
 
 for i in 1 .. 10000:
   let s = v.tick(float64(i) / 48000.0)

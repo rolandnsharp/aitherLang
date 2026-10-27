@@ -3,7 +3,7 @@
 ## NaN re-init instead of migrating (they used to poison every resend).
 
 import std/math
-import ../parser, ../voice
+import ../ccompile, ../voice
 
 proc tickN(v: NativeVoice; n: int; t0 = 0): tuple[l, r: float64] =
   for i in 1 .. n: result = v.tick(float64(t0 + i) / 48000.0)
@@ -22,10 +22,10 @@ sin(TAU * phasor(220)) * 0.2 + $x
 """
 
 let v = newVoice(48000.0)
-v.load(parseProgram(Good), 48000.0)
+v.load((Good), 48000.0)
 discard v.tickN(1000)
 doAssert not v.canRollback
-v.load(parseProgram(Bad), 48000.0)
+v.load((Bad), 48000.0)
 doAssert v.canRollback
 let blown = v.tickN(1000, 1000)
 doAssert abs(blown.l) > 8.0, "bad patch should blow up: " & $blown.l
@@ -46,17 +46,17 @@ $y = $y * 1
 $y
 """
 let w = newVoice(48000.0)
-w.load(parseProgram(NanVar), 48000.0)
+w.load((NanVar), 48000.0)
 discard w.tickN(3)
-w.load(parseProgram(Fixed), 48000.0)
+w.load((Fixed), 48000.0)
 let first = w.tickN(1)
 doAssert first.l == 0.5, "NaN var should re-init, got " & $first.l
 
 # scrubState clears a NaN var in place without touching healthy ones.
-w.load(parseProgram(NanVar), 48000.0)
+w.load((NanVar), 48000.0)
 discard w.tickN(3)
 w.scrubState()
-w.load(parseProgram(Fixed), 48000.0)
+w.load((Fixed), 48000.0)
 doAssert w.tickN(1).l == 0.5
 
 echo "rollback ok"

@@ -2,14 +2,11 @@
 ## patch that uses `midi_cc(n)` must see the knob at its current position
 ## on the first tick after reload — no "zeroed knobs on edit" surprise.
 
-import ../parser, ../voice, ../midi
+import ../ccompile, ../voice, ../midi
 
-const Stdlib = staticRead("../stdlib.aither")
 
-proc program(src: string): Node =
-  let stdAst = parseProgram(Stdlib)
-  let userAst = parseProgram(src)
-  Node(kind: nkBlock, kids: stdAst.kids & userAst.kids, line: 1)
+proc program(src: string): string =
+  src
 
 midiResetAll()
 midiCc(74, 90)

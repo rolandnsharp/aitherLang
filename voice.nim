@@ -3,7 +3,7 @@
 ## its compiled tick() can run) and a malloc'd VoiceState buffer.
 
 import std/[strutils, tables, sets, os, osproc, locks, monotimes]
-import parser, tcc, dsp, codegen, midi, engine_types, ccompile
+import tcc, dsp, midi, engine_types, ccompile
 
 type
   TickFn* = proc (s: pointer; outL, outR: ptr float64) {.cdecl.}
@@ -84,7 +84,7 @@ type
     # `partParkPending` marks a part that parks once its fade-out lands.
     partParked*:      seq[float64]
     partParkPending*: seq[bool]
-    # Per-helper-type layout of this voice's pool (see codegen.Region).
+    # Per-helper-type layout of this voice's pool (see ccompile.Region).
     # Used at hot-reload time to copy matching (type, perTypeIdx) regions
     # from the old state into the new one.
     regions*:         seq[Region]
@@ -290,7 +290,7 @@ proc clockReadCost*(): float64 =
   if sink < 0: result = 0                # keep the calls
 
 # Layout constants mirror the codegen's emitted struct — see the NOTE in
-# codegen.nim near the VoiceState emission. Migration here writes directly
+# codegen.c near the VoiceState emission. Migration here writes directly
 # into the buffer by computed offsets; stay in lockstep with codegen.
 const HeaderSize  = sizeof(VoiceHeader)   # the struct's fixed fields
 const VarSlotSize = sizeof(float64)
@@ -337,16 +337,11 @@ proc prepareC(csrc: string; varNames, partNames, unheard: seq[string];
            varNames: varNames, partNames: partNames, unheard: unheard,
            regions: regions)
 
-proc prepare*(program: Node; sr: float64; patchPath: string = ""): Prepared =
+proc prepareSource*(stdlibSrc, src, tag: string; sr: float64; patchPath = "";
+                    seedSelf = false): tuple[prepared: Prepared; callsInput: bool] =
   ## Compile + allocate the new state buffer. Slow (TCC compile is 5-20 ms
   ## on big patches, state zero-init a ms or so a few MB). Caller must
   ## hand the result to `commit` to actually swap it in.
-  let (csrc, varNames, partNames, unheard, regions) = generateFull(program, patchPath, sr)
-  prepareC(csrc, varNames, partNames, unheard, regions, sr)
-
-proc prepareSource*(stdlibSrc, src, tag: string; sr: float64; patchPath = "";
-                    seedSelf = false): tuple[prepared: Prepared; callsInput: bool] =
-  ## `prepare` from a patch's source, through the compiler in C.
   let g = compileSource(stdlibSrc, src, tag, patchPath, sr, seedSelf)
   (prepareC(g.csrc, g.varNames, g.partNames, g.unheard, g.regions, sr), g.callsInput)
 
@@ -627,17 +622,16 @@ proc dispose*(v: NativeVoice) =
   release(tccLock)
   v.oldLibs = @[]
 
-proc load*(v: NativeVoice; program: Node; sr: float64;
-           patchPath: string = "") =
-  ## Convenience wrapper: prepare + commit. Call this only when NOT on
-  ## the audio critical path (e.g. from tests). Engine.nim uses the
-  ## split form so the heavy compile happens outside the mutex.
-  v.commit(prepare(program, sr, patchPath))
-
 proc loadSource*(v: NativeVoice; stdlibSrc, src, tag: string; sr: float64;
                  patchPath: string = "") =
-  ## `load` from a patch's source, through the compiler in C.
+  ## prepare + commit. Call this only when NOT on the audio critical
+  ## path (e.g. from tests). Engine.nim uses the split form so the heavy
+  ## compile happens outside the mutex.
   v.commit(prepareSource(stdlibSrc, src, tag, sr, patchPath).prepared)
+
+proc load*(v: NativeVoice; src: string; sr: float64; patchPath = "") =
+  ## A patch's source with the stdlib, loaded: for tests and tools.
+  v.loadSource(Stdlib, src, if patchPath.len > 0: patchPath else: "<inline>", sr, patchPath)
 
 proc tick*(v: NativeVoice; t: float64): tuple[l, r: float64] {.inline.} =
   ## One sample at engine time `t`, input() from the dsp globals: what

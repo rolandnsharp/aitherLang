@@ -4,17 +4,12 @@
 ## the outer filter ran on the wrong slots and blew up. A chain must
 ## sound exactly like the same chain split over `let`s.
 
-import ../parser, ../voice, ../codegen
+import ../ccompile, ../voice
 
-const Stdlib = staticRead("../stdlib.aither")
 const SR = 48000
 
 proc load(src, name: string): NativeVoice =
-  let stdAst = parseProgram(Stdlib)
-  setSource(stdAst, "stdlib")
-  let userAst = parseProgram(src)
-  setSource(userAst, name)
-  let prog = Node(kind: nkBlock, kids: stdAst.kids & userAst.kids, line: 1)
+  let prog = src
   result = newVoice(float64(SR))
   result.load(prog, float64(SR))
 

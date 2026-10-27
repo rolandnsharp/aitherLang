@@ -11,21 +11,16 @@
 ## meant "you accidentally reused the play name."
 
 import std/[strutils]
-import ../parser, ../codegen
+import ../ccompile
 
-const Stdlib = staticRead("../stdlib.aither")
 
-proc prog(src: string): Node =
-  let stdAst = parseProgram(Stdlib)
-  setSource(stdAst, "stdlib")
-  let userAst = parseProgram(src)
-  setSource(userAst, "patches/shadow.aither")
-  Node(kind: nkBlock, kids: stdAst.kids & userAst.kids, line: 1)
+proc prog(src: string): string =
+  src
 
 proc mustFail(src: string; wantSubstr: string) =
   let ast = prog(src)
   try:
-    discard generate(ast, "patches/shadow.aither")
+    discard compile(ast, "patches/shadow.aither")
     doAssert false, "expected compile error for: " & src
   except CatchableError as e:
     doAssert wantSubstr.toLowerAscii() in e.msg.toLowerAscii(),
@@ -73,6 +68,6 @@ play lead:
   sin(TAU * phasor(note)) * 0.3
 bass + lead
 """
-discard generate(prog(ok), "patches/ok.aither")
+discard compile(prog(ok), "patches/ok.aither")
 
 echo "shadow_play_name ok"

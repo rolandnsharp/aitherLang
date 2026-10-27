@@ -4,12 +4,11 @@
 ## added in an early play shifted the `prev` slots of every later one,
 ## and physical models fed each other's velocities and blew up.
 
-import ../parser, ../voice, ../codegen
+import ../ccompile, ../voice
 
-const Stdlib = staticRead("../stdlib.aither")
 
-proc prog(src: string): Node =
-  Node(kind: nkBlock, kids: parseProgram(Stdlib).kids & parseProgram(src).kids)
+proc prog(src: string): string =
+  src
 
 const A = """
 play a:
@@ -41,8 +40,9 @@ proc find(rs: seq[Region]; scope, t: string; i: int): Region =
     if r.scope == scope and r.typeName == t and r.scopeIdx == i: return r
   raise newException(ValueError, "no region " & scope & " " & t & "#" & $i)
 
-let (_, _, _, ra) = generate(prog(A), "", 48000.0)
-let (_, _, _, rb) = generate(prog(B), "", 48000.0)
+let ra = compile(prog(A), "", 48000.0).regions
+let gen = compile(prog(B), "", 48000.0)
+let rb = gen.regions
 
 let v = newVoice(48000.0)
 v.load(prog(A), 48000.0)

@@ -2,20 +2,20 @@
 ## run tick() 48000 times, verify we get an audible impulse-driven tone.
 
 import std/[math, os, monotimes]
-import ../parser, ../dsp, ../tcc, ../codegen
+import ../ccompile, ../dsp, ../tcc
 
 proc errHandler(opaque: pointer; msg: cstring) {.cdecl.} =
   stderr.writeLine "TCC: ", $msg
 
-const Stdlib = staticRead("../stdlib.aither")
 
 let patch = if paramCount() >= 1: paramStr(1) else: "patches/kick.aither"
 let userSrc = readFile(patch)
-let stdAst = parseProgram(Stdlib)
-let userAst = parseProgram(userSrc)
-let program = Node(kind: nkBlock, kids: stdAst.kids & userAst.kids, line: 1)
+let program = userSrc
 
-let (csrc, varNames, partNames, _) = generate(program)
+let gen = compile(program)
+let csrc = gen.csrc
+let varNames = gen.varNames
+let partNames = gen.partNames
 echo "---- generated C ----"
 echo csrc
 echo "---- vars: ", varNames

@@ -16,21 +16,17 @@
 ##     `stuck` set, and its name for the log
 
 import std/strutils
-import ../parser, ../voice, ../codegen
+import ../ccompile, ../voice
 
 proc render(src: string; n = 4): seq[tuple[l, r: float64]] =
   let v = newVoice(48000.0)
-  v.load(parseProgram(src), 48000.0)
+  v.load((src), 48000.0)
   for i in 0 ..< n:
     result.add v.tick(float64(i) / 48000.0)
 
-proc parsed(src, path: string): Node =
-  result = parseProgram(src)
-  setSource(result, path)
-
 proc errorOf(src: string): string =
   try:
-    discard generate(parsed(src, "patches/x.aither"), "patches/x.aither")
+    discard compile(src, "patches/x.aither")
     doAssert false, "expected a compile error"
   except CatchableError as e:
     return e.msg
@@ -176,10 +172,10 @@ walk(double, 1, 3)
 # sample counted bad, `stuck` set and the def named for the log.
 block guard:
   let v = newVoice(48000.0)
-  v.load(parsed("""
+  v.load("""
 def rec forever(x): forever(x + 1)
 forever(0)
-""", "patches/stuck.aither"), 48000.0, "patches/stuck.aither")
+""", 48000.0, "patches/stuck.aither")
   let hdr = cast[ptr VoiceHeader](v.state)
   hdr.fadeGain = 1.0
   hdr.inBuf = nil

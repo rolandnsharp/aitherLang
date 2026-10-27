@@ -5,7 +5,7 @@
 ## HANDOFF_NAN_DEFENSES.md and the follow-up handoff).
 
 import std/[strutils]
-import ../parser, ../codegen
+import ../ccompile
 
 # --- User-patch error: must point at the user's file and the right line.
 const UserSrc = """
@@ -18,10 +18,8 @@ let bar = notDefinedYet * foo
 foo + bar
 """
 block userError:
-  let ast = parseProgram(UserSrc)
-  setSource(ast, "patches/test.aither")
   try:
-    discard generate(ast, "patches/test.aither")
+    discard compile(UserSrc, "patches/test.aither")
     doAssert false, "expected compile error"
   except CatchableError as e:
     let m = e.msg
@@ -43,15 +41,8 @@ play choir:
   ease(swell)
 """
 block shadowError:
-  const Stdlib = staticRead("../stdlib.aither")
-  let stdAst = parseProgram(Stdlib)
-  setSource(stdAst, "stdlib")
-  let userAst = parseProgram(ShadowSrc)
-  setSource(userAst, "patches/shadow.aither")
-  let merged = Node(kind: nkBlock,
-                    kids: stdAst.kids & userAst.kids, line: 1)
   try:
-    discard generate(merged, "patches/shadow.aither")
+    discard compile(ShadowSrc, "patches/shadow.aither")
     # After the Step 2 fix this compiles fine; if so, the test's point is
     # that the Step 1 plumbing WAS in place when Step 2 landed, so we
     # just skip the assertion in that case.

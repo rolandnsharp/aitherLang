@@ -16,11 +16,11 @@
 ## subtrees straight to a single emitExpr. This test pins the invariants.
 
 import std/[math, strutils]
-import ../parser, ../voice, ../codegen
+import ../ccompile, ../voice
 
 proc zeroCrossings(src: string; windowStart, N: int; sr = 48000.0): int =
   let v = newVoice(sr)
-  v.load(parseProgram(src), sr)
+  v.load((src), sr)
   for i in 0..<windowStart:
     discard v.tick(float64(i) / sr)
   var prev = 0.0
@@ -31,7 +31,7 @@ proc zeroCrossings(src: string; windowStart, N: int; sr = 48000.0): int =
     prev = s.l
 
 proc countRegions(src: string; typeName: string): int =
-  let (_, _, _, regions) = generate(parseProgram(src), "", 48000.0)
+  let regions = compile((src), "", 48000.0).regions
   for r in regions:
     if r.typeName == typeName: inc result
 

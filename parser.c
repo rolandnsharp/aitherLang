@@ -1,5 +1,4 @@
-/* aither's parser (parser.h): tokenizer and recursive descent to a tree.
- * It reads exactly what parser.nim reads and words its errors the same. */
+/* aither's parser (parser.h): tokenizer and recursive descent to a tree. */
 
 #include <setjmp.h>
 #include <stdarg.h>
@@ -839,41 +838,4 @@ void set_source(Arena* a, Node* n, const char* source) {
   n->source = source;
   for (int i = 0; i < n->nkids; i++) set_source(a, n->kids[i], source);
   (void)a;
-}
-
-/* ------------------------------------------------------------------- dump */
-
-static void out(char** buf, long* len, long* cap, const char* fmt, ...) {
-  va_list ap;
-  for (;;) {
-    va_start(ap, fmt);
-    long room = *cap - *len;
-    int k = vsnprintf(*buf ? *buf + *len : NULL, *buf ? room : 0, fmt, ap);
-    va_end(ap);
-    if (*buf && k < room) { *len += k; return; }
-    *cap = (*cap + k + 1) * 2;
-    *buf = realloc(*buf, *cap);
-  }
-}
-
-static const char* kind_names[] = {
-  "nkNum", "nkIdent", "nkBinOp", "nkUnary", "nkCall", "nkIf",
-  "nkVar", "nkLet", "nkDef", "nkAssign", "nkArr", "nkIdx", "nkIdxAssign", "nkBlock",
-  "nkPlay", "nkLambda", "nkImport", "nkStr", "nkNamedArg"
-};
-
-void dump_node(const Node* n, char** buf, long* len, long* cap) {
-  if (!n) { out(buf, len, cap, "nil"); return; }
-  out(buf, len, cap, "(%s %d \"%s\" %.17g%s", kind_names[n->kind], n->line, n->str, n->num,
-      n->is_rec ? " rec" : "");
-  if (n->nparams || n->kind == nkDef || n->kind == nkLambda || n->kind == nkPlay) {
-    out(buf, len, cap, " [");
-    for (int i = 0; i < n->nparams; i++) {
-      out(buf, len, cap, i ? " %s" : "%s", n->params[i]);
-      if (n->defaults && n->defaults[i]) { out(buf, len, cap, "="); dump_node(n->defaults[i], buf, len, cap); }
-    }
-    out(buf, len, cap, "]");
-  }
-  for (int i = 0; i < n->nkids; i++) { out(buf, len, cap, " "); dump_node(n->kids[i], buf, len, cap); }
-  out(buf, len, cap, ")");
 }

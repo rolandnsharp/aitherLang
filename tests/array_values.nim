@@ -8,11 +8,11 @@
 ## `if/else` cascades. This test pins each scope path.
 
 import std/[math, strutils]
-import ../parser, ../voice, ../codegen
+import ../ccompile, ../voice
 
 proc evalAt(src: string): float64 =
   let v = newVoice(48000.0)
-  v.load(parseProgram(src), 48000.0)
+  v.load((src), 48000.0)
   v.tick(0.0).l
 
 # --- 1. Top-level array, indexed by literal — pre-existing behaviour
@@ -114,7 +114,7 @@ def lookup(n):
   p[n]
 lookup(0)
 """
-  let (_, _, _, regions) = generate(parseProgram(P), "", 48000.0)
+  let regions = compile((P), "", 48000.0).regions
   doAssert regions.len == 0,
     "def-body array lookup must not allocate pool regions, got " & $regions.len
 

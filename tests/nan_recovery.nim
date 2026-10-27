@@ -3,7 +3,7 @@
 ## `resetPool` helper that the audio callback will call on detection.
 
 import std/[math]
-import ../parser, ../voice, ../dsp
+import ../ccompile, ../voice, ../dsp
 
 # A patch with a stateful primitive so the lpf reads from the pool.
 const Patch = """
@@ -11,7 +11,7 @@ sin(TAU * phasor(220)) |> lpf(800, 0.5)
 """
 
 let v = newVoice(48000.0)
-v.load(parseProgram(Patch), 48000.0)
+v.load((Patch), 48000.0)
 
 # Warm up briefly so the pool holds non-trivial state.
 for i in 1 .. 8:

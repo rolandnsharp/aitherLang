@@ -4,7 +4,7 @@
 ## bits are the same: the same arithmetic, once instead of every sample.
 
 import std/[os, strutils]
-import ../parser, ../voice, ../codegen
+import ../ccompile, ../voice
 
 const Patch = """
 let cut = 1200
@@ -21,11 +21,11 @@ play c:
 c
 """
 
-proc csrcOf(src: string): string = generate(parseProgram(src), "", 48000.0).csrc
+proc csrcOf(src: string): string = compile((src), "", 48000.0).csrc
 
 proc render(src: string; n = 2400): seq[float64] =
   let v = newVoice(48000.0)
-  v.load(parseProgram(src), 48000.0)
+  v.load((src), 48000.0)
   for i in 0 ..< n:
     let s = v.tick(float64(i) / 48000.0)
     result.add s.l

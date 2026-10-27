@@ -6,12 +6,11 @@
 ## inherited the old displacement and `try` showed +24 dBFS.)
 
 import std/[strutils]
-import ../parser, ../voice, ../codegen
+import ../ccompile, ../voice
 
-const Stdlib = staticRead("../stdlib.aither")
 
-proc prog(src: string): Node =
-  Node(kind: nkBlock, kids: parseProgram(Stdlib).kids & parseProgram(src).kids)
+proc prog(src: string): string =
+  src
 
 const Stick = """
 def stick(force):
@@ -44,7 +43,7 @@ proc slots(v: NativeVoice; rs: seq[Region]): seq[float64] =
     for k in 0 ..< r.size: result.add pool[r.offset + k]
 
 # Owners are recorded: bar's state is `bar/$bv`, `bar/$bx`.
-let (_, _, _, rb) = generate(prog(Bar & Drive & "play hit:\n  bar(trig)\n"), "", 48000.0)
+let rb = compile(prog(Bar & Drive & "play hit:\n  bar(trig)\n"), "", 48000.0).regions
 var owners: seq[string]
 for r in rb:
   if r.typeName == "var": owners.add r.owner
@@ -55,7 +54,7 @@ doAssert vars(rb, "bar").len == 6, $vars(rb, "bar").len
 let v = newVoice(48000.0)
 v.load(prog(Stick & Drive & "play hit:\n  stick(trig)\n"), 48000.0)
 for i in 0 ..< 2000: discard v.tick(float64(i) / 48000.0)
-let (_, _, _, rs) = generate(prog(Stick & Drive & "play hit:\n  stick(trig)\n"), "", 48000.0)
+let rs = compile(prog(Stick & Drive & "play hit:\n  stick(trig)\n"), "", 48000.0).regions
 let stickState = v.slots(vars(rs, "stick"))
 var moving = 0
 for x in stickState:
@@ -72,19 +71,19 @@ echo "stick -> bar: bar starts clean"
 for i in 0 ..< 2000: discard v.tick(float64(i) / 48000.0)
 let barBefore = v.slots(vars(rb, "bar"))
 v.load(prog(Bar2 & Drive & "play hit:\n  bar(trig)\n"), 48000.0)
-let (_, _, _, rb2) = generate(prog(Bar2 & Drive & "play hit:\n  bar(trig)\n"), "", 48000.0)
+let rb2 = compile(prog(Bar2 & Drive & "play hit:\n  bar(trig)\n"), "", 48000.0).regions
 doAssert v.slots(vars(rb2, "bar")) == barBefore, "bar's state should survive an edit"
 echo "bar edit: state kept"
 
 # 3. Renamed statement, same def: the fallback carries bar's state over.
 v.load(prog(Bar2 & Drive & "play hit2:\n  bar(trig)\n"), 48000.0)
-let (_, _, _, rb3) = generate(prog(Bar2 & Drive & "play hit2:\n  bar(trig)\n"), "", 48000.0)
+let rb3 = compile(prog(Bar2 & Drive & "play hit2:\n  bar(trig)\n"), "", 48000.0).regions
 doAssert v.slots(vars(rb3, "bar")) == barBefore, "renamed play should keep bar's state"
 echo "renamed play, same def: state kept"
 
 # 4. Renamed statement AND a different def of the same shape: clean.
 v.load(prog(Stick & Drive & "play hit3:\n  stick(trig)\n"), 48000.0)
-let (_, _, _, rs3) = generate(prog(Stick & Drive & "play hit3:\n  stick(trig)\n"), "", 48000.0)
+let rs3 = compile(prog(Stick & Drive & "play hit3:\n  stick(trig)\n"), "", 48000.0).regions
 for x in v.slots(vars(rs3, "stick")):
   doAssert x == 0.0, "stick inherited bar's state via the fallback"
 echo "renamed play, other def: starts clean"

@@ -1,10 +1,10 @@
-## The compiler in C (parser.c, imports.c, codegen.c), for the engine: a
-## patch's source in, the C it compiles to and its state layout out, as
-## codegen.generateFull gives them. Errors raise as the Nim path's do:
-## ParseError, ImportError, or ValueError for a compile error.
+## The compiler, which is C (parser.c, imports.c, codegen.c), as Nim
+## sees it: a patch's source in, the C it compiles to and its state
+## layout out. Errors raise ParseError, ImportError, or ValueError for a
+## compile error.
 
 import std/os
-import parser, imports, codegen, dsp
+import dsp
 
 {.compile: "parser.c".}
 {.compile: "imports.c".}
@@ -14,7 +14,34 @@ const Dir = currentSourcePath().parentDir
 const CodegenH = Dir / "codegen.h"
 const ImportsH = Dir / "imports.h"
 
+const Stdlib* = staticRead("stdlib.aither")
+const MaxProfSlots* = 1024   # `aither profile`: top-level statements timed, at most (codegen.c)
+
 type
+  ParseError* = object of CatchableError
+  ImportError* = object of CatchableError
+
+  # One stateful call site's slots in the voice's pool, keyed by
+  # (typeName, perTypeIdx). Across a hot reload a new region with a
+  # matching key and size inherits the old one's slots, so inserting a
+  # new helper type doesn't shift existing state.
+  Region* = object
+    typeName*: string
+    perTypeIdx*: int
+    # Stable key: the statement the call sits in (`play drums/let k`,
+    # `let bass`, `out`, ...) and its index among same-type calls there.
+    # Migration matches on this first, so a stateful call added to one
+    # play or let can't shift the state of any other.
+    scope*: string
+    scopeIdx*: int
+    # Which def the call sits in (the chain of inlined defs,
+    # `didge3>formant`; "" at file level), and for `$state` its name
+    # (`bar/$bv`): replacing one physical model by another of the same
+    # shape starts the new one clean.
+    owner*: string
+    offset*: int            # absolute start offset into pool (in slots)
+    size*: int              # number of float64 slots
+
   CRegion {.importc: "Region", header: CodegenH, bycopy.} = object
     type_name, scope, owner: cstring
     per_type_idx, scope_idx: cint
@@ -32,14 +59,14 @@ type
 
 proc arena_new(): pointer {.importc, header: CodegenH.}
 proc arena_free(a: pointer) {.importc, header: CodegenH.}
+proc parse_program(a: pointer; src: cstring; err: cstring; errlen: cint): pointer {.importc, header: CodegenH.}
 proc build_program(a: pointer; stdlibSrc, src, srcTag: cstring; seedSelf: cint;
                    kind: ptr cint; err: cstring; errlen: cint): pointer {.importc, header: ImportsH.}
 proc generate_full(a: pointer; program: pointer; patchPath: cstring; sr: cdouble;
                    hoistOn: cint; o: ptr CGenerated; err: cstring; errlen: cint): cint {.importc, header: CodegenH.}
 proc calls_input(n: pointer): cint {.importc, header: CodegenH.}
 
-const BuildParse = 1     # imports.h's BUILD_PARSE, BUILD_IMPORT
-const BuildImport = 2
+const BuildImport = 2        # imports.h's BUILD_IMPORT
 
 type Compiled* = object
   csrc*: string
@@ -78,3 +105,30 @@ proc compileSource*(stdlibSrc, src, tag, patchPath: string; sr: float64;
     result.regions.add Region(typeName: $r.type_name, perTypeIdx: int(r.per_type_idx),
                               scope: $r.scope, scopeIdx: int(r.scope_idx), owner: $r.owner,
                               offset: int(r.offset), size: int(r.size))
+
+proc callsInput*(src: string; tag = "<inline>"): bool =
+  ## Does the patch (with its imports) call `input()` anywhere? Parsed
+  ## only, not compiled.
+  let a = arena_new()
+  defer: arena_free(a)
+  var err = newString(4096)
+  var kind: cint
+  let prog = build_program(a, Stdlib, src, tag, 0, addr kind, err.cstring, 4096)
+  if prog == nil:
+    let msg = $err.cstring
+    if kind == BuildImport: raise newException(ImportError, msg)
+    raise newException(ParseError, msg)
+  calls_input(prog) != 0
+
+proc compile*(src: string; patchPath = ""; sr = 48000.0): Compiled =
+  ## A patch's source with the stdlib, as the engine compiles it: for
+  ## tests and tools.
+  compileSource(Stdlib, src, if patchPath.len > 0: patchPath else: "<inline>", patchPath, sr)
+
+proc parse*(src: string) =
+  ## Parse only, raising ParseError with the parser's message.
+  let a = arena_new()
+  defer: arena_free(a)
+  var err = newString(1024)
+  if parse_program(a, src, err.cstring, 1024) == nil:
+    raise newException(ParseError, $err.cstring)

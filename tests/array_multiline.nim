@@ -7,7 +7,7 @@
 ## (and their indent/dedent side effects) as whitespace, same as Python
 ## list literals.
 
-import ../parser, ../codegen
+import ../ccompile
 
 const Multiline = """
 let notes = [
@@ -21,8 +21,8 @@ play t:
   let f = wave(1.0, notes)
   sin(TAU * phasor(f)) * 0.3
 """
-let prog = parseProgram(Multiline)
-discard generate(prog, "multi.aither")
+let prog = (Multiline)
+discard compile(prog, "multi.aither")
 
 # Empty array across lines — also fine.
 const EmptyMulti = """
@@ -31,7 +31,7 @@ let empty = [
 let x = 0.0
 x
 """
-discard parseProgram(EmptyMulti)
+parse(EmptyMulti)
 
 # Nested literals + comments inside brackets still work.
 const WithComments = """
@@ -45,8 +45,8 @@ let notes = [
 play t:
   wave(1.0, notes)
 """
-let p2 = parseProgram(WithComments)
-discard generate(p2, "multi.aither")
+let p2 = (WithComments)
+discard compile(p2, "multi.aither")
 
 # A trailing newline directly before the close bracket is fine too.
 const NlBeforeClose = """
@@ -54,6 +54,6 @@ let notes = [110.0, 220.0
 ]
 play t: wave(1.0, notes)
 """
-discard parseProgram(NlBeforeClose)
+parse(NlBeforeClose)
 
 echo "array_multiline ok"

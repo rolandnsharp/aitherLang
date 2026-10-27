@@ -3,17 +3,12 @@
 ## unstable patch must trip it, and loud-but-healthy shipped patches
 ## (bush_doof runs close to 0 dBFS) must never trip it.
 
-import ../parser, ../voice, ../codegen, ../engine_types
+import ../ccompile, ../voice, ../engine_types
 
-const Stdlib = staticRead("../stdlib.aither")
 const SR = 48000
 
 proc load(src, name: string): NativeVoice =
-  let stdAst = parseProgram(Stdlib)
-  setSource(stdAst, "stdlib")
-  let userAst = parseProgram(src)
-  setSource(userAst, name)
-  let prog = Node(kind: nkBlock, kids: stdAst.kids & userAst.kids, line: 1)
+  let prog = src
   result = newVoice(float64(SR))
   result.load(prog, float64(SR))
 

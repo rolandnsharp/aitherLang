@@ -12,7 +12,7 @@
 ## and codegen later raised "unknown identifier: x (stdlib:37)" when
 ## emitting ease's body `let c = clamp(x, 0, 1)`.
 
-import ../parser, ../voice
+import ../ccompile, ../voice
 
 const ChoirPatch = """
 let tempo = 120.0
@@ -39,16 +39,9 @@ play choir:
 cello + choir
 """
 
-const Stdlib = staticRead("../stdlib.aither")
-let stdAst = parseProgram(Stdlib)
-setSource(stdAst, "stdlib")
-let userAst = parseProgram(ChoirPatch)
-setSource(userAst, "patches/choir_test.aither")
-let program = Node(kind: nkBlock,
-                   kids: stdAst.kids & userAst.kids, line: 1)
 
 let v = newVoice(48000.0)
-v.load(program, 48000.0, "patches/choir_test.aither")
+v.load(ChoirPatch, 48000.0, "patches/choir_test.aither")
 
 # Also cover the minimal reduction of the bug — a bare `let <stdlib-def-name>`
 # locally used as a scalar arg to another def must NOT be mistaken for a
@@ -58,14 +51,8 @@ play t:
   let swell = 0.5
   ease(swell)
 """
-let userAst2 = parseProgram(Minimal)
-setSource(userAst2, "patches/min_shadow.aither")
-let stdAst2 = parseProgram(Stdlib)
-setSource(stdAst2, "stdlib")
-let program2 = Node(kind: nkBlock,
-                    kids: stdAst2.kids & userAst2.kids, line: 1)
 let v2 = newVoice(48000.0)
-v2.load(program2, 48000.0, "patches/min_shadow.aither")
+v2.load(Minimal, 48000.0, "patches/min_shadow.aither")
 
 # Sanity: pass a real def reference through osc — osc(saw, 220) — still
 # works. `saw` is a stdlib shape helper, not a local, so the fn-ref path
@@ -74,14 +61,8 @@ const HigherOrder = """
 play t:
   osc(saw, 220)
 """
-let userAst3 = parseProgram(HigherOrder)
-setSource(userAst3, "patches/ho.aither")
-let stdAst3 = parseProgram(Stdlib)
-setSource(stdAst3, "stdlib")
-let program3 = Node(kind: nkBlock,
-                    kids: stdAst3.kids & userAst3.kids, line: 1)
 let v3 = newVoice(48000.0)
-v3.load(program3, 48000.0, "patches/ho.aither")
+v3.load(HigherOrder, 48000.0, "patches/ho.aither")
 
 # Run a few ticks of the choir patch just to confirm the compile is
 # audible-clean (no NaN / Inf out of the gate).

@@ -5,16 +5,14 @@
 ## impossible to write — while three steps worked.
 ##
 ## Also covers two smaller bugs found alongside:
-##   - the stereo-value error named a hard-coded `bass` whatever the
-##     variable was called
 ##   - a 3-entry table in arithmetic (`t3 * 0.1`) reached the C compiler
 ##     as an undeclared symbol instead of a compile error
 
 import std/[strutils]
-import ../parser, ../voice, ../codegen
+import ../ccompile, ../voice
 
 proc peakOf(src: string): float64 =
-  let prog = parseProgram(src)
+  let prog = (src)
   let v = newVoice(48000.0)
   v.load(prog, 48000.0)
   for i in 0 ..< 4800:
@@ -24,7 +22,7 @@ proc peakOf(src: string): float64 =
 
 proc errorOf(src: string): string =
   try:
-    discard generate(parseProgram(src), "patches/x.aither")
+    discard compile((src), "patches/x.aither")
     doAssert false, "expected a compile error"
   except CatchableError as e:
     return e.msg
@@ -60,15 +58,14 @@ play a:
 a
 """) > 0.0, "two-element let as a pair"
 
-# 5. The error names the actual variable.
-let msg = errorOf("""
+# 5. A pair given to a stateful call runs it once a side (it used to be
+# an error naming a hard-coded `bass`).
+doAssert peakOf("""
 play a:
-  let wide = [sin(TAU * phasor(220)), sin(TAU * phasor(221))]
-  phasor(wide)
+  let wide = [220, 221]
+  sin(TAU * phasor(wide)) * 0.2
 a
-""")
-doAssert "wide[0]" in msg, "error should name the variable, got: " & msg
-doAssert "bass" notin msg, "hard-coded name leaked: " & msg
+""") > 0.0, "phasor of a pair"
 
 # 6. A 3-entry table in arithmetic is a compile error, not a C error.
 let msg3 = errorOf("""

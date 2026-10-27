@@ -3,7 +3,7 @@
 ## recognizes the names and emits the expected calls.
 
 import std/strutils
-import ../parser, ../codegen
+import ../ccompile
 
 const Src = """
 play synth:
@@ -17,8 +17,10 @@ play kick:
 (synth + kick)
 """
 
-let ast = parseProgram(Src)
-let (csrc, _, parts, _) = generate(ast)
+let ast = (Src)
+let gen = compile(ast)
+let csrc = gen.csrc
+let parts = gen.partNames
 
 doAssert "n_midi_cc" in csrc, "n_midi_cc missing in emitted C"
 doAssert "n_midi_note" in csrc
@@ -31,7 +33,7 @@ doAssert parts == @["synth", "kick"]
 # Arg-count errors surface through codegen, not as silent no-ops.
 var bad = false
 try:
-  discard generate(parseProgram("play x: midi_cc()\nx"))
+  discard compile(("play x: midi_cc()\nx"))
 except ValueError:
   bad = true
 doAssert bad, "midi_cc with no args should fail codegen"

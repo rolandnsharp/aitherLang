@@ -744,9 +744,7 @@ relative to the importing file. A library may hold `def`s, constant
 `play`, `$state` or a sound belongs in the patch that imports it,
 and the compiler says so. A file imported twice is included once
 (cycles end there). A def in the patch overrides a library's of
-the same name. Imports are re-read on every `send`, and `aither
-watch patch.aither` sends again whenever the patch or any file it
-imports changes. Errors inside a library point at the library
+the same name. Imports are re-read on every `send`. Errors inside a library point at the library
 file and line.
 
 ## Scope rules
@@ -1291,7 +1289,6 @@ output) gets a fixed loop delay. A block is `AITHER_BUFFER` frames
 | Command                          | Description                                |
 |----------------------------------|--------------------------------------------|
 | `send <file> [fade]`             | load / hot-swap a patch, then report level, quiet parts, guard trips |
-| `watch <file> [fade]`            | send, and send again whenever it or an imported file changes |
 | `stop <voice> [fade]`            | fade out & remove                          |
 | `clear [fade]`                   | stop all voices                            |
 | `list`                           | show active voices and their parts         |
@@ -1347,22 +1344,20 @@ offline (no engine connection required, ~100 ms turnaround).
 
 ## Implementation
 
-### Parser (`parser.nim`, ~560 lines)
+### Parser (`parser.c`, ~840 lines; `imports.c`, ~170)
 
 Tokenizer with group-depth handling (newlines inside `(...)`
 and `[...]` are whitespace) and line continuation (a newline
 ends a statement only where one can end); indentation is
-skipped, never measured. Recursive-descent parser → AST; a
+skipped, never measured. Recursive-descent parser → syntax tree; a
 def or play body ends at its expression. Handles: literals, identifiers,
 operators, function calls, `$state`, `let`, `def`, `play`,
 `lambda`, `if/then/else`, `else if` chains, `|>`, arrays,
 array indexing, comments. Precedence climbing for expressions.
 
-### Codegen (`codegen.c`, ~2600 lines)
+### Codegen (`codegen.c`, ~2700 lines)
 
-AST → C source, in C (parser.c and imports.c before it; the
-Nim codegen.nim is the reference the corpus and render-check
-compare it with until it goes). Every value is emitted as its
+Syntax tree → C source. Every value is emitted as its
 two sides, pure C expressions; what has state is a statement
 leaving its result in a temporary. Each patch transpiles to a single C source
 string containing `tick(state, t)` and `init(state)`. The C
@@ -1485,7 +1480,8 @@ prev. Pure aither code, baked into the binary as a const string.
 
 ### Totals
 
-~4250 lines Nim + ~325 lines aither. One binary, ~970 KB.
+About 4,100 lines of C (the language), 3,400 of Nim (the engine and
+CLI) and 430 of aither (the stdlib). One binary.
 Runtime dependencies: libtcc, ALSA, the system audio library.
 
 ---

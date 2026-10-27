@@ -3,7 +3,7 @@
 ## first tick should see the migrated phase, not a fresh 0.
 
 import std/[os, tables]
-import ../parser, ../voice
+import ../ccompile, ../voice
 
 const PatchA = """
 $phase = 0
@@ -18,7 +18,7 @@ $phase = $phase + 0.01
 $phase + $freq * 0
 """
 
-let progA = parseProgram(PatchA)
+let progA = (PatchA)
 let v = newVoice(48000.0)
 v.load(progA, 48000.0)
 
@@ -42,7 +42,7 @@ echo "after reload:  phase=", afterReload.l
 
 # Now load a program that keeps `phase` but adds a new `freq`. phase must
 # stay migrated; freq must initialize to 440.
-let progB = parseProgram(PatchB)
+let progB = (PatchB)
 v.load(progB, 48000.0)
 let afterB = v.tick(0.0)
 # phase was ≈1.02, increments to ≈1.03; freq*0 = 0.
@@ -56,7 +56,7 @@ $phase = 0
 $freq = 440
 $freq
 """
-v.load(parseProgram(PatchC), 48000.0)
+v.load((PatchC), 48000.0)
 let afterC = v.tick(0.0)
 doAssert abs(afterC.l - 440.0) < 1e-9,
   "freq should migrate from prior compilation, got " & $afterC.l

@@ -6,16 +6,11 @@
 ## overshoot.
 
 import std/[math]
-import ../parser, ../voice
+import ../ccompile, ../voice
 
-const Stdlib = staticRead("../stdlib.aither")
 
-proc prog(src: string): Node =
-  let stdAst = parseProgram(Stdlib)
-  setSource(stdAst, "stdlib")
-  let userAst = parseProgram(src)
-  setSource(userAst, "patches/test.aither")
-  Node(kind: nkBlock, kids: stdAst.kids & userAst.kids, line: 1)
+proc prog(src: string): string =
+  src
 
 proc renderMono(src: string; nSamples: int): seq[float64] =
   let v = newVoice(48000.0)

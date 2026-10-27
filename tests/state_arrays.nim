@@ -7,7 +7,7 @@
 ## 219-line version `notes/voice-eval/gen_tube24.py` wrote.
 
 import std/[math, strutils, os]
-import ../render, ../parser, ../voice, ../codegen
+import ../render, ../ccompile, ../voice
 
 proc mono(src: string; n: int): seq[float64] =
   renderPatchSrc(src, float64(n) / 48000.0).left
@@ -80,9 +80,8 @@ let topOut = mono(Top, 6)
 doAssert topOut[1] == 0.5 and topOut[2] == 1.0 and topOut.sum == 1.5, $topOut
 
 # Hot reload: same shape keeps the elements; a new size starts fresh.
-const Stdlib = staticRead("../stdlib.aither")
-proc prog(src: string): Node =
-  Node(kind: nkBlock, kids: parseProgram(Stdlib).kids & parseProgram(src).kids)
+proc prog(src: string): string =
+  src
 proc sarr(rs: seq[Region]; name: string): Region =
   for r in rs:
     if r.typeName == "sarr" and r.owner == "/$" & name: return r
@@ -92,7 +91,7 @@ v.load(prog("$h = array(3)\n$h[1] = $h[1] + 1\n$h[1]"), 48000.0)
 for i in 0 ..< 10: discard v.tick(float64(i) / 48000.0)
 v.load(prog("$h = array(3)\n$h[1] = $h[1] + 1\n$h[1] * 2"), 48000.0)
 doAssert v.tick(0.0).l == 22.0, "state array should survive a reload"
-let (_, _, _, regs) = generate(prog("$h = array(3)\n$h[1]"), "", 48000.0)
+let regs = compile(prog("$h = array(3)\n$h[1]"), "", 48000.0).regions
 doAssert sarr(regs, "h").size == 4, $sarr(regs, "h").size
 v.load(prog("$h = array(5)\n$h[1] = $h[1] + 1\n$h[1]"), 48000.0)
 doAssert v.tick(0.0).l == 1.0, "a resized state array should start fresh"

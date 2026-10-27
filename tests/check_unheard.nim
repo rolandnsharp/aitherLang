@@ -7,10 +7,10 @@
 ## output is 30 dB or more below it: QUIET VOICE.
 
 import std/[strutils, os]
-import ../parser, ../codegen, ../render, ../engine_types, ../cli_output
+import ../ccompile, ../render, ../engine_types, ../cli_output
 
 proc unheardOf(src: string): seq[string] =
-  generateFull(parseProgram(src), "", 48000.0).unheard
+  compile((src), "", 48000.0).unheard
 
 # Forgotten on the last line.
 doAssert unheardOf("play drone:\n  0.1\nplay sticks:\n  0.2\n\ndrone\n") == @["sticks"]

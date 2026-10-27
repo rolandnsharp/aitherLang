@@ -8,7 +8,7 @@
 ## change, not a codegen one.)
 
 import std/[math]
-import ../parser, ../voice
+import ../ccompile, ../voice
 
 const Patch = """
 def step():
@@ -20,7 +20,7 @@ c
 """
 
 let v = newVoice(48000.0)
-v.load(parseProgram(Patch), 48000.0)
+v.load((Patch), 48000.0)
 
 var last = 0.0
 for i in 1 .. 100:

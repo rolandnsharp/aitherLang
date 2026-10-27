@@ -1,5 +1,5 @@
 /* `import "lib/voice.aither"`: a library's defs and constant tables
- * spliced into the program (imports.nim, in C). Paths are relative to the
+ * spliced into the program. Paths are relative to the
  * importing file; a file imported twice, or in a cycle, is included once.
  * A library holds defs, constant lets and further imports: plays, state
  * and sound belong in the patch. */

@@ -3,20 +3,22 @@
 ## Overview
 
 ```
-parser.nim         ~560 lines   tokenizer + recursive descent → AST
-codegen.nim       ~1350 lines   AST → C source + per-helper-type state layout
-voice.nim          ~260 lines   TCC compile → dlopen'd tick(); hot-reload migration
+parser.c           ~840 lines   tokenizer + recursive descent → syntax tree
+imports.c          ~170 lines   `import`: libraries spliced in, once each
+codegen.c         ~2680 lines   tree → C source + per-helper-type state layout
+ccompile.nim       ~130 lines   the compiler as Nim sees it: source in, C and layout out
+voice.nim          ~650 lines   TCC compile → tick(); hot-reload migration
 tcc.nim             ~40 lines   minimal TCC FFI
-dsp.c              ~330 lines   native DSP primitives (filters, delay, tape, reverb…)
-dsp.nim            ~100 lines   dsp.c's functions for Nim, and the table of natives
-midi.nim           ~235 lines   ALSA seq input thread + auto-resubscribe
-engine.nim         ~735 lines   audio callback + UNIX socket server + per-voice stats
-engine_types.nim    ~50 lines   data structs (VoiceInfo, StatsSnapshot, MidiStatus…)
-cli_output.nim     ~155 lines   text formatters for list/scope/parts/spectrum/audit
+dsp.c              ~360 lines   native DSP primitives (filters, delay, tape, reverb…)
+dsp.nim             ~90 lines   dsp.c's functions for Nim, and the table of natives
+midi.nim           ~360 lines   ALSA seq input thread + auto-resubscribe + held notes
+engine.nim        ~1310 lines   audio callback + UNIX socket server + per-voice stats
+engine_types.nim   ~100 lines   data structs (VoiceInfo, StatsSnapshot, MidiStatus…)
+cli_output.nim     ~250 lines   text formatters for list/scope/parts/spectrum/audit
 analysis.nim       ~250 lines   pure FFT + spectral feature extraction
-render.nim          ~65 lines   offline patch render to in-memory buffer
-aither.nim         ~105 lines   CLI dispatch (entry point — `nim c aither.nim`)
-stdlib.aither      ~225 lines   composition layer (pure aither defs)
+render.nim         ~160 lines   offline patch render to in-memory buffer
+aither.nim         ~210 lines   CLI dispatch (entry point — `nim c aither.nim`)
+stdlib.aither      ~430 lines   composition layer (pure aither defs)
 alsa_midi.c                     ALSA seq client (small wrapper)
 tools/play.c                    a speaker on the end of the pipe (ALSA, not part of aither)
 tools/scope.c, tools/display.h  a vector display on the pipe (SDL3, OpenGL ES 3); display.h is
@@ -26,7 +28,9 @@ tools/tv.c                      a raster display on the pipe: w×h samples a fra
 tools/pad.c                     the uConsole gamepad as MIDI knobs
 ```
 
-About 4250 lines Nim total. One binary, ~970 KB. No runtime
+The language (parser, imports, compiler, DSP) is about 4,100 lines of
+C; the engine, CLI and tools around it about 3,400 lines of Nim. One
+binary. No runtime
 dependencies beyond libtcc, ALSA, and the system audio library.
 
 ## Layers
@@ -35,10 +39,10 @@ dependencies beyond libtcc, ALSA, and the system audio library.
   user patch (.aither)          source file
         │
         ▼
-  parser.nim                    tokens → AST (ref objects)
+  parser.c, imports.c           tokens → syntax tree, imports spliced in
         │
         ▼
-  codegen.nim                   AST → C source string
+  codegen.c                     tree → C source string
         │                       + per-helper-type state region map
         ▼
   voice.nim                     TCC in-memory compile → dlopen'd tick()
@@ -58,7 +62,7 @@ dispatches a command (`send`, `stop`, `list`, `audit`, `spectrum`,
 
 ## Compilation pipeline
 
-A patch source is parsed once into an AST, then `codegen.nim`
+A patch source is parsed once into a syntax tree, then `codegen.c`
 emits a single C source string containing:
 
 - `tick(state, t)` returning a stereo sample

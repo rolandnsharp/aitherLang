@@ -393,19 +393,22 @@ high-quality reverb tails simultaneously, use a DAW.
 ## Architecture
 
 ```
-parser.nim         ~700 lines   tokenizer + recursive descent → AST
-codegen.nim       ~1740 lines   AST → C source + per-helper-type state layout
-voice.nim          ~270 lines   TCC compile → dlopen'd tick(); hot-reload migration
-dsp.c              ~330 lines   native DSP primitives (filters, delay, tape, reverb…)
-dsp.nim            ~100 lines   dsp.c's functions for Nim, and the table of natives
-midi.nim           ~330 lines   ALSA seq input + auto-resubscribe + held-notes
-engine.nim         ~750 lines   audio callback + UNIX socket server + stats
-engine_types.nim    ~60 lines   data structs returned by engine procs
-cli_output.nim     ~155 lines   text formatters for list/scope/parts/spectrum/audit
+parser.c           ~840 lines   tokenizer + recursive descent → syntax tree
+imports.c          ~170 lines   `import`: libraries spliced in, once each
+codegen.c         ~2680 lines   tree → C source + per-helper-type state layout
+ccompile.nim       ~130 lines   the compiler as Nim sees it: source in, C and layout out
+voice.nim          ~650 lines   TCC compile → tick(); hot-reload migration
+tcc.nim             ~40 lines   minimal TCC FFI
+dsp.c              ~360 lines   native DSP primitives (filters, delay, tape, reverb…)
+dsp.nim             ~90 lines   dsp.c's functions for Nim, and the table of natives
+midi.nim           ~360 lines   ALSA seq input thread + auto-resubscribe + held notes
+engine.nim        ~1310 lines   audio callback + UNIX socket server + per-voice stats
+engine_types.nim   ~100 lines   data structs (VoiceInfo, StatsSnapshot, MidiStatus…)
+cli_output.nim     ~250 lines   text formatters for list/scope/parts/spectrum/audit
 analysis.nim       ~250 lines   pure FFT + spectral feature extraction
-render.nim          ~65 lines   offline patch render to in-memory buffer
-aither.nim         ~105 lines   CLI dispatch (entry point)
-stdlib.aither      ~340 lines   starter-kit defs (additive, inharmonic, midi_keyboard, …)
+render.nim         ~160 lines   offline patch render to in-memory buffer
+aither.nim         ~210 lines   CLI dispatch (entry point — `nim c aither.nim`)
+stdlib.aither      ~430 lines   composition layer (pure aither defs)
 ```
 
 About 4800 lines Nim total. A patch is parsed to an AST, transpiled

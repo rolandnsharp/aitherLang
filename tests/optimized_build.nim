@@ -4,17 +4,12 @@
 ## reloaded. Also prints the speedup, since that's the point of it.
 
 import std/[monotimes, times, os]
-import ../parser, ../voice, ../codegen
+import ../ccompile, ../voice
 
-const Stdlib = staticRead("../stdlib.aither")
 const SR = 48000
 
-proc program(src, name: string): Node =
-  let stdAst = parseProgram(Stdlib)
-  setSource(stdAst, "stdlib")
-  let userAst = parseProgram(src)
-  setSource(userAst, name)
-  Node(kind: nkBlock, kids: stdAst.kids & userAst.kids, line: 1)
+proc program(src, name: string): string =
+  src
 
 proc render(v: NativeVoice; fromSample, n: int): seq[float64] =
   for i in fromSample ..< fromSample + n:

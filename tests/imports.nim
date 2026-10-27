@@ -4,8 +4,8 @@
 ## def winning over the library's, and clear errors for a missing file
 ## or a library that holds more than defs and tables.
 
-import std/[os, strutils, sequtils]
-import ../render, ../imports
+import std/[os, strutils]
+import ../render, ../ccompile
 
 let dir = getTempDir() / "aither_imports_" & $getCurrentProcessId()
 createDir(dir / "lib")
@@ -34,11 +34,6 @@ a
 let r = renderPatchFull(dir / "patch.aither", 0.001)
 # third(1)=3, the patch's half wins (0.25), ca(0)=1, cb(0)=2.
 doAssert r.audio.left[0] == 3.0 + 0.25 + 1.0 + 2.0, $r.audio.left[0]
-
-let files = importedFiles(dir / "patch.aither")
-doAssert files.len == 5, $files        # patch, voice, tables, cycle_a, cycle_b
-doAssert files[0] == dir / "patch.aither"
-doAssert files.anyIt(it.endsWith("tables.aither"))
 
 proc errOf(path: string): string =
   try:

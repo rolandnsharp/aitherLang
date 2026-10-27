@@ -12,16 +12,11 @@
 ## documentation-ready sanity.
 
 import std/[math, tables, strutils]
-import ../parser, ../voice, ../codegen
+import ../ccompile, ../voice
 
-const Stdlib = staticRead("../stdlib.aither")
 
-proc prog(src: string): Node =
-  let stdAst = parseProgram(Stdlib)
-  setSource(stdAst, "stdlib")
-  let userAst = parseProgram(src)
-  setSource(userAst, "patches/test.aither")
-  Node(kind: nkBlock, kids: stdAst.kids & userAst.kids, line: 1)
+proc prog(src: string): string =
+  src
 
 proc rmsAudible(src: string; N: int): tuple[rms, peak: float] =
   let v = newVoice(48000.0)
@@ -39,7 +34,7 @@ proc rmsAudible(src: string; N: int): tuple[rms, peak: float] =
   (sqrt(energy / float(N)), peak)
 
 proc countType(src: string; ty: string): int =
-  let (_, _, _, regions) = generate(prog(src), "", 48000.0)
+  let regions = compile(prog(src), "", 48000.0).regions
   for r in regions:
     if r.typeName == ty: inc result
 

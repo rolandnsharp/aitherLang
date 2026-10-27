@@ -16,7 +16,7 @@
 ## fire for any non-top-level array.
 
 import std/[strutils]
-import ../parser, ../voice, ../codegen
+import ../ccompile, ../voice
 
 # 3a.1: play-local numeric-literal array, used via wave().
 const Local = """
@@ -27,7 +27,7 @@ play pipes:
 pipes
 """
 block autoHoist:
-  let prog = parseProgram(Local)
+  let prog = (Local)
   let v = newVoice(48000.0)
   v.load(prog, 48000.0)
   # Run a handful of ticks; the wave should at minimum produce finite
@@ -55,7 +55,7 @@ play b:
 a + b
 """
 block noCollide:
-  let prog = parseProgram(TwoPlays)
+  let prog = (TwoPlays)
   let v = newVoice(48000.0)
   v.load(prog, 48000.0)
   var peak = 0.0
@@ -75,9 +75,9 @@ play t:
   wave(1.0, notes)
 """
 block dynError:
-  let prog = parseProgram(Dynamic)
+  let prog = (Dynamic)
   try:
-    discard generate(prog, "patches/dyn.aither")
+    discard compile(prog, "patches/dyn.aither")
     doAssert false, "expected error for dynamic array"
   except CatchableError as e:
     doAssert "numeric literal" in e.msg.toLowerAscii() or

@@ -8,7 +8,7 @@
 ## accepted let-prefixed bodies before the migration).
 
 import std/[strutils]
-import ../parser, ../voice
+import ../ccompile, ../voice
 
 # --- 1. Top-level $state increments per sample.
 block topLevelCounter:
@@ -18,7 +18,7 @@ $counter = $counter + 1.0
 $counter
 """
   let v = newVoice(48000.0)
-  v.load(parseProgram(P), 48000.0)
+  v.load((P), 48000.0)
   for _ in 1 .. 10: discard v.tick(0.0)
   let s = v.tick(0.0)
   doAssert abs(s.l - 11.0) < 1e-9,
@@ -38,7 +38,7 @@ let b = step()
 a + b * 100
 """
   let v = newVoice(48000.0)
-  v.load(parseProgram(P), 48000.0)
+  v.load((P), 48000.0)
   let s = v.tick(0.0)
   doAssert abs(s.l - 101.0) < 1e-9,
     "two call sites should each be 1 → a+b*100 = 101, got " & $s.l
@@ -59,7 +59,7 @@ play tick:
 tick[0]
 """
   let v = newVoice(48000.0)
-  v.load(parseProgram(P), 48000.0)
+  v.load((P), 48000.0)
   for _ in 1 .. 4: discard v.tick(0.0)
   let s = v.tick(0.0)
   doAssert abs(s.l - 5.0) < 1e-9,
@@ -76,7 +76,7 @@ sum(4, n =>
   $c)
 """
   let v = newVoice(48000.0)
-  v.load(parseProgram(P), 48000.0)
+  v.load((P), 48000.0)
   let s1 = v.tick(0.0)
   doAssert abs(s1.l - 4.0) < 1e-9,
     "after 1 tick, four iters at $c=1 → 4, got " & $s1.l
@@ -95,7 +95,7 @@ sum(2, n =>
   $a + 100.0)
 """
   let v = newVoice(48000.0)
-  v.load(parseProgram(P), 48000.0)
+  v.load((P), 48000.0)
   let s = v.tick(0.0)
   doAssert abs(s.l - 203.0) < 1e-9,
     "sequential $-update should give 203, got " & $s.l
@@ -119,7 +119,7 @@ sum(1, n =>
   $x)
 """
   let v = newVoice(48000.0)
-  v.load(parseProgram(P), 48000.0)
+  v.load((P), 48000.0)
   var maxAbs = 0.0
   var anyNaN = false
   for i in 0 ..< 4800:
@@ -133,14 +133,14 @@ sum(1, n =>
 # --- 7. `var` is an ordinary name: state is written `$name`, and the
 # word is no longer reserved for a migration message.
 block varIsAName:
-  discard parseProgram("let var = 0.5\nvar")
+  parse("let var = 0.5\nvar")
 
 # --- 8. `$ name` (with space between `$` and ident) is invalid. The
 # tokenizer rejects it so the surface rule "the sigil hugs its name"
 # is enforced where the spelling is decided.
 block dollarSpaceRejected:
   try:
-    discard parseProgram("$ x = 0\n$x")
+    parse("$ x = 0\n$x")
     doAssert false, "`$ x` (with space) should error"
   except ParseError as e:
     discard
@@ -155,7 +155,7 @@ $z = 0.0
 $z
 """
   let v = newVoice(48000.0)
-  v.load(parseProgram(P), 48000.0)
+  v.load((P), 48000.0)
   let s = v.tick(0.0)
   doAssert abs(s.l - 0.0) < 1e-9,
     "fresh $z should read 0, got " & $s.l

@@ -23,13 +23,13 @@
 ##   - Lambdas are not first-class: they only appear as a sum() arg.
 
 import std/[math, strutils]
-import ../parser, ../voice, ../codegen
+import ../ccompile, ../voice
 
 # --- 1. sum with literal N: constant lambda body.
 block literalN:
   const P = "sum(5, n => 1.0)"
   let v = newVoice(48000.0)
-  v.load(parseProgram(P), 48000.0)
+  v.load((P), 48000.0)
   let s = v.tick(0.0)
   doAssert abs(s.l - 5.0) < 1e-9,
     "sum(5, n => 1.0) should be 5.0, got " & $s.l
@@ -38,7 +38,7 @@ block literalN:
 block triangleNumber:
   const P = "sum(10, n => n)"
   let v = newVoice(48000.0)
-  v.load(parseProgram(P), 48000.0)
+  v.load((P), 48000.0)
   let s = v.tick(0.0)
   doAssert abs(s.l - 55.0) < 1e-9,
     "sum(10, n => n) should be 55.0, got " & $s.l
@@ -51,7 +51,7 @@ sum(4, n => f * n)
 """
   # f * (1+2+3+4) = 7 * 10 = 70
   let v = newVoice(48000.0)
-  v.load(parseProgram(P), 48000.0)
+  v.load((P), 48000.0)
   let s = v.tick(0.0)
   doAssert abs(s.l - 70.0) < 1e-9,
     "closure-capture of let should give 70.0, got " & $s.l
@@ -65,7 +65,7 @@ scaled_sum(10.0)
 """
   # base=10: 10*1 + 10*2 + 10*3 = 60
   let v = newVoice(48000.0)
-  v.load(parseProgram(P), 48000.0)
+  v.load((P), 48000.0)
   let s = v.tick(0.0)
   doAssert abs(s.l - 60.0) < 1e-9,
     "closure-capture of def param should give 60.0, got " & $s.l
@@ -80,7 +80,7 @@ def fixed_count(amount):
 fixed_count(5)
 """
   let v = newVoice(48000.0)
-  v.load(parseProgram(P), 48000.0)
+  v.load((P), 48000.0)
   let s = v.tick(0.0)
   doAssert abs(s.l - 5.0) < 1e-9,
     "literal propagation through def param should give 5.0, got " & $s.l
@@ -92,7 +92,7 @@ let H = 8
 sum(H, n => 1.0)
 """
   let v = newVoice(48000.0)
-  v.load(parseProgram(P), 48000.0)
+  v.load((P), 48000.0)
   let s = v.tick(0.0)
   doAssert abs(s.l - 8.0) < 1e-9,
     "literal propagation from let should give 8.0, got " & $s.l
@@ -102,7 +102,7 @@ sum(H, n => 1.0)
 block statefulLambda:
   const P = "sum(3, n => sin(TAU * phasor(440.0 * n)))"
   let v = newVoice(48000.0)
-  v.load(parseProgram(P), 48000.0)
+  v.load((P), 48000.0)
   var maxAbs = 0.0
   for i in 0..<2000:
     let s = v.tick(float64(i) / 48000.0)
@@ -115,7 +115,7 @@ block statefulLambda:
 # 4 distinct phasor regions so each harmonic has its own phase state.
 block regionCount:
   const P = "sum(4, n => sin(TAU * phasor(100.0 * n)))"
-  let (_, _, _, regions) = generate(parseProgram(P), "", 48000.0)
+  let regions = compile((P), "", 48000.0).regions
   var phasorCount = 0
   for r in regions:
     if r.typeName == "phasor": inc phasorCount
@@ -128,7 +128,7 @@ block regionCount:
 block nestedSum:
   const P = "sum(3, n => sum(2, m => n * m))"
   let v = newVoice(48000.0)
-  v.load(parseProgram(P), 48000.0)
+  v.load((P), 48000.0)
   let s = v.tick(0.0)
   doAssert abs(s.l - 18.0) < 1e-9,
     "nested sum should give 18.0, got " & $s.l
@@ -138,7 +138,7 @@ block lambdaMisuse:
   const P = "let f = n => n * 2\nf"
   try:
     let v = newVoice(48000.0)
-    v.load(parseProgram(P), 48000.0)
+    v.load((P), 48000.0)
     doAssert false, "lambda stored in let should error"
   except CatchableError as e:
     doAssert "lambda" in e.msg.toLowerAscii(),
@@ -154,7 +154,7 @@ sum($counter, n => n)
 """
   try:
     let v = newVoice(48000.0)
-    v.load(parseProgram(P), 48000.0)
+    v.load((P), 48000.0)
     doAssert false, "sum with runtime-valued N should error"
   except CatchableError as e:
     let m = e.msg.toLowerAscii()
@@ -169,7 +169,7 @@ sum(5, ident_fn)
 """
   try:
     let v = newVoice(48000.0)
-    v.load(parseProgram(P), 48000.0)
+    v.load((P), 48000.0)
     doAssert false, "sum with non-lambda second arg should error"
   except CatchableError as e:
     doAssert "lambda" in e.msg.toLowerAscii(),
@@ -180,35 +180,25 @@ block sumArity:
   const P = "sum(3)"
   try:
     let v = newVoice(48000.0)
-    v.load(parseProgram(P), 48000.0)
+    v.load((P), 48000.0)
     doAssert false, "sum with 1 arg should error"
   except CatchableError as e:
     doAssert "sum" in e.msg.toLowerAscii(),
       "error should mention sum, got: " & e.msg
 
-# --- 14. Multi-arg lambda parses as nkLambda with N params.
-# `(a, b) => a + b` is valid syntax; tryParseParenLambda picks it up
-# at the open paren, restoring on misses so plain grouping `(expr)`
-# still works.
+# --- 14. A multi-arg lambda parses: `(a, b) => a + b` is valid syntax,
+# picked up at the open paren, while plain grouping `(expr)` still works
+# (15 checks what it computes).
 block multiArgParse:
-  let ast = parseProgram("def f(g): g(3, 4)\nf((a, b) => a + b)")
-  # Find the call to f, walk to the lambda arg.
-  var foundLam = false
-  proc walk(n: Node) =
-    if n == nil: return
-    if n.kind == nkLambda and n.params.len == 2 and
-       n.params[0] == "a" and n.params[1] == "b":
-      foundLam = true
-    for k in n.kids: walk(k)
-  walk(ast)
-  doAssert foundLam, "expected nkLambda with params [a, b] in AST"
+  parse("def f(g): g(3, 4)\nf((a, b) => a + b)")
+  parse("(1 + 2) * 3")
 
 # --- 15. Multi-arg lambda inlined through a def-call: 2-arg lambda
 # bound to `g`, body of f calls g(3, 4), result = 3 + 4 = 7.
 block multiArgInline:
   const P = "def f(g): g(3, 4)\nf((a, b) => a + b)"
   let v = newVoice(48000.0)
-  v.load(parseProgram(P), 48000.0)
+  v.load((P), 48000.0)
   let s = v.tick(0.0)
   doAssert abs(s.l - 7.0) < 1e-9,
     "f((a,b) => a+b) where f(g) = g(3,4) should give 7.0, got " & $s.l
@@ -219,7 +209,7 @@ block multiArgAsymmetric:
   const P = "def f(g): g(3, 5)\nf((a, b) => a + b * 2)"
   # 3 + 5 * 2 = 13
   let v = newVoice(48000.0)
-  v.load(parseProgram(P), 48000.0)
+  v.load((P), 48000.0)
   let s = v.tick(0.0)
   doAssert abs(s.l - 13.0) < 1e-9,
     "asymmetric multi-arg lambda should give 13.0, got " & $s.l
@@ -235,7 +225,7 @@ f((a, b) =>
 """
   # (2 + 3)^2 = 25
   let v = newVoice(48000.0)
-  v.load(parseProgram(P), 48000.0)
+  v.load((P), 48000.0)
   let s = v.tick(0.0)
   doAssert abs(s.l - 25.0) < 1e-9,
     "multi-arg lambda with let body should give 25.0, got " & $s.l
@@ -245,7 +235,7 @@ f((a, b) =>
 block parenGroupingPreserved:
   const P = "(2 + 3) * 4"
   let v = newVoice(48000.0)
-  v.load(parseProgram(P), 48000.0)
+  v.load((P), 48000.0)
   let s = v.tick(0.0)
   doAssert abs(s.l - 20.0) < 1e-9,
     "(2 + 3) * 4 should give 20.0, got " & $s.l
@@ -255,7 +245,7 @@ block parenGroupingPreserved:
 block parenSingleArg:
   const P = "def f(g): g(7)\nf((n) => n * 3)"
   let v = newVoice(48000.0)
-  v.load(parseProgram(P), 48000.0)
+  v.load((P), 48000.0)
   let s = v.tick(0.0)
   doAssert abs(s.l - 21.0) < 1e-9,
     "(n) => n*3 invoked as g(7) should give 21.0, got " & $s.l
@@ -267,7 +257,7 @@ block sumRejectsMultiArg:
   const P = "sum(4, (a, b) => a + b)"
   try:
     let v = newVoice(48000.0)
-    v.load(parseProgram(P), 48000.0)
+    v.load((P), 48000.0)
     doAssert false, "sum with multi-arg lambda should error"
   except CatchableError as e:
     doAssert "one parameter" in e.msg or "lambda" in e.msg,
@@ -278,7 +268,7 @@ block lambdaArityMismatch:
   const P = "def f(g): g(1)\nf((a, b) => a + b)"
   try:
     let v = newVoice(48000.0)
-    v.load(parseProgram(P), 48000.0)
+    v.load((P), 48000.0)
     doAssert false, "calling 2-arg lambda with 1 arg should error"
   except CatchableError as e:
     doAssert "arg" in e.msg or "lambda" in e.msg,
@@ -295,7 +285,7 @@ outer((a, b) => a + b)
 """
   # 10 + 20 = 30
   let v = newVoice(48000.0)
-  v.load(parseProgram(P), 48000.0)
+  v.load((P), 48000.0)
   let s = v.tick(0.0)
   doAssert abs(s.l - 30.0) < 1e-9,
     "lambda forwarded through two defs should give 30.0, got " & $s.l
@@ -304,11 +294,11 @@ outer((a, b) => a + b)
 # extras are ignored (not evaluated). Too few is still an error.
 block extraArgs:
   let v = newVoice(48000.0)
-  v.load(parseProgram("def call3(f): f(2, 3, 4)\ncall3((a, b) => a * b)"), 48000.0)
+  v.load(("def call3(f): f(2, 3, 4)\ncall3((a, b) => a * b)"), 48000.0)
   doAssert abs(v.tick(0.0).l - 6.0) < 1e-12, "two of three args"
   try:
     let w = newVoice(48000.0)
-    w.load(parseProgram("def call1(f): f(2)\ncall1((a, b) => a * b)"), 48000.0)
+    w.load(("def call1(f): f(2)\ncall1((a, b) => a * b)"), 48000.0)
     doAssert false, "too few args should error"
   except CatchableError as e:
     doAssert "takes 2 args, got 1" in e.msg, e.msg

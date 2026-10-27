@@ -2,7 +2,7 @@
 
 import std/[os, net, strutils, math, locks, tables, sets, terminal, algorithm, atomics]
 from std/posix import signal, SIGPIPE, SIG_IGN, EINTR, errno, read, write
-import parser, voice, midi, dsp, render, imports
+import voice, midi, dsp, render, ccompile
 import engine_types, cli_output, analysis
 export engine_types
 

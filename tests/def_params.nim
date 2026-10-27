@@ -10,10 +10,10 @@
 ##   - `f(1, k = 3)` names an argument; positional first, then named
 
 import std/strutils
-import ../parser, ../voice, ../codegen
+import ../ccompile, ../voice
 
 proc render(src: string; n = 480): seq[float64] =
-  let prog = parseProgram(src)
+  let prog = (src)
   let v = newVoice(48000.0)
   v.load(prog, 48000.0)
   for i in 0 ..< n:
@@ -23,7 +23,7 @@ proc render(src: string; n = 480): seq[float64] =
 
 proc errorOf(src: string): string =
   try:
-    discard generate(parseProgram(src), "patches/x.aither")
+    discard compile((src), "patches/x.aither")
     doAssert false, "expected a compile error"
   except CatchableError as e:
     return e.msg

@@ -3,7 +3,7 @@
 ## preserves part gains by name.
 
 import std/[math]
-import ../parser, ../voice
+import ../ccompile, ../voice
 
 # Three plays: scalar, scalar-but-different, and explicit stereo.
 # Final expression references them both as a sum (stereo broadcast) and
@@ -16,7 +16,7 @@ play b:
 a + b
 """
 
-let prog = parseProgram(PatchA)
+let prog = (PatchA)
 let v = newVoice(48000.0)
 v.load(prog, 48000.0)
 
@@ -56,7 +56,7 @@ play b:
   [sin(TAU * phasor(219)) * 0.3, sin(TAU * phasor(222)) * 0.3]
 a + b
 """
-v.load(parseProgram(PatchB), 48000.0)
+v.load((PatchB), 48000.0)
 doAssert v.partGains[0] == 0.0,
   "hot reload should preserve part 'a' gain of 0.0, got " & $v.partGains[0]
 doAssert v.partGains[1] == 1.0,

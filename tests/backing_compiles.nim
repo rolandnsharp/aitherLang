@@ -9,17 +9,12 @@
 ## ears.
 
 import std/[math, strutils]
-import ../parser, ../voice, ../codegen
+import ../ccompile, ../voice
 
-const Stdlib = staticRead("../stdlib.aither")
 const Patch = staticRead("../patches/backing.aither")
 
 proc loadProgram(): NativeVoice =
-  let stdAst = parseProgram(Stdlib)
-  setSource(stdAst, "stdlib")
-  let userAst = parseProgram(Patch)
-  setSource(userAst, "patches/backing.aither")
-  let prog = Node(kind: nkBlock, kids: stdAst.kids & userAst.kids, line: 1)
+  let prog = Patch
   result = newVoice(48000.0)
   result.load(prog, 48000.0)
 
@@ -56,10 +51,9 @@ doAssert rms > 0.005,
 # Region-level smoke check: confirm the codegen unrolled the spectral
 # stuff. additive(..., 8) at three pads + 6 partials at two more =
 # many phasors. Just check there are >40 (catches a broken unroll).
-let (_, _, parts, regions) = generate(
-  Node(kind: nkBlock,
-       kids: parseProgram(Stdlib).kids & parseProgram(Patch).kids, line: 1),
-  "patches/backing.aither", 48000.0)
+let gen = compile(Patch, "patches/backing.aither", 48000.0)
+let parts = gen.partNames
+let regions = gen.regions
 var phasorCount = 0
 for r in regions:
   if r.typeName == "phasor": inc phasorCount

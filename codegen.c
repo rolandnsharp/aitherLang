@@ -1,9 +1,7 @@
-/* aither to C (codegen.h). A port of codegen.nim, procedure for
- * procedure and in the same order, so that it writes the same C text for
- * every patch, temporaries' numbers included (make codegen-check). Nim
- * evaluates arguments left to right and C promises no order, so every
- * call that numbers a temporary or registers a region is sequenced into
- * its own statement. */
+/* aither to C (codegen.h). C promises no order for evaluating a
+ * call's arguments, so every call that numbers a temporary or registers
+ * a region is sequenced into its own statement: the C written for a
+ * patch is the same on every build. */
 
 #include <setjmp.h>
 #include <stdarg.h>

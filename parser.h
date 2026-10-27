@@ -34,8 +34,7 @@ Arena* arena_new(void);
 void arena_free(Arena* a);
 void* arena_alloc(Arena* a, unsigned long n);     /* zeroed */
 
-/* Parse a program. NULL on a parse error, with the message in `err`
- * (as the Nim parser words it). */
+/* Parse a program. NULL on a parse error, with the message in `err`. */
 Node* parse_program(Arena* a, const char* source, char* err, int errlen);
 
 /* Does the program call `input()` anywhere? */
@@ -43,8 +42,5 @@ int calls_input(const Node* n);
 
 /* Stamp every node of a subtree with its source. */
 void set_source(Arena* a, Node* n, const char* source);
-
-/* The tree as text, one form per node, for comparing parsers. */
-void dump_node(const Node* n, char** buf, long* len, long* cap);
 
 #endif

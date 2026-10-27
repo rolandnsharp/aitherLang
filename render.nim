@@ -12,9 +12,9 @@
 ## iterated on offline against the same material every time.
 
 import std/[os, math, strutils, sets]
-import parser, voice, dsp, engine_types, imports, ccompile
+import voice, dsp, engine_types, ccompile
+export ccompile.Stdlib
 
-const Stdlib* = staticRead("stdlib.aither")
 
 type
   RenderError* = object of CatchableError
@@ -114,31 +114,12 @@ proc renderVoice*(v: NativeVoice; seconds: float64; sr: int;
       rms: (if n > 0: sqrt(sumSq[p] / float64(n)) else: 0.0), peak: peak[p],
       low: (if sumSq[p] > 0.0: min(1.0, lowSq[p] / sumSq[p]) else: 0.0))
 
-proc renderProgram(prog: Node; seconds: float64; sr: int;
-                   input: Stereo; skip = 0.0): Rendered =
-  let v = newVoice(float64(sr))
-  v.load(prog, float64(sr))
-  renderVoice(v, seconds, sr, input, skip)
-
 proc renderSource(src, tag: string; seconds: float64; sr: int;
                   input: Stereo; skip = 0.0): Rendered =
   ## A patch's source through the compiler in C, rendered.
   let v = newVoice(float64(sr))
   v.loadSource(Stdlib, src, tag, float64(sr))
   renderVoice(v, seconds, sr, input, skip)
-
-proc buildProgram*(src, srcTag: string): Node =
-  let stdAst = parseProgram(Stdlib)
-  setSource(stdAst, "stdlib")
-  var userAst = parseProgram(src)
-  setSource(userAst, srcTag)
-  # Imports resolve against the patch's directory (the current directory
-  # for inline source).
-  var files: seq[string]
-  var seen = initHashSet[string]()
-  let fromPath = if srcTag == "<inline>": "" else: srcTag
-  userAst = expandImports(userAst, fromPath, files, seen)
-  Node(kind: nkBlock, kids: stdAst.kids & userAst.kids, line: 1)
 
 proc renderPatchSrc*(src: string; seconds: float64;
                      sr: int = 48000; input: Stereo = (@[], @[])): Stereo =
@@ -151,14 +132,14 @@ proc renderPatchSrc*(src: string; seconds: float64;
 proc patchCallsInput*(srcPath: string): bool =
   ## Does the patch (with its imports) call `input()`? `audit` reads
   ## stdin only then.
-  compileSource(Stdlib, readFile(srcPath), srcPath, "", 48000.0).callsInput
+  callsInput(readFile(srcPath), srcPath)
 
 proc renderPatchFull*(srcPath: string; seconds: float64; sr: int = 48000;
                       input: Stereo = (@[], @[]); skip = 0.0): Rendered =
   ## Render a patch from disk, with per-part levels. `skip` seconds run
   ## first and aren't kept, to reach a later section. Raises IOError if
-  ## the file doesn't exist; ParseError / ValueError propagate from
-  ## parser / codegen.
+  ## the file doesn't exist; ParseError / ImportError / ValueError
+  ## propagate from the compiler.
   if not fileExists(srcPath):
     raise newException(IOError, "patch not found: " & srcPath)
   let src = readFile(srcPath)

@@ -10,11 +10,11 @@
 ## accidentally break what's been load-bearing for the docs all along.
 
 import std/[strutils]
-import ../parser, ../voice
+import ../ccompile, ../voice
 
 proc evalAt(src: string): float64 =
   let v = newVoice(48000.0)
-  v.load(parseProgram(src), 48000.0)
+  v.load((src), 48000.0)
   v.tick(0.0).l
 
 # --- 1. 5-arm chain inside a def body, indented form.

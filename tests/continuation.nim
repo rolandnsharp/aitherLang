@@ -6,11 +6,11 @@
 ## BUGS_AND_ISSUES.md issue 4. Every program this accepts was a parse
 ## error before; the whole patch corpus parses to identical trees.
 
-import ../parser, ../voice
+import ../ccompile, ../voice
 
 proc evalAt(src: string): float64 =
   let v = newVoice(48000.0)
-  v.load(parseProgram(src), 48000.0)
+  v.load((src), 48000.0)
   v.tick(0.0).l
 
 proc near(got, want: float64; what: string) =

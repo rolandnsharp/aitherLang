@@ -2,7 +2,7 @@
 ## back to the aither source file.
 
 import std/[os, strutils]
-import ../parser, ../codegen
+import ../ccompile
 
 const Src = """
 let trig = impulse(2)
@@ -10,8 +10,8 @@ let env = discharge(trig, 12)
 sin(TAU * phasor(50)) * env
 """
 
-let prog = parseProgram(Src)
-let (csrc, _, _, _) = generate(prog, "patches/fake.aither")
+let prog = (Src)
+let csrc = compile(prog, "patches/fake.aither").csrc
 
 # Expected directives at the three source lines (1, 2, 3).
 for n in [1, 2, 3]:

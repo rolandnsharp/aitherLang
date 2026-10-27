@@ -6,14 +6,11 @@
 ## independent and still the same on every run (render stays repeatable).
 
 import std/math
-import ../parser, ../voice
+import ../ccompile, ../voice
 
-const Stdlib = staticRead("../stdlib.aither")
 
 proc loadWith(src: string): NativeVoice =
-  let stdAst = parseProgram(Stdlib)
-  let userAst = parseProgram(src)
-  let program = Node(kind: nkBlock, kids: stdAst.kids & userAst.kids, line: 1)
+  let program = src
   result = newVoice(48000.0)
   result.load(program, 48000.0)
 

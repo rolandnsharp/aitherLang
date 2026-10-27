@@ -4,15 +4,11 @@
 ## by a sample the picture would shear. Run through tick_block, the
 ## engine's path, which sets t from its own second/fraction clock.
 
-import ../parser, ../voice
-
-const Stdlib = staticRead("../stdlib.aither")
+import ../ccompile, ../voice
 
 proc voiceOf(src: string; sr: float64): NativeVoice =
-  let prog = Node(kind: nkBlock, line: 1,
-                  kids: parseProgram(Stdlib).kids & parseProgram(src).kids)
   result = newVoice(sr)
-  result.load(prog, sr)
+  result.load(src, sr)
 
 # n samples from the engine's start, in blocks of 7 so block edges fall
 # everywhere.

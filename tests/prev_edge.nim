@@ -13,14 +13,11 @@
 ## behaviour plus the basic sample-delay invariants.
 
 import std/[strutils, atomics]
-import ../parser, ../voice, ../midi
+import ../ccompile, ../voice, ../midi
 
-const Stdlib = staticRead("../stdlib.aither")
 
 proc loadWith(src: string): NativeVoice =
-  let stdAst = parseProgram(Stdlib)
-  let userAst = parseProgram(src)
-  let program = Node(kind: nkBlock, kids: stdAst.kids & userAst.kids, line: 1)
+  let program = src
   result = newVoice(48000.0)
   result.load(program, 48000.0)
 
