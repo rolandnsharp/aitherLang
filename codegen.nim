@@ -1629,7 +1629,6 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
     of "t":       "s->t"
     of "sr":      "s->sr"
     of "dt":      "s->dt"
-    of "sweep":   "((s->t) - (s->sweep_origin))"
     of "PI":      "3.14159265358979323846"
     of "TAU":     "(2.0 * 3.14159265358979323846)"
     else:
@@ -1650,6 +1649,8 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
           "side with " & n.str & "[0] / " & n.str & "[1], or use mono(" &
           n.str & ") " & errLoc(n))
       elif n.str in c.topLets:
+        if n.str notin c.letsDone and n.str == "sweep":
+          return "((s->t) - (s->sweep_origin))"     # the built-in, until the let
         if n.str notin c.letsDone:
           raise newException(ValueError,
             "'" & n.str & "' is used before its `let` on line " &
@@ -1657,6 +1658,7 @@ proc emitExpr(c: Ctx; sc: Scope; n: Node): string =
             "this line " & errLoc(n))
         "l_" & n.str
       elif n.str in c.topVarSet: "s->v_" & n.str
+      elif n.str == "sweep": "((s->t) - (s->sweep_origin))"    # a patch's own `sweep` comes first
       else:
         raise newException(ValueError,
           "unknown identifier: " & n.str & " " & errLoc(n))

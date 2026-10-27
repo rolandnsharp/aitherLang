@@ -1680,16 +1680,22 @@ static void decide_var(Ctx* c, Node* st);
 static Node* file_var_decl(Ctx* c, const char* name);
 
 /* A name's value: a scope's binding, then the file's. */
+/* A built-in name's value, or NULL. A name the patch binds comes first:
+ * `let sweep = ...` is the patch's own. */
+static const char* builtin_value(const char* s) {
+  if (eq(s, "t")) return "s->t";
+  if (eq(s, "sr")) return "s->sr";
+  if (eq(s, "dt")) return "s->dt";
+  /* The voice's own time: a sweep from the origin the engine sets (a
+   * new voice, `aither sweep`), so a patch never subtracts. */
+  if (eq(s, "sweep")) return "((s->t) - (s->sweep_origin))";
+  if (eq(s, "PI")) return "3.14159265358979323846";
+  if (eq(s, "TAU")) return "(2.0 * 3.14159265358979323846)";
+  return NULL;
+}
+
 static V emit_ident(Ctx* c, Scope* sc, Node* n) {
   const char* s = n->str;
-  if (eq(s, "t")) return mono("s->t");
-  if (eq(s, "sr")) return mono("s->sr");
-  if (eq(s, "dt")) return mono("s->dt");
-  /* The voice's own time: a sweep from the origin the engine sets
-   * (send, retrigger, locate), so a patch never subtracts. */
-  if (eq(s, "sweep")) return mono("((s->t) - (s->sweep_origin))");
-  if (eq(s, "PI")) return mono("3.14159265358979323846");
-  if (eq(s, "TAU")) return mono("(2.0 * 3.14159265358979323846)");
   for (Scope* x = sc; x; x = x->parent) {
     Ent* e = lfind(x->names, s);
     if (e) return mono(e->a);
@@ -1707,6 +1713,7 @@ static V emit_ident(Ctx* c, Scope* sc, Node* n) {
   if (has(&c->pair_vars, s)) return vpair(pair_var_ref(c, s, 0), pair_var_ref(c, s, 1));
   if (has(&c->top_lets, s)) {
     if (!has(&c->lets_done, s)) {
+      if (builtin_value(s)) return mono(builtin_value(s));   /* the built-in, until the let */
       Ent* ll = hfind(&c->let_lines, s);
       fail(c, "'%s' is used before its `let` on line %ld: move that let above this line %s",
            s, ll ? ll->n : 0L, err_loc(c, n));
@@ -1721,6 +1728,8 @@ static V emit_ident(Ctx* c, Scope* sc, Node* n) {
     decide_var(c, file_var_decl(c, s));
     return emit_ident(c, sc, n);
   }
+  const char* b = builtin_value(s);
+  if (b) return mono(b);
   fail(c, "unknown identifier: %s %s", s, err_loc(c, n));
   return mono("");
 }
