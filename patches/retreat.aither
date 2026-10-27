@@ -1,9 +1,7 @@
 # retreat — 20 minutes, tonal centre on D, four sections.
 # arriving (0-5min) → deepening (5-10) → stillness (10-15) → emerging (15-20)
 
-$elapsed    = 0
-$elapsed    = $elapsed + dt
-let pos    = $elapsed
+let pos    = sweep
 let breath = (sin(TAU * pos / 30 - PI / 2) + 1) * 0.5   # 30s breath
 
 # --- section gates (ease-in / ease-out envelopes, non-overlapping middle) ---

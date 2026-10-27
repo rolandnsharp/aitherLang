@@ -193,5 +193,33 @@ block gapless:
   discard g.waitExit()
   g.close()
 
+# --- 10. `sweep`: a voice's own time, read and set over the socket. The
+# patch plays its sweep (in thousands of seconds) as its left side.
+block sweepCmd:
+  writeFile(dir / "sw.aither", "[sweep / 1000, 0]\n")
+  let w = start("sw.aither")
+  w.inputStream.close()
+  waitUp()
+  proc lastLeft(): float32 =
+    let got = w.outputStream.readStr(512 * 8)
+    doAssert got.len == 512 * 8, "the stream ended early"
+    copyMem(addr result, unsafeAddr got[511 * 8], 4)
+  discard lastLeft()
+  let r = ask("sweep sw")
+  doAssert r.startsWith("OK"), "sweep sw: " & r
+  let at = parseFloat(r.splitLines()[1])
+  doAssert at >= 0 and at < 30, "a new voice's sweep starts near 0: " & r
+  doAssert ask("sweep sw 500").startsWith("OK")
+  var v = 0'f32
+  for _ in 0 ..< 200:                   # blocks already in the pipe come first
+    v = lastLeft()
+    if v > 0.49: break
+  doAssert v > 0.499 and v < 0.52, "after sweep 500 the patch reads about 500 s: " & $v
+  doAssert ask("sweep nobody").startsWith("ERR"), "an unknown voice"
+  doAssert ask("sweep sw soon").startsWith("ERR"), "seconds must be a number"
+  doAssert "OK" in ask("kill")
+  discard w.waitExit()
+  w.close()
+
 echo "engine_live ok"
 quit(0)       # through the exit procs: the watchdog thread is still alive

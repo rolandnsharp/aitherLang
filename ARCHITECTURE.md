@@ -200,7 +200,7 @@ brief mutex).
 - Hot-swap: snapshot old part gains by name, parse + compile new,
   migrate state by region identity, swap function pointers, restore
   matching part gains. New parts default to gain 1.
-- `retrigger`: reset `startT` so the composition clock restarts.
+- `sweep <voice> [seconds]`: read or set the voice's sweep (its origin on the engine clock).
 
 ### Voice slot lifecycle
 

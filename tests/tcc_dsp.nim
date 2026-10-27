@@ -25,7 +25,7 @@ typedef struct {
   /* 7 bytes padding */
   double sr;
   /* --- aither voice fields --- */
-  double t, dt;
+  double t, dt, sweep_origin;
 } VoiceState;
 
 #ifndef M_PI
@@ -51,7 +51,7 @@ doAssert s.relocate() == 0
 type
   VState = object
     state: DspState
-    t, dt: float64
+    t, dt, sweep_origin: float64
   TickFn = proc (s: ptr VState): float64 {.cdecl.}
 
 echo "sizeof DspState  = ", sizeof(DspState)

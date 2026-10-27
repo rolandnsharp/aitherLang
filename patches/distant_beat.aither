@@ -5,9 +5,7 @@
 # One pipe per let: chained pipes and piping straight out of a call
 # currently miscompile.
 
-$elapsed    = 0
-$elapsed    = $elapsed + dt
-let pos    = $elapsed
+let pos    = sweep
 let fadeIn = ease(pos / 8)
 
 # one bar = 4 beats at 72 BPM = 3.33 s

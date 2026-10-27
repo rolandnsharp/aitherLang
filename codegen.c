@@ -1685,6 +1685,9 @@ static V emit_ident(Ctx* c, Scope* sc, Node* n) {
   if (eq(s, "t")) return mono("s->t");
   if (eq(s, "sr")) return mono("s->sr");
   if (eq(s, "dt")) return mono("s->dt");
+  /* The voice's own time: a sweep from the origin the engine sets
+   * (send, retrigger, locate), so a patch never subtracts. */
+  if (eq(s, "sweep")) return mono("((s->t) - (s->sweep_origin))");
   if (eq(s, "PI")) return mono("3.14159265358979323846");
   if (eq(s, "TAU")) return mono("(2.0 * 3.14159265358979323846)");
   for (Scope* x = sc; x; x = x->parent) {
@@ -2448,7 +2451,7 @@ static const char* emit_program(Ctx* c, Node* program) {
     "  long   idx;\n"
     "  char   overflow;\n"
     "  double sr;\n"
-    "  double t, dt;\n"
+    "  double t, dt, sweep_origin;\n"
     "  double* part_gains;\n"
     "  double* part_out;\n"
     "  double* part_park;\n"

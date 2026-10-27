@@ -138,45 +138,62 @@ A few consequences worth knowing:
 
 ## The composition clock
 
-`t` is the one clock: seconds since the engine started, the same
-for every voice, so `sin(TAU * 440 * t)` is a wave of the one time
-and two voices agree on what now is. A piece's *own* time, how
-long it has been playing, isn't a second clock. It is something the
-piece lives through, so it is state:
+Two clocks, each with one job:
+
+- `t` is the one clock, seconds since the engine started, the same
+  for every voice: `sin(TAU * 440 * t)` is a wave of the one time,
+  and two voices agree on what now is.
+- `sweep` is this piece's own time, seconds along its timeline. Picture
+  an oscilloscope: the beam is *swept* across the screen at a steady
+  speed, and where it is says what time it is on that screen. Lay the
+  piece out left to right, 0:00 at the left edge; `sweep` is where the
+  piece's beam is.
+
+```
+let fade  = ease(sweep / 20)                   # fade in over the first 20 seconds
+let b     = ease((sweep - 55) / 10)            # cross to section B around 1:00
+let swell = exp(-pow((sweep - 150) / 40, 2))   # a climax peaking at 2:30
+```
+
+The engine holds the sweep, as an oscilloscope's sweep is triggered
+from outside: sending a new voice starts it at 0, sending an edit
+lets it run on, and you can move it while it plays:
+
+```
+aither sweep cathedral          # where its beam is: 143.2
+aither sweep cathedral 150      # jump to the bells at 2:30
+aither sweep cathedral 0        # from the top
+```
+
+It is `t` less the moment the beam was last set, so it is exact, and
+moving it costs nothing.
+
+**Time as lived state.** Sometimes a piece wants a time a jump
+shouldn't touch: how long this voice has really been playing, so a
+slow drift carries on however you move around the piece. That is state,
+an integral the piece lives through sample by sample:
 
 ```
 $elapsed = 0
-$elapsed = $elapsed + dt   # one sample's time more, every sample
-let pos = $elapsed         # seconds since the piece began
+$elapsed = $elapsed + dt     # one sample's time more, every sample
 ```
 
-This is PHILOSOPHY's duality at work: `sin(TAU * 440 * t)` is
-Pythagorean, a wave that exists at every time at once; `$elapsed`
-is Heraclitean, an integral, known only by living through every
-sample before it. Because it is ordinary state it does the right
-thing on its own: `send` keeps it (an edit doesn't restart the
-piece), and `retrigger`, or sending a stopped voice again, starts it
-from 0, as the voice is born again.
-
-Name it for what it means in the piece. Some names, and the
-picture each carries:
+`send` keeps it, as any state, and no `sweep` moves it. Name it for
+what it means in the piece; some names, and the picture each carries:
 
 | name | the picture |
 |------|-------------|
 | `$elapsed` | the plain word: time gone by since the start |
-| `$sweep` | an oscilloscope's timebase: triggered at the start, running linearly, starting over on a new trigger |
 | `$ramp` | the waveform it is: a sawtooth that never wraps, `phasor`'s sibling |
 | `$timebase` | an analogue computer's independent variable: an integrator fed a steady voltage from the moment the machine goes to *operate* |
-| `$age` | how long the piece has lived |
-| `$pos` | where the piece's head is, as on a tape |
+| `$age` | how long the voice has lived |
 | `$proper` | physics' proper time: the clock carried *with* the voice, where `t` is the time everyone shares |
 
-Adding `dt` drifts by microseconds over an hour, nothing you can
-hear in a fade or a section. Where it must be exact, count samples:
-`$n = 0`, `$n = $n + 1`, and `$n * dt` is the time.
+Adding `dt` drifts by microseconds over an hour, nothing you can hear;
+where it must be exact, count samples (`$n = $n + 1`, and `$n * dt`).
 
-`pos` is your composition timeline. Shape the piece as a
-function of `pos`:
+`sweep` (often bound as `let pos = sweep`) is your composition
+timeline. Shape the piece as a function of it:
 
 - fade-in, steady, fade-out → smoothstep ramps of `pos`
 - section changes → crossfades keyed on `pos`

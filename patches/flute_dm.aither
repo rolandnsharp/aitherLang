@@ -1,9 +1,7 @@
 # flute_dm — a low, slow flute line in D minor (bass-flute register, from D3).
 # Same voice as flute.aither: breathy sine + odd harmonics + vibrato, legato.
 
-$elapsed = 0
-$elapsed = $elapsed + dt
-let pos = $elapsed
+let pos = sweep
 
 # fade in over 4s.
 let fadeIn = ease(pos / 4)

@@ -1,9 +1,7 @@
 # phi_bush — bush doof on Pythagorean ratios + golden ratio.
 # Conservative reconstruction after NaN debugging.
 
-$elapsed    = 0
-$elapsed    = $elapsed + dt
-let pos    = $elapsed
+let pos    = sweep
 let fadeIn = ease(pos / 4)
 let tempo  = 145 / 60
 

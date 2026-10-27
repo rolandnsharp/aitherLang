@@ -27,9 +27,8 @@
 # ▶ NEW IDEAS IN THE CODE
 #
 #   t          seconds since the engine started
-#   $elapsed   state: it keeps its value from one sample to
-#              the next. Adding dt (one sample's time) each
-#              sample makes it the seconds since this piece began.
+#   sweep      seconds since this file was sent: where the
+#              piece's beam is on its own timeline
 #   let pos    a name for a value. pos = seconds since send.
 #   int(x)     drops the fraction: int(4.7) = 4
 #   mod        remainder: 5 mod 4 = 1. So "which" counts
@@ -37,9 +36,7 @@
 #   if/else    picks one value. Each else-if is a new line.
 
 play tour:
-  $elapsed   = 0
-  $elapsed   = $elapsed + dt
-  let pos   = $elapsed
+  let pos   = sweep
   let which = int(pos / 3) mod 4
   if which == 0 then osc(sin, 220) * 0.2
   else if which == 1 then osc(tri, 220) * 0.2

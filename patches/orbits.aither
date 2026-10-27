@@ -16,9 +16,7 @@
 #
 #   ./aither patches/orbits.aither | tools/play hw:rockchipes8388c 20 | tools/scope
 
-$elapsed = 0
-$elapsed = $elapsed + dt
-let pos = $elapsed
+let pos = sweep
 let fin = ease(pos / 6)
 
 # Four chords of 24 s; each voice glides to the next over the last 8.

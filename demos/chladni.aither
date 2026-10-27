@@ -26,9 +26,7 @@ let h = 27
 let k = pixel_index(w, h)
 let x = k % w
 let y = int(k / w)
-$elapsed = 0
-$elapsed = $elapsed + dt
-let pos = $elapsed
+let pos = sweep
 let edge = x == 0 or y == 0 or x == w - 1 or y == h - 1    # clamped
 
 # The drive: one point near a corner, where Chladni bowed, chosen to reach

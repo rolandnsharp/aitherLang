@@ -10,9 +10,7 @@
 # centered. A long reverb glues the whole field together. The piece
 # resolves to filtered noise as the drone dissolves into texture.
 
-$elapsed    = 0
-$elapsed    = $elapsed + dt
-let pos    = $elapsed
+let pos    = sweep
 let fadeIn = ease(pos / 4)
 
 # --- the fractal: same triangle, three timescales ---------------------

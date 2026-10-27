@@ -25,9 +25,7 @@
 #   K7 (CC 19) — REVERB           right = drowns in cathedral wash
 #   K8 (CC 16) — DRIVE            right = saturates the master to fat distortion
 
-$elapsed    = 0
-$elapsed    = $elapsed + dt
-let pos    = $elapsed
+let pos    = sweep
 let fadeIn = ease(pos / 4)
 let tempo  = 130 / 60.0
 

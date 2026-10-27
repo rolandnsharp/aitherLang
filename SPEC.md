@@ -33,18 +33,15 @@ gets a float.
 | `t`       | time in seconds since engine start     |
 | `sr`      | sample rate (48000)                    |
 | `dt`      | 1 / sample rate                        |
+| `sweep`   | this voice's own time: seconds along its timeline |
 | `PI`      | 3.14159...                             |
 | `TAU`     | 6.28318... (2π)                        |
 
-`t` is the one clock. A piece's own time, seconds since it began,
-is state it lives through (COMPOSING.md, "The composition clock"):
-
-```
-$elapsed = 0
-$elapsed = $elapsed + dt
-```
-
-`send` keeps it, as any state; `retrigger` starts it again.
+`t` is the one clock, shared by every voice. `sweep` is this voice's
+own: 0 when it is first sent, running on through edits, and set with
+`aither sweep <voice> <seconds>` (COMPOSING.md, "The composition
+clock"). It is `t` less the moment it was last set: exact, and free
+to move.
 
 ## State
 
@@ -1267,7 +1264,7 @@ output) gets a fixed loop delay. A block is `AITHER_BUFFER` frames
 | `clear [fade]`                   | stop all voices                            |
 | `list`                           | show active voices and their parts         |
 | `status`                         | `list` plus the master level               |
-| `retrigger <voice>`              | reset the voice's state: it plays from the top |
+| `sweep <voice> [seconds]`        | where the voice's sweep is; with seconds, set it (0: from the top) |
 | `kill`                           | shut down engine                           |
 
 ### Part-level
@@ -1519,9 +1516,7 @@ def ease(x):
   let c = clamp(x, 0, 1)
   c * c * (3 - 2 * c)
 
-$elapsed   = 0
-$elapsed   = $elapsed + dt
-let pos    = $elapsed
+let pos    = sweep
 let breath = (sin(TAU * pos / 20) + 1) * 0.5
 
 play drone:

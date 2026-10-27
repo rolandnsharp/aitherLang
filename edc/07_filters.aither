@@ -39,9 +39,7 @@
 #          drifts slowly, like wind through a gap.
 
 play wah:
-  $elapsed    = 0
-  $elapsed    = $elapsed + dt
-  let pos    = $elapsed
+  let pos    = sweep
   let sweep  = (sin(TAU * pos / 8) + 1) * 0.5
   let cutoff = 200 + sweep * 2800
   (osc(saw, 110) |> lpf(cutoff, 0.8)) * 0.25

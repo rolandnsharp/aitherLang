@@ -68,7 +68,7 @@ doAssert s.relocate() == 0
 type
   VState = object
     state: DspState
-    t, dt: float64
+    t, dt, sweep_origin: float64
     partGainsPtr: pointer
     partOutPtr: pointer
     vars: array[32, float64]      # plenty of room

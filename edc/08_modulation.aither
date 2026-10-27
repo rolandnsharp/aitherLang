@@ -23,8 +23,7 @@
 #
 # ▶ THE COMPOSITION CLOCK
 #
-#   pos ($elapsed, adding dt every sample) is seconds since
-#   you sent the file.
+#   pos = sweep is seconds since you sent the file.
 #   ease(pos / 3) glides smoothly from 0 to 1 over the first
 #   3 seconds and stays at 1: a fade-in. Shape a whole piece
 #   as a function of pos and you're composing.
@@ -42,9 +41,7 @@
 #   drone   a low pad that breathes in volume and slowly,
 #           never-repeatingly, opens and closes its filter.
 
-$elapsed = 0
-$elapsed = $elapsed + dt
-let pos = $elapsed
+let pos = sweep
 
 play singer:
   let vibDepth = ease((pos - 2) / 4) * 5

@@ -1,9 +1,7 @@
 # bass — a pair of deep drones on D and A (root + fifth), slowly beating.
 # mono; strictly below 150 Hz; 15-second fade-in so it enters unnoticed.
 
-$elapsed    = 0
-$elapsed    = $elapsed + dt
-let pos    = $elapsed
+let pos    = sweep
 let fadeIn = ease(pos / 15)
 let breath = (sin(TAU * pos / 45 - PI / 2) + 1) * 0.5    # 45s cycle, out of step with retreat's 30s
 

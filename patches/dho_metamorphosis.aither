@@ -33,9 +33,7 @@
 #   ~1:25  A's output IS B's force; B's amplitude IS A's slow ripple.
 #          Oscillator and modulator are no longer fixed identities.
 
-$elapsed = 0
-$elapsed = $elapsed + dt
-let pos = $elapsed
+let pos = sweep
 
 # Damping arc on A. Starts at 0.00001 — low enough that the single
 # kickoff impulse rings cleanly through the whole 30 s of phase 1

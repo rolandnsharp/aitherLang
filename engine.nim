@@ -509,8 +509,8 @@ proc loadPatch*(filename: string; fadeIn: float64): string =
     let retrigger = (not slots[idx].active) or
                     slots[idx].fadeGain <= 0.0 or
                     slots[idx].fadeDelta < 0.0       # interrupting a fade-out
-    if retrigger:                          # a stopped voice sent again is born again
-      slots[idx].voice.restart()
+    if retrigger:
+      slots[idx].voice.sweepOrigin = now
       slots[idx].active = true
       slots[idx].fadeGain = if fadeIn > 0.0: 0.0 else: 1.0
       slots[idx].fadeDelta = if fadeIn > 0.0: fadeDeltaFor(fadeIn) else: 0.0
@@ -525,6 +525,7 @@ proc loadPatch*(filename: string; fadeIn: float64): string =
       return "voice limit reached (" & $MaxVoices & ")"
     let voice = newVoice(float64(SampleRate))
     voice.commit(prepared)
+    voice.sweepOrigin = now
     slots[slotCount] = Slot(
       name: baseName, voice: voice, active: true,
       fadeGain: (if fadeIn > 0.0: 0.0 else: 1.0),
@@ -579,6 +580,7 @@ proc tryPatch*(filename: string; seconds, skip: float64): string =
   let origin =
     if scratch.state != nil: "live state of " & baseName
     else: "fresh state (no live voice " & baseName & ")"
+  if scratch.state == nil: scratch.sweepOrigin = now
   scratch.commit(prepared)
   let head = "try: " & baseName & " from " & origin & ", t=" &
              formatFloat(now + skip, ffDecimal, 1) & "s, " &
@@ -659,13 +661,23 @@ proc profileVoice(name: string; seconds: float64): string =
     shown += tm
   o.strip(leading = false)
 
-proc retriggerVoice(name: string): string =
+proc sweepVoice(name: string; seconds: float64): string =
+  ## Set a voice's sweep: from the next sample it reads `seconds` and runs
+  ## on. 0 plays the piece from the top.
   let idx = findSlot(name)
   if idx < 0: return "not found: " & name
   lockForCommand()
-  slots[idx].voice.restart()
+  slots[idx].voice.sweepOrigin = timeSec + timeFrac - seconds
   release(mtx)
   ""
+
+proc sweepOf(name: string): tuple[secs: float64; found: bool] =
+  ## Where a voice's sweep is now.
+  let idx = findSlot(name)
+  if idx < 0: return (0.0, false)
+  lockForCommand()
+  result = (timeSec + timeFrac - slots[idx].voice.sweepOrigin, true)
+  release(mtx)
 
 proc markStoppedForTest*(name: string): bool =
   ## Test-only: forcibly mark a voice inactive, simulating the audio
@@ -1040,9 +1052,17 @@ proc handleCmd(line: string): string =
     else:
       let summary = analyze(buf, float64(SampleRate))
       "OK\n" & formatSpectrum(summary)
-  of "retrigger":
-    if parts.len < 2: return "ERR usage: retrigger <name>"
-    let err = retriggerVoice(parts[1])
+  of "sweep":
+    # `sweep <name>`: where its sweep is; `sweep <name> <seconds>`: set it.
+    if parts.len < 2: return "ERR usage: sweep <name> [seconds]"
+    if parts.len == 2:
+      let s = sweepOf(parts[1])
+      if not s.found: return "ERR not found: " & parts[1]
+      return "OK\n" & formatFloat(s.secs, ffDecimal, 1)
+    var secs: float64
+    try: secs = parseFloat(parts[2])
+    except ValueError: return "ERR sweep: seconds must be a number, got " & parts[2]
+    let err = sweepVoice(parts[1], secs)
     if err.len > 0: "ERR " & err else: "OK"
   of "check":
     if parts.len < 2: return "ERR usage: check <voice>"

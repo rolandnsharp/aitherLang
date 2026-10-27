@@ -14,9 +14,7 @@
 
 import "lib/notes.aither"
 
-$elapsed = 0
-$elapsed = $elapsed + dt
-let pos = $elapsed
+let pos = sweep
 let chord = int(pos / 8)                 # the tables wrap: I IV vi V, again
 let inChord = pos - chord * 8
 let low = notes[chordLow[chord]]

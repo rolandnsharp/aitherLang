@@ -321,12 +321,13 @@ are free.
 
 ### Retrigger
 
-Start a voice from the top without cycling stop+send: its state
-is reset, so every `$` takes its first value again, and a piece
-clock like `$elapsed` starts from 0:
+`sweep` is the per-voice composition clock. Move it without
+cycling stop+send:
 
 ```
-./aither retrigger bass         # composition plays from pos=0 again
+./aither sweep bass 0           # the composition plays from the top
+./aither sweep bass 90          # jump to 1:30
+./aither sweep bass             # where it is now
 ```
 
 ### Clear
@@ -502,16 +503,15 @@ speakers can't play it however loud it measures. Live,
 osc(sin, 440 + t * 10)           # pitch rises forever
 ```
 
-### The piece's own time
+### `sweep` — this voice's own time
 
-`t` is shared by every voice. The time since this piece began is
-state it lives through (COMPOSING.md, "The composition clock"):
+`sweep` is seconds along this voice's timeline, 0 when it was first
+sent. It is the composition clock:
 
 ```
 play swell:
-  $elapsed = 0
-  $elapsed = $elapsed + dt            # seconds since the piece began
-  let fade = clamp($elapsed / 5, 0, 1)     # fade in over 5 seconds
+  let pos = sweep
+  let fade = clamp(pos / 5, 0, 1)     # fade in over 5 seconds
   osc(saw, 55) |> lpf(800, 0.5) * fade * 0.4
 
 swell
@@ -520,16 +520,15 @@ swell
 ```
 # timed section change
 play two_part:
-  $sweep = 0
-  $sweep = $sweep + dt
-  if $sweep < 10 then osc(sin, 440)
+  let pos = sweep
+  if pos < 10 then osc(sin, 440)
   else              osc(sin, 660)
 
 two_part * 0.2
 ```
 
-Hot-swapping a voice keeps it, as it keeps all state. Use
-`./aither retrigger <voice>` to start it again.
+Hot-swapping a voice lets its sweep run on. Use
+`./aither sweep <voice> 0` to start it again.
 
 ## Scale lookups
 
@@ -876,7 +875,7 @@ User: "add a melody in A minor"
 → aither send melody.aither
 
 User: "slowly open the bass filter"
-→ LLM edits bass.aither: $open = 0; $open = $open + dt; lpf(300 + $open * 100, 0.5)
+→ LLM edits bass.aither: lpf(300 + sweep * 100, 0.5)
 → aither send bass.aither
 
 User: "fade out the melody"
