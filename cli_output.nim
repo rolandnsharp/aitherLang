@@ -30,6 +30,7 @@ proc voiceStateWord(s: VoiceState): string =
   case s
   of vsStopped:    "stopped"
   of vsMuted:      "muted"
+  of vsParked:     "parked"
   of vsFadingOut:  "fading-out"
   of vsFadingIn:   "fading-in"
   of vsPlaying:    "playing"

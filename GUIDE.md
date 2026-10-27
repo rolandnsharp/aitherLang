@@ -209,10 +209,10 @@ patch's `gain()` calls, not in the CLI.
 
 ```
 ./aither parts bass                   # list parts with gain + state
-./aither mute bass kick               # silence one part within bass
-./aither mute bass kick 2             # ...with a 2-second fade
-./aither unmute bass kick             # resume
-./aither solo bass kick               # fade other parts in bass to 0
+./aither mute bass.kick               # silence one part within bass
+./aither mute bass.kick 2             # ...with a 2-second fade
+./aither unmute bass.kick             # resume
+./aither solo bass.kick               # fade other parts in bass to 0
 ```
 
 Hot-reloading a patch preserves every part's current gain.
@@ -307,9 +307,9 @@ Each file is an independent voice. Load several:
 ./aither mute bass              # silence voice, state keeps running
 ./aither unmute bass            # resume from where it was
 ./aither solo kick 2            # fade everything else out
-./aither mute set lead 0.5      # one part of a voice, over 0.5 s
-./aither park set lead 0.5      # fade it out, then stop computing it
-./aither unpark set lead 0.5    # back from where it stopped
+./aither mute set.lead 0.5      # one part of a voice, over 0.5 s
+./aither park set.lead 0.5      # fade it out, then stop computing it
+./aither unpark set.lead 0.5    # back from where it stopped
 ```
 
 A muted part still runs, so its LFOs and sequencers stay in
@@ -868,7 +868,7 @@ User: "make it darker"
 → aither send bass.aither
 
 User: "mute the kick for now"
-→ aither part bass kick mute
+→ aither mute bass.kick
 
 User: "add a melody in A minor"
 → LLM writes melody.aither with a play block

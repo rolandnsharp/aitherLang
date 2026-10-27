@@ -53,9 +53,9 @@ chord + shimmer
 # ▶ TRY THIS
 #
 #   1. Mute a part while it plays, without editing:
-#        ./aither mute 04_mixing shimmer
-#        ./aither unmute 04_mixing shimmer
-#      Or solo one: ./aither solo 04_mixing chord
+#        ./aither mute 04_mixing.shimmer
+#        ./aither unmute 04_mixing.shimmer
+#      Or solo one: ./aither solo 04_mixing.chord
 #   2. Change + 2 to + 0.5 (slow beats), then + 8 (a fast
 #      flutter), then + 30 (a rough, sour buzz).
 #   3. Swap the chord's 275 for 264 (6/5 of 220). Major

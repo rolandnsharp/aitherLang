@@ -221,5 +221,55 @@ block sweepCmd:
   discard w.waitExit()
   w.close()
 
+# --- 11. mute, park and solo name a voice or one of its plays
+# (`v`, `v.a`), with a fade. The patch plays two parts of 0.25 on the
+# left and its sample count on the right, so the right side shows
+# whether the voice is running: a mute runs on, a park freezes.
+block targets:
+  writeFile(dir / "mp.aither", "$n = 0\n$n = $n + 1\nplay a: 0.25\nplay b: 0.25\n[(a + b)[0], $n / 1000000]\n")
+  let m = start("mp.aither")
+  m.inputStream.close()
+  waitUp()
+  proc frame(): (float32, float32) =
+    let got = m.outputStream.readStr(512 * 8)
+    doAssert got.len == 512 * 8, "the stream ended early"
+    copyMem(addr result[0], unsafeAddr got[511 * 8], 4)
+    copyMem(addr result[1], unsafeAddr got[511 * 8 + 4], 4)
+  proc until(cmd: string; want: float32): (float32, float32) =
+    ## Send `cmd`, then read until the left side settles at `want`.
+    doAssert ask(cmd).startsWith("OK"), cmd & ": " & ask(cmd)
+    for _ in 0 ..< 300:
+      result = frame()
+      if abs(result[0] - want) < 1e-4: return
+    doAssert false, cmd & ": the left side never reached " & $want & " (" & $result[0] & ")"
+  # 40 blocks silenced: a mute that ran on has counted them, a park
+  # hasn't (its count picks up where it stopped).
+  let held = 40 * 512 / 1_000_000
+  var f = until("list", 0.5)
+  var n0 = f[1]
+  discard until("mute mp 0.01", 0)
+  doAssert "[muted]" in ask("list"), ask("list")
+  for _ in 0 ..< 40: discard frame()
+  f = until("unmute mp", 0.5)
+  doAssert f[1] - n0 > held, "a muted voice runs on: " & $n0 & " then " & $f[1]
+  n0 = f[1]
+  discard until("park mp 0.01", 0)
+  doAssert "[parked]" in ask("list"), ask("list")
+  for _ in 0 ..< 40: discard frame()
+  f = until("unpark mp", 0.5)
+  doAssert f[1] - n0 < held / 2, "a parked voice is frozen: " & $n0 & " then " & $f[1]
+  discard until("mute mp.a 0.01", 0.25)
+  discard until("park mp.b", 0)
+  discard until("unpark mp.b", 0.25)
+  discard until("unmute mp.a", 0.5)
+  discard until("solo mp.b", 0.25)
+  discard until("unmute mp.a", 0.5)
+  doAssert ask("mute mp.zz").startsWith("ERR"), "no such play"
+  doAssert ask("mute nobody").startsWith("ERR"), "no such voice"
+  doAssert ask("mute mp a").startsWith("ERR"), "the old two-word form is gone"
+  doAssert "OK" in ask("kill")
+  discard m.waitExit()
+  m.close()
+
 echo "engine_live ok"
 quit(0)       # through the exit procs: the watchdog thread is still alive

@@ -1,9 +1,8 @@
 ## solo X must mute the other voices, not stop them. The pre-fix
 ## behaviour faded other voices' fadeGain to 0 and then marked them
 ## inactive ([stopped]), which `unmute` couldn't revive — the operator
-## had to re-`send` and lose running state. After the fix, `solo X`
-## sets `muted = true` on the others (instant, recoverable) and
-## clears `muted` on the targeted voice.
+## had to re-`send` and lose running state. Now `solo X` mutes the
+## others (they fade to silence and run on, recoverable) and wakes X.
 ##
 ## Test path: write two trivial patches to /tmp, load each via
 ## engine.loadPatch, call soloVoice, parse listVoices output.
@@ -53,7 +52,7 @@ doAssert "[stopped]" notin afterSolo,
 # Unmute B — should return to [playing], proving the muted state is
 # recoverable. The pre-fix behaviour left B [stopped] and unmute had
 # no effect.
-doAssert engine.setMute("aither_test_solo_b", false).len == 0
+doAssert engine.setVoiceSilenced("aither_test_solo_b", false, false, 0.0).len == 0
 
 let afterUnmute = formatVoiceList(midiStatus(), voiceInfoList())
 doAssert "aither_test_solo_b [playing]" in afterUnmute,

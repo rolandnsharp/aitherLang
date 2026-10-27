@@ -35,7 +35,7 @@ proc isRunaway*(l, r: float64): bool {.inline.} =
 
 type
   VoiceState* = enum
-    vsStopped, vsMuted, vsFadingOut, vsFadingIn, vsPlaying, vsRunaway
+    vsStopped, vsMuted, vsParked, vsFadingOut, vsFadingIn, vsPlaying, vsRunaway
 
   PartState* = enum
     psSilent, psFadingOut, psFadingIn, psPlaying, psParked

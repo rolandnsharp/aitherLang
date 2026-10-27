@@ -81,7 +81,7 @@ kick + snare + hat + bass
 # ▶ TRY THIS
 #
 #   1. Mute layers to hear each one:
-#        ./aither mute 10_drums bass    (and unmute it)
+#        ./aither mute 10_drums.bass    (and unmute it)
 #   2. Change bpm to 90 for hip-hop, 170 for drum & bass.
 #   3. Edit the kick pattern into a breakbeat:
 #        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0]

@@ -147,6 +147,7 @@ aither send piano.aither 2            ...with 2-second fade in
 aither stop piano 1                   fade out over 1 second
 aither mute piano                     silence whole voice (state keeps running)
 aither solo piano                     fade other voices to muted
+aither park piano.drone 2             fade one play out, then stop computing it
 aither list                           show active voices + per-play gains
 aither parts piano                    focused per-play view for one voice
 aither levels master                  master-bus RMS / peak / clips / envelope

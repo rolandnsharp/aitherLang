@@ -70,6 +70,10 @@ type
     recent:     RecentRing  # rolling 0.5s buffer for `spectrum`
     nanLogged:  bool        # one log line per voice per session, then quiet
     runaway:    bool        # muted by the runaway guard; cleared on resend
+    held:       bool        # muted or parked by you: its fade-out holds at
+                            # silence instead of freeing the slot
+    parkAtZero: bool        # parked: once the fade reaches 0, stop running
+    parked:     bool        # parked: skipped, no CPU, state frozen
     # Guard bookkeeping, all reset by a send. The audio callback only
     # sets flags and counters; the doctor thread does the rollback.
     swapAt:       float64   # engine time of the last hot-swap (0 = none)
@@ -190,7 +194,7 @@ proc mixBlock(outL, outR: var seq[float64];
       slots[v].retryAt = 0.0
       slots[v].fadeGain = 0.0
       slots[v].fadeDelta = fadeDeltaFor(1.0)
-    if not slots[v].active or slots[v].muted or slots[v].wantRollback:
+    if not slots[v].active or slots[v].muted or slots[v].parked or slots[v].wantRollback:
       continue
     let voice = slots[v].voice
     let hdr = cast[ptr VoiceHeader](voice.state)
@@ -268,7 +272,13 @@ proc mixBlock(outL, outR: var seq[float64];
          else: "muted until resent")
       continue
     if slots[v].fadeGain <= 0.0 and slots[v].fadeDelta < 0.0:
-      slots[v].active = false           # fade-out done: the slot is free
+      if slots[v].held:                 # muted or parked: hold at silence
+        slots[v].fadeDelta = 0.0
+        if slots[v].parkAtZero:
+          slots[v].parked = true
+          slots[v].parkAtZero = false
+      else:
+        slots[v].active = false         # fade-out done: the slot is free
     # The voice's stats and rolling buffer, and its share of the mix.
     for i in 0 ..< frames:
       let gl = blkL[i]
@@ -507,8 +517,10 @@ proc loadPatch*(filename: string; fadeIn: float64): string =
       slots[idx].runaway = false
       slots[idx].muted = false
     let retrigger = (not slots[idx].active) or
-                    slots[idx].fadeGain <= 0.0 or
-                    slots[idx].fadeDelta < 0.0       # interrupting a fade-out
+                    (not slots[idx].held and
+                     (slots[idx].fadeGain <= 0.0 or
+                      slots[idx].fadeDelta < 0.0))   # interrupting a fade-out
+                    # (an edit to a muted or parked voice stays so)
     if retrigger:
       slots[idx].voice.sweepOrigin = now
       slots[idx].active = true
@@ -695,61 +707,75 @@ proc activeVoiceCount*(): int =
   for i in 0 ..< slotCount:
     if slots[i].active: inc result
 
+proc stopSlot(s: var Slot; fade: float64) =
+  ## Fade a voice out and free its slot; a parked one goes at once.
+  s.held = false
+  s.parkAtZero = false
+  if s.parked:
+    s.parked = false
+    s.active = false
+  s.fadeDelta = -fadeDeltaFor(fade)
+
 proc stopVoice*(name: string; fade: float64): string =
   let idx = findSlot(name)
   if idx < 0: return "not found: " & name
   lockForCommand()
-  if fade > 0.0:
-    slots[idx].fadeDelta = -fadeDeltaFor(fade)
-  else:
-    slots[idx].fadeDelta = -fadeDeltaFor(DefaultFadeMs / 1000.0)
+  stopSlot(slots[idx], fade)
   release(mtx)
   ""
 
 proc clearAll(fade: float64): string =
   lockForCommand()
-  for i in 0 ..< slotCount:
-    if fade > 0.0:
-      slots[i].fadeDelta = -fadeDeltaFor(fade)
-    else:
-      slots[i].fadeDelta = -fadeDeltaFor(DefaultFadeMs / 1000.0)
+  for i in 0 ..< slotCount: stopSlot(slots[i], fade)
   release(mtx)
   ""
 
-proc setMute*(name: string; muted: bool): string =
+proc silence(s: var Slot; park: bool; fade: float64) =
+  ## Mute (it runs on, silent) or park (it stops running once silent).
+  if s.parked: return
+  s.held = true
+  s.parkAtZero = park
+  if s.fadeGain <= 0.0:
+    s.fadeDelta = 0.0
+    s.parked = park
+    s.parkAtZero = false
+  else:
+    s.fadeDelta = -fadeDeltaFor(fade)
+
+proc wake(s: var Slot; fade: float64) =
+  ## Unmute or unpark: run again from where it was and fade in. You take
+  ## responsibility for a voice the guard had muted.
+  s.held = false
+  s.parkAtZero = false
+  s.parked = false
+  if s.muted:
+    s.muted = false
+    s.runaway = false
+    s.retryAt = 0.0
+  s.fadeDelta = if s.fadeGain < 1.0: fadeDeltaFor(fade) else: 0.0
+
+proc setVoiceSilenced*(name: string; on, park: bool; fade: float64): string =
+  ## `mute`/`park` a voice (on) or `unmute`/`unpark` it.
   let idx = findSlot(name)
   if idx < 0: return "not found: " & name
   lockForCommand()
-  slots[idx].muted = muted
-  if not muted:                              # user takes responsibility
-    slots[idx].runaway = false
-    slots[idx].retryAt = 0.0
+  if on: silence(slots[idx], park, fade) else: wake(slots[idx], fade)
   release(mtx)
   ""
 
 proc soloVoice*(name: string; fade: float64): string =
+  ## The voice plays, every other one is muted: they run on, silent, so
+  ## `unmute` brings them back in step.
   let idx = findSlot(name)
   if idx < 0: return "not found: " & name
   lockForCommand()
   for i in 0 ..< slotCount:
-    if i == idx:
-      # Targeted voice: ensure it's playing and unmuted. Fade in if it
-      # had been silent.
-      slots[i].muted = false
-      slots[i].fadeDelta = if slots[i].fadeGain < 1.0: fadeDeltaFor(fade) else: 0.0
-    else:
-      # Other voices: mute (recoverable via `unmute`), not stop. The
-      # old behaviour faded gain to 0 then marked the slot inactive,
-      # which `unmute` couldn't revive — forcing a re-`send` and losing
-      # running state. Mute leaves the voice ticking silently so an
-      # operator can toggle it back instantly.
-      slots[i].muted = true
+    if not slots[i].active: continue
+    if i == idx: wake(slots[i], fade)
+    elif slots[i].held or slots[i].fadeDelta >= 0.0:    # not already stopping
+      silence(slots[i], false, fade)
   release(mtx)
   ""
-
-proc isNumeric(s: string): bool {.inline.} =
-  try: discard parseFloat(s); true
-  except ValueError: false
 
 # [Removed: SparkBlocks / dBOf / envBar / fmtDb moved to cli_output.nim
 #  in Phase 0 of the analysis-CLI work. Engine now returns raw stats;
@@ -764,7 +790,8 @@ proc isNumeric(s: string): bool {.inline.} =
 proc voiceStateOf(s: Slot): VoiceState =
   if not s.active:           vsStopped
   elif s.runaway:            vsRunaway
-  elif s.muted:              vsMuted
+  elif s.parked or s.parkAtZero: vsParked
+  elif s.muted or s.held:    vsMuted
   elif s.fadeDelta < 0.0:    vsFadingOut
   elif s.fadeDelta > 0.0:    vsFadingIn
   else:                      vsPlaying
@@ -982,6 +1009,14 @@ proc soloPart(voiceName, partName: string; fade: float64): string =
 
 # ------------------------------------------------------------- command parsing
 
+proc splitTarget(target: string): (string, string) =
+  ## `bass` is a voice, `bass.drone` its play `drone`. A play's name has
+  ## no dot, so the last one splits them (a voice's file name may have
+  ## dots: `bass.v2` is a voice if one is called that).
+  let dot = target.rfind('.')
+  if dot < 0 or findSlot(target) >= 0: (target, "")
+  else: (target[0 ..< dot], target[dot + 1 .. ^1])
+
 proc handleCmd(line: string): string =
   let parts = line.strip().splitWhitespace()
   if parts.len == 0: return "ERR empty"
@@ -1001,39 +1036,26 @@ proc handleCmd(line: string): string =
     let fade = if parts.len >= 3: parseFloatArg(parts[2]) else: 0.0
     let err = stopVoice(parts[1], fade)
     if err.len > 0: "ERR " & err else: "OK"
-  of "mute":
-    if parts.len < 2: return "ERR usage: mute <voice> [play] [fade-seconds]"
-    if parts.len >= 3 and not isNumeric(parts[2]):
-      let fade = if parts.len >= 4: parseFloatArg(parts[3]) else: 0.0
-      let err = setPartMute(parts[1], parts[2], true, fade)
-      if err.len > 0: "ERR " & err else: "OK"
-    else:
-      let err = setMute(parts[1], true)
-      if err.len > 0: "ERR " & err else: "OK"
-  of "unmute":
-    if parts.len < 2: return "ERR usage: unmute <voice> [play] [fade-seconds]"
-    if parts.len >= 3 and not isNumeric(parts[2]):
-      let fade = if parts.len >= 4: parseFloatArg(parts[3]) else: 0.0
-      let err = setPartMute(parts[1], parts[2], false, fade)
-      if err.len > 0: "ERR " & err else: "OK"
-    else:
-      let err = setMute(parts[1], false)
-      if err.len > 0: "ERR " & err else: "OK"
-  of "park", "unpark":
-    if parts.len < 3: return "ERR usage: " & parts[0] & " <voice> <play> [fade-seconds]"
-    let fade = if parts.len >= 4: parseFloatArg(parts[3]) else: 0.0
-    let err = setPartPark(parts[1], parts[2], parts[0] == "park", fade)
+  of "mute", "unmute", "solo", "park", "unpark":
+    # `verb voice [fade]` or `verb voice.part [fade]`.
+    let verb = parts[0].toLowerAscii()
+    if parts.len notin 2..3: return "ERR usage: " & verb & " <voice>[.<play>] [fade-seconds]"
+    if parts.len == 3 and parseFloatArg(parts[2], NaN).isNaN:
+      return "ERR the fade is seconds, not " & parts[2] & " (a play is named " &
+             parts[1] & "." & parts[2] & ")"
+    let fade = if parts.len == 3: parseFloatArg(parts[2]) else: 0.0
+    let (voice, part) = splitTarget(parts[1])
+    let err =
+      if part.len == 0:
+        case verb
+        of "solo": soloVoice(voice, fade)
+        else: setVoiceSilenced(voice, verb in ["mute", "park"], verb.endsWith("park"), fade)
+      else:
+        case verb
+        of "mute", "unmute": setPartMute(voice, part, verb == "mute", fade)
+        of "park", "unpark": setPartPark(voice, part, verb == "park", fade)
+        else: soloPart(voice, part, fade)
     if err.len > 0: "ERR " & err else: "OK"
-  of "solo":
-    if parts.len < 2: return "ERR usage: solo <voice> [play] [fade-seconds]"
-    if parts.len >= 3 and not isNumeric(parts[2]):
-      let fade = if parts.len >= 4: parseFloatArg(parts[3]) else: 0.0
-      let err = soloPart(parts[1], parts[2], fade)
-      if err.len > 0: "ERR " & err else: "OK"
-    else:
-      let fade = if parts.len >= 3: parseFloatArg(parts[2]) else: 0.0
-      let err = soloVoice(parts[1], fade)
-      if err.len > 0: "ERR " & err else: "OK"
   of "clear":
     let fade = if parts.len >= 2: parseFloatArg(parts[1]) else: 0.0
     let err = clearAll(fade)

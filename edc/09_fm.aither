@@ -71,10 +71,10 @@ epiano + bell + growl
 #   3. Try 1.41 → 3.5 or 0.5 and listen to new metals.
 #   4. Solo the growl and listen to it sweep from pure sine
 #      to rough saw every 10 seconds:
-#        ./aither solo 09_fm growl
+#        ./aither solo 09_fm.growl
 #      To undo, unmute the other two one at a time:
-#        ./aither unmute 09_fm epiano
-#        ./aither unmute 09_fm bell
+#        ./aither unmute 09_fm.epiano
+#        ./aither unmute 09_fm.bell
 #   5. Stack it: modulate the modulator. Replace epiano's
 #      push line with
 #        let push2 = sin(TAU * phasor(660)) * env * 2

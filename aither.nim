@@ -86,11 +86,12 @@ proc usage() =
   echo ""
   echo "  send <file> [fade]          load patch (instant or fade-in seconds)"
   echo "  stop <name> [fade]          fade out & remove voice"
-  echo "  mute <voice> [play] [fade]  silence whole voice or one play block"
-  echo "  unmute <voice> [play] [fade] resume voice or play block"
-  echo "  solo <voice> [play] [fade]  fade out other voices, or other plays in this voice"
-  echo "  park <voice> <play> [fade]  fade a play out, then skip it: no CPU, state frozen"
-  echo "  unpark <voice> <play> [fade] run a parked play again from where it stopped"
+  echo "  mute <target> [fade]        fade to silence; it runs on, in step"
+  echo "  unmute <target> [fade]      fade back in"
+  echo "  solo <target> [fade]        mute the others: other voices, or the voice's other plays"
+  echo "  park <target> [fade]        fade out, then stop running it: no CPU, state frozen"
+  echo "  unpark <target> [fade]      run it again from where it stopped"
+  echo "                              a target is a voice (bass) or one of its plays (bass.drone)"
   echo "  clear [fade]                stop all voices"
   echo "  list                        show active voices"
   echo "  status                      voices, parts and the master level"
@@ -143,21 +144,9 @@ of "stop":
   if args.len < 2: quit "usage: aither stop <name> [fade]"
   let extra = if args.len >= 3: " " & args[2] else: ""
   sendCmd("stop " & args[1] & extra)
-of "mute":
-  if args.len < 2: quit "usage: aither mute <voice> [play] [fade]"
-  let extra = if args.len >= 3: " " & args[2 .. ^1].join(" ") else: ""
-  sendCmd("mute " & args[1] & extra)
-of "unmute":
-  if args.len < 2: quit "usage: aither unmute <voice> [play] [fade]"
-  let extra = if args.len >= 3: " " & args[2 .. ^1].join(" ") else: ""
-  sendCmd("unmute " & args[1] & extra)
-of "park", "unpark":
-  if args.len < 3: quit "usage: aither " & args[0] & " <voice> <play> [fade]"
-  sendCmd(args[0] & " " & args[1 .. ^1].join(" "))
-of "solo":
-  if args.len < 2: quit "usage: aither solo <voice> [play] [fade]"
-  let extra = if args.len >= 3: " " & args[2 .. ^1].join(" ") else: ""
-  sendCmd("solo " & args[1] & extra)
+of "mute", "unmute", "solo", "park", "unpark":
+  if args.len notin 2..3: quit "usage: aither " & args[0] & " <voice>[.<play>] [fade]"
+  sendCmd(args.join(" "))
 of "clear":
   let extra = if args.len >= 2: " " & args[1] else: ""
   sendCmd("clear" & extra)

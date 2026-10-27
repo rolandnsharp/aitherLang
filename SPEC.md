@@ -1293,23 +1293,32 @@ output) gets a fixed loop delay. A block is `AITHER_BUFFER` frames
 | `send <file> [fade]`             | load / hot-swap a patch, then report level, quiet parts, guard trips |
 | `watch <file> [fade]`            | send, and send again whenever it or an imported file changes |
 | `stop <voice> [fade]`            | fade out & remove                          |
-| `mute <voice>` / `unmute`        | silence / resume (state keeps running)     |
-| `solo <voice> [fade]`            | mute all other voices                      |
 | `clear [fade]`                   | stop all voices                            |
 | `list`                           | show active voices and their parts         |
 | `status`                         | `list` plus the master level               |
 | `sweep <voice> [seconds]`        | where the voice's sweep is; with seconds, set it (0: from the top) |
 | `kill`                           | shut down engine                           |
 
-### Part-level
+### Mute, solo, park
 
-| Command                                   | Description                                   |
-|-------------------------------------------|-----------------------------------------------|
-| `parts <voice>`                           | list parts: state, gain, rms, peak            |
-| `mute <voice> <part> [fade]` / `unmute`   | fade the part's gain to 0 / 1; it keeps computing, so its LFOs and sequencers stay in step |
-| `solo <voice> <part> [fade]`              | mute the voice's other parts                  |
-| `park <voice> <part> [fade]`              | fade out, then skip the part's body: no CPU, state frozen where it was |
-| `unpark <voice> <part> [fade]`            | run a parked part again from where it stopped, fading in (`unmute` does this too) |
+Each takes a target, a voice (`bass`) or one of its plays
+(`bass.drone`), and a fade in seconds (20 ms when left out). A voice
+and a play mean the same by each word:
+
+| Command                   | Description                                   |
+|---------------------------|-----------------------------------------------|
+| `parts <voice>`           | list parts: state, gain, rms, peak            |
+| `mute <target> [fade]`    | fade to silence; it keeps computing, so its LFOs, sequencers and sweep stay in step |
+| `unmute <target> [fade]`  | fade back in (a parked one runs again too)    |
+| `solo <target> [fade]`    | mute the others: every other voice, or the voice's other plays |
+| `park <target> [fade]`    | fade out, then stop computing it: no CPU, state frozen where it was |
+| `unpark <target> [fade]`  | run it again from where it stopped, fading in |
+
+A play's name has no dot, so the last dot splits a target; a voice
+whose file name has a dot (`bass.v2`) is found by its whole name
+first. A fade that isn't a number is an error, which catches the old
+two-word form (`mute bass drone`). `send` to a muted or parked voice
+hot-swaps it and leaves it so; `stop` and `clear` remove it.
 
 There are no special part names: a part called `scope` is a part
 like any other and is heard. The oscilloscope is a patch whose final
