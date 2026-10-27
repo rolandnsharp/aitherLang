@@ -8,13 +8,9 @@
 import std/[math]
 import ../ccompile, ../voice
 
-
-proc prog(src: string): string =
-  src
-
 proc renderMono(src: string; nSamples: int): seq[float64] =
   let v = newVoice(48000.0)
-  v.load(prog(src), 48000.0)
+  v.load((src), 48000.0)
   result.setLen(nSamples)
   for i in 0..<nSamples:
     let s = v.tick(float64(i) / 48000.0)

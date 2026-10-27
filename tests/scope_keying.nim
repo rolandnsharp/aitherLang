@@ -6,10 +6,6 @@
 
 import ../ccompile, ../voice
 
-
-proc prog(src: string): string =
-  src
-
 const A = """
 play a:
   let x = prev(sin(TAU * phasor(3)))
@@ -40,12 +36,12 @@ proc find(rs: seq[Region]; scope, t: string; i: int): Region =
     if r.scope == scope and r.typeName == t and r.scopeIdx == i: return r
   raise newException(ValueError, "no region " & scope & " " & t & "#" & $i)
 
-let ra = compile(prog(A), "", 48000.0).regions
-let gen = compile(prog(B), "", 48000.0)
+let ra = compile((A), "", 48000.0).regions
+let gen = compile((B), "", 48000.0)
 let rb = gen.regions
 
 let v = newVoice(48000.0)
-v.load(prog(A), 48000.0)
+v.load((A), 48000.0)
 for i in 1 .. 4800: discard v.tick(float64(i) / 48000.0)
 let pool = poolOf(v.state)
 var before: seq[seq[float64]]
@@ -55,7 +51,7 @@ for (sc, idx) in [("play b/let y", 0), ("play b/let z", 0), ("play a/let x", 0)]
   for k in 0 ..< r.size: s.add pool[r.offset + k]
   before.add s
 
-v.load(prog(B), 48000.0)
+v.load((B), 48000.0)
 let pool2 = poolOf(v.state)
 for n, (sc, idx) in [("play b/let y", 0), ("play b/let z", 0), ("play a/let x", 0)]:
   let r = find(rb, sc, "var", idx)

@@ -5,9 +5,6 @@
 import std/strutils
 import ../ccompile, ../voice
 
-proc prog(src: string): string =
-  src
-
 const Patch = """
 play count:
   $n = 0
@@ -20,7 +17,7 @@ play other:
 count + other
 """
 let v = newVoice(48000.0)
-v.load(prog(Patch), 48000.0)
+v.load((Patch), 48000.0)
 doAssert v.partNames == @["count", "other"]
 for i in 0 ..< 5: discard v.tick(float64(i) / 48000.0)
 doAssert v.tick(0.0).l == 6006.0
@@ -39,7 +36,7 @@ doAssert resumed.l == 7.0 + 18000.0, $resumed.l
 
 # A hot reload keeps the park by name.
 v.partParked[1] = 1.0
-v.load(prog(Patch.replace("* 1000", "* 100")), 48000.0)
+v.load((Patch.replace("* 1000", "* 100")), 48000.0)
 doAssert v.partParked == @[0.0, 1.0], $v.partParked
 let after = v.tick(0.0)
 doAssert after.l == 8.0, $after.l

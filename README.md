@@ -123,6 +123,23 @@ how much. A change to the language or the stdlib that touches a patch
 it wasn't meant to shows up there; one that was meant to shows up as
 the golden file's diff in its commit.
 
+What the language computes is tested in aither: each file in
+`tests/lang/` is a list of cases, a small patch each, with what it
+must give written above it:
+
+```
+# --- a def's parameters can be named
+# expect: 0.04707
+def knob(a, k = 2, m = 2): a * k * m
+knob(1) * 0.01 + knob(1, 3) * 0.001 + knob(1, m = 5) * 0.0001 + knob(1, 7, m = 1) * 0.00001
+```
+
+`# expect: v` is sample 0 (`v, w` for the two sides), `# expect at N:`
+sample N, `# expect until N:` every sample before N, and `# error: text`
+a compile error saying that. Two forms that must agree are one case,
+`A - B`, expected 0. The rest of the suite is Nim, testing the engine:
+hot reload, MIDI, the socket, the guards.
+
 ## Use
 
 ```
