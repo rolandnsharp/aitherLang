@@ -760,6 +760,23 @@ The tuned circuit's damping is its selectivity: narrow keeps a
 neighbouring station out but blurs the sound, wide is clear but lets it
 in.
 
+In order of preference:
+
+1. **Use the pair whole.** An operation reads both sides for you:
+   `magnitude(p)`, `phase(p)`, `turn(p, w)`, or the pair played as it
+   is. No names, nothing thrown away.
+2. **Destructure with both names** when a formula needs each side on
+   its own. A damped mode's velocity is the case (the didge patches):
+   ```
+   let [x, q] = dho(force, f, damp)
+   let v = -(TAU * f * sqrt(1 - damp * damp) * q + damp * TAU * f * x)
+   ```
+3. **One side, with `_`,** only where one number is all that fits.
+
+Destructuring a pair just to rebuild what an operation gives
+(`let [x, q] = p` then `sqrt(x * x + q * q)` for `magnitude(p)`) is
+the same maths done by hand.
+
 Played, a phasor pair is the same sound with its sides a quarter turn
 apart: a little wide, and summed to mono it doesn't cancel (cos + sin
 is a sine 3 dB up). So even where a patch wants "one sound", the pair
