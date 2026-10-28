@@ -26,8 +26,8 @@ edc/10_drums.aither  718DBB742B16851D  -18.1  -3.1
 edc/10_drums_puzzle.aither  0902A02A8BF98825  -38.1  -18.6
 edc/11_physics.aither  669F5E555E9F5E89  -26.4  -9.7
 edc/11_physics_puzzle.aither  ED79EC9C796F3E0D  -24.6  -12.8
-edc/12_bells.aither  9E9A5D8004DEE579  -31.1  -15.2
-edc/12_bells_puzzle.aither  B167EBEF4B584499  -12.1  -5.8
+edc/12_bells.aither  4582C47E66AFA705  -31.1  -15.2
+edc/12_bells_puzzle.aither  D50C0A1D9E5EA4D7  -12.1  -4.6
 edc/13_composing.aither  89561137840AD846  -57.7  -43.9
 edc/13_composing_puzzle.aither  89561137840AD846  -57.7  -43.9
 edc/14_keyboard.aither  601F56D86B33D295  -23.5  -10.3
@@ -43,7 +43,7 @@ edc/solutions/08_modulation_puzzle.aither  35F4C1D623A1041D  -17.0  -10.5
 edc/solutions/09_fm_puzzle.aither  4651D26231282C11  -17.0  -14.0
 edc/solutions/10_drums_puzzle.aither  74173A12E4781515  -27.9  -8.6
 edc/solutions/11_physics_puzzle.aither  F56FBEAC500AC271  -23.1  -11.2
-edc/solutions/12_bells_puzzle.aither  6B9FF8C170C7C359  -12.0  -5.4
+edc/solutions/12_bells_puzzle.aither  F2BE447F8E9E6C8B  -12.1  -4.6
 edc/solutions/13_composing_puzzle.aither  89561137840AD846  -57.7  -43.9
 edc/solutions/14_keyboard_puzzle.aither  B464794BBB3604E5  -27.4  -14.0
 examples/acid.aither  801DDB0E34EF731D  -10.8  -1.1
