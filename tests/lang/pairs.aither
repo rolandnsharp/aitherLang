@@ -1,0 +1,197 @@
+# Pairs: every value is two sides, and a pair indexes like a two-entry
+# table.
+
+# --- p[-1] is the right side
+# expect: 0.3
+let p = [0.1, 0.3]
+p[-1]
+
+# --- p[2] wraps to the left
+# expect: 0.1
+let p = [0.1, 0.3]
+p[2]
+
+# --- p[3] wraps to the right
+# expect: 0.3
+let p = [0.1, 0.3]
+p[3]
+
+# --- an index worked out as it runs
+# expect at 12000: 0.1
+# expect at 36000: 0.3
+let p = [0.1, 0.3]
+p[int(phasor(1) * 2)]
+
+# --- a play's pair, indexed as it runs
+# expect at 12000: 0.1
+# expect at 36000: 0.3
+play a:
+  [0.1, 0.3]
+a[int(phasor(1) * 2)]
+
+# --- a def indexes a two-entry table passed by name
+# expect at 12000: 0.1
+# expect at 36000: 0.3
+def pick(tbl, i):
+  tbl[i]
+let t = [0.1, 0.3]
+pick(t, int(phasor(1) * 2))
+
+# --- a def indexes a two-entry literal
+# expect at 12000: 0.1
+# expect at 36000: 0.3
+def pick(tbl, i):
+  tbl[i]
+pick([0.1, 0.3], int(phasor(1) * 2))
+
+# --- a three-entry table through the same def
+# expect: 0.3
+def pick(tbl, i):
+  tbl[i]
+let t = [0.1, 0.2, 0.3]
+pick(t, 2)
+
+# --- rotate's angle is a number, so a def passing it on takes one
+# expect until 9600: 0
+def wheel(th): rotate([0.5, 0], th)
+wheel(TAU * t) - rotate([0.5, 0], TAU * t)
+
+# --- a def parameter used as a pair stays a pair
+# expect until 9600: 0
+def wheel(p, th): rotate(p, th)
+wheel([0.5, 0.2], t) - rotate([0.5, 0.2], t)
+
+# --- a def of two rotates
+# expect until 9600: 0
+def card(th): rotate([0.5, 0], th) - rotate([0.25, 0], 2 * th)
+card(t) * 0.5 - (rotate([0.5, 0], t) - rotate([0.25, 0], 2 * t)) * 0.5
+
+# --- a def returns its pair state as it returns a pair let
+# expect until 9600: 0
+def f(x):
+  $z = [0, 0]
+  $z = [x, 0.2]
+  $z * 0.5
+def g(x):
+  $z = [0, 0]
+  $z = [x, 0.2]
+  let r = [$z[0], $z[1]]
+  r * 0.5
+let x = sin(TAU * 3 * t)
+f(x) - g(x)
+
+# --- a pair given to a stateful call runs it once a side
+# expect at 4800: 0.10002083333333, 0.20004166666667
+phasor([1, 2])
+
+# --- a number scales a pair
+# expect: 2.5, -7.5
+2.5 * [1, -3]
+
+# --- a quarter turn twice is a half turn: [0, 1] turned by itself is [-1, 0]
+# expect: -1, 0
+turn([0, 1], [0, 1])
+
+# --- turning by [1, 0] leaves a pair as it is
+# expect: 0.7, -0.4
+turn([0.7, -0.4], [1, 0])
+
+# --- turning scales by the turner's size and adds its angle
+# expect: 5.3, 1.8
+turn([3, 2], [1.5, -0.4])
+
+# --- turning by a spin adds speeds: 220 and 50 Hz make 270
+# expect until 4800: 0, 0
+turn(spin(220), spin(50)) - spin(270)
+
+# --- turning back by the conjugate undoes a turn by a unit pair
+# expect: 3, 2
+let w = [cos(0.7), sin(0.7)]
+turn(turn([3, 2], w), conj(w))
+
+# --- rotation keeps magnitude
+# expect: 1
+magnitude(rotate([1, 0], 0.7)) * magnitude(rotate([1, 0], 2.3)) * magnitude(rotate([1, 0], -1.9))
+
+# --- phase after a rotate is the angle
+# expect: 1.234
+phase(rotate([1, 0], 1.234))
+
+# --- phase wraps to -pi..pi
+# expect: -0.7
+phase(rotate([1, 0], TAU - 0.7))
+
+# --- magnitude of one number is an error
+# error: magnitude
+magnitude(1)
+
+# --- analytic's magnitude is the envelope: a steady sine's stays near its level
+# expect at 4799: 1
+let env = magnitude(analytic(sin(TAU * phasor(1000)) * 0.5))
+$ok = 1
+$ok = if t > 0.02 and (env > 0.65 or env < 0.35) then 0 else $ok
+$ok
+
+# --- freq_shift moves 440 Hz to 640, the old pitch 20 dB down (two Goertzel meters)
+# expect at 23999: 1
+let [y, _] = freq_shift(sin(TAU * phasor(440)) * 0.5, 200)
+let on = if t > 0.05 then y else 0
+$at640 = [0, 0]
+$at440 = [0, 0]
+$at640 = $at640 + on * [cos(TAU * 640 * t), sin(TAU * 640 * t)]
+$at440 = $at440 + on * [cos(TAU * 440 * t), sin(TAU * 440 * t)]
+if magnitude($at640) > 10 * magnitude($at440) then 1 else 0
+
+# --- a two-entry wave is a table, not a pair
+# expect: 0.25
+# expect at 36000: 0.75
+wave(1, [0.25, 0.75])
+
+# --- the same through a let
+# expect at 36000: 0.75
+let steps = [0.25, 0.75]
+wave(1, steps)
+
+# --- the same through a play-local let
+# expect at 36000: 0.75
+play a:
+  let steps = [0.25, 0.75]
+  wave(1, steps)
+a
+
+# --- a two-entry let in arithmetic is a pair
+# expect: 0.2, 0.1
+let gains = [0.2, 0.1]
+gains * 1
+
+# --- a three-entry table in arithmetic is a compile error
+# error: table
+let t3 = [1.0, 2.0, 3.0]
+t3 * 0.1
+
+# --- haas on a number: the right is the left 1 ms later
+# expect: 1, 0
+# expect at 48: 0, 1
+haas(if t < dt then 1 else 0, 1)
+
+# --- haas on a pair delays one side
+# expect: 0, 0.5
+# expect at 48: 1, 0
+haas([if t < dt then 1 else 0, if t < dt then 0.5 else 0], -1)
+
+# --- reverb on a pair: one a side, so a left-only hit leaves the right silent
+# expect until 4800: 0
+let y = [if t < dt then 1 else 0, 0] |> reverb(1.0, 0.5)
+[0, y[1]]
+
+# --- ...and the left rings
+# expect at 4799: 1
+let y = [if t < dt then 1 else 0, 0] |> reverb(1.0, 0.5)
+$e = 0
+$e = $e + y[0] * y[0]
+if $e > 0.1 then 1 else 0
+
+# --- reverb on a number is the same both sides
+# expect until 4800: 0
+let y = (if t < dt then 1 else 0) |> reverb(1.0, 0.5)
+y[0] - y[1]

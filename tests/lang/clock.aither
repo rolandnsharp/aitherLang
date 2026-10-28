@@ -1,0 +1,24 @@
+# The clock: a phasor steps once a sample, wherever it is written, and
+# steps before it is read: sample k is (k + 1) f / sr, wrapped.
+
+# --- a phasor as the final expression steps once a sample
+# expect at 4800: 0.0022916666667
+phasor(110)
+
+# --- inside an expression
+# expect at 4800: -0.9954166666667
+phasor(110.0) * 2 - 1
+
+# --- inside sin
+# expect at 4800: 0.014398468777821
+sin(TAU * phasor(110.0))
+
+# --- in a play
+# expect at 4800: 0.0022916666667
+play tone:
+  phasor(110.0)
+tone
+
+# --- combined with a pair, still once
+# expect at 4800: 0.0022916666667, 0.0022916666667
+phasor(110.0) + [0, 0]

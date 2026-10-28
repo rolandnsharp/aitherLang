@@ -1,0 +1,158 @@
+# $state and def rec: memory that persists, and loops that repeat.
+
+# --- top-level state counts samples
+# expect at 10: 11
+$counter = 0.0
+$counter = $counter + 1.0
+$counter
+
+# --- each call site of a def has its own state
+# expect: 101
+# expect at 1: 202
+def step():
+  $level = 0.0
+  $level = $level + 1.0
+  $level
+let a = step()
+let b = step()
+a + b * 100
+
+# --- state in a play
+# expect at 4: 5
+play tick:
+  $count = 0.0
+  $count = $count + 1.0
+  $count
+tick[0]
+
+# --- each iteration of sum has its own state
+# expect: 4
+# expect at 1: 8
+sum(4, n =>
+  $c = 0.0
+  $c = $c + 1.0
+  $c)
+
+# --- a lambda body reads the value it just stored
+# expect: 203
+sum(2, n =>
+  $a = 0.0
+  $a = $a + n
+  $a + 100.0)
+
+# --- an oscillator written inline in a lambda rings and stays bounded
+# expect at 4799: 1
+let x = sum(1, n =>
+  let omega = TAU * 440.0
+  let omega2 = omega * omega
+  $x = 0.0
+  $dx = 0.0
+  $dx = $dx + (-2 * 4.0 * $dx - omega2 * $x + omega2) * dt
+  $x = $x + $dx * dt
+  $x)
+$m = 0
+$m = max($m, abs(x))
+if $m > 0.001 and $m < 1e6 then 1 else 0
+
+# --- the sigil hugs its name
+# error: must be followed immediately by an identifier
+$ x = 0
+$x
+
+# --- fresh state reads its init
+# expect: 0
+$z = 0.0
+$z
+
+# --- def rec: gcd
+# expect: 21
+def rec gcd(a, b): if b == 0 then a else gcd(b, a mod b)
+gcd(1071, 462)
+
+# --- accumulators as defaults
+# expect: 832040
+def rec fib(n, a = 0, b = 1): if n == 0 then a else fib(n - 1, b, a + b)
+fib(30)
+
+# --- z -> z^2 + c until it leaves, over pairs
+# expect: 62, 59
+def rec escape(z, c, n):
+  if n == 0 or magnitude(z) > 2 then n else escape(turn(z, z) + c, c, n - 1)
+[escape([0, 0], [1, 1], 64), escape([0, 0], [0.5, 0], 64) + escape([0, 0], [-1, 0], 64)]
+
+# --- a pair result from a pair parameter
+# expect: -1, 1
+def rec orbit(z, c, n): if n == 0 then z else orbit(turn(z, z) + c, c, n - 1)
+orbit([0, 0], [0, 1], 2)
+
+# --- one $k for the code, not one per step: four steps a sample
+# expect: 4
+# expect at 3: 16
+def rec count(n):
+  $k = 0
+  $k = $k + 1
+  if n == 0 then $k else count(n - 1)
+count(3)
+
+# --- the base case's phasor steps once a sample, however many repeats came first
+# expect until 64: 0
+def rec pick(n): if n == 0 then phasor(1000) else pick(n - 1)
+pick(5) - phasor(1000)
+
+# --- a function passed on unchanged
+# expect: 1024
+def double(x): x * 2
+def rec apply(f, x, n): if n == 0 then x else apply(f, f(x), n - 1)
+apply(double, 1, 10)
+
+# --- a parameter no repeat changes stays a compile-time count
+# expect: 30
+def rec tri(n, k, acc = 0): if k == 0 then acc else tri(n, k - 1, acc + sum(n, i => i))
+tri(4, 3)
+
+# --- each call site is its own loop, inside sum and inside another recursion
+# expect: 8, 8
+def rec gcd(a, b): if b == 0 then a else gcd(b, a mod b)
+def rec outer(n, acc): if n == 0 then acc else outer(n - 1, acc + gcd(n * 6, 4))
+[sum(3, i => gcd(i * 6, 4)), outer(3, 0)]
+
+# --- a long recursion runs to the end when nothing sets a deadline
+# expect: 7
+def rec down(n): if n == 0 then 7 else down(n - 1)
+down(1000000)
+
+# --- rec on a def that never calls itself
+# expect: 42
+def rec twice(x): x * 2
+twice(21)
+
+# --- a def returns a pair parameter or a pair let as a pair
+# expect: 2.6, 2.8
+def norm(z): z / magnitude(z)
+def twice(z):
+  let w = turn(z, [2, 0])
+  w
+norm([3, 4]) + twice([1, 1])
+
+# --- calling itself takes rec
+# error: def rec countdown
+def countdown(n): if n == 0 then 0 else countdown(n - 1)
+countdown(3)
+
+# --- a self-call must be the whole result
+# error: calls itself inside an expression
+def rec fib(n): if n < 2 then n else fib(n - 1) + fib(n - 2)
+fib(10)
+
+# --- a cycle through another def
+# error: ping -> pong -> ping
+def ping(n): if n == 0 then 0 else pong(n - 1)
+def pong(n): if n == 0 then 1 else ping(n - 1)
+ping(5)
+
+# --- a repeat can't change a function parameter
+# error: passes a different array or function as 'f'
+def double(x): x * 2
+def inc(x): x + 1
+def rec walk(f, x, n): if n == 0 then x else walk(inc, f(x), n - 1)
+walk(double, 1, 3)

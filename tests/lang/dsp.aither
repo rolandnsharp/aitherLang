@@ -1,0 +1,99 @@
+# Natives: delays between samples, filters that can't be broken, chains.
+
+# --- a 0-sample delay is this sample's input
+# expect: 1
+# expect at 1: 0
+# expect at 7: 0
+let x = if t < dt then 1 else 0
+delay(x, 0, 0.001)
+
+# --- a whole-sample delay is an exact shift
+# expect at 2: 0
+# expect at 3: 1
+# expect at 4: 0
+let x = if t < dt then 1 else 0
+delay(x, 3 / sr, 0.001)
+
+# --- 2.5 samples lands half on 2, half on 3
+# expect at 1: 0
+# expect at 2: 0.5
+# expect at 3: 0.5
+# expect at 4: 0
+let x = if t < dt then 1 else 0
+delay(x, 2.5 / sr, 0.001)
+
+# --- a ramp delayed 7.25 samples is the ramp shifted by exactly that
+# expect at 10: 2.75
+# expect at 19: 11.75
+delay(t * sr, 7.25 / sr, 0.001)
+
+# --- the whole buffer is usable: 47 samples of a 48-sample one
+# expect at 46: 0
+# expect at 47: 1
+# expect at 48: 0
+let x = if t < dt then 1 else 0
+delay(x, 47 / sr, 0.001)
+
+# --- fbdelay's 0 is one sample: its feedback needs the last output
+# expect: 0
+# expect at 1: 1
+# expect at 2: 0.5
+# expect at 3: 0.25
+let x = if t < dt then 1 else 0
+fbdelay(x, 0, 0.001, 0.5)
+
+# --- a fractional feedback delay
+# expect at 2: 0.5
+# expect at 3: 0.5
+let x = if t < dt then 1 else 0
+fbdelay(x, 2.5 / sr, 0.001, 0.5)
+
+# --- a loop tunes to its length, not the sample grid: echoes every 109.5 samples (centroids)
+# expect at 109: 0.4995
+# expect at 110: 0.4995
+# expect at 399: 109.5, 219
+let strike = if t < 1 / sr then 1 else 0
+$loop = 0.0
+$loop = strike + delay($loop, 108.5 / sr, 0.05) * 0.999
+let i = floor(t * sr + 0.5)
+let w1 = if i >= 100 and i <= 120 then 1 else 0
+let w2 = if i >= 210 and i <= 230 then 1 else 0
+$n1 = 0
+$d1 = 0
+$n2 = 0
+$d2 = 0
+$n1 = $n1 + w1 * i * $loop
+$d1 = $d1 + w1 * $loop
+$n2 = $n2 + w2 * i * $loop
+$d2 = $d2 + w2 * $loop
+if i < 399 then [$loop, $loop] else [$n1 / $d1, $n2 / $d2]
+
+# --- a negative cutoff can't break a filter (it used to fill it with NaN)
+# expect at 9999: 1
+let y = noise() |> bpf(-300, 0.6)
+if abs(y) < 1e6 then 1 else 0
+
+# --- a chain of filters is the same chain over lets
+# expect until 48000: 0
+let x = osc(saw, 110)
+(x |> bpf(1000, 0.6) |> hpf(500, 0.2)) - ((x |> bpf(1000, 0.6)) |> hpf(500, 0.2))
+
+# --- three filters
+# expect until 48000: 0
+let x = osc(saw, 110)
+let a = x |> lpf(2000, 0.3)
+let b = a |> hpf(200, 0.2)
+(x |> lpf(2000, 0.3) |> hpf(200, 0.2) |> lpf(800, 0.5)) - (b |> lpf(800, 0.5))
+
+# --- a def with a filter, piped
+# expect until 48000: 0
+def src(f):
+  osc(saw, f) |> lpf(2000, 0.3)
+let a = src(110)
+(src(110) |> lpf(500, 0.3)) - (a |> lpf(500, 0.3))
+
+# --- a native in a cutoff argument
+# expect until 48000: 0
+let c = 200 + discharge(impulse(4), 8) * 2000
+let x = osc(saw, 110)
+(x |> lpf(200 + discharge(impulse(4), 8) * 2000, 0.5)) - (x |> lpf(c, 0.5))

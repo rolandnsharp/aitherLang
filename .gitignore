@@ -18,4 +18,5 @@ tests/*
 !tests/*.nim
 !tests/*.aither
 !tests/corpus.golden
+!tests/lang/
 __pycache__/

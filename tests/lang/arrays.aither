@@ -1,0 +1,211 @@
+# Arrays: constant tables, this sample's local arrays, state arrays,
+# each, and stepped arrays.
+
+# --- a top-level table, a literal index
+# expect: 30
+let p = [10.0, 20.0, 30.0, 40.0, 50.0]
+p[2]
+
+# --- an index worked out as it runs
+# expect: 1
+# expect at 12000: 4
+let p = [1.0, 2.0, 4.0, 8.0]
+p[int(t * 10)]
+
+# --- a table in a def body
+# expect: 7
+def lookup(n):
+  let p = [2.0, 3.0, 5.0, 7.0, 11.0]
+  p[n - 1]
+lookup(4)
+
+# --- a play reads a top-level table
+# expect: 87.31
+let roots = [110.0, 87.31, 130.81, 98.0]
+play bass:
+  roots[1]
+bass
+
+# --- a play-local table
+# expect: 0.9
+play t:
+  let pat = [0.5, 0.7, 0.9]
+  pat[2]
+t
+
+# --- wave reads a table
+# expect: 220
+let notes = [220.0, 330.0, 440.0]
+wave(0.0, notes)
+
+# --- a table lookup inside sum
+# expect: 10
+def my_ratio(n):
+  let r = [1.0, 2.0, 3.0, 4.0]
+  r[n - 1]
+sum(4, n => my_ratio(n))
+
+# --- local arrays: values worked out as they run, a cycling index, len
+# expect: 4308.5
+let a = [t * 0 + 7, 2, 3]
+let b = array(4, 0.5)
+b[2] = 1
+a[1] + a[4] + a[-1] + b[0] + b[2] + len(a) * 100 + len(b) * 1000
+
+# --- a local array in a def and a play, written with each
+# expect: 22
+def tri3(x):
+  let a = array(3)
+  each(3, i => a[i] = x * (i + 1))
+  a[0] + a[1] + a[2]
+play p:
+  let q = [1, 2, 3, 4 + t * 0]
+  q[3] = 10
+  tri3(2) + q[3]
+
+# --- a state array persists, and reads past its ends are 0
+# expect: 302
+# expect at 4: 306
+def cnt():
+  $c = array(3, 1)
+  $c[0] = $c[0] + 1
+  $c[0] + $c[5] + $c[-1] + len($c) * 100
+cnt()
+
+# --- two call sites, two arrays
+# expect at 2: 33
+def cnt():
+  $c = array(2)
+  $c[1] = $c[1] + 1
+  $c[1]
+cnt() * 10 + cnt()
+
+# --- each is one step: a shift register moves one place a sample
+# expect at 3: 0
+# expect at 4: 1
+# expect at 5: 0
+$f = array(4)
+let out = $f[3]
+each(3, i => $f[i + 1] = $f[i])
+$f[0] = if t < dt then 1 else 0
+out
+
+# --- stores outside each land at once; a store inside sum works
+# expect: 10
+$g = array(3)
+$g[0] = 5
+$g[1] = $g[0] * 2
+$g[1] + sum(3, n => $g[n - 1] = n)
+
+# --- two arrays in one each read each other as they were
+# expect: 21
+# expect at 1: 12
+# expect at 2: 21
+$a = array(2, 1)
+$b = array(2, 2)
+each(2, i =>
+  $a[i] = $b[i]
+  $b[i] = $a[i])
+$a[0] * 10 + $b[1]
+
+# --- a file-level state array, stepped in one play, read in another
+# expect: 0
+# expect at 1: 0.5
+# expect at 2: 1
+# expect at 3: 0
+$h = array(3)
+let drive = if t < dt then 1 else 0
+play a:
+  each(2, i => $h[i + 1] = $h[i])
+  $h[0] = drive
+  $h[2]
+play b:
+  $h[1] * 0.5
+a + b
+
+# --- an array's size must be known when it compiles
+# error: compile-time integer
+let n = t
+$f = array(n)
+$f[0]
+
+# --- array() declares; it isn't a value
+# error: declares an array
+array(3) + 1
+
+# --- a constant table can't be stored into
+# error: constant table
+let c = [1, 2, 3]
+c[0] = 5
+c[0]
+
+# --- a stepped array: reads hold between steps, every 4 samples
+# expect: 0
+# expect at 1: 0.01
+# expect at 4: 0.01
+# expect at 5: 0.02
+# expect at 61: 0.16
+$c = array(1, every = 4)
+$c[0] = $c[0] + 1
+$c[0] * 0.01
+
+# --- stepped with the frame: what was stored at the last pixel of the frame before
+# expect at 1: 0.7
+# expect at 8: 0.7
+# expect at 63: 0.7
+let k = pixel_index(4, 2)
+$a = array(1, every = 8)
+$a[0] = k
+$a[0] * 0.1
+
+# --- an element nobody stores keeps its value
+# expect until 64: 0.5
+$a = array(2, 5, every = 3)
+$a[0] = $a[0] + 1
+$a[1] * 0.1
+
+# --- every = 1 steps every sample
+# expect at 10: 0.01
+# expect at 11: 0.011
+$c = array(1, every = 1)
+$c[0] = $c[0] + 1
+$c[0] * 0.001
+
+# --- inside each, stores wait for the step
+# expect at 1: 0.02
+# expect at 4: 0.04
+# expect at 7: 0.06
+$a = array(3, every = 3)
+each(3, i => $a[i] = $a[i] + i)
+$a[2] * 0.01
+
+# --- every by position is every by name
+# expect until 64: 0
+$c = array(1, 0, 4)
+$c[0] = $c[0] + 1
+$d = array(1, every = 4)
+$d[0] = $d[0] + 1
+$c[0] - $d[0]
+
+# --- a stepped array is state, not a let
+# error: not let
+let a = array(4, every = 2)
+a[0]
+
+# --- every is a whole number
+# error: whole number
+$a = array(4, every = 1.5)
+$a[0]
+
+# --- array says what it takes
+# error: no parameter 'size'
+$a = array(4, size = 2)
+$a[0]
+
+# --- every belongs to array, not to a builtin
+# error: no parameter 'every'
+phasor(440, every = 2)
+
+# --- nor to a stdlib def
+# error: no parameter 'every'
+osc(sin, 440, every = 2)

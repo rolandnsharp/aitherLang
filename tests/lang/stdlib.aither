@@ -1,0 +1,93 @@
+# The stdlib's defs are what they say they are.
+
+# --- osc is a shape on a phasor
+# expect until 4800: 0
+osc(saw, 220) - saw(TAU * phasor(220))
+
+# --- additive with one partial is a sine
+# expect until 4800: 0
+additive(440, saw_shape, 1) - sin(TAU * phasor(440))
+
+# --- additive's partials are harmonics at 1/n
+# expect until 4800: 0
+additive(220, saw_shape, 3) - (sin(TAU * phasor(220)) + sin(TAU * phasor(440)) / 2 + sin(TAU * phasor(660)) / 3)
+
+# --- partials above 24 kHz are left out
+# expect until 4800: 0
+additive(10000, saw_shape, 3) - (sin(TAU * phasor(10000)) + sin(TAU * phasor(20000)) / 2)
+
+# --- freq_shift is the analytic signal turned by a spin: a pair in quadrature
+# expect until 4800: 0, 0
+let x = sin(TAU * phasor(330)) * 0.5
+freq_shift(x, 100) - turn(analytic(x), spin(100))
+
+# --- spin is cos and sin of one phase
+# expect until 4800: 0
+spin(330) - [cos(TAU * phasor(330)), sin(TAU * phasor(330))]
+
+# --- dho's position is the spring's equation, written out
+# expect until 9600: 0
+let force = if t < dt then 1e8 else 0
+let w = TAU * 440
+$x = 0.0
+$v = 0.0
+$v = $v + (-(2 * 0.01 * w) * $v - w * w * $x + force) * dt
+$x = $x + $v * dt
+dho(force, 440, 0.01)[0] - $x
+
+# --- dho's second side is its velocity over w
+# expect until 9600: 0
+let force = if t < dt then 1e8 else 0
+let w = TAU * 440
+$x = 0.0
+$v = 0.0
+$v = $v + (-(2 * 0.01 * w) * $v - w * w * $x + force) * dt
+$x = $x + $v * dt
+dho(force, 440, 0.01)[1] - $v / w
+
+# --- a steady signal through a resonator comes out at its own level
+# expect at 47999: 1
+let y = resonator(0.5, 100, 200)
+if abs(y - 0.5) < 0.001 then 1 else 0
+
+# --- slew is lp1 with a time constant
+# expect until 4800: 0
+let x = sqr(TAU * phasor(50))
+slew(x, 0.01) - lp1(x, 1 / (TAU * 0.01))
+
+# --- slew 0 is the signal
+# expect until 480: 0
+let x = sqr(TAU * phasor(50))
+slew(x, 0) - x
+
+# --- tremolo at depth 0 is the signal, at depth 1 a 0..1 wobble
+# expect until 4800: 0, 0
+let x = sin(TAU * phasor(220))
+[tremolo(x, 5, 0) - x, tremolo(1, 5, 1) - (sin(TAU * phasor(5)) + 1) * 0.5]
+
+# --- pan is equal power
+# expect: 1
+let p = pan(1, 0.3)
+p[0] * p[0] + p[1] * p[1]
+
+# --- width 0 is mono, 1 is unchanged
+# expect: 0.3, 0.3
+width([0.5, 0.1], 0)
+
+# --- mono is the mean of the sides
+# expect: 0.3
+mono([0.5, 0.1])
+
+# --- gain, and drive's soft clip x / (1 + |x|)
+# expect: 0.5, 0.75
+[gain(0.25, 2), drive(1, 3)]
+
+# --- ease is smoothstep, clamped
+# expect: 0.5
+ease(0.5) + ease(-1) + ease(2) - 1
+
+# --- prev is one sample late
+# expect at 9: 9
+$n = 0
+$n = $n + 1
+prev($n)

@@ -1,0 +1,293 @@
+# Small syntax: numbers, `-`, `mod`, lines, blocks.
+
+# --- mod is floored
+# expect: 4
+7 mod 4 + 10 mod 3
+
+# --- mod of a negative takes the divisor's sign
+# expect: 3
+-1 mod 4
+
+# --- % is spelled mod
+# error: is spelled `mod`
+7 % 4
+
+# --- number exponents
+# expect: 1105.25
+1e3 + 2.5e-1 + 1E2 + .5e1
+
+# --- 1e-3
+# expect: 0.001
+1e-3
+
+# --- 2e is the number 2 and the name e, not an exponent
+# error: second top-level expression
+2e
+
+# --- a negative number is a literal, so a table may hold one
+# expect: -0.5
+wave(1, [-0.5, 0.5, 0.25])
+
+# --- negative entries in a constant table
+# expect: -1.25
+let tbl = [0.5, -0.25, -1]
+tbl[2] + tbl[1]
+
+# --- unary minus is still an expression
+# expect: -5
+let x = 3
+-x * 2 + -(1 + 1) + 2 - -1
+
+# --- var is an ordinary name
+# expect: 0.5
+let var = 0.5
+var
+
+# --- a line ending on an operator continues
+# expect: 0.75
+let a = 0.25 +
+  0.5
+a
+
+# --- a trailing - continues, unindented
+# expect: -0.25
+let a = 0.25 -
+0.5
+a
+
+# --- a trailing = continues
+# expect: 0.75
+let a =
+  0.75
+a
+
+# --- a line starting with |> continues the one above
+# expect: 0.375
+def half(x):
+  x * 0.5
+1.5
+|> half
+    |> half
+
+# --- a leading * continues
+# expect: 0.75
+let a = 3.0
+  * 0.25
+a
+
+# --- a leading == continues
+# expect: 1
+let a = 1.0
+  == 1.0
+a
+
+# --- a leading + continues (there is no unary +)
+# expect: 0.75
+let a = 0.25
+  + 0.5
+a
+
+# --- a leading - starts a new statement
+# expect: -0.5
+let a = 0.5
+-a
+
+# --- a leading ( is not a call
+# expect: 1
+let a = 0.5
+(a * 2)
+
+# --- `or` counts only as a whole word
+# expect: 0.25
+let order = 0.25
+order
+
+# --- a continuation inside a def body leaves the block intact
+# expect: 3
+def f(x):
+  let y = x +
+      1.0
+  y * 2
+f(0.5)
+
+# --- no indentation anywhere: the expression closes each block
+# expect: 0.75
+def half(x):
+let h = x * 0.5
+h
+play a:
+half(1.0)
+play b:
+$n = 0.25
+$n
+a + b
+
+# --- a one-line def
+# expect: 1.5
+def half(x): x * 0.5
+half(3.0)
+
+# --- stray tabs and spaces mean nothing
+# expect: 1.5
+def half(x):
+		x * 0.5
+      half(3.0)
+
+# --- each is a statement: the block reads on past it
+# expect: 0.6
+def total(x):
+let a = array(3)
+each(3, i => a[i] = x * (i + 1))
+a[0] + a[1] + a[2]
+total(0.1)
+
+# --- a def body with no expression runs into the next def
+# error: def f has no expression
+def f(x):
+let y = x
+def g(x): x
+g(1)
+
+# --- a play body with no expression runs into the end
+# error: play p has no expression
+play p:
+let y = 1
+
+# --- a body's second expression spills out to the top level
+# error: second top-level expression at line 4 (the first is at line 3)
+def f(x):
+x
+x * 2
+f(1)
+
+# --- a top-level each is a statement, not the output: the plays play
+# expect: 0.5
+let w = array(3)
+each(3, r => w[r] = r * 0.25)
+play a:
+  w[2]
+
+# --- a top-level each, then the final expression
+# expect: 2
+let w = array(2)
+each(2, r => w[r] = 1)
+w[0] + w[1]
+
+# --- an array literal over several lines, with comments
+# expect: 110
+let notes = [
+  110.0,   # A2
+  146.83,  # D3
+  164.81,  # E3
+  220.0,
+]
+wave(1.0, notes)
+
+# --- a newline just before the closing bracket
+# expect: 110
+let notes = [110.0, 220.0
+]
+wave(1.0, notes)
+
+# --- an empty array over lines
+# expect: 0
+let empty = [
+]
+let x = 0.0
+x
+
+# --- else if chains, indented, in a def
+# expect: 7
+def f(n):
+  if n == 1 then 2.0
+  else if n == 2 then 3.0
+  else if n == 3 then 5.0
+  else if n == 4 then 7.0
+  else 11.0
+f(4)
+
+# --- else if, last arm
+# expect: 11
+def f(n):
+  if n == 1 then 2.0
+  else if n == 2 then 3.0
+  else 11.0
+f(5)
+
+# --- else if at the top level
+# expect: 4
+let x = 3.0
+if x == 1 then 1.0
+else if x == 2 then 2.0
+else if x == 3 then 4.0
+else 99.0
+
+# --- else if on one line
+# expect: 7
+if 1 == 1 then 7.0 else if 1 == 2 then 0.0 else 9.0
+
+# --- else if in a play
+# expect: 42
+play t:
+  let x = 2.0
+  if x == 1 then 1.0
+  else if x == 2 then 42.0
+  else 99.0
+t
+
+# --- a let used above its line is a plain error naming both lines
+# error: used before its `let` on line 2
+let a = b + 1
+let b = 2
+a * 0
+
+# --- min and max take any number of arguments
+# expect: 0.9
+max(0.1, 0.4, 0.2) + min(1, 0.5, 0.9)
+
+# --- a $state init reads the lets above it
+# expect: 2
+let tempo = 120
+$beat = tempo / 60
+$beat
+
+# --- a file of plays plays them all
+# expect: 0.75, 0.375
+play a:
+  0.25
+
+play b:
+  [0.5, 0.125]
+
+# --- a def parameter shadows a file-level pair of the same name (adsr's s)
+# expect at 479: 1, 0
+let s = [0.9, 0.0]
+let e = s |> adsr(0.001, 0.3, 0.7, 0.4)
+[if e[0] > 0.9 then 1 else 0, e[1]]
+
+# --- let [a, b] names a pair's two sides
+# expect: 0.5, 0.25
+let [l, r] = [0.25, 0.5]
+[r, l]
+
+# --- _ names a side not wanted
+# expect: 0.75
+let [_, b] = [0.25, 0.75]
+b
+
+# --- in a def body, through a parameter: the def takes the pair whole
+# expect: 0.5, 0.5
+def first(z):
+  let [a, _] = z
+  a
+first([0.5, 0.25])
+
+# --- a number gives both names the number
+# expect: 0.3
+let [a, b] = 0.15
+a + b
+
+# --- two names, no more
+# error: two names
+let [a, b, c] = [1, 2]
+a

@@ -1,0 +1,126 @@
+# prev, noise, and `and`/`or` that always run both sides.
+
+# --- prev is last sample's value
+# expect: 0
+# expect at 4: 4
+$c = 0.0
+$c = $c + 1
+prev($c)
+
+# --- prev of a let is prev of its expression
+# expect until 8: 0
+$c = 0.0
+$c = $c + 1
+let g = $c
+prev(g) - prev($c)
+
+# --- two prevs keep their own memory
+# expect at 4: 12
+$c = 0.0
+$c = $c + 1
+prev($c) + prev($c * 2.0)
+
+# --- a rising edge fires once: `and` runs both sides, so prev keeps up
+# expect at 1: 0
+# expect at 2: 1
+# expect at 3: 0
+# expect at 5: 0
+$c = 0.0
+$c = $c + 1
+let g = if $c >= 3 and $c <= 5 then 1.0 else 0.0
+if g > 0.5 and prev(g) < 0.5 then 1.0 else 0.0
+
+# --- the second press fires too
+# expect at 2: 1
+# expect at 12: 1
+# expect at 13: 0
+$c = 0.0
+$c = $c + 1
+let g = if ($c >= 3 and $c <= 5) or ($c >= 13 and $c <= 15) then 1.0 else 0.0
+if g > 0.5 and prev(g) < 0.5 then 1.0 else 0.0
+
+# --- `or` runs both sides
+# expect: 1
+# expect at 2: 1
+$counter = 0.0
+$counter = $counter + 1
+1.0 or $counter > 0
+
+# --- two noise() calls are two streams
+# expect at 47999: 1
+def uncorrelated(a, b):
+  $n = 0
+  $sa = 0
+  $sb = 0
+  $saa = 0
+  $sbb = 0
+  $sab = 0
+  $n = $n + 1
+  $sa = $sa + a
+  $sb = $sb + b
+  $saa = $saa + a * a
+  $sbb = $sbb + b * b
+  $sab = $sab + a * b
+  let ma = $sa / $n
+  let mb = $sb / $n
+  let c = ($sab / $n - ma * mb) / sqrt(($saa / $n - ma * ma) * ($sbb / $n - mb * mb))
+  if abs(c) < 0.02 then 1 else 0
+uncorrelated(noise(), noise())
+
+# --- a def called twice has two streams
+# expect at 47999: 1
+def uncorrelated(a, b):
+  $n = 0
+  $sa = 0
+  $sb = 0
+  $saa = 0
+  $sbb = 0
+  $sab = 0
+  $n = $n + 1
+  $sa = $sa + a
+  $sb = $sb + b
+  $saa = $saa + a * a
+  $sbb = $sbb + b * b
+  $sab = $sab + a * b
+  let ma = $sa / $n
+  let mb = $sb / $n
+  let c = ($sab / $n - ma * mb) / sqrt(($saa / $n - ma * ma) * ($sbb / $n - mb * mb))
+  if abs(c) < 0.02 then 1 else 0
+def hiss(g): noise() * g
+uncorrelated(hiss(1), hiss(1))
+
+# --- noise in two lets is two streams
+# expect at 47999: 1
+def uncorrelated(a, b):
+  $n = 0
+  $sa = 0
+  $sb = 0
+  $saa = 0
+  $sbb = 0
+  $sab = 0
+  $n = $n + 1
+  $sa = $sa + a
+  $sb = $sb + b
+  $saa = $saa + a * a
+  $sbb = $sbb + b * b
+  $sab = $sab + a * b
+  let ma = $sa / $n
+  let mb = $sb / $n
+  let c = ($sab / $n - ma * mb) / sqrt(($saa / $n - ma * ma) * ($sbb / $n - mb * mb))
+  if abs(c) < 0.02 then 1 else 0
+let a = noise()
+let b = lp1(noise(), 48000)
+uncorrelated(a, b)
+
+# --- noise is white in -1..1: mean 0, variance 1/3
+# expect at 47999: 1
+let x = noise()
+$n = 0
+$s = 0
+$ss = 0
+$out = 0
+$n = $n + 1
+$s = $s + x
+$ss = $ss + x * x
+$out = max($out, abs(x))
+if $out <= 1 and abs($s / $n) < 0.01 and abs($ss / $n - 1 / 3) < 0.01 then 1 else 0
