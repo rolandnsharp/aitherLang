@@ -3,8 +3,8 @@
 
 #include "check.h"
 
-/* A patch from disk, rendered as `aither render` does (its path the
- * tag, so imports resolve beside it): render.nim's renderPatch. -1 with
+/* A patch from disk, rendered with its path as the
+ * tag, so imports resolve beside it, as `audit` does. -1 with
  * "patch not found" when the file isn't there. */
 static int render_file(const char* path, double seconds, int sr, Rendered* out, char* err,
                        int errlen) {

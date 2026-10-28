@@ -22,7 +22,7 @@ typedef struct DspState {
   double sr;
 } DspState;
 
-/* What a patch calls by name (dsp.nim's Natives table lists them). */
+/* What a patch calls by name (the compiler finds natives here). */
 double n_lp1(DspState* s, double sig, double cut);
 double n_hp1(DspState* s, double sig, double cut);
 double n_lpf(DspState* s, double sig, double cut, double res);

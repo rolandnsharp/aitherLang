@@ -1,6 +1,6 @@
 /* Thin C wrapper around ALSA seq — isolates aither from the header's
- * unions and bitfields. All Nim needs to know is the five entry points
- * plus three callback function pointers. */
+ * unions and bitfields. midi.c needs only the entry points and three
+ * callback function pointers. */
 
 #include <alsa/asoundlib.h>
 #include <string.h>

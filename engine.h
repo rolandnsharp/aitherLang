@@ -14,9 +14,9 @@
 
 #include "voice.h"
 
-#define ENGINE_ENV_BINS 20     /* sparkline slots; engine_types.nim's EnvBins */
+#define ENGINE_ENV_BINS 20     /* sparkline slots in a meter */
 
-/* The states `list`, `levels` and `check` report, in engine_types.nim's order. */
+/* The states `list`, `levels` and `check` report. */
 enum { VS_STOPPED, VS_MUTED, VS_PARKED, VS_FADING_OUT, VS_FADING_IN, VS_PLAYING, VS_RUNAWAY };
 enum { PS_SILENT, PS_FADING_OUT, PS_FADING_IN, PS_PLAYING, PS_PARKED };
 
@@ -64,7 +64,7 @@ typedef struct {
 
 /* Reads the AITHER_* settings; the stdlib's text is kept (not copied). */
 void  engine_init(const char* stdlib_src);
-/* Run the engine (engine.nim's runEngine): never returns. */
+/* Run the engine (aither with no command): never returns. */
 void  engine_run(char** files, int nfiles, double seconds);
 /* One command line, its reply (malloc'd, without the newline). */
 char* engine_command(const char* line);
