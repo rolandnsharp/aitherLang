@@ -32,7 +32,7 @@ def voice(freq):
 play drone:
   let dry = (voice(f1) + voice(f2) * 0.7 + voice(f3) * 0.5) * bright
   # The single line of language design that motivated all this work:
-  let [shifted, _] = freq_shift(dry, shiftHz)
+  let shifted = freq_shift(dry, shiftHz)       # the pair: heard, its sides a quarter turn apart
   dry * (1 - wet) + shifted * wet
 
 drone |> drive(0.9)

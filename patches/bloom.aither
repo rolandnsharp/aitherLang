@@ -110,6 +110,8 @@ play shimmer:
 play drone:
   let warm = additive(220, warm_shape, 14) * 0.4
   let shHz = lfo1 * 80
+  # Left and right are two opposite shifts, one number each: the spectrum
+  # pulls apart across the field.
   let [L, _]    = freq_shift(warm,  shHz)
   let [R, _]    = freq_shift(warm, -shHz)
   let amp  = 0.13 * (bloomW * 0.25 + shiftW + collapseW * 0.5)

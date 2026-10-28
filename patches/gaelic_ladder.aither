@@ -344,20 +344,18 @@ play aitherVoice:
   # offset — the Tesla swarm gains a metallic organ-bell quality.
   # ONLY aither's complex-algebra primitives can do this in one op.
   let baseSig = l1 + l2
-  let [l3, _] = freq_shift(baseSig, 37) * 0.9
+  let pair = analytic(baseSig)       # one analytic signal, turned twice: L3 and L4
+  let l3 = turn(pair, spin(37)) * 0.9
 
   # L4 — PHASE FRACTAL: take the analytic signal of the layered
   # output, square it via turn. Squaring an analytic signal doubles
   # its phase angle = mathematically locked octave-up that tracks
   # the source's phase exactly. Pure aither move.
-  let pair = analytic(baseSig)
-  let sq = turn(pair, pair)
-  let l4 = sq[0] * 0.4
+  let l4 = turn(pair, pair) * 0.4
 
   # Cumulative additive layering
-  let out = l1 * w1 + l2 * w2 + l3 * w3 + l4 * w4
-  let s = out * aitherVol
-  [s, s]
+  let out = l1 * w1 + l2 * w2 + l3 * w3 + l4 * w4    # l3 and l4 are pairs: their layers sound wide
+  out * aitherVol
 
 # ===== MASTER =====
 let dry  = bodhran + handpan + handpan2 + aitherVoice

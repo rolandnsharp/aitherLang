@@ -67,11 +67,12 @@ play heterodyne:
 # signal (e.g. analytic(complex_drone)).
 play halo:
   let p = spin(220)
-  let drone = p[0] * 0.5
-  let [shifted, _] = freq_shift(drone, shimmerAmt * 100)
+  # p is already a turning pair, so shifting it is one turn: no Hilbert
+  # filters needed to rebuild the quarter-turn side freq_shift would make.
+  let shifted = turn(p, spin(shimmerAmt * 100)) * 0.5
   let s = shifted * 0.15
   let w3 = max(0, 1 - abs(voiceMix - 0.667) * 4)
-  [s * w3, s * w3]
+  s * w3
 
 # ===== VOICE 4 — PHASE-FRACTAL OCTAVE =====
 # Squaring a spin via turn(p, p) doubles its phase angle —

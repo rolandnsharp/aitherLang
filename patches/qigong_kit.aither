@@ -143,10 +143,9 @@ play harp:
   let raw = (h1 + h2 + h3 + h4)
 
   # K3 freq_shift twist
-  let [shifted, _] = freq_shift(raw, harpTwist)
+  let shifted = freq_shift(raw, harpTwist)     # the pair: the twisted harp, a little wide
 
-  let s = shifted * harpVol
-  [s, s]
+  shifted * harpVol
 
 # ===== WHALE CHORUS — slow swept low voices =====
 # Each whale is a low fundamental whose pitch is modulated by a slow

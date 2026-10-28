@@ -44,16 +44,13 @@ play pad:
 # under the hood: Hilbert → analytic signal → rotate by 2π·hz·t → real).
 let dry     = pad
 let mono    = (dry[0] + dry[1]) * 0.5
-let [shifted, _] = freq_shift(mono, shiftHz)
+let shifted = freq_shift(mono, shiftHz)      # a turning pair: the shifted pad in quadrature
 
-# K2 — spectral square. Build the analytic signal of the post-shift
-# pad, then complex-multiply it by itself. turn((re, im), (re, im))
-# = (re² − im², 2·re·im), which for an analytic signal is exactly
-# the frequency-doubled, phase-locked version (and intermod
-# sidebands for chord input). Take the real part.
-let pair    = analytic(shifted)
-let sq      = turn(pair, pair)
-let squared = sq[0]
+# K2 — spectral square. The shifted pad is already a turning pair (an
+# analytic signal), so turning it by itself doubles every phase: the
+# frequency-doubled, phase-locked version (and intermod sidebands for
+# chord input). No second Hilbert pair needed.
+let squared = turn(shifted, shifted)
 
 # Crossfade dry vs squared. Clamp the squared term — chord magnitudes
 # can spike higher than unit, and we want a controlled blend rather
@@ -63,5 +60,5 @@ let blended = shifted * (1 - squareAmt * 0.5) + sqSafe * squareAmt * 0.5
 
 # Master FX
 let driven = drive(blended, driveAmt)
-let wet    = driven |> reverb(2.5, 0.4)
-([driven, driven] + [wet, wet] * revWet) * 0.55
+let wet    = mono(driven) |> reverb(2.5, 0.4)     # one reverb for both sides
+(driven + wet * revWet) * 0.55

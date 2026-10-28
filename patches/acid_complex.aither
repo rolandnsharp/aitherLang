@@ -114,7 +114,7 @@ play acid:
   let kwC = max(0, (kickParadigm - 0.5) * 2)
   let kickClick = noise() * discharge(kTrig, 200) * 0.3
   let kickRaw   = kickA * kwA + kickB * kwB + kickC * kwC + kickClick
-  let [kickShifted, _] = freq_shift(kickRaw, kickShift)
+  let [kickShifted, _] = freq_shift(kickRaw, kickShift)   # one side: the low end stays centred
   let kickSig     = kickShifted * kickVol * 0.5
 
   # ===== BASS =====
@@ -146,7 +146,7 @@ play acid:
                + h_oct * w_oct * 0.36
                + h_fth * w_fth * 0.30
                + h_7th * w_7th * 0.26)
-  let [bassShifted, _] = freq_shift(bassStack, bassShift)
+  let [bassShifted, _] = freq_shift(bassStack, bassShift) # one side: the low end stays centred
   let bassSig     = bassShifted * bassVol * 0.5
 
   # ===== DIDGERIDOO =====
