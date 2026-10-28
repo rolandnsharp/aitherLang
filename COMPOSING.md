@@ -663,7 +663,8 @@ without re-routing. This is what `f(state) → sample` looks like
 when one equation generalises a half-dozen named techniques.
 
 **Force is in acceleration units.** `force` adds directly to
-`ddx`, so a constant force settles to `x = force / k`, exactly. At audio
+`ddx`, so a constant force settles to about `x = force / k` (within
+0.03% below 500 Hz; short of it near Nyquist, PHASORS.md "The push"). At audio
 frequencies `k = (TAU*freq)^2` is huge — a 440 Hz oscillator has
 `k ≈ 7.6M`, so impulse-style strikes need force on the order of
 `1e7`–`1e8` to ring at unit amplitude. For LFO/envelope use at

@@ -59,8 +59,10 @@ def freq_shift(signal, hz): turn(analytic(signal), spin(hz))
 # exact solution sampled, not a step towards it, so the pair stays a
 # circle at any frequency up to Nyquist (Mathews and Smith's "phasor
 # filter", 2003; PHASORS.md says why). wd, the rate it turns, is a
-# little under w when damped. The push is force / wd, so a constant
-# force stretches the spring to force / w^2, as the equation says.
+# little under w when damped. The push is force dt / wd: each sample's
+# force a strike at that instant, so a strike and the resonance are
+# exact, and a constant force stretches the spring to about force / w^2
+# (within 0.03% below 500 Hz, short of it near Nyquist; PHASORS.md).
 # An oscillator rings, so damp stops just under 1; past that a spring
 # only creeps back, and swell or slew is the tool.
 # The velocity, if a model needs it, takes both sides:

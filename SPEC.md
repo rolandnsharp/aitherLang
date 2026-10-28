@@ -1121,7 +1121,10 @@ def resonator(signal, freq, decay)        # a signal through a resonance
 `dho` is the spring every resonance is (`w = TAU freq`). Sweep `damp`
 and it walks through sustained sine (0), bell (~0.005), pluck (~0.2)
 and thud (~0.9); `force` is an acceleration, so a strike is a big
-number, and a constant force stretches it to `force / w²`. It returns
+number, and a constant force stretches it to about `force / w²`
+(within 0.03% below 500 Hz; short of it towards Nyquist, since each
+sample's force is a strike at that instant, which keeps a strike and the
+resonance itself exact: PHASORS.md, "The push"). It returns
 its phasor, the pair `[x, q]`: `x` is the position, the sound; `q` the
 position a quarter turn behind. The pair turns the way `spin` does, at
 `wd = w · sqrt(1 - damp²)`, its length is how far it swings, and

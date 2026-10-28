@@ -187,10 +187,23 @@ comment saying so. Taking `−w·q` alone would be off by about the
 damping, 5–9% for those modes, which is the `_` rule earning its keep:
 the right answer needed both sides.
 
-**The push.** The force enters as `force·dt / wd`, which is a strike's
-velocity kick in the phasor's units, so a strike of a given force swings
-as far as it always did, and a constant force stretches the spring to
-exactly `force / w²`, as the equation says, at any damping below 1.
+**The push.** The force enters as `force·dt / wd`, a velocity kick in
+the phasor's units: each sample's force is taken as a strike at that
+instant (impulse invariance, as Mathews and Smith's filter takes its
+input). So a strike is exact, and a `dho` driven at its own frequency
+responds as the spring does: to 0.1% below 6 kHz at any damping, and at
+any frequency while it rings (damp up to 0.01); only a heavily damped
+one near Nyquist answers weak (a quarter weak at 20 kHz, damp 0.3 to
+0.6). What it gives up
+is far below the resonance: a constant force stretches the spring to
+`force / w²` times `(θ/2)·cot(θ/2)`, with `θ = wd·dt` the turn a sample
+(exactly so undamped): within 0.03% below 500 Hz at 44.1 kHz, 6% short
+at 6 kHz. Holding the force through the sample instead (zero-order hold)
+would make the constant force exact, but it delays the push by half a
+sample, and a 12 kHz resonance then answers 12% weak and 49° late; the
+resonance is what's heard, so `dho` keeps the strike. Both are checked
+in Lean (proofs.blah.dev, "Aither: the phasor mathematics of
+PHASORS.md").
 
 **An oscillator turns.** A spring damped past critical (`damp ≥ 1`)
 doesn't oscillate, it creeps back, and a turning point can't represent
