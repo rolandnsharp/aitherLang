@@ -10,7 +10,7 @@ proc loadWith(src: string): NativeVoice =
   result = newVoice(48000.0)
   result.load(src, 48000.0)
 
-# --- 6. The bell_verify.aither idiom — let-bound midi_gate() then
+# --- 6. The bell idiom — let-bound midi_gate() then
 # prev(g) for the strike. End-to-end check that the rising-edge fires
 # exactly once on note-on, with NO other firings around it.
 block midiBellPattern:

@@ -1,3 +1,0 @@
-let trig = impulse(8)
-let env = discharge(trig, 50)
-noise() * env |> hpf(8000, 0.3) |> gain(0.2)
