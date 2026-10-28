@@ -799,6 +799,8 @@ static void note_invariant(Ctx* c, Scope* target, const char* name, Node* expr, 
  * that number, an invariant name as its expression. */
 static Node* spell(Ctx* c, Scope* sc, Node* n) {
   if (!n) return NULL;
+  double cv;
+  if (n->kind == nkIdx && const_value(c, sc, n, &cv)) return mknum(c, cv, n->line, n->source);
   if (n->kind == nkIdent && !(eq(n->str, "PI") || eq(n->str, "TAU") || eq(n->str, "sr") || eq(n->str, "dt")) && sc) {
     double v;
     if (lookup_num_lit(sc, n->str, &v)) return mknum(c, v, n->line, n->source);

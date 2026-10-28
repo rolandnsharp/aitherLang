@@ -209,3 +209,14 @@ phasor(440, every = 2)
 # --- nor to a stdlib def
 # error: no parameter 'every'
 osc(sin, 440, every = 2)
+
+# --- a constant table at a compile-time index is a number, inside maths computed once
+# expect: 2, 2
+let notes = [220.0, 440.0, 880.0]
+def octaves(i): log2(notes[i] / 220) + 0 * t
+octaves(2)
+
+# --- the same table, read as it runs
+# expect at 12000: 1
+let notes = [220.0, 440.0, 880.0]
+log2(notes[int(t * 10)] / 220)

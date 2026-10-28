@@ -16,7 +16,7 @@
 #   wob a bell keeps it light; on a real bell each mode beats at its own
 #   rate.)
 # - Each mode is a quarter-turn pair, so the whole bell is too, and
-#   magnitude(bell) is its loudness at every sample: it drives the faint
+#   amplitude(bell) is its loudness at every sample: it drives the faint
 #   metallic air of the strike, which dies exactly with the ring.
 # - Width: the bells' pair has its sides a quarter turn apart, which is
 #   as wide as stereo gets (the sides are uncorrelated). Naming both
@@ -66,7 +66,7 @@ let small  = bell(strike([0, 1, 0, 1, 0, 1, 0, 0]), 587.33)   # D5
 let bells = big * 0.9 + middle * 0.7 + small * 0.5
 
 # The air of struck metal, as loud as the bells are ringing right now.
-let ring = magnitude(bells)
+let ring = amplitude(bells)
 let air  = bpf(noise(), 6000, 0.6) * ring * 0.04
 
 let [x, q] = (bells + air) * 0.5
