@@ -1,0 +1,96 @@
+# contour — a jig made of waves: no sequences, no steps, no tables.
+#
+# Every musical thing here is a wave read by a clock (COMPOSING.md,
+# "Rhythm is oscillation"):
+#
+# - The clock: one bar phasor, twelve pulses a bar (6/8, two lilting
+#   groups of three).
+# - Rhythm by ratio: the bodhran strikes where a phasor running five
+#   times a bar wraps, heard on the twelve-pulse grid. That is the
+#   Euclidean rhythm E(5, 12), five strikes as evenly spread over twelve
+#   pulses as a grid allows (Toussaint's "Euclidean algorithm generates
+#   traditional musical rhythms" shows most folk rhythms are such), from
+#   one division: floor(i * k / n) steps up exactly where a strike goes.
+#   The frame drum's three-a-bar is the same with k = 3.
+# - Accents from harmonics: a player's feel is a shape over the bar, a
+#   periodic wave, so a few harmonics of the bar make it. K1 morphs from
+#   a heartbeat (one accent a bar) through a jig (two) to a reel (four),
+#   blending shapes, not lists.
+# - Melody from a contour: three slow waves summed make a line that
+#   rises, falls and answers itself; at each melody strike it is held
+#   and put onto the scale.
+# - The scale by formula: seven even steps of the octave rounded to the
+#   nearest semitone are exactly the Dorian mode (0 2 3 5 7 9 10); five
+#   are a pentatonic (0 2 5 7 10). K2 picks five or seven.
+# - Everything struck gets a short push, so nothing clicks (COMPOSING,
+#   "Strike what you play whole with a short push").
+#
+#   aither patches/contour.aither | tools/play hw:rockchipes8388c 50
+#
+# K1 (CC 74) the feel: heartbeat, jig, reel.
+# K2 (CC 71) the scale: pentatonic below half, Dorian above.
+# K3 (CC 76) the melody's reach: a narrow tune to a wide one.
+
+let tempo = 2.2                                # pulses a second
+let bar = phasor(tempo / 12)                   # where we are in the bar
+let pulse = impulse(tempo)                     # the grid: twelve a bar
+let phrase = phasor(tempo / 48)                # four bars
+
+# ------------------------------------------------------------------ rhythm
+
+# k strikes as evenly as twelve pulses allow: the pulses where k * i / 12
+# crosses a whole number.
+def euclid(k):
+  let i = floor(bar * 12 + 0.001)
+  pulse * (floor(i * k / 12) - floor((i - 1) * k / 12))
+
+# The feel: accents as harmonics of the bar.
+let feel = midi_cc(74)
+let heartbeat = 0.35 + 0.65 * max(0, cos(TAU * bar))
+let jig = 0.45 + 0.55 * max(0, cos(TAU * 2 * bar))
+let reel = 0.55 + 0.45 * max(0, cos(TAU * 4 * bar))
+let accent = heartbeat * max(0, 1 - feel * 2) + jig * (1 - abs(feel * 2 - 1)) + reel * max(0, feel * 2 - 1)
+
+def push(strike): discharge(strike, 1 / 0.001) / 0.001   # a strike as a 1 ms push, area 1
+
+play bodhran:
+  let hit = euclid(5) * accent
+  let w = TAU * 75
+  let [boom, _] = dho(push(hit) * w * 0.6, 75, 0.12)      # one side: the low end stays centred
+  let tap = bpf(noise(), 1800, 0.4) * discharge(hit, 60) * 0.5
+  (boom + tap) * 0.5
+
+play frame:
+  let hit = euclid(3) * (0.6 + 0.4 * accent)
+  let w = TAU * 210
+  dho(push(hit) * w * 0.2, 210, 0.05) * 0.25            # higher: played whole
+
+# ------------------------------------------------------------------ melody
+
+# The contour: three slow waves, a phrase, its half and its answer.
+let reach = 2 + midi_cc(76) * 5
+let line = (sin(TAU * phrase) + 0.6 * sin(TAU * 2 * phrase + 1.3) + 0.35 * sin(TAU * 3 * phrase + 2.1)) * reach
+
+# The scale: `steps` even divisions of the octave, rounded to semitones.
+let steps = if midi_cc(71) < 0.5 then 5 else 7
+def scale(degree):
+  let octave = floor(degree / steps)
+  let within = degree - octave * steps
+  293.66 * pow(2, octave + floor(within * 12 / steps + 0.5) / 12)   # from D4
+
+play melody:
+  let hit = euclid(7)
+  $degree = 0.0
+  $degree = if hit > 0 then floor(line + 0.5) else $degree      # held at each strike
+  let f = scale($degree)
+  let w = TAU * f
+  let note = dho(push(hit) * w * 0.25, f, 0.004)
+  note * 0.35
+
+# ------------------------------------------------------------------- drone
+
+play drone:
+  (osc(sin, 73.42) + osc(sin, 110) * 0.5 + osc(sin, 146.83) * 0.3) * 0.12
+
+let dry = bodhran + frame + melody + drone
+dry + (mono(dry) |> reverb(2.2, 0.8)) * 0.25
