@@ -20,3 +20,6 @@ tests/*
 !tests/corpus.golden
 !tests/lang/
 __pycache__/
+
+# a binary mid-link (the Makefile renames it into place)
+*.tmp

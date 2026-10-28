@@ -11,23 +11,26 @@ HDR    := engine.h voice.h render.h analysis.h cli_output.h midi.h codegen.h par
 
 all: aither
 
+# Every binary is linked to a temporary name and renamed into place: a
+# rename is atomic, so whatever is running, or starts during a build, gets
+# the old binary or the new one whole, never a half-written file.
 aither: aither.c $(ENGINE) $(HDR) stdlib.aither
-	$(CC) $(CFLAGS) -o aither aither.c $(ENGINE) $(LIBS)
+	$(CC) $(CFLAGS) -o $@.tmp aither.c $(ENGINE) $(LIBS) && mv -f $@.tmp $@
 
 tools/play: tools/play.c realtime.c
-	cc -O2 tools/play.c realtime.c -o tools/play -lasound
+	cc -O2 tools/play.c realtime.c -o $@.tmp -lasound && mv -f $@.tmp $@
 
 tools/card: tools/card.c realtime.c
-	cc -O2 -Wall tools/card.c realtime.c -o tools/card -lasound
+	cc -O2 -Wall tools/card.c realtime.c -o $@.tmp -lasound && mv -f $@.tmp $@
 
 tools/pad: tools/pad.c
-	cc -O2 tools/pad.c -o tools/pad -lasound
+	cc -O2 tools/pad.c -o $@.tmp -lasound && mv -f $@.tmp $@
 
 tools/scope: tools/scope.c tools/display.h
-	cc -O2 -Wall tools/scope.c -o tools/scope $$(pkg-config --cflags --libs sdl3) -lEGL -lGLESv2 -lpthread -lm
+	cc -O2 -Wall tools/scope.c -o $@.tmp $$(pkg-config --cflags --libs sdl3) -lEGL -lGLESv2 -lpthread -lm && mv -f $@.tmp $@
 
 tools/tv: tools/tv.c tools/display.h
-	cc -O2 -Wall tools/tv.c -o tools/tv $$(pkg-config --cflags --libs sdl3) -lEGL -lGLESv2 -lpthread -lm
+	cc -O2 -Wall tools/tv.c -o $@.tmp $$(pkg-config --cflags --libs sdl3) -lEGL -lGLESv2 -lpthread -lm && mv -f $@.tmp $@
 
 # tests/run: every TEST in the C files under tests/, each in its own
 # process (tests/check.h); `tests/run name ...` runs those. engine_live
@@ -38,10 +41,10 @@ TOOLS  := tests/corpus.c tests/exact.c tests/temporal_audit.c tests/bench.c
 TESTS  := $(filter-out $(TOOLS),$(wildcard tests/*.c))
 
 tests/run: $(TESTS) tests/check.h $(ENGINE) $(HDR) stdlib.aither
-	$(CC) $(TESTCFLAGS) -o $@ $(TESTS) $(ENGINE) $(LIBS)
+	$(CC) $(TESTCFLAGS) -o $@.tmp $(TESTS) $(ENGINE) $(LIBS) && mv -f $@.tmp $@
 
 tests/corpus tests/exact tests/temporal_audit tests/bench: tests/%: tests/%.c $(ENGINE) $(HDR) stdlib.aither
-	$(CC) $(TESTCFLAGS) -o $@ $< $(ENGINE) $(LIBS)
+	$(CC) $(TESTCFLAGS) -o $@.tmp $< $(ENGINE) $(LIBS) && mv -f $@.tmp $@
 
 test: aither tests/run
 	tests/run
@@ -65,6 +68,6 @@ exact: tests/exact
 	tests/exact
 
 clean:
-	rm -rf aither nimcache/ tests/run tests/corpus tests/exact tests/temporal_audit tests/bench tools/play tools/card tools/pad tools/scope tools/tv
+	rm -rf aither *.tmp tools/*.tmp tests/*.tmp nimcache/ tests/run tests/corpus tests/exact tests/temporal_audit tests/bench tools/play tools/card tools/pad tools/scope tools/tv
 
 .PHONY: all clean test corpus corpus-update exact bench
