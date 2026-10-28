@@ -1,0 +1,5 @@
+# Analogue addition: 0.5 + 0.5 through a summer with a slow amplifier
+# (20 Hz), so its output rises to about 1 over tenths of a second.
+# 1 + 1 would meet the rail. Silent: a constant has no frequency.
+import "lib/field.aither"
+summer(0.5, 0.5, 20)

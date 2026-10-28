@@ -1,0 +1,9 @@
+# Two poles resonating together: 440 and 440.5 Hz on a weak spring. The
+# first starts ringing, the second still; about once a second the energy
+# passes across and back, as two pendulums on one string.
+# Left ear and x: the first ring. Right ear and y: the second.
+#   coupled(440, 443, 0.002): detuned past the spring, the second only
+#   borrows a little. coupled(440, 443, 0.02): a stronger spring, and the
+#   exchange returns.
+import "lib/field.aither"
+coupled(440, 440.5, 0.002) * 0.9

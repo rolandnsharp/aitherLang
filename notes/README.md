@@ -15,6 +15,11 @@ tried and dropped; each doc says so near the top where that's the case.
 - [sensing-2026-10-16.md](sensing-2026-10-16.md) — aither between a
   sensor and a display: EMF, natural radio and lightning, cosmic rays,
   RF/5G, electrical work, video at audio rate. Brainstorm.
+- [field.md](field.md) — analogue computing as an aither library:
+  parts with speeds and rails (`patches/lib/field.aither`), aither's
+  filters as circuits (`patches/lib/analogue.aither`), the
+  `patches/field_*` examples; [field-plan.md](field-plan.md) is what
+  comes next, [field-ab.md](field-ab.md) the blind A/B on the didge.
 - [card-2026-10-16.md](card-2026-10-16.md) — a duplex tool, one clock
   for output and input: a fixed, known loop delay for lock-in, sweeps
   and the metal detector. Proposed, not built; no engine change.

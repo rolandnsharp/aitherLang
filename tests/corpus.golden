@@ -111,6 +111,10 @@ patches/drums.aither  EADF06FF71598111  -19.0  -5.2
 patches/dusk.aither  F09A2ADAB2114CDD  -27.4  -13.6
 patches/ecology.aither  98D76FB87057247D  -27.9  -10.9
 patches/emergent.aither  7040BF30EE462C31  -22.2  -11.5
+patches/field_coupled.aither  7DAB50363AFF8573  -8.9  -2.9
+patches/field_ring.aither  0B7DD5997969D4BE  -6.1  -3.1
+patches/field_summer.aither  920A03654E076065  -0.3  -0.2
+patches/field_vdp.aither  23BFDA81D392E34B  -5.5  -1.9
 patches/flute.aither  566C285BD3188172  -29.6  -14.9
 patches/flute_dm.aither  235D973B9743EE70  -29.3  -14.5
 patches/fm_swarm.aither  FCE976C9C6D9DA11  -27.1  -11.4

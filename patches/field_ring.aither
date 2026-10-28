@@ -1,0 +1,5 @@
+# One ring, two integrators and an inverter: a cosine left and a sine
+# right, so the scope draws a circle and you hear 440 Hz.
+#   aither examples/ring.aither | tools/scope | tools/play
+import "lib/field.aither"
+ring(440, 0, 0.7)

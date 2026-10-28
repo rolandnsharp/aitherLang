@@ -1,0 +1,65 @@
+# analogue.aither: aither's electronics as circuits, for any patch.
+#
+#   import "lib/analogue.aither"         (from a patch in patches/)
+#   ... |> a_lpf(800, 0.5) |> a_drive(1.4)
+#
+# The same topology as aither's filters (the zero-delay state-variable
+# filter in dsp.c), with what a real circuit adds, following notes/field-plan.md's
+# rule: inexactness from dynamics, not decoration.
+#
+# - Rails: each integrator is an amplifier whose output saturates
+#   softly toward ±A_RAIL. Quiet signals pass as before; a formant
+#   ringing hard bends.
+# - Two steps a sample, so the bends' harmonics fold back less.
+# - Tolerance: each filter sits a little off its nominal cutoff (±1%,
+#   seeded by where it is in the code, like noise(): the same every run).
+# - Drift: a slow wander of about 0.2%.
+# - a_drive: an amplifier with a little asymmetry, as a real stage has,
+#   so it adds even harmonics as well as odd.
+#
+# Built-ins win over library defs, so these have their own names.
+
+let A_RAIL = 1.5
+
+def a_sat(v): A_RAIL * tanh(v / A_RAIL)
+
+# One filter, two half-steps a sample. mode: 0 low, 1 high, 2 band.
+def a_svf(x, cutoff, res, mode):
+  $tol = 0.0
+  $tol = if $tol == 0 then 1 + noise() * 0.01 else $tol
+  let f = clamp(cutoff * $tol * (1 + lp1(noise(), 0.5) * 0.5), 1, sr * 0.45)
+  let g = tan(PI * f / (2 * sr))
+  let k = 2 * (1 - res)
+  let a1 = 1 / (1 + g * (g + k))
+  let a2 = g * a1
+  let a3 = g * a2
+  $ic1 = 0.0
+  $ic2 = 0.0
+  $xp = 0.0
+  let xh = ($xp + x) * 0.5
+  $xp = x
+  # the first half-step, on the input halfway through the sample
+  let h3 = xh - $ic2
+  let h1 = a1 * $ic1 + a2 * h3
+  let h2 = $ic2 + a2 * $ic1 + a3 * h3
+  $ic1 = a_sat(2 * h1 - $ic1)
+  $ic2 = a_sat(2 * h2 - $ic2)
+  # the second, on the input now
+  let v3 = x - $ic2
+  let v1 = a1 * $ic1 + a2 * v3
+  let v2 = $ic2 + a2 * $ic1 + a3 * v3
+  $ic1 = a_sat(2 * v1 - $ic1)
+  $ic2 = a_sat(2 * v2 - $ic2)
+  if mode == 0 then v2 else if mode == 1 then x - k * v1 - v2 else v1
+
+def a_lpf(x, cutoff, res): a_svf(x, cutoff, res, 0)
+def a_hpf(x, cutoff, res): a_svf(x, cutoff, res, 1)
+def a_bpf(x, cutoff, res): a_svf(x, cutoff, res, 2)
+
+# aither's drive (x / (1 + |x|)) with a stage's asymmetry: the positive
+# swing gives a little more than the negative, which adds even
+# harmonics; the offset that makes is taken out (a coupling capacitor).
+def a_drive(signal, amount):
+  let x = signal * amount
+  let y = (x + 0.15 * x * x) / (1 + abs(x))
+  hp1(y, 10)

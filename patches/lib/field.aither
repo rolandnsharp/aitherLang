@@ -1,0 +1,86 @@
+# field.aither: analogue parts and oscillators as named defs, for any
+# aither patch.
+#
+#   import "lib/field.aither"            (from a patch in patches/)
+#
+# The parts of an analogue computer, each a process with a speed and
+# limits, not a formula: what you call is what you get. `a + b` stays
+# exact; `summer(a, b)` is two signals meeting at an amplifier's input.
+# notes/field-plan.md's rule: inexactness from dynamics, not decoration. Values are
+# in machine units, ±1, the range of the sound and of the scope.
+
+# ---------------------------------------------------------------- parts
+
+# An amplifier's output range. Linear to 0.9, then bending softly into
+# the rail at 1, as a real stage saturates: nothing is touched below.
+def rail(x):
+  let m = abs(x)
+  if m < 0.9 then x else (if x < 0 then -1 else 1) * (0.9 + 0.1 * tanh((m - 0.9) / 0.1))
+
+# An amplifier with a bandwidth: its output moves toward its input at a
+# finite speed (`bw` Hz) and stays inside the rails. Every part below
+# goes through one.
+def amplifier(x, bw = 20000):
+  $y = 0.0
+  $y = $y + (rail(x) - $y) * (1 - exp(-TAU * bw * dt))
+  $y
+
+# Two signals meeting at a node. summer(0.5, 0.5) is about 1, reached in
+# a few time constants; summer(1, 1) meets the rail.
+def summer(a, b, bw = 20000): amplifier(a + b, bw)
+
+def inverter(a, bw = 20000): amplifier(-a, bw)
+
+# A multiplier: the least accurate part of a real machine. Here, a
+# little slower than the others.
+def multiplier(a, b, bw = 5000): amplifier(a * b, bw)
+
+# An integrator: a capacitor charging, `gain` per second, leaking
+# `leak` per second, inside the rails.
+def integrator(input, gain, leak = 0):
+  $y = 0.0
+  $y = rail($y + (gain * input - leak * $y) * dt)
+  $y
+
+# ----------------------------------------------------------- oscillators
+
+# The first program of every analogue computer: two integrators and an
+# inverter in a ring, which solve x'' = -w^2 x. The result is the pair
+# [x, v], a cosine and a sine: a phasor, aither's complex number. `push`
+# drives the ring from outside (coupling, a hand); `start` is the charge
+# it is given on its first sample; `leak` lets it die away.
+def ring(freq, push = 0, start = 0, leak = 0):
+  $xo = 0.0
+  $on = 0.0
+  let w = TAU * freq
+  let kick = if $on == 0 then start / (w * dt) else 0
+  $on = 1
+  let v = integrator(inverter($xo, 200000) + push + kick, w, leak)
+  let x = integrator(v, w, leak)
+  $xo = x
+  [x, v]
+
+# A ring that keeps itself alive (Van der Pol): it feeds energy back
+# while it is small and takes it out while it is large, so from a tiny
+# start it spirals out to its own circle (about 0.8) and stays. `mu` is
+# how hard it pulls toward the circle.
+def vdp(freq, mu = 0.1, start = 0.01):
+  $xp = 0.0
+  $vp = 0.0
+  let r = ring(freq, mu * (1 - ($xp / 0.4) * ($xp / 0.4)) * $vp, start)
+  $xp = r[0]
+  $vp = r[1]
+  r
+
+# Two rings on one spring: each is pushed by how far the other is from
+# it, `k` the spring's strength. Detuned a little, the energy passes
+# from one to the other and back; coupled hard enough, they lock. The
+# result is [a, b], the two rings' positions.
+def coupled(f1, f2, k, s1 = 0.8, s2 = 0):
+  $pa = 0.0
+  $pb = 0.0
+  let a = ring(f1, k * ($pb - $pa), s1)
+  let b = ring(f2, k * ($pa - $pb), s2)
+  $pa = a[0]
+  $pb = b[0]
+  [a[0], b[0]]
