@@ -13,7 +13,7 @@ let c = pixel(w, h) * 1.5 - [0.5, 0]
 $z = array(2 * w * h)                   # each pixel's z
 $m = array(2 * w * h)                   # ... and what is shown of it
 let z = [$z[2 * k], $z[2 * k + 1]]
-let next = if magnitude(z) > 2 then z else turn(z, z) + c
+let next = if amplitude(z) > 2 then z else turn(z, z) + c
 $z[2 * k] = next[0]
 $z[2 * k + 1] = next[1]
 
@@ -21,4 +21,4 @@ let m = [$m[2 * k], $m[2 * k + 1]]
 let seen = m + (next - m) * 0.05
 $m[2 * k] = seen[0]
 $m[2 * k + 1] = seen[1]
-seen / (1 + magnitude(seen))
+seen / (1 + amplitude(seen))

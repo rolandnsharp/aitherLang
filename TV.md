@@ -7,7 +7,7 @@ A patch's final expression is a pair. Pipe the engine into `tv` and
 the stream fills a picture: w×h samples a frame, in raster order (rows
 top to bottom, each left to right), each pair one pixel's complex
 value. Its phase is the hue (the positive reals red, then yellow,
-green, cyan, blue and magenta going round) and its magnitude the
+green, cyan, blue and magenta going round) and its amplitude the
 brightness, black at 0 and full at 1.
 
 ```
@@ -56,7 +56,7 @@ centre, black at it. Any complex function of the pixel is a picture of
 that function: `cmul(p, p)` winds the wheel twice, `rotate(p, t)`
 turns it, and a polynomial shows each root as a point where every
 colour meets. Squeeze the result into the unit circle with
-`z / (1 + magnitude(z))`, which keeps the phase and bounds the size
+`z / (1 + amplitude(z))`, which keeps the phase and bounds the size
 (see Practicalities).
 
 ### A system you watch run
@@ -70,7 +70,7 @@ let k = pixel_index(w, h)
 let c = pixel(w, h) * 1.5 - [0.5, 0]
 $z = array(2 * w * h)
 let z = [$z[2 * k], $z[2 * k + 1]]
-let next = if magnitude(z) > 2 then z else cmul(z, z) + c
+let next = if amplitude(z) > 2 then z else cmul(z, z) + c
 ```
 
 Points inside the set settle into cycles, which flicker frame to frame
@@ -92,7 +92,7 @@ def rec escape(z, c, n):
   else escape(cmul(z, z) + c, c, n - 1)
 ```
 
-Compare |z|² with 4 rather than `magnitude(z)` with 2: `magnitude`
+Compare |z|² with 4 rather than `amplitude(z)` with 2: `amplitude`
 takes a square root every step.
 
 ## Practicalities

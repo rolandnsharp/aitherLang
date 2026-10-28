@@ -16,7 +16,7 @@
 
 let [mic, _] = input()
 let z = analytic(lp1(lp1(mic, 700), 700))           # the fundamental, as a turning pair
-let level = magnitude(z)
+let level = amplitude(z)
 let step = phase(turn(z, conj(prev(z))))            # the angle it turned this sample
 $pitch = 110
 $pitch = if level > 0.01 then step / (TAU * dt) else $pitch   # hold the last pitch through the gaps

@@ -66,5 +66,5 @@ $v[k] = c
 
 # The phasor, brightness as power; the terrain a dim brown.
 let z = [next, (next - c) / omega]
-let shown = z * magnitude(z) * 10
-if earth then [0.11, 0.06] else shown / max(1, magnitude(shown))
+let shown = z * amplitude(z) * 10
+if earth then [0.11, 0.06] else shown / max(1, amplitude(shown))

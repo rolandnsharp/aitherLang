@@ -244,7 +244,7 @@ figures instead. `--palette amber`, `--decay 0.9`; `f` full screen,
 
 `tools/tv` (`make tools/tv`) is the raster display: a frame is w×h
 samples in scan order, each pair one pixel's complex value, its phase
-the hue and its magnitude the brightness. A patch finds its pixel with
+the hue and its amplitude the brightness. A patch finds its pixel with
 `pixel(w, h)` and runs at w × h × 60 samples a second for 60 frames:
 
 ```

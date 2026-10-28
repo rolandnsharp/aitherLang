@@ -111,7 +111,7 @@ turn(turn([3, 2], w), conj(w))
 
 # --- rotation keeps magnitude
 # expect: 1
-magnitude(rotate([1, 0], 0.7)) * magnitude(rotate([1, 0], 2.3)) * magnitude(rotate([1, 0], -1.9))
+amplitude(rotate([1, 0], 0.7)) * amplitude(rotate([1, 0], 2.3)) * amplitude(rotate([1, 0], -1.9))
 
 # --- phase after a rotate is the angle
 # expect: 1.234
@@ -121,13 +121,13 @@ phase(rotate([1, 0], 1.234))
 # expect: -0.7
 phase(rotate([1, 0], TAU - 0.7))
 
-# --- magnitude of one number is an error
-# error: magnitude
-magnitude(1)
+# --- the amplitude of one number is an error
+# error: amplitude takes one pair
+amplitude(1)
 
 # --- analytic's magnitude is the envelope: a steady sine's stays near its level
 # expect at 4799: 1
-let env = magnitude(analytic(sin(TAU * phasor(1000)) * 0.5))
+let env = amplitude(analytic(sin(TAU * phasor(1000)) * 0.5))
 $ok = 1
 $ok = if t > 0.02 and (env > 0.65 or env < 0.35) then 0 else $ok
 $ok
@@ -140,7 +140,7 @@ $at640 = [0, 0]
 $at440 = [0, 0]
 $at640 = $at640 + on * [cos(TAU * 640 * t), sin(TAU * 640 * t)]
 $at440 = $at440 + on * [cos(TAU * 440 * t), sin(TAU * 440 * t)]
-if magnitude($at640) > 10 * magnitude($at440) then 1 else 0
+if amplitude($at640) > 10 * amplitude($at440) then 1 else 0
 
 # --- a two-entry wave is a table, not a pair
 # expect: 0.25
@@ -205,4 +205,4 @@ phase(turn(p, conj(prev(p)))) / (TAU * dt)
 # expect at 47999: 1
 let w = TAU * 1000
 let ring = dho(sin(TAU * phasor(1000)) * 0.5 * 2 * 0.05 * w * w, 1000, 0.05)
-if abs(magnitude(ring) - 0.5) < 0.02 then 1 else 0
+if abs(amplitude(ring) - 0.5) < 0.02 then 1 else 0

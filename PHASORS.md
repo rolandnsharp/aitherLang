@@ -4,7 +4,7 @@ Every value in aither is a pair, and a pair is a point that can turn.
 This page is why: the ideas the language is built on, where they come
 from, and what we measured when we tried the alternatives. Read it to
 understand why aither code is written the way it is: `turn` instead of
-multiplying sides, `magnitude` instead of rectifying, `dho` returning a
+multiplying sides, `amplitude` instead of rectifying, `dho` returning a
 pair, a `_` being worth a second look.
 
 ## 1. A pair is a phasor
@@ -23,7 +23,7 @@ number" type, it adds the operations that read a pair as one
 | `spin(hz)`      | a unit point turning `hz` times a second           |
 | `turn(z, w)`    | `z` turned by `w`'s angle and scaled by its length |
 | `conj(z)`       | the same point turning the other way               |
-| `magnitude(z)`  | how far it is from the centre                      |
+| `amplitude(z)`  | how far it is from the centre                      |
 | `phase(z)`      | which way it points                                |
 
 **Which way is positive: anticlockwise.** A positive frequency is a
@@ -40,6 +40,12 @@ The one rule worth remembering: **turning by a spin adds its speed.**
 `turn(spin(220), spin(50))` is `spin(270)`, and `turn(p, p)` doubles
 `p`'s speed. A frequency shift, a radio tuned down, single-sideband
 mixing and octave doubling are all this rule.
+
+A phasor has an amplitude and a phase, in the engineers' words since
+Steinmetz, and those are the names: `amplitude(z)` is its length (what
+mathematics calls the modulus, `|z|`), `phase(z)` its angle. Not `abs`:
+a function given a pair runs on each side, so `abs` of a pair is two
+absolute values, and the length gets its own word.
 
 `+`, `-`, `*` and `/` stay side by side, so stereo arithmetic means
 what it looks like and nothing changes meaning because a value
@@ -78,7 +84,7 @@ what is wanted from it reads both sides at once:
 
 | you want                      | read the pair with                              |
 |-------------------------------|-------------------------------------------------|
-| how loud                      | `magnitude(p)`                                  |
+| how loud                      | `amplitude(p)`                                  |
 | how fast it turns: frequency  | `phase(turn(p, conj(prev(p)))) / (TAU * dt)`    |
 | move it, shift it, mix it     | `turn(p, w)`                                    |
 | hear it                       | the pair itself                                 |
@@ -100,7 +106,7 @@ capacitor is a damped harmonic oscillator) and gives both sides, so its
 length is the station's sound at every instant:
 
 ```
-magnitude(dho(antenna * 2 * damp * w * w, dial, damp))
+amplitude(dho(antenna * 2 * damp * w * w, dial, damp))
 ```
 
 That line is `patches/crystal.aither`, with `patches/station.aither`

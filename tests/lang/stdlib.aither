@@ -53,7 +53,7 @@ if abs(rate - 440 * sqrt(1 - 0.01 * 0.01)) < 0.5 then 1 else 0
 # --- its phasor stays a circle near Nyquist: driven at 18 kHz, its length holds
 # expect at 95999: 1
 let w = TAU * 18000
-let len = magnitude(dho(sin(TAU * phasor(18000)) * 0.5 * 2 * 0.05 * w * w, 18000, 0.05))
+let len = amplitude(dho(sin(TAU * phasor(18000)) * 0.5 * 2 * 0.05 * w * w, 18000, 0.05))
 $lo = 9
 $hi = 0
 $lo = if t > 1 then min($lo, len) else $lo

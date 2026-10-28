@@ -574,13 +574,13 @@ sounds:
 ```
 # Bell strike — long ring at 440 Hz, its pair doing the work
 let bell = dho(impulse(0.5) * 100000000, 440, 0.005)
-let ring = magnitude(bell)             # how hard it's still ringing: an envelope, at every sample
+let ring = amplitude(bell)             # how hard it's still ringing: an envelope, at every sample
 let beat = turn(bell, spin(1.5))       # the whole bell 1.5 Hz higher: an even beat against itself
 (bell + beat) * 0.5 + noise() * ring * 0.02   # and a breath that dies with it
 
 # Resonant filter — narrow bandpass at 800 Hz, driven by external audio
 let band = dho(audio_in * 50000, 800, 0.2)
-let level = magnitude(band)            # its loudness, as a tuned circuit hears it
+let level = amplitude(band)            # its loudness, as a tuned circuit hears it
 ```
 
 For demonstration, `patches/dho_walk.aither` wires K1 to `damp` on
@@ -591,7 +591,7 @@ turns, and a spring damped past critical only creeps back, which is an
 envelope's job (`swell`, `slew`).
 
 The whole pair is a phasor, a circle at every frequency, so it goes
-straight into `turn`, `rotate`, `magnitude`, `phase` or `tv`. `q` is
+straight into `turn`, `rotate`, `amplitude`, `phase` or `tv`. `q` is
 the velocity only when undamped: damped, the phasor also shrinks as it
 turns, so the velocity takes both sides,
 `v = -(wd * q + damp * w * x)` with `wd = w * sqrt(1 - damp^2)`, the
@@ -712,7 +712,7 @@ its sides where a model needs both: `let [x, q] = dho(...)`.
 | `turn(z, w)`             | `z` turned by `w`'s angle, scaled by its size (complex multiplication) |
 | `conj(z)`                | the same pair turning the other way                    |
 | `rotate(z, angle)`       | turned by a fixed angle, in radians                    |
-| `magnitude(z)`           | how big                                                |
+| `amplitude(z)`           | how big                                                |
 | `phase(z)`               | which way it points                                    |
 | `analytic(signal)`       | `[signal, hilbert(signal)]`: the signal as spins       |
 | `freq_shift(signal, hz)` | the analytic signal turned by a spin: shifted up `hz` Hz, a pair in quadrature |
@@ -736,7 +736,7 @@ operation that reads the whole pair.
 
 | you want         | read the pair with                                  | instead of                     |
 |------------------|-----------------------------------------------------|--------------------------------|
-| how loud         | `magnitude(p)`                                      | one side, rectified and smoothed |
+| how loud         | `amplitude(p)`                                      | one side, rectified and smoothed |
 | how fast it turns (pitch, FM) | `phase(turn(p, conj(prev(p)))) / (TAU * dt)` | timing zero crossings      |
 | move, shift, mix | `turn(p, w)`                                        | one side times a sine          |
 | hear it          | the pair itself: the sink decides                   | `let [x, _] = p`               |
@@ -748,7 +748,7 @@ loudness. A `dho` is the tuned circuit (a coil and capacitor is a damped
 harmonic oscillator) and gives both sides, so the whole receiver is
 
 ```
-magnitude(dho(antenna * 2 * damp * w * w, dial, damp))
+amplitude(dho(antenna * 2 * damp * w * w, dial, damp))
 ```
 
 the phasor's length, which is the station's sound at every instant
@@ -763,7 +763,7 @@ in.
 In order of preference:
 
 1. **Use the pair whole.** An operation reads both sides for you:
-   `magnitude(p)`, `phase(p)`, `turn(p, w)`, or the pair played as it
+   `amplitude(p)`, `phase(p)`, `turn(p, w)`, or the pair played as it
    is. No names, nothing thrown away.
 2. **Destructure with both names** when a formula needs each side on
    its own. A damped mode's velocity is the case (the didge patches):
@@ -774,7 +774,7 @@ In order of preference:
 3. **One side, with `_`,** only where one number is all that fits.
 
 Destructuring a pair just to rebuild what an operation gives
-(`let [x, q] = p` then `sqrt(x * x + q * q)` for `magnitude(p)`) is
+(`let [x, q] = p` then `sqrt(x * x + q * q)` for `amplitude(p)`) is
 the same maths done by hand.
 
 Played, a phasor pair is the same sound with its sides a quarter turn
@@ -907,7 +907,7 @@ def orbit(f, q, c):
   let hop = step < $last                 # the phasor wrapped: hop
   $last = step
   $was = if hop then $z else $was
-  $z = if hop then (if magnitude($z) > 2 then [0, 0] else turn($z, $z) + c) else $z
+  $z = if hop then (if amplitude($z) > 2 then [0, 0] else turn($z, $z) + c) else $z
   let s = step * step * (3 - 2 * step)   # glide from where it was to where it is
   $was + ($z - $was) * s
 ```

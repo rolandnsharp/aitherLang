@@ -234,7 +234,7 @@ def pixel_index(w, h): (floor(t * sr + 0.5) + w * h - 1) mod (w * h)
 
 # The pixel's centre as a pair: x across -1..1, y up, square pixels, so y
 # spans +-h/w. What the patch returns for it is the pixel's complex value:
-# tv shows its phase as hue and its magnitude as brightness.
+# tv shows its phase as hue and its amplitude as brightness.
 def pixel(w, h):
   let k = pixel_index(w, h)
   let col = k mod w

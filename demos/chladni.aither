@@ -68,10 +68,10 @@ $v[k] = c
 # is how far it swings, against the strongest swing of the frame before,
 # so a figure shows as it rings up; the nodal lines stay black.
 let z = [next, (next - c) / omega]
-let swing = magnitude(z)
+let swing = amplitude(z)
 $peak = 0.0
 $lastPeak = 0.001
 $lastPeak = if k == 0 then max(0.001, $peak) else $lastPeak
 $peak = if k == 0 then swing else max($peak, swing)
 let shown = z / $lastPeak
-if edge then [0.06, 0.06] else shown / max(1, magnitude(shown))
+if edge then [0.06, 0.06] else shown / max(1, amplitude(shown))

@@ -1,0 +1,75 @@
+# bell — three church bells, built from their modes, ringing a slow peal.
+#
+# A bell is a set of modes, each a dho: the hum an octave below, the
+# prime, the minor-third tierce that makes a bell sound like a bell, the
+# quint, the nominal, and the inharmonic modes above (a typical tuned
+# bell's ratios). The modes ring at once and die at their own rates,
+# high ones first, so a strike opens bright and mellows into the hum.
+#
+# What the pairs do here (PHASORS.md):
+# - Every mode is a turning dho, exact at any pitch, so the small bell's
+#   top modes ring true above 10 kHz, where a stepped spring leans into
+#   an ellipse and, past 14 kHz, runs away.
+# - Warble: a real bell is not perfectly round, so each mode is two close
+#   frequencies that beat. Here that is the mode and itself turned a
+#   little faster, turn(mode, wob): no second oscillator to drift. (One
+#   wob a bell keeps it light; on a real bell each mode beats at its own
+#   rate.)
+# - Each mode is a quarter-turn pair, so the whole bell is too, and
+#   magnitude(bell) is its loudness at every sample: it drives the faint
+#   metallic air of the strike, which dies exactly with the ring.
+# - Width: the bells' pair has its sides a quarter turn apart, which is
+#   as wide as stereo gets (the sides are uncorrelated). Naming both
+#   sides sets it: the left ear hears x, the right x turned partway
+#   towards q, and that angle is the width, 0 mono to 90 degrees wide.
+#   Nothing cancels summed to mono at any width.
+#
+# The strike is a short push, as a clapper is: a short hit excites the
+# high modes, a soft one only the low (K1), as on a real bell.
+#
+# K1 (CC 74) the strike: soft and dark to hard and bright.
+# K2 (CC 71) warble: still to a slow shimmer.
+# K3 (CC 76) the room: dry to a stone tower.
+# K4 (CC 77) width: mono to as wide as a quarter turn.
+
+let ratios = [0.5, 1.0, 1.183, 1.506, 2.0, 2.514, 2.662, 3.011, 4.166, 5.433, 6.796, 8.215]
+let hard   = midi_cc(74)
+let warble = 0.2 + midi_cc(71) * 1.6                # Hz, at the prime
+let room   = midi_cc(76)
+let wide   = midi_cc(77)
+
+# One bell: its strike (a push of unit area), its prime frequency. A
+# push of area 1 swings a mode by 1 / w, so each is pushed by w times
+# the swing wanted.
+def bell(strike, f):
+  let wob = spin(warble)
+  sum(12, n =>
+    let r = ratios[n - 1]
+    let fm = f * r
+    let w = TAU * fm
+    let damp = 0.0006 * pow(r, 1.3)                 # high modes die first
+    let mode = dho(strike * w * 0.3 * pow(r, -0.3), fm, damp)
+    let doublet = (mode + turn(mode, wob)) * 0.5
+    if fm < 18000 then doublet / sqrt(r) else 0)
+
+# The peal: eight steps, three bells, each struck on its own steps.
+let rate = 0.6                                      # strikes a second
+let step = int(phasor(rate / 8) * 8)
+let hit  = impulse(rate)
+let width = 0.0003 + (1 - hard) * 0.003             # the strike's length, s
+def strike(pattern): discharge(hit * pattern[step], 1 / width) / width   # area 1
+
+let big    = bell(strike([1, 0, 0, 0, 1, 0, 0, 0]), 146.83)   # D3
+let middle = bell(strike([0, 0, 1, 0, 0, 0, 1, 1]), 220.0)    # A3
+let small  = bell(strike([0, 1, 0, 1, 0, 1, 0, 0]), 587.33)   # D5
+
+let bells = big * 0.9 + middle * 0.7 + small * 0.5
+
+# The air of struck metal, as loud as the bells are ringing right now.
+let ring = magnitude(bells)
+let air  = bpf(noise(), 6000, 0.6) * ring * 0.04
+
+let [x, q] = (bells + air) * 0.5
+let angle = wide * PI / 2
+let dry = [x, x * cos(angle) + q * sin(angle)]
+dry * (1 - room * 0.5) + (mono(dry) |> reverb(4.5, 0.9)) * room * 0.6

@@ -49,7 +49,7 @@ def seat(n0, d0, n1, d1, u):
   let out = (sin(PI * r0) / (d0 * d0)) * (1 - u) + (sin(PI * r1) / (d1 * d1)) * u
   let edge = cardioid(th)
   let dip = sin(PI * u)
-  edge * (1 - dip * 0.12) + edge / magnitude(edge) * out * 0.6 * (1 - dip)
+  edge * (1 - dip * 0.12) + edge / amplitude(edge) * out * 0.6 * (1 - dip)
 
 let c1 = seat(num1[a], den1[a], num1[b], den1[b], u)
 let c2 = seat(num2[a], den2[a], num2[b], den2[b], u)
@@ -71,7 +71,7 @@ def orbit(f, q, c):
   let hop = step < $last                             # the phasor wrapped: hop
   $last = step
   $was = if hop then $z else $was
-  $z = if hop then (if magnitude($z) > 2 then [0, 0] else turn($z, $z) + c) else $z
+  $z = if hop then (if amplitude($z) > 2 then [0, 0] else turn($z, $z) + c) else $z
   let s = step * step * (3 - 2 * step)               # glide from where it was to where it is
   $was + ($z - $was) * s
 

@@ -68,7 +68,7 @@ let nextI = if resetTrig > 0.5 then 0.0 else zSquared[1] + cImag
 # Magnitude guard. A tone whose Z has crossed |Z|=2 is in the escaping
 # region; mute it (output 0) until the next reset. This is the standard
 # Mandelbrot "is C in the set?" test, applied per-sample.
-let mag = magnitude(nextR, nextI)
+let mag = amplitude(nextR, nextI)
 let alive = if mag < 4.0 then 1.0 else 0.0
 
 $zr = nextR * alive

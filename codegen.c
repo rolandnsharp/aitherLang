@@ -30,7 +30,7 @@ struct Ent {
   long n;             /* arrays, larrays, sarrays: length; counters */
   long wo;            /* sarrays: where stores go */
   double v;           /* numlits */
-  Node* node;         /* lambdas, invs; userDefs */
+  Node* node;         /* lambdas, invs; userDefs; arrays: the table's literal */
   Scope* sc;          /* invs */
   void* p;            /* pair-param caches */
 };
@@ -467,6 +467,17 @@ static int const_value(Ctx* c, Scope* sc, Node* n, double* v) {
       if (const_value(c, sc, n->kids[0], &a)) { *v = -a; return 1; }
     }
     return 0;
+  case nkIdx: {
+    /* A constant table at a compile-time index, wrapped as the emitted
+     * read wraps it. */
+    double ix;
+    if (n->kids[0]->kind != nkIdent || !const_value(c, sc, n->kids[1], &ix)) return 0;
+    Ent* e = lookup_array(c, sc, n->kids[0]->str);
+    if (!e || !e->node || e->n <= 0) return 0;
+    long i = (long)ix % e->n;
+    if (i < 0) i += e->n;
+    return const_value(c, sc, e->node->kids[i], v);
+  }
   default: return 0;
   }
 }
@@ -526,11 +537,11 @@ static const char* const BUILTIN_FNS[] = {
   "midi_cc", "midi_note", "midi_freq", "midi_gate",
   "midi_trig", "midi_voice_freq", "midi_voice_gate",
   "midi_voice_vel", "midi_voice_key", "midi_vel",
-  "magnitude", "phase", NULL};
+  "amplitude", "phase", NULL};
 
 /* Pair-returning builtins, and the reductions of a pair to a number. */
 static const char* const PAIR_CALLS[] = {"turn", "analytic", "conj", "input", NULL};
-static const char* const PAIR_READERS[] = {"magnitude", "phase", NULL};
+static const char* const PAIR_READERS[] = {"amplitude", "phase", NULL};
 
 /* Whether argument j of a pair builtin (called with n) is a pair. */
 static int takes_pair_at(const char* name, int j, int n) {
@@ -744,7 +755,7 @@ static int is_invariant(Ctx* c, Scope* sc, Node* n) {
   switch (n->kind) {
   case nkNum: return 1;
   case nkIdent: {
-    if (eq(n->str, "PI") || eq(n->str, "TAU") || eq(n->str, "sr")) return 1;
+    if (eq(n->str, "PI") || eq(n->str, "TAU") || eq(n->str, "sr") || eq(n->str, "dt")) return 1;
     if (!sc) return 0;
     double v;
     if (lookup_num_lit(sc, n->str, &v)) return 1;
@@ -757,6 +768,7 @@ static int is_invariant(Ctx* c, Scope* sc, Node* n) {
     if (n->nkids != 3) return 0;
     for (int i = 0; i < 3; i++) if (!is_invariant(c, sc, n->kids[i])) return 0;
     return 1;
+  case nkIdx: return is_const(c, sc, n);
   case nkCall:
     if (!(in(n->str, PURE_MATH) || eq(n->str, "midi_cc")) || n->nkids == 0) return 0;
     for (int i = 0; i < n->nkids; i++) if (!is_invariant(c, sc, n->kids[i])) return 0;
@@ -787,7 +799,7 @@ static void note_invariant(Ctx* c, Scope* target, const char* name, Node* expr, 
  * that number, an invariant name as its expression. */
 static Node* spell(Ctx* c, Scope* sc, Node* n) {
   if (!n) return NULL;
-  if (n->kind == nkIdent && !(eq(n->str, "PI") || eq(n->str, "TAU") || eq(n->str, "sr")) && sc) {
+  if (n->kind == nkIdent && !(eq(n->str, "PI") || eq(n->str, "TAU") || eq(n->str, "sr") || eq(n->str, "dt")) && sc) {
     double v;
     if (lookup_num_lit(sc, n->str, &v)) return mknum(c, v, n->line, n->source);
     Ent* inv = lookup_inv(sc, n->str);
@@ -889,7 +901,7 @@ static int bind_by_name(Ctx* c, Scope* sc, Scope* inner, const char* p, Node* a,
     }
     if ((e = lookup_array(c, sc, a->str))) {
       Ent* d = lput(c, &inner->arrays, p);
-      d->a = e->a; d->n = e->n;
+      d->a = e->a; d->n = e->n; d->node = e->node;
       return 1;
     }
   }
@@ -905,7 +917,7 @@ static int bind_by_name(Ctx* c, Scope* sc, Scope* inner, const char* p, Node* a,
       }
       badd(c, &c->array_decls, "static const double %s[%d] = {%s};\n", sym, a->nkids, bstr(&items));
       Ent* d = lput(c, &inner->arrays, p);
-      d->a = sym; d->n = a->nkids;
+      d->a = sym; d->n = a->nkids; d->node = a;
     } else {
       const char* tmp = fresh(c, F(c, "arg_%s", p));
       declare_local_array(c, sc, tmp, a, preface, 0);
@@ -1216,6 +1228,7 @@ static void emit_let(Ctx* c, Scope* sc, const char* name, Node* rhs, Buf* pre, c
     Ent* e = lput(c, &sc->arrays, name);
     e->a = static_table(c, fresh(c, F(c, "arr_%s", name)), rhs, items);
     e->n = rhs->nkids;
+    e->node = rhs;
     if (rhs->nkids != 2) return;
     /* two numbers are a pair as well */
     Ent* s2 = lput(c, &sc->stereo, name);
@@ -2015,7 +2028,7 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
   }
   if (in(name, PAIR_READERS)) {
     const char** a = pair_operands(c, sc, n, pre, 2, "one pair (or two numbers)");
-    if (eq(name, "magnitude")) return mono(F(c, "sqrt(%s * %s + %s * %s)", a[0], a[0], a[1], a[1]));
+    if (eq(name, "amplitude")) return mono(F(c, "sqrt(%s * %s + %s * %s)", a[0], a[0], a[1], a[1]));
     return mono(F(c, "atan2(%s, %s)", a[1], a[0]));
   }
   if (eq(name, "wave")) {
@@ -2297,6 +2310,7 @@ static const char* emit_program(Ctx* c, Node* program) {
         Ent* e = hput(c, &c->top_arrays, s->str);
         e->a = static_table(c, F(c, "arr_%s", s->str), rhs, items);
         e->n = rhs->nkids;
+        e->node = rhs;
         if (rhs->nkids == 2) {
           badd(c, &body, "  double l_%s_l = %s;\n  double l_%s_r = %s;\n", s->str, items[0], s->str, items[1]);
           incl(c, &c->stereo_lets, s->str);

@@ -261,7 +261,7 @@ return.
 
 A def uses a parameter as a pair when it indexes it (`p[0]`),
 hands it to a pair operation where that takes a pair (`turn(p, q)`,
-`magnitude(p)`; `analytic`'s signal is a number),
+`amplitude(p)`; `analytic`'s signal is a number),
 passes it to a def that takes a pair there, or does
 arithmetic with it and a pair (`turn(z, z) + c`), or names its sides
 (`let [a, b] = p`); a `def rec`
@@ -270,7 +270,7 @@ takes a pair whole, and a number passed to it fills both
 sides. A def returns a pair when its result is one: a literal
 `[a, b]`, a pair call, a pair parameter, a `let` bound to a
 pair, pair state (`$z = [0, 0]`), or arithmetic on one
-(`def norm(z): z / magnitude(z)`).
+(`def norm(z): z / amplitude(z)`).
 
 `sum`, `each` and `array(N)` accept any compile-time number:
 a literal, a name bound to one, `len(array)`, or arithmetic
@@ -288,7 +288,7 @@ again, so it is a loop that stops when the data says so:
 ```
 # z -> z^2 + c until it leaves, or n runs out: the steps left
 def rec escape(z, c, n):
-  if n == 0 or magnitude(z) > 2 then n else escape(turn(z, z) + c, c, n - 1)
+  if n == 0 or amplitude(z) > 2 then n else escape(turn(z, z) + c, c, n - 1)
 
 def rec fib(n, a = 0, b = 1): if n == 0 then a else fib(n - 1, b, a + b)
 fib(30)                            # 832040
@@ -647,7 +647,7 @@ read as a complex number only by the operations that turn it
 |-----------------|-----------------------------------------------------|
 | `turn(z, w)`    | `z` turned by `w`'s angle and scaled by its size (complex multiplication); turning by a spin adds its speed |
 | `conj(z)`       | the same pair turning the other way                 |
-| `magnitude(z)`  | how big: `sqrt(z0² + z1²)`                          |
+| `amplitude(z)`  | how big: `sqrt(z0² + z1²)`                          |
 | `phase(z)`      | which way it points, -π..π                          |
 | `analytic(x)`   | a signal as spins: `x` and its Hilbert transform, a quarter turn behind at every frequency |
 
@@ -657,7 +657,7 @@ Undoing a turn by a unit pair is turning by its conjugate:
 **Read the whole pair.** A pair from an oscillator, `analytic` or
 `spin` is a phasor: two sides a quarter turn apart. Most of what is
 wanted from it reads both sides at once, exactly and at every sample:
-how loud is `magnitude(p)` (no rectifying and smoothing, which is how
+how loud is `amplitude(p)` (no rectifying and smoothing, which is how
 one side has to get it); how fast it turns, its frequency, is
 `phase(turn(p, conj(prev(p)))) / (TAU * dt)`; moving or mixing it is
 `turn`; hearing it is the pair itself, its sides played a quarter turn
@@ -1100,7 +1100,7 @@ number, and a constant force stretches it to `force / w²`. It returns
 its phasor, the pair `[x, q]`: `x` is the position, the sound; `q` the
 position a quarter turn behind. The pair turns the way `spin` does, at
 `wd = w · sqrt(1 - damp²)`, its length is how far it swings, and
-`magnitude` and `phase` read it whole (see "Read the whole pair").
+`amplitude` and `phase` read it whole (see "Read the whole pair").
 
 Each sample the phasor turns by `wd · dt` and shrinks by
 `exp(-damp · w · dt)`, then the force pushes it by `force · dt / wd`:
@@ -1247,7 +1247,7 @@ def tremolo(signal, rate, depth): ...     # amplitude wobble, depth 0..1
 All three follow the engine clock (`t`), so they line up with the samples
 `tv` counts whatever was sent when; the patch and `tv` must agree on
 the size. What the patch returns for a pixel is a complex number: `tv`
-shows its phase as hue and its magnitude as brightness, full at 1.
+shows its phase as hue and its amplitude as brightness, full at 1.
 See TV.md.
 
 ### Polyphony

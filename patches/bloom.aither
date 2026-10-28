@@ -133,7 +133,7 @@ play mandel:
   let zsq = turn([$zr, $zi], [$zr, $zi])
   let nextR = if resetTrig > 0.5 then 0.0 else zsq[0] + cR
   let nextI = if resetTrig > 0.5 then 0.0 else zsq[1] + cI
-  let mag   = magnitude(nextR, nextI)
+  let mag   = amplitude(nextR, nextI)
   let alive = if mag < 4.0 then 1.0 else 0.0
   $zr = nextR * alive
   $zi = nextI * alive

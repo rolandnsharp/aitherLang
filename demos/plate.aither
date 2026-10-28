@@ -44,7 +44,7 @@ def lockin(music, freq):
   let ph = TAU * phasor(freq)
   $z = [0, 0]
   $z = $z + ([music * cos(ph), -music * sin(ph)] - $z) * (dt / 0.06)
-  magnitude($z)
+  amplitude($z)
 
 let music = mono(input())
 let heard = array(9)
@@ -60,4 +60,4 @@ let re = sum(9, n => shape[n - 1] * heard[n - 1] * cos(angle(n - 1)))
 let im = sum(9, n => shape[n - 1] * heard[n - 1] * sin(angle(n - 1)))
 # Softly bounded rather than clipped, so a bell's swell over the pad shows.
 let z = [re, im] * 40
-z / (1 + magnitude(z))
+z / (1 + amplitude(z))
