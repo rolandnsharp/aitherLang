@@ -90,7 +90,7 @@ patches/cello_max.aither  35D5F339D9C0771D  -20.0  -6.0
 patches/chaos.aither  C5687E4BD2EC2BA7  -29.7  -12.7
 patches/chimera.aither  03BF9597A9D2E7A1  -30.0  -16.3
 patches/chord.aither  E18667140FADE855  -16.2  -3.4
-patches/complex_pad.aither  7A6F1D53A9FA1725  -20.5  -9.6
+patches/complex_pad.aither  53D6D912660A06D9  -21.1  -9.8
 patches/crystal.aither  41984FA61F1EE325  -240.0  -240.0
 patches/dho_metamorphosis.aither  AA063A9FAE6E0EA9  -10.6  -5.1
 patches/dho_walk.aither  B2BC18FED60740E1  -37.5  -12.4
@@ -112,8 +112,8 @@ patches/flute.aither  566C285BD3188172  -29.6  -14.9
 patches/flute_dm.aither  235D973B9743EE70  -29.3  -14.5
 patches/fm_swarm.aither  FCE976C9C6D9DA11  -27.1  -11.4
 patches/follow.aither  38050E9D275DC325  -240.0  -240.0
-patches/freq_shifter.aither  7962CAE7F7A55869  -14.5  -6.4
-patches/gaelic_ladder.aither  BC0B0558AC869341  -24.9  -9.2
+patches/freq_shifter.aither  C5791840E56DFAF2  -14.5  -6.4
+patches/gaelic_ladder.aither  95778640C6B53537  -24.9  -9.1
 patches/jagged.aither  64B956AA3258105D  -19.5  -7.0
 patches/lattice.aither  3DBE86C056644DD9  -34.1  -19.1
 patches/listen.aither  41984FA61F1EE325  -240.0  -240.0
@@ -127,14 +127,14 @@ patches/pad_didge.aither  E38264475749EFAD  -20.6  -12.9
 patches/phi_bush.aither  4EFB3BC905D154E9  -25.9  -5.2
 patches/primes.aither  1A1970268F7AFC09  -15.9  -2.1
 patches/qigong_drift.aither  15392022173BEAF1  -28.4  -18.3
-patches/qigong_kit.aither  FB4272B6B5AF2FAD  -24.8  -12.1
+patches/qigong_kit.aither  CFD7EE1418A0B1A7  -25.0  -11.7
 patches/qigong_light.aither  AECB4581DB7FBF9E  -46.8  -29.6
 patches/quest.aither  4DA9E6A4EB321111  -15.6  -4.6
 patches/retreat.aither  9E9ED1478C206E19  -18.4  -8.1
 patches/sculpt.aither  6901D3C56EA11926  -29.5  -14.8
 patches/seahorse.aither  9768198C784E8A7E  -5.3  -0.9
 patches/spectra.aither  9DD9AD3608DCE7F9  -21.5  -9.4
-patches/spin_demo.aither  61BA256B842088AD  -29.4  -23.0
+patches/spin_demo.aither  93A0FA23D4838D94  -29.8  -23.4
 patches/spin_drone.aither  2F92BCC46DE4FBF1  -24.2  -12.7
 patches/station.aither  EA87E5B6175E2C39  -13.1  -3.8
 patches/subharmonic.aither  0F30C9ADABE886F9  -23.4  -12.2
