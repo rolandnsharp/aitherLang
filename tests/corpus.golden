@@ -99,6 +99,7 @@ patches/didge_sticks.aither  B2F5A2608F13FB92  -22.9  -9.3
 patches/distant_beat.aither  B9C994724A6A3161  -33.6  -17.5
 patches/doof.aither  A64324589504FA81  -25.7  -4.2
 patches/doof_set.aither  23E60CC1E4953FB5  -19.6  -3.2
+patches/duck.aither  D28C62AFD4287135  -22.4  -9.1
 patches/dusk.aither  F09A2ADAB2114CDD  -27.4  -13.6
 patches/ecology.aither  98D76FB87057247D  -27.9  -10.9
 patches/emergent.aither  7040BF30EE462C31  -22.2  -11.5
@@ -109,10 +110,12 @@ patches/field_vdp.aither  23BFDA81D392E34B  -5.5  -1.9
 patches/flute.aither  566C285BD3188172  -29.6  -14.9
 patches/flute_dm.aither  235D973B9743EE70  -29.3  -14.5
 patches/fm_swarm.aither  FCE976C9C6D9DA11  -27.1  -11.4
+patches/follow.aither  B8F17852FB4C2325  -240.0  -240.0
 patches/freq_shifter.aither  7962CAE7F7A55869  -14.5  -6.4
 patches/gaelic_ladder.aither  BC0B0558AC869341  -24.9  -9.2
 patches/jagged.aither  64B956AA3258105D  -19.5  -7.0
 patches/lattice.aither  3DBE86C056644DD9  -34.1  -19.1
+patches/listen.aither  41984FA61F1EE325  -240.0  -240.0
 patches/mandelbrot.aither  966DB8CFD5789261  -22.3  -8.5
 patches/mandelbrot_voice.aither  1B615BC582C62A79  -34.5  -33.3
 patches/metal_keys.aither  536B714FC28A6EF9  -22.8  -10.3
@@ -133,6 +136,7 @@ patches/spectra.aither  9DD9AD3608DCE7F9  -21.5  -9.4
 patches/spin_demo.aither  61BA256B842088AD  -29.4  -23.0
 patches/spin_drone.aither  2F92BCC46DE4FBF1  -24.2  -12.7
 patches/subharmonic.aither  0F30C9ADABE886F9  -23.4  -12.2
+patches/sympathetic.aither  41984FA61F1EE325  -240.0  -240.0
 patches/sympathy.aither  C1DAFED76F18AECD  -36.2  -23.6
 patches/tesla.aither  74822890147D5B91  -40.5  -14.9
 patches/tesla2.aither  92148E383FE23AD1  -35.2  -20.4
