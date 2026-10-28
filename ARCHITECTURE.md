@@ -7,8 +7,8 @@ parser.c           ~840 lines   tokenizer + recursive descent → syntax tree
 imports.c          ~170 lines   `import`: libraries spliced in, once each
 codegen.c         ~2680 lines   tree → C source + per-helper-type state layout
 ccompile.nim       ~130 lines   the compiler as Nim sees it: source in, C and layout out
-voice.nim          ~650 lines   TCC compile → tick(); hot-reload migration
-tcc.nim             ~40 lines   minimal TCC FFI
+voice.c           ~660 lines   a voice: TCC compile → tick(); hot-reload migration, rollback, the -O2 swap
+voice.nim         ~210 lines   voice.c as the Nim engine sees it (until the engine is C)
 dsp.c              ~360 lines   native DSP primitives (filters, delay, tape, reverb…)
 dsp.nim             ~90 lines   dsp.c's functions for Nim, and the table of natives
 midi.nim           ~360 lines   ALSA seq input thread + auto-resubscribe + held notes
@@ -45,7 +45,7 @@ dependencies beyond libtcc, ALSA, and the system audio library.
   codegen.c                     tree → C source string
         │                       + per-helper-type state region map
         ▼
-  voice.nim                     TCC in-memory compile → dlopen'd tick()
+  voice.c                       TCC in-memory compile → tick()
         │                       + state migration (preserves per-region state
         │                         across hot-reloads, skips NaN-poisoned regions)
         ▼
@@ -70,10 +70,10 @@ emits a single C source string containing:
 - A per-voice float64 state pool layout (region map: which DSP
   helper owns which slot indices)
 
-The C is handed to TCC (`tcc.nim` is a thin FFI). TCC compiles
-to machine code in memory in a few milliseconds. `voice.nim`
-extracts the `tick` and `init` function pointers via dlopen and
-holds them in a `Voice` object.
+The C is handed to TCC (libtcc, called from `voice.c`). TCC compiles
+to machine code in memory in a few milliseconds. `voice.c` takes the
+`tick` and `tick_block` entry points and holds them, with the state
+buffer and its layout, in a `Voice`.
 
 Hot-reload (`aither send <file>` against an existing voice)
 compiles the new code off the audio thread, then atomically

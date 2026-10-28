@@ -582,12 +582,12 @@ proc tryPatch*(filename: string; seconds, skip: float64): string =
     let live = slots[idx].voice
     let size = live.stateSize
     release(mtx)                      # allocate outside the audio lock
-    buf = alloc0(size)
+    buf = allocState(size)
     lockForCommand()
     if slots[idx].voice.state != nil and slots[idx].voice.stateSize == size:
       slots[idx].voice.snapshotInto(scratch, buf)
     else:
-      dealloc(buf)
+      freeState(buf)
   release(mtx)
   let origin =
     if scratch.state != nil: "live state of " & baseName
@@ -633,7 +633,7 @@ proc profileVoice(name: string; seconds: float64): string =
     return "ERR not found: " & name
   let v = slots[idx].voice
   let gen = v.gen
-  for x in v.prof.mitems: x = 0.0
+  for i in 0 ..< MaxProfSlots: v.prof[i] = 0.0
   let hdr = cast[ptr VoiceHeader](v.state)
   hdr.profTicks = 0
   hdr.profiling = 1
@@ -650,7 +650,8 @@ proc profileVoice(name: string; seconds: float64): string =
   let window = monoNow() - t0
   let ticks = float64(hdr.profTicks)
   let names = v.profSlotNames()
-  let times = v.prof
+  var times = newSeq[float64](names.len)
+  for i in 0 ..< names.len: times[i] = v.prof[i]
   release(mtx)
   var rows: seq[(float64, string)]
   var total = 0.0

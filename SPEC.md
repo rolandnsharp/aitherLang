@@ -1436,7 +1436,7 @@ Numeric literals propagate through `let` and `def` parameters
 so `additive(f, shape, 16)` resolves `max_n = 16` at compile
 time.
 
-### Voice (`voice.nim`, ~260 lines)
+### Voice (`voice.c`, ~660 lines)
 
 Owns the TCC compilation, dlopen of the resulting library, and
 the per-voice float64 state pool, allocated after the voice's struct

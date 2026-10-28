@@ -20,7 +20,7 @@ fresh-c:
 	fi; true
 .PHONY: fresh-c
 
-aither: aither.nim engine.nim engine_types.nim cli_output.nim analysis.nim render.nim voice.nim tcc.nim dsp.nim dsp.c dsp.h ccompile.nim codegen.c codegen.h parser.c parser.h imports.c imports.h midi.nim alsa_midi.c realtime.c stdlib.aither
+aither: aither.nim engine.nim engine_types.nim cli_output.nim analysis.nim render.nim voice.nim voice.c voice.h dsp.nim dsp.c dsp.h ccompile.nim codegen.c codegen.h parser.c parser.h imports.c imports.h midi.nim alsa_midi.c realtime.c stdlib.aither
 	@$(MAKE) -s fresh-c
 	$(NIM) c $(FLAGS) --out:aither aither.nim
 

@@ -26,7 +26,7 @@ proc renderWith(path: string; optimized: bool): Stereo =
   renderVoice(v, 1.0, 48000).audio
 
 let files = execProcess("git ls-files '*.aither'").splitLines()
-  .filterIt(it.len > 0 and "/lib/" notin it).sorted()
+  .filterIt(it.len > 0 and "/lib/" notin it and not it.startsWith("tests/")).sorted()   # tests/lang: cases, not patches
 var differ, failed = 0
 for f in files:
   var a, b: Stereo

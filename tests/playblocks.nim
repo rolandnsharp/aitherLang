@@ -21,8 +21,8 @@ let v = newVoice(48000.0)
 v.load(prog, 48000.0)
 
 doAssert v.partNames == @["a", "b"], "partNames was " & $v.partNames
-doAssert v.partGains.len == 2
-for g in v.partGains: doAssert g == 1.0
+doAssert v.partCount == 2
+for i in 0 ..< v.partCount: doAssert v.partGains[i] == 1.0
 
 # Play block b is stereo — expect L != R over a short run (220 Hz vs 221 Hz).
 var deltaSq = 0.0

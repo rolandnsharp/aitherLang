@@ -37,7 +37,7 @@ doAssert resumed.l == 7.0 + 18000.0, $resumed.l
 # A hot reload keeps the park by name.
 v.partParked[1] = 1.0
 v.load((Patch.replace("* 1000", "* 100")), 48000.0)
-doAssert v.partParked == @[0.0, 1.0], $v.partParked
+doAssert v.partParked[0] == 0.0 and v.partParked[1] == 1.0, $v.partParked[1]
 let after = v.tick(0.0)
 doAssert after.l == 8.0, $after.l
 echo "part park ok"

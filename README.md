@@ -417,8 +417,8 @@ parser.c           ~840 lines   tokenizer + recursive descent → syntax tree
 imports.c          ~170 lines   `import`: libraries spliced in, once each
 codegen.c         ~2680 lines   tree → C source + per-helper-type state layout
 ccompile.nim       ~130 lines   the compiler as Nim sees it: source in, C and layout out
-voice.nim          ~650 lines   TCC compile → tick(); hot-reload migration
-tcc.nim             ~40 lines   minimal TCC FFI
+voice.c           ~660 lines   a voice: TCC compile → tick(); hot-reload migration, rollback, the -O2 swap
+voice.nim         ~210 lines   voice.c as the Nim engine sees it (until the engine is C)
 dsp.c              ~360 lines   native DSP primitives (filters, delay, tape, reverb…)
 dsp.nim             ~90 lines   dsp.c's functions for Nim, and the table of natives
 midi.nim           ~360 lines   ALSA seq input thread + auto-resubscribe + held notes
