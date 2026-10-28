@@ -1,6 +1,7 @@
-## Offline patch render. Compiles an aither patch via parser/codegen,
-## ticks a voice for N samples, returns the buffer in memory. No disk
-## I/O for the patch itself, no engine, no audio thread.
+## Offline patch render, which is C (render.c), as the Nim tests see it
+## until they are C too (notes/c-port-2026-10-28.md). Compiles an aither
+## patch, ticks a voice for N samples, returns the buffer in memory. No
+## disk I/O for the patch itself, no engine, no audio thread.
 ##
 ## Patches that read MIDI primitives (`midi_freq`, `midi_gate`, etc.)
 ## see zero events here and produce silence — there's no MIDI thread
@@ -11,8 +12,8 @@
 ## engine's own format), so a patch that processes audio input can be
 ## iterated on offline against the same material every time.
 
-import std/[os, math, strutils, sets]
-import voice, dsp, engine_types, ccompile
+import std/os
+import voice, engine_types, ccompile
 export ccompile.Stdlib
 
 
@@ -27,92 +28,58 @@ type
     skipped*: float64            # rendered first but not measured
 
 
-# A render this long (lead-in included) is built with cc -O2 first: the
-# seconds of compiling pay for themselves against TCC's slow code.
-const OptimizeOverSeconds = 4.0
+const RenderH = currentSourcePath().parentDir / "render.h"
+{.compile: "render.c".}
 
-proc optimize*(v: NativeVoice) =
-  if getEnv("AITHER_OPT") == "0" or findExe("cc").len == 0: return
-  try:
-    let (lib, fn) = compileOptimized(v.csrc, v.stateSize)
-    discard v.upgrade(v.gen, lib, fn)
-  except CatchableError:
-    discard                       # stay on TCC; same output, just slower
+type
+  CPartLevel {.importc: "PartLevel", header: RenderH, bycopy.} = object
+    name: cstring
+    rms, peak, low, gain: float64
+    unheard: cint
+  CRendered {.importc: "Rendered", header: RenderH, bycopy.} = object
+    left, right: ptr UncheckedArray[float64]
+    n: clong
+    parts: ptr UncheckedArray[CPartLevel]
+    nparts: cint
+    seconds, skipped: float64
 
-# 4th-order Butterworth lowpass (two biquads) for the below-200 Hz
-# share: steep enough that a 330 Hz tone reads ~2%, a 100 Hz one ~100%.
-type Biquad = object
-  b0, b1, b2, a1, a2, z1, z2: float64
+proc render_optimize(v: NativeVoice) {.importc, header: RenderH.}
+proc cRenderVoice(v: NativeVoice; seconds: cdouble; sr: cint; inL, inR: ptr float64; nIn: clong;
+                  skip, t0: cdouble; feedInput: cint; o: ptr CRendered; err: cstring;
+                  errlen: cint): cint {.importc: "render_voice", header: RenderH.}
+proc rendered_free(r: ptr CRendered) {.importc, header: RenderH.}
 
-proc lowpass(fc, q: float64; sr: int): Biquad =
-  let w = 2.0 * PI * fc / float64(sr)
-  let alpha = sin(w) / (2.0 * q)
-  let a0 = 1.0 + alpha
-  result.b0 = (1.0 - cos(w)) / 2.0 / a0
-  result.b1 = (1.0 - cos(w)) / a0
-  result.b2 = result.b0
-  result.a1 = -2.0 * cos(w) / a0
-  result.a2 = (1.0 - alpha) / a0
-
-proc step(f: var Biquad; x: float64): float64 {.inline.} =
-  result = f.b0 * x + f.z1
-  f.z1 = f.b1 * x - f.a1 * result + f.z2
-  f.z2 = f.b2 * x - f.a2 * result
+proc optimize*(v: NativeVoice) = render_optimize(v)
+  ## The voice's cc -O2 build now, unless AITHER_OPT=0 or there's no cc.
 
 proc renderVoice*(v: NativeVoice; seconds: float64; sr: int;
                   input: Stereo = (@[], @[]); skip = 0.0;
                   t0 = 0.0; feedInput = true): Rendered =
   ## Tick a loaded voice from engine time `t0`: `skip` seconds of lead-in
-  ## (run, not kept), then `seconds` kept and measured per part. NaN at
-  ## any sample raises RenderError naming the time it happened. Inside
-  ## the engine pass `feedInput = false`: `input()` then reads the live
-  ## capture, and the render leaves it alone.
-  let nSkip = max(0, int(skip * float64(sr)))
-  let n = max(0, int(seconds * float64(sr)))
-  if float64(nSkip + n) / float64(sr) >= OptimizeOverSeconds: v.optimize()
-  result.seconds = float64(n) / float64(sr)
-  result.skipped = float64(nSkip) / float64(sr)
-  result.audio.left.setLen(n)
-  result.audio.right.setLen(n)
-  let np = v.partNames.len
-  var sumSq, lowSq, peak = newSeq[float64](np)
-  var lp1, lp2 = newSeq[Biquad](np)
-  for p in 0 ..< np:
-    lp1[p] = lowpass(LowSplitHz, 0.5412, sr)
-    lp2[p] = lowpass(LowSplitHz, 1.3066, sr)
-  for i in 0 ..< nSkip + n:
-    # Feed the recording one frame at a time; silence past its end.
-    if not feedInput: discard
-    elif i < input.left.len:
-      inputL = input.left[i]
-      inputR = input.right[i]
-    else:
-      inputL = 0.0
-      inputR = 0.0
-    let s = v.tick(t0 + float64(i) / float64(sr))
-    if s.l != s.l or s.r != s.r:
-      if feedInput:
-        inputL = 0.0; inputR = 0.0
-      raise newException(RenderError,
-        "patch produced NaN at " & formatFloat(float64(i) / float64(sr), ffDecimal, 3) &
-        "s (sample " & $i & " of " & $(nSkip + n) & ")")
-    if i < nSkip: continue
-    result.audio.left[i - nSkip] = s.l
-    result.audio.right[i - nSkip] = s.r
-    for p in 0 ..< np:
-      let m = (v.partOut[2*p] + v.partOut[2*p + 1]) * 0.5
-      let low = lp2[p].step(lp1[p].step(m))
-      sumSq[p] += m * m
-      lowSq[p] += low * low
-      peak[p] = max(peak[p], max(abs(v.partOut[2*p]), abs(v.partOut[2*p + 1])))
-  if feedInput:
-    inputL = 0.0
-    inputR = 0.0
-  for p in 0 ..< np:
-    result.parts.add PartLevel(name: v.partNames[p], gain: v.partGains[p],
-      unheard: v.partNames[p] in v.unheard,
-      rms: (if n > 0: sqrt(sumSq[p] / float64(n)) else: 0.0), peak: peak[p],
-      low: (if sumSq[p] > 0.0: min(1.0, lowSq[p] / sumSq[p]) else: 0.0))
+  ## (run, not kept), then `seconds` kept and measured per part (render.c).
+  ## NaN at any sample raises RenderError naming the time it happened.
+  ## Inside the engine pass `feedInput = false`: `input()` then reads the
+  ## live capture, and the render leaves it alone.
+  var c: CRendered
+  var err = newString(512)
+  let n = min(input.left.len, input.right.len)
+  let inL = if n > 0: unsafeAddr input.left[0] else: nil
+  let inR = if n > 0: unsafeAddr input.right[0] else: nil
+  if cRenderVoice(v, seconds, cint(sr), inL, inR, clong(n), skip, t0, cint(feedInput), addr c,
+                  err.cstring, 512) != 0:
+    raise newException(RenderError, $err.cstring)
+  result.seconds = c.seconds
+  result.skipped = c.skipped
+  result.audio.left.setLen(int(c.n))
+  result.audio.right.setLen(int(c.n))
+  for i in 0 ..< int(c.n):
+    result.audio.left[i] = c.left[i]
+    result.audio.right[i] = c.right[i]
+  for p in 0 ..< int(c.nparts):
+    let x = c.parts[p]
+    result.parts.add PartLevel(name: $x.name, rms: x.rms, peak: x.peak, low: x.low,
+                               gain: x.gain, unheard: x.unheard != 0)
+  rendered_free(addr c)
 
 proc renderSource(src, tag: string; seconds: float64; sr: int;
                   input: Stereo; skip = 0.0): Rendered =

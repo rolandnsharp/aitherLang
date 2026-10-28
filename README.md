@@ -91,13 +91,14 @@ function and plays the result. Use any. Mix any. Invent new ones.
 make
 ```
 
-One binary, ~800 KB, and it never touches a sound card: the engine
+One binary, ~350 KB, and it never touches a sound card: the engine
 writes raw float pairs to standard output and whatever is on the end
 of the pipe (a player, a scope, an SDR, a file) gives them their
 meaning. Linux-only for now (MIDI via ALSA seq).
 
-Needs Nim, a C compiler, libtcc and the ALSA headers. On
-Alpine/postmarketOS:
+Needs GCC 15 or later (the stdlib is `#embed`ded), libtcc and the ALSA
+headers; `make` builds `aither` with `cc` alone. The test suite still
+needs Nim, until its tests are C or aither too. On Alpine/postmarketOS:
 
 ```
 apk add nim build-base tcc-dev tcc-libs-static alsa-lib-dev
@@ -413,26 +414,24 @@ high-quality reverb tails simultaneously, use a DAW.
 ## Architecture
 
 ```
-parser.c           ~840 lines   tokenizer + recursive descent → syntax tree
+aither.c           ~430 lines   the entry point: the engine, a command sent to it, or `audit`
+parser.c           ~890 lines   tokenizer + recursive descent → syntax tree
 imports.c          ~170 lines   `import`: libraries spliced in, once each
-codegen.c         ~2680 lines   tree → C source + per-helper-type state layout
-ccompile.nim       ~130 lines   the compiler as Nim sees it: source in, C and layout out
-voice.c           ~660 lines   a voice: TCC compile → tick(); hot-reload migration, rollback, the -O2 swap
-voice.nim         ~210 lines   voice.c as Nim sees it (render and the tests)
-dsp.c              ~360 lines   native DSP primitives (filters, delay, tape, reverb…)
-dsp.nim             ~90 lines   dsp.c's functions for Nim, and the table of natives
-midi.nim           ~360 lines   ALSA seq input thread + auto-resubscribe + held notes
-engine.c         ~1620 lines   the pump, voice table, guards, -O2 builds, rollback, UNIX socket + commands
-engine.nim        ~240 lines   engine.c as Nim sees it, and the hooks it calls (text, try's render, MIDI)
-engine_types.nim   ~100 lines   data structs (VoiceInfo, StatsSnapshot, MidiStatus…)
-cli_output.nim     ~250 lines   text formatters for list/scope/parts/spectrum/audit
-analysis.nim       ~250 lines   pure FFT + spectral feature extraction
-render.nim         ~160 lines   offline patch render to in-memory buffer
-aither.nim         ~210 lines   CLI dispatch (entry point — `nim c aither.nim`)
-stdlib.aither      ~430 lines   composition layer (pure aither defs)
+codegen.c         ~2760 lines   tree → C source + per-helper-type state layout
+voice.c            ~650 lines   a voice: TCC compile → tick(); hot-reload migration, rollback, the -O2 swap
+dsp.c              ~340 lines   native DSP primitives (filters, delay, tape, reverb…)
+engine.c          ~1660 lines   the pump, voice table, guards, -O2 builds, rollback, UNIX socket + commands
+render.c           ~190 lines   offline render to memory, with each play's level
+analysis.c         ~230 lines   FFT + spectral features
+cli_output.c       ~320 lines   every text aither prints: list, levels, parts, check, spectrum, audit
+midi.c             ~290 lines   MIDI as signals: held notes, the natives, the input thread, resubscribe
+alsa_midi.c        ~170 lines   ALSA seq client (small wrapper)
+realtime.c          ~85 lines   the mix thread on the audio core, at real-time priority
+stdlib.aither      ~460 lines   composition layer (pure aither defs), embedded in the binary
+*.nim              ~960 lines   the C as the Nim tests see it, until they are C too
 ```
 
-About 7,000 lines of C and 2,000 of Nim. A patch is parsed to an AST, transpiled
+About 8,200 lines of C, and Nim bindings for the tests. A patch is parsed to an AST, transpiled
 to C, handed to TCC which compiles it to machine code in memory, and
 the resulting `tick(state, t)` function pointer is called once per
 sample from the audio callback. Hot reload compiles the new code off

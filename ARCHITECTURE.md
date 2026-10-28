@@ -3,24 +3,21 @@
 ## Overview
 
 ```
-parser.c           ~840 lines   tokenizer + recursive descent → syntax tree
+aither.c           ~430 lines   the entry point: the engine, a command sent to it, or `audit`
+parser.c           ~890 lines   tokenizer + recursive descent → syntax tree
 imports.c          ~170 lines   `import`: libraries spliced in, once each
-codegen.c         ~2680 lines   tree → C source + per-helper-type state layout
-ccompile.nim       ~130 lines   the compiler as Nim sees it: source in, C and layout out
-voice.c           ~660 lines   a voice: TCC compile → tick(); hot-reload migration, rollback, the -O2 swap
-voice.nim         ~210 lines   voice.c as Nim sees it (render and the tests)
-dsp.c              ~360 lines   native DSP primitives (filters, delay, tape, reverb…)
-dsp.nim             ~90 lines   dsp.c's functions for Nim, and the table of natives
-midi.nim           ~360 lines   ALSA seq input thread + auto-resubscribe + held notes
-engine.c         ~1620 lines   the pump, voice table, guards, -O2 builds, rollback, UNIX socket + commands
-engine.nim        ~240 lines   engine.c as Nim sees it, and the hooks it calls (text, try's render, MIDI)
-engine_types.nim   ~100 lines   data structs (VoiceInfo, StatsSnapshot, MidiStatus…)
-cli_output.nim     ~250 lines   text formatters for list/scope/parts/spectrum/audit
-analysis.nim       ~250 lines   pure FFT + spectral feature extraction
-render.nim         ~160 lines   offline patch render to in-memory buffer
-aither.nim         ~210 lines   CLI dispatch (entry point — `nim c aither.nim`)
-stdlib.aither      ~430 lines   composition layer (pure aither defs)
-alsa_midi.c                     ALSA seq client (small wrapper)
+codegen.c         ~2760 lines   tree → C source + per-helper-type state layout
+voice.c            ~650 lines   a voice: TCC compile → tick(); hot-reload migration, rollback, the -O2 swap
+dsp.c              ~340 lines   native DSP primitives (filters, delay, tape, reverb…)
+engine.c          ~1660 lines   the pump, voice table, guards, -O2 builds, rollback, UNIX socket + commands
+render.c           ~190 lines   offline render to memory, with each play's level
+analysis.c         ~230 lines   FFT + spectral features
+cli_output.c       ~320 lines   every text aither prints: list, levels, parts, check, spectrum, audit
+midi.c             ~290 lines   MIDI as signals: held notes, the natives, the input thread, resubscribe
+alsa_midi.c        ~170 lines   ALSA seq client (small wrapper)
+realtime.c          ~85 lines   the mix thread on the audio core, at real-time priority
+stdlib.aither      ~460 lines   composition layer (pure aither defs), embedded in the binary
+*.nim              ~960 lines   the C as the Nim tests see it, until they are C too
 tools/play.c                    a speaker on the end of the pipe (ALSA, not part of aither)
 tools/scope.c, tools/display.h  a vector display on the pipe (SDL3, OpenGL ES 3); display.h is
                                 what scope and tv share (stdin, pass-through, the heard-sample
@@ -29,10 +26,9 @@ tools/tv.c                      a raster display on the pipe: w×h samples a fra
 tools/pad.c                     the uConsole gamepad as MIDI knobs
 ```
 
-The language (parser, imports, compiler, DSP), the voice and the engine
-are C; the CLI, text formatting, analysis, render and MIDI around them
-about 2,000 lines of Nim (notes/c-port-2026-10-28.md). One
-binary. No runtime
+All of it is C, about 8,200 lines, built by `cc` alone (`make`); the
+Nim files are bindings the test suite still uses until its tests are
+C or aither too (notes/c-port-2026-10-28.md). One binary. No runtime
 dependencies beyond libtcc, ALSA, and the system audio library.
 
 ## Layers
@@ -57,7 +53,7 @@ dependencies beyond libtcc, ALSA, and the system audio library.
   stdout                        raw float32 pairs; a player / scope / SDR / file reads them
 ```
 
-The engine accepts CLI commands over a UNIX socket; `aither.nim`
+The engine accepts CLI commands over a UNIX socket; `aither.c`
 is the entry point that either runs the engine (`start`) or
 dispatches a command (`send`, `stop`, `list`, `audit`, `spectrum`,
 …) to the running engine.
@@ -193,11 +189,12 @@ brief mutex).
   plain native being one calling the other, so both paths are the
   same bits. `AITHER_HOIST=0` disables it.
 - ALSA MIDI input on its own thread (auto-resubscribes if the
-  port is dropped — see `midi.nim`).
+  port is dropped — see `midi.c`).
 - Main thread accepts socket commands.
 - `mtx` locks around patch load, voice add/remove, part-gain
-  adjustment, and stats snapshots. Audio callback uses
-  `tryAcquire`; if it fails, outputs silence for that buffer.
+  adjustment, and stats snapshots. The mix waits for it rather than
+  skip a block (the stream is gapless), and a command waiting for it
+  goes first.
 
 ### Hot reload
 
@@ -230,12 +227,12 @@ Per-voice + master both use the same `Stats` struct:
 
 ## CLI architecture
 
-`aither.nim` is the entry point (`nim c aither.nim`). It dispatches:
+`aither.c` is the entry point (`make` builds it). It dispatches:
 
-- no verb (or patch files and a duration) — call `engine.runEngine`
+- no verb (or patch files and a duration) — call `engine_run`
   in-process: the engine itself.
-- `audit <patch> [seconds]` — call `render.renderPatch` then
-  `analysis.analyze` then `cli_output.formatAudit` and print.
+- `audit <patch> [seconds]` — call `render_source` then
+  `analyze` then `cli_audit` and print.
   Pure offline, no engine connection.
 - All other commands — open the UNIX socket, send the command
   string, print the response. Engine handles the dispatch
@@ -244,9 +241,8 @@ Per-voice + master both use the same `Stats` struct:
 The engine's command handler returns formatted text directly
 because the response is plain stdout. Internally, engine.c takes
 snapshots under the lock (`VoiceSnap`, `StatsSnap`, `CheckSnap`, in
-engine.h) and hands them to hooks in engine.nim, where the
-`cli_output.nim` formatters turn them into text (until stage 3 of the
-port moves the formatters to C). The split lets engine state be tested without parsing
+engine.h) and lets go of it; the `cli_output.c` formatters turn them
+into text. The split lets engine state be tested without parsing
 strings.
 
 ## Parser
@@ -337,12 +333,12 @@ aither with no fused multiply-adds, called from generated C.
 
 ## Analysis CLI
 
-`analysis.nim` is pure (no engine or stdlib dependencies). Takes
-a `seq[float64]` + sample rate, returns a `SpectrumSummary`:
+`analysis.c` is pure (no engine or stdlib dependencies). Takes
+a buffer of doubles + sample rate, fills a `SpectrumSummary`:
 top-N peaks, spectral centroid, RMS, peak dB, zero-crossing rate,
 estimated fundamental.
 
-`render.nim` runs a patch offline (parse → codegen → TCC compile
+`render.c` runs a patch offline (parse → codegen → TCC compile
 → tick N samples → return buffer). Doesn't touch the engine.
 
 `./aither audit <patch> [seconds]` composes them: render →
@@ -353,8 +349,8 @@ without bothering anyone with playback.
 
 `./aither spectrum [voice]` does the same for a LIVE voice's
 recent buffer (the engine maintains a 0.5 s rolling float32
-ring per voice; `voiceBufferSnapshot` copies it out and the
-analysis runs against that).
+ring per voice; `spectrum` in engine.c copies it out under the lock
+and the analysis runs against that).
 
 ## Design invariants
 

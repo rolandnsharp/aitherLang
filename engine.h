@@ -5,10 +5,9 @@
  * a send that blew up), meter it and mix it, write the mix. Commands
  * arrive on a UNIX socket, one line each, and are answered with text.
  *
- * The text formatting, the offline render behind `try` and MIDI are
- * still Nim (stage 3 of notes/c-port-2026-10-28.md): the engine hands
- * them the snapshots below through hooks engine.nim provides (declared
- * in engine.c). */
+ * The snapshots below are what `list`, `levels`, `parts` and `check`
+ * report, taken under the voice table's lock and formatted after it is
+ * let go (cli_output.h). */
 
 #ifndef AITHER_ENGINE_H
 #define AITHER_ENGINE_H

@@ -1,34 +1,12 @@
-## Shared data types between engine.nim and cli_output.nim.
-##
-## Engine extracts state into these structs (under mtx); cli_output
-## formats them for stdout. Putting them in a third module breaks the
-## otherwise-circular `engine ↔ cli_output` import.
+## The engine's data as the Nim tests see it (engine.h's snapshots,
+## render.h's PartLevel), until the tests are C too
+## (notes/c-port-2026-10-28.md). cli_output.nim hands them to C.
 
-import std/[os, strutils]
-
-const EnvBins* = 20            # sparkline slots; matches engine.nim's stats ring
+const EnvBins* = 20            # sparkline slots; engine.h's ENGINE_ENV_BINS
 
 # A single voice sample beyond ±8 (+18 dBFS) is never music — it's a
-# patch that has blown up. The output tanh would turn it into a
-# full-scale square wave, so the engine mutes the voice instead.
+# patch that has blown up (engine.c's RUNAWAY_LIMIT).
 const RunawayLimit* = 8.0
-
-proc envFloat*(name: string; default: float64): float64 =
-  ## A numeric tuning knob from the environment, or `default`.
-  let v = getEnv(name)
-  if v.len == 0: return default
-  try: parseFloat(v)
-  except ValueError: default
-
-# The per-part "share below" split in audit/try. 200 Hz is where small
-# laptop speakers give up; studio monitors might want AITHER_LOW_HZ=40.
-let LowSplitHz* = envFloat("AITHER_LOW_HZ", 200.0)
-
-# The meters' time constants: the decaying peak and the smoothed mean
-# square, per sample. Applied in the generated C (tick_block) and, for
-# the voice's own stats, in the engine.
-const PeakDecay* = 0.99993   # ~300 ms exponential decay
-const RmsAlpha*  = 1.04e-4   # ~200 ms smoothing
 
 proc isRunaway*(l, r: float64): bool {.inline.} =
   abs(l) > RunawayLimit or abs(r) > RunawayLimit

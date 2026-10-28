@@ -1517,30 +1517,28 @@ would read a `tanh` as distortion; a player clamps at ±1 for the
 speaker's sake. Voice slots sweep on `send` so stopped
 voices don't leak the table.
 
-### MIDI (`midi.nim`, ~235 lines)
+### MIDI (`midi.c`)
 
 ALSA seq input thread. Auto-resubscribes if the port is dropped.
 Engine logs a clear line on drop / recovery so silent failure
 isn't a debugging blind spot.
 
-### Engine types + CLI output (`engine_types.nim` ~50 lines,
-`cli_output.nim` ~155 lines)
+### CLI output (`cli_output.c`)
 
-Engine procs return data structures (`VoiceInfo`,
-`StatsSnapshot`, `MidiStatus`, `SpectrumSummary`); formatters in
-`cli_output.nim` turn those into text. Lets engine state be
+The engine takes snapshots of its state under the lock
+(`VoiceSnap`, `StatsSnap`, `CheckSnap`, engine.h); formatters in
+`cli_output.c` turn those into text. Lets engine state be
 tested without parsing strings.
 
-### Analysis + render (`analysis.nim` ~250 lines, `render.nim`
-~65 lines)
+### Analysis + render (`analysis.c`, `render.c`)
 
-`analysis.nim` is pure FFT + spectral feature extraction (no
-engine knowledge). `render.nim` runs a patch offline through
+`analysis.c` is pure FFT + spectral feature extraction (no
+engine knowledge). `render.c` runs a patch offline through
 the same parse → codegen → TCC → tick path the engine uses,
 returning an in-memory buffer. Together they power
-`./aither audit` and `./aither spectrum`.
+`./aither audit` and `./aither try`.
 
-### CLI dispatch (`aither.nim`, ~105 lines)
+### CLI dispatch (`aither.c`)
 
 Entry point. Either runs the engine in-process (`start`) or
 sends a command over the socket. `audit` is the one offline
@@ -1557,8 +1555,9 @@ prev. Pure aither code, baked into the binary as a const string.
 
 ### Totals
 
-About 4,100 lines of C (the language), 3,400 of Nim (the engine and
-CLI) and 430 of aither (the stdlib). One binary.
+About 8,200 lines of C (the language, the engine and the CLI) and
+460 of aither (the stdlib). One binary, built by `cc`; the test suite's
+Nim bindings go when its tests are C or aither too.
 Runtime dependencies: libtcc, ALSA, the system audio library.
 
 ---

@@ -13,18 +13,7 @@
 #include "voice.h"
 #include "imports.h"
 #include "dsp.h"
-
-/* What MIDI holds, exported by midi.nim until it is C too. */
-extern double n_midi_cc(int);
-extern double n_midi_note(int);
-extern double n_midi_freq(void);
-extern double n_midi_gate(void);
-extern double n_midi_vel(void);
-extern double n_midi_trig(void*, int);
-extern double n_midi_voice_freq(int);
-extern double n_midi_voice_gate(int);
-extern double n_midi_voice_vel(int);
-extern double n_midi_voice_key(int);
+#include "midi.h"
 
 /* --------------------------------------------------------------- the clock */
 

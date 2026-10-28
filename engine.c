@@ -3,6 +3,7 @@
 
 #define _GNU_SOURCE
 #include <errno.h>
+#include <limits.h>
 #include <math.h>
 #include <pthread.h>
 #include <sched.h>
@@ -18,24 +19,13 @@
 #include <sys/stat.h>
 #include <sys/un.h>
 #include "engine.h"
+#include "analysis.h"
+#include "cli_output.h"
+#include "midi.h"
+#include "render.h"
 
 int  aither_realtime(const char* who);   /* realtime.c */
 void aither_repin(void);
-
-/* What is still Nim until stage 3 (engine.nim): text, try's render, MIDI.
- * Each returns malloc'd text. */
-char* aither_fmt_meter(const char* name, const StatsSnap* s);
-char* aither_fmt_list(const VoiceSnap* v, int n);
-char* aither_fmt_levels(const char* target, int found, const VoiceStatsSnap* s, int n);
-char* aither_fmt_parts(const char* voice, int found, const PartSnap* p, int n);
-char* aither_fmt_check(const CheckSnap* q);
-char* aither_fmt_spectrum(const double* mono, long n, double sr);
-/* `try`'s render of the scratch voice, and the whole reply. */
-char* aither_try_report(Voice* scratch, double seconds, double skip, double t0, int sr,
-                        const char* head);
-char* aither_midi_command(int argc, const char** argv);
-char* aither_midi_resubscribe(void);           /* NULL: nothing to report */
-void  aither_midi_up(void);
 
 enum { MAX_VOICES = 16 };
 #define DEFAULT_FADE_MS 20.0
@@ -179,25 +169,6 @@ static char* base_name(const char* p) {
   const char* t = file_tail(p);
   const char* dot = strrchr(t, '.');
   return dot && dot > t ? strndup(t, dot - t) : sdup(t);
-}
-
-static int have_exe(const char* name) {
-  const char* path = getenv("PATH");
-  if (!path) return 0;
-  char* copy = strdup(path);
-  int found = 0;
-  for (char* save = NULL, *d = strtok_r(copy, ":", &save); d && !found; d = strtok_r(NULL, ":", &save)) {
-    char full[1024];
-    snprintf(full, sizeof full, "%s/%s", d, name);
-    found = access(full, X_OK) == 0 && is_file(full);
-  }
-  free(copy);
-  return found;
-}
-
-static int optimizer_wanted(void) {
-  const char* o = getenv("AITHER_OPT");
-  return !(o && strcmp(o, "0") == 0) && have_exe("cc");
 }
 
 /* ------------------------------------------------------------------- slots */
@@ -562,7 +533,7 @@ static void queue_optimize(const char* name, Voice* v) {
 }
 
 static void start_optimizer(void) {
-  if (!optimizer_wanted()) {
+  if (!render_cc_available()) {
     fprintf(stderr, "[aither] cc -O2 rebuilds off (no cc, or AITHER_OPT=0)\n");
     return;
   }
@@ -570,16 +541,6 @@ static void start_optimizer(void) {
   pthread_create(&th, NULL, opt_worker, NULL);
   pthread_detach(th);
   opt_enabled = 1;
-}
-
-static void optimize_now(Voice* v) {
-  /* An offline run's -O2 build, up front; on failure it stays on TCC. */
-  if (!optimizer_wanted()) return;
-  void* lib;
-  TickFn fn;
-  char err[2048];
-  if (voice_compile_optimized(v->cur.csrc, v->cur.state_size, 0, &lib, &fn, err, sizeof err) == 0)
-    voice_upgrade(v, v->gen, lib, fn);
 }
 
 /* ------------------------------------------------------- the rollback doctor */
@@ -769,12 +730,45 @@ char* engine_load(const char* path, double fade_in) {
   free(name);
   /* Resubscribe MIDI if the input thread had silently died. Cheap when
    * nothing dropped; on a recovery, say so: the keyboard is back. */
-  char* midi = aither_midi_resubscribe();
+  char* midi = midi_resubscribe_if_dropped();
   if (midi) {
     fprintf(stderr, "[aither] MIDI %s\n", midi);
     free(midi);
   }
   return NULL;
+}
+
+static char* try_report(Voice* scratch, double seconds, double skip, double t0, const char* head) {
+  /* `try`'s render of the prepared scratch voice, as the reply. */
+  Rendered r;
+  char err[512];
+  if (render_voice(scratch, seconds, (int)sample_rate, NULL, NULL, 0, skip, t0, 0, &r, err, sizeof err) != 0)
+    return fmt("ERR %s\n  WOULD BREAK: %s\n  (sent live, this rolls back to the playing version)", head, err);
+  double peak = 0.0;
+  for (long i = 0; i < r.n; i++) peak = fmax_nim(peak, fmax_nim(fabs(r.left[i]), fabs(r.right[i])));
+  Buf o = {0};
+  bprintf(&o, "OK\n%s", head);
+  if (peak > ROLLBACK_LIMIT) {
+    /* The spectrum of a blow-up is noise; the part table shows which
+     * play it came from. (An infinite peak reads as LONG_MAX dBFS, as
+     * the Nim engine had it.) */
+    double db = 20.0 * log10(peak);
+    bprintf(&o, "\n  WOULD BREAK: peak +%ld dBFS (sent live, anything past +9.5 dBFS rolls back)",
+            isfinite(db) ? (long)db : LONG_MAX);
+  } else {
+    double* mono = mono_mix(r.left, r.right, r.n);
+    SpectrumSummary sum;
+    analyze(mono, r.n, (double)sample_rate, 8, &sum);
+    free(mono);
+    char* spec = cli_spectrum(&sum);
+    bprintf(&o, "\n%s", spec);
+    free(spec);
+  }
+  char* parts = cli_part_levels(r.parts, r.nparts);
+  if (*parts) bprintf(&o, "\n%s", parts);
+  free(parts);
+  rendered_free(&r);
+  return bdone(&o);
 }
 
 static char* try_patch(const char* path, double seconds, double skip) {
@@ -812,7 +806,7 @@ static char* try_patch(const char* path, double seconds, double skip) {
   if (!scratch->cur.state) scratch->sweep_origin = now;
   voice_commit(scratch, prepared);
   char* head = fmt("try: %s from %s, t=%.1fs, %.1fs", name, origin, now + skip, seconds);
-  char* r = aither_try_report(scratch, seconds, skip, now, (int)sample_rate, head);
+  char* r = try_report(scratch, seconds, skip, now, head);
   voice_dispose(scratch);
   free(head);
   free(origin);
@@ -1181,7 +1175,7 @@ static char* levels(const char* target) {
     }
   }
   unlock();
-  char* r = aither_fmt_levels(target, found, q, n);
+  char* r = cli_scope(target, found, q, n);
   for (int i = 0; i < n; i++) free(q[i].name);
   free(q);
   return r;
@@ -1194,7 +1188,7 @@ static char* parts_of(const char* name) {
   int idx = find_slot(name);
   if (idx >= 0) n = snapshot_parts(slots[idx].voice, &p);
   unlock();
-  char* r = aither_fmt_parts(name, idx >= 0, p, n);
+  char* r = cli_parts(name, idx >= 0, p, n);
   free_parts(p, n);
   return r;
 }
@@ -1224,8 +1218,10 @@ static char* spectrum(const char* target) {
     free(m);
     return fmt("ERR voice not found: %s", target);
   }
-  char* body = aither_fmt_spectrum(m, recent_samples, (double)sample_rate);
+  SpectrumSummary sum;
+  analyze(m, recent_samples, (double)sample_rate, 8, &sum);
   free(m);
+  char* body = cli_spectrum(&sum);
   char* r = fmt("OK\n%s", body);
   free(body);
   return r;
@@ -1239,7 +1235,7 @@ static char* meter_after_send(const char* name) {
   int idx = find_slot(name);
   if (idx >= 0) st = snapshot_stats(&slots[idx].stats);
   unlock();
-  return idx >= 0 ? aither_fmt_meter(name, &st) : NULL;
+  return idx >= 0 ? cli_meter_line(name, &st) : NULL;
 }
 
 static char* check(const char* name) {
@@ -1261,7 +1257,7 @@ static char* check(const char* name) {
   }
   q.master = snapshot_stats(&master);
   unlock();
-  char* r = aither_fmt_check(&q);
+  char* r = cli_check(&q);
   free(q.voice.name);
   free_parts(q.parts, q.nparts);
   return r;
@@ -1282,11 +1278,55 @@ static char* ok_body(char* body) {
   return r;
 }
 
+static void lower(char* s) {
+  for (; *s; s++) if (*s >= 'A' && *s <= 'Z') *s += 'a' - 'A';
+}
+
+static char* midi_command(int n, char** w) {
+  const char* usage = "ERR usage: midi list|connect <spec>|disconnect";
+  lower(w[0]);
+  if (strcmp(w[0], "list") == 0) {
+    char* body = midi_list_ports();
+    size_t len = strlen(body);
+    while (len > 0 && strchr(" \t\v\r\n\f", body[len - 1])) body[--len] = 0;
+    char* r = *body ? fmt("OK\n%s", body) : sdup("OK (no MIDI ports)");
+    free(body);
+    return r;
+  }
+  if (strcmp(w[0], "connect") == 0) {
+    if (n < 2) return sdup("ERR usage: midi connect <client:port>");
+    return midi_connect(w[1]) ? fmt("OK connected %s", w[1]) : fmt("ERR midi connect failed: %s", w[1]);
+  }
+  if (strcmp(w[0], "disconnect") == 0) {
+    /* We don't track single subscriptions, so the only offer is closing
+     * and reopening the sequencer, which drops the thread too. */
+    midi_shutdown();
+    if (!midi_open("aither")) return sdup("ERR midi reopen failed");
+    midi_start_thread();
+    return sdup("OK midi reset");
+  }
+  return sdup(usage);
+}
+
+static void midi_up(void) {
+  /* Without a sequencer (a container, a chroot) it says so and carries
+   * on: midi_* read zero, patches still run. */
+  if (!midi_open("aither")) {
+    fprintf(stderr, "[aither] MIDI unavailable (ALSA seq open failed)\n");
+    return;
+  }
+  char* who = midi_auto_connect();
+  if (*who) fprintf(stderr, "[aither] connected to MIDI: %s\n", who);
+  else fprintf(stderr, "[aither] MIDI ready, no input port auto-connected\n");
+  free(who);
+  midi_start_thread();
+}
+
 static char* handle(int n, char** w) {
   if (n == 0) return sdup("ERR empty");
   char verb[32];
   snprintf(verb, sizeof verb, "%s", w[0]);
-  for (char* c = verb; *c; c++) if (*c >= 'A' && *c <= 'Z') *c += 'a' - 'A';
+  lower(verb);
 #define IS(s) (strcmp(verb, s) == 0)
   if (IS("send")) {
     if (n < 2) return sdup("ERR usage: send <file> [fade-seconds]");
@@ -1342,7 +1382,7 @@ static char* handle(int n, char** w) {
   if (IS("list")) {
     VoiceSnap* v;
     int nv = engine_voices(&v);
-    char* r = ok_body(aither_fmt_list(v, nv));
+    char* r = ok_body(cli_voice_list(midi_last_connect_info(), midi_subscription_active(), v, nv));
     engine_free_voices(v, nv);
     return r;
   }
@@ -1382,7 +1422,7 @@ static char* handle(int n, char** w) {
   }
   if (IS("midi")) {
     if (n < 2) return sdup("ERR usage: midi list|connect <spec>|disconnect");
-    return aither_midi_command(n - 1, (const char**)w + 1);
+    return midi_command(n - 1, w + 1);
   }
   if (IS("kill")) {
     killed = 1;
@@ -1549,7 +1589,7 @@ void engine_run(char** files, int nfiles, double seconds) {
   if (seconds > 0.0) {
     /* Offline: one deterministic pass, cc -O2 built up front when it pays. */
     if (seconds >= 4.0)
-      for (int i = 0; i < slot_count; i++) optimize_now(slots[i].voice);
+      for (int i = 0; i < slot_count; i++) render_optimize(slots[i].voice);
     pipe_limit = (long long)(seconds * (double)sample_rate);
     running = 1;
     pump_pipe();
@@ -1561,9 +1601,7 @@ void engine_run(char** files, int nfiles, double seconds) {
   pthread_t th;
   pthread_create(&th, NULL, doctor, NULL);
   pthread_detach(th);
-  /* MIDI input. Without a sequencer (a container, a chroot) it says so and
-   * carries on: midi_* read zero, patches still run. */
-  aither_midi_up();
+  midi_up();
 
   /* A socket left by an engine that was killed blocks the bind. If an
    * engine answers on it, it's live: say so and stop. Otherwise it's

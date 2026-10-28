@@ -1,28 +1,32 @@
 NIM   := nim
-FLAGS := --mm:arc --threads:on --opt:speed -d:danger \
-         --passC:"-O3 -march=native -flto -fno-plt -fno-stack-protector" \
-         --passL:"-flto -ltcc -ldl -lasound" --hints:off --warnings:off
+# The binary is C. No fused multiply-adds (-ffp-contract=off): dsp.c's
+# natives must compute what TCC's code does, bit for bit (make exact).
+CC     := cc
+CFLAGS := -std=gnu23 -O3 -march=native -flto -fno-plt -fno-stack-protector \
+          -fno-math-errno -ffp-contract=off -pthread
+LIBS   := -ltcc -ldl -lasound -lm
+SRC    := aither.c engine.c voice.c render.c analysis.c cli_output.c midi.c alsa_midi.c \
+          realtime.c codegen.c parser.c imports.c dsp.c
+HDR    := engine.h voice.h render.h analysis.h cli_output.h midi.h codegen.h parser.h \
+          imports.h dsp.h
 
 all: aither
 
-# Nim decides whether to rebuild a binary from its .nim sources alone:
-# when only a C file it {.compile.}s changed, it reruns the old binary,
-# and the tests run the old compiler (it bit on 2026-10-14 and again on
-# 2026-10-28). So when any C source or header is newer than the last
-# build, every test build cache goes, and the engine's compiled objects
-# of our C files with it.
+# Nim decides whether to rebuild a test binary from its .nim sources
+# alone: when only a C file it {.compile.}s changed, it reruns the old
+# binary, and the tests run the old compiler (it bit on 2026-10-14 and
+# again on 2026-10-28). So when any C source or header is newer than the
+# last build, every test build cache goes.
 fresh-c:
 	@if [ ! -f nimcache/.c-stamp ] || [ -n "$$(find . -maxdepth 1 \( -name '*.c' -o -name '*.h' \) -newer nimcache/.c-stamp)" ]; then \
 	  rm -rf nimcache/tests nimcache/dumpc; \
 	  rm -f tests/all tests/corpus tests/exact_builds $(addprefix tests/,cli_output_format midi_resilience slot_sweep solo_mutes engine_live); \
-	  [ -d $(HOME)/.cache/nim/aither_r ] && find $(HOME)/.cache/nim/aither_r -name '@m..@s*.c.o' ! -name '*.nim.c.o' -delete; \
 	  mkdir -p nimcache && touch nimcache/.c-stamp; \
 	fi; true
 .PHONY: fresh-c
 
-aither: aither.nim engine.nim engine.c engine.h engine_types.nim cli_output.nim analysis.nim render.nim voice.nim voice.c voice.h dsp.nim dsp.c dsp.h ccompile.nim codegen.c codegen.h parser.c parser.h imports.c imports.h midi.nim alsa_midi.c realtime.c stdlib.aither
-	@$(MAKE) -s fresh-c
-	$(NIM) c $(FLAGS) --out:aither aither.nim
+aither: $(SRC) $(HDR) stdlib.aither
+	$(CC) $(CFLAGS) -o aither $(SRC) $(LIBS)
 
 tools/play: tools/play.c realtime.c
 	cc -O2 tools/play.c realtime.c -o tools/play -lasound
