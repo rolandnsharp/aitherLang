@@ -1,0 +1,31 @@
+# crystal — a crystal radio: one tuned circuit, and its length.
+#
+# A crystal set has an antenna, a tuned circuit (a coil and a capacitor,
+# ringing at one frequency: the dial), a crystal diode and an earphone.
+# The tuned circuit picks a station by resonance; the diode keeps the
+# upper half of each wave and the earphone smooths it, leaving the
+# carrier's loudness, which is the station's sound.
+#
+# Here the tuned circuit is a dho: a coil and capacitor is a damped
+# harmonic oscillator. And a dho gives both its sides, position and
+# velocity a quarter turn apart: its phasor. A phasor's length is its
+# loudness at every instant, so magnitude() is the diode and the
+# earphone at once. The 1906 set had one side and had to rectify and
+# smooth; this has both.
+#
+#   aither patches/station.aither | aither patches/crystal.aither | tools/play
+#
+# K1 (CC 74) the dial: 4 to 11 kHz (the stations are at 6 and 9). A dho
+# is stable below sr / pi, about 14 kHz at 44.1 kHz, so the band stops there.
+# K2 (CC 71) selectivity: narrow keeps the other station out but blurs
+# the sound, wide is clear but lets it bleed in, as on a real set.
+
+let [antenna, _] = input()
+let dial = 4000 + midi_cc(74) * 7000
+let damp = 0.02 + midi_cc(71) * 0.2
+let w = TAU * dial
+
+let tuned = dho(antenna * 2 * damp * w * w, dial, damp)   # driven so its swing matches the station's
+let sound = magnitude(tuned) |> hp1(30)                    # its length, less the steady carrier
+
+sound * 5

@@ -1,0 +1,21 @@
+# station — two AM radio stations on one wire, for crystal.aither.
+#
+# Each station is a carrier whose loudness carries its sound: amplitude
+# modulation, as broadcast radio began. Station one sits at 6 kHz and
+# plays a slow melody in D minor; station two at 9 kHz plays a pulsing
+# C major chord. Both
+# go down one wire, as both reach one antenna. Heard directly it is a
+# high whine; tuned and detected, it is music.
+#
+#   aither patches/station.aither | aither patches/crystal.aither | tools/play
+#
+# (Carriers are in the audio band so the whole radio fits in the pipe.)
+
+let melody = osc(sin, wave(2, [293.66, 349.23, 440.0, 392.0, 349.23, 329.63, 293.66, 220.0])) *
+             swell(phasor(2) < 0.8, 0.01, 0.1)
+let chord = (osc(sin, 130.81) + osc(sin, 164.81) + osc(sin, 196.0)) / 3 * (0.6 + 0.4 * sin(TAU * phasor(0.5)))
+
+let one = osc(sin, 6000) * (0.5 + 0.45 * melody)
+let two = osc(sin, 9000) * (0.5 + 0.45 * chord)
+
+(one + two) * 0.4

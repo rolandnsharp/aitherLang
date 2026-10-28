@@ -720,6 +720,43 @@ single-sideband mixing and octave doubling (`turn(p, p)`) are all it.
 for `turn` when you mean the algebra. A number times a pair scales it:
 `0.5 * p`.
 
+### Read the whole pair
+
+A pair from an oscillator (`dho`, `vdp`, `spin`) or from `analytic` is a
+phasor: two sides a quarter turn apart. Most of what you want from it
+reads **both** sides. Taking one side (`let [x, _] = p`) throws half the
+information away; when you find yourself writing `_`, look for the
+operation that reads the whole pair.
+
+| you want         | read the pair with                                  | instead of                     |
+|------------------|-----------------------------------------------------|--------------------------------|
+| how loud         | `magnitude(p)`                                      | one side, rectified and smoothed |
+| how fast it turns (pitch, FM) | `phase(turn(p, conj(prev(p)))) / (TAU * dt)` | timing zero crossings      |
+| move, shift, mix | `turn(p, w)`                                        | one side times a sine          |
+| hear it          | the pair itself: the sink decides                   | `let [x, _] = p`               |
+
+The crystal radio shows why. A 1906 crystal set has one side, the
+voltage across its tuned circuit, so it needs a diode to keep the top
+half of each wave and an earphone to smooth it into the station's
+loudness. A `dho` is the tuned circuit (a coil and capacitor is a damped
+harmonic oscillator) and gives both sides, so the whole receiver is
+
+```
+magnitude(dho(antenna * 2 * damp * w * w, dial, damp))
+```
+
+the phasor's length, which is the station's sound at every instant
+(`patches/crystal.aither`, with `patches/station.aither` as the
+broadcaster: `aither patches/station.aither | aither patches/crystal.aither
+| tools/play`). The same reading makes a vocoder's bands
+(`patches/listen.aither`) and a pitch follower (`patches/follow.aither`).
+The tuned circuit's damping is its selectivity: narrow keeps a
+neighbouring station out but blurs the sound, wide is clear but lets it
+in.
+
+`let [x, _] =` is right where one number is all there is room for: a
+sound into a mono mix, a value into a filter that takes one.
+
 ### Pair producers — start with `spin`, not `sin(TAU * phasor(…))`
 
 When the next step in your signal chain is a pair operation (`turn`,

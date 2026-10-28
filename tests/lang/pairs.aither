@@ -195,3 +195,14 @@ if $e > 0.1 then 1 else 0
 # expect until 4800: 0
 let y = (if t < dt then 1 else 0) |> reverb(1.0, 0.5)
 y[0] - y[1]
+
+# --- how fast a phasor turns is its frequency: the angle since last sample over TAU dt
+# expect at 100: 440
+let p = spin(440)
+phase(turn(p, conj(prev(p)))) / (TAU * dt)
+
+# --- a tuned circuit driven at its frequency: its phasor's length is the drive's amplitude
+# expect at 47999: 1
+let w = TAU * 1000
+let ring = dho(sin(TAU * phasor(1000)) * 0.5 * 2 * 0.05 * w * w, 1000, 0.05)
+if abs(magnitude(ring) - 0.5) < 0.02 then 1 else 0

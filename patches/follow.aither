@@ -1,26 +1,26 @@
 # follow — a synth that follows the pitch you play into the mic.
 #
-# Pitch by zero crossings: the mic, low-passed until only its
-# fundamental is left, crosses zero upwards once a cycle; the time
-# between crossings is the period. A slew smooths it, and the loudness
-# opens the voice, so it follows a whistle, a voice or a didge, and
-# holds its last note through the gaps. It plays a fifth above you, with
-# a sub an octave below.
+# Pitch is how fast a phasor turns. analytic() makes the mic's
+# fundamental (low-passed until little else is left) into a turning
+# pair; turned back by last sample's conjugate, what is left is the
+# angle it turned in one sample, and that angle over TAU dt is its
+# frequency, at every sample, with no zero crossings to wait for. Its
+# length is how loud it is: that opens the voice. A slew smooths the
+# pitch, and it holds its last note through the gaps. It plays above you,
+# with a sub an octave below. Tracks a clean sung glide to about 1%; a
+# loud kick in the same mic pulls it about, so give it one instrument.
 #
 #   tools/card -- aither patches/follow.aither
 #
 # K1 (CC 74) the interval above you: unison to an octave.
 
 let [mic, _] = input()
-let low = lp1(lp1(mic, 700), 700)                  # the fundamental, most of the rest gone
-let level = lp1(abs(mic), 15)
-
-let up = if low > 0 and prev(low) <= 0 then 1 else 0
-$age = 0
-$period = 0.005
-$period = if up > 0.5 and $age > 0.0012 and level > 0.01 then $age else $period
-$age = if up > 0.5 then 0 else $age + dt
-let f = slew(1 / $period, 0.03)
+let z = analytic(lp1(lp1(mic, 700), 700))           # the fundamental, as a turning pair
+let level = magnitude(z)
+let step = phase(turn(z, conj(prev(z))))            # the angle it turned this sample
+$pitch = 110
+$pitch = if level > 0.01 then step / (TAU * dt) else $pitch   # hold the last pitch through the gaps
+let f = slew(clamp($pitch, 40, 2000), 0.03)
 
 let ratio = pow(2, floor(midi_cc(74) * 12.99) / 12)     # semitones above, 0..12
 let gate = swell(if level > 0.01 then 1 else 0, 0.02, 0.4)

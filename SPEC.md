@@ -654,6 +654,16 @@ read as a complex number only by the operations that turn it
 Undoing a turn by a unit pair is turning by its conjugate:
 `turn(turn(z, w), conj(w))` is `z`.
 
+**Read the whole pair.** A pair from an oscillator, `analytic` or
+`spin` is a phasor: two sides a quarter turn apart. Most of what is
+wanted from it reads both sides at once, exactly and at every sample:
+how loud is `magnitude(p)` (no rectifying and smoothing, which is how
+one side has to get it); how fast it turns, its frequency, is
+`phase(turn(p, conj(prev(p)))) / (TAU * dt)`; moving or mixing it is
+`turn`; hearing it is the pair itself, its sides played a quarter turn
+apart. Taking one side (`let [x, _] = p`) throws the other away, and is
+for where one number is all there is room for, such as a mono mix.
+
 Return `[L, R]` for stereo. Plays and the final expression
 may return a float (mono, mirrored to both channels) or a
 two-element array (stereo).
@@ -1083,7 +1093,12 @@ def dho(force, freq, damp)                # x'' = force - 2 damp w x' - w^2 x
 def resonator(signal, freq, decay)        # a signal through a resonance
 ```
 
-`dho` is the spring every resonance is (`w = TAU freq`). Sweep `damp`
+`dho` is the spring every resonance is (`w = TAU freq`); it is stable
+below `sr / π` (about 14 kHz at 44.1 kHz), where its integrator's step
+stays under two radians. Its phasor is a true circle well below that
+(a driven one's length holds within 1% at 220 Hz) and bends into an
+ellipse as the frequency nears it (at 6 kHz on 44.1 kHz, its length
+swings by a third a cycle), so `magnitude` of a high `dho` ripples. Sweep `damp`
 and it walks through sustained sine (0), bell (~0.005), pluck (~0.2),
 critical (1) and silence (>1); `force` is an acceleration, so a strike
 is a big number. It returns its phasor, the pair `[x, v / w]`: `[0]` is

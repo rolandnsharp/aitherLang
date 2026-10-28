@@ -1,10 +1,11 @@
 # listen — a vocoder: what the mic hears, in 16 bands, shapes a chord.
 #
-# Each band is a tuned circuit and a detector, the crystal set's two
-# parts: bpf picks the band out of the mic, lp1(abs(...)) follows its
-# loudness. The same band of a saw chord is opened by that loudness, so
-# the chord speaks with the mic's vowels and consonants. Sing, talk or
-# play a didge into it.
+# Each band is a tuned circuit: a dho the mic drives, ringing at the
+# band's frequency. Its phasor's length is the band's loudness, read
+# with magnitude() at every instant (crystal.aither says why: a phasor
+# has both sides, so nothing needs rectifying or smoothing). The same
+# band of a saw chord is opened by that loudness, so the chord speaks
+# with the mic's vowels and consonants. Sing, talk or play a didge in.
 #
 #   tools/card -- aither patches/listen.aither             (the uConsole's mic and speaker)
 #   arecord -f FLOAT_LE -c 2 -r 48000 | aither patches/listen.aither | tools/play
@@ -15,9 +16,11 @@ let [mic, _] = input()
 let root = 55 * pow(2, floor(midi_cc(74) * 12) / 12)
 let carrier = osc(saw, root) + osc(saw, root * 1.5) + osc(saw, root * 2) + osc(saw, root * 3.01) * 0.5
 
+let damp = 0.14                                  # each band about a third of an octave wide
 let voc = sum(16, n =>
   let f = 100 * pow(2, n / 2.5)                  # 130 Hz to 8.4 kHz, 2.5 bands an octave
-  let loud = lp1(abs(bpf(mic, f, 0.9)), 30)      # the band's loudness
-  bpf(carrier, f, 0.9) * loud * 0.08)
+  let w = TAU * f
+  let loud = magnitude(dho(mic * 2 * damp * w * w, f, damp))   # the band's loudness
+  bpf(carrier, f, 0.9) * loud * 0.16)
 
 voc + mic * midi_cc(71) * 0.5
