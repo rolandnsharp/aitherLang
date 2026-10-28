@@ -10,12 +10,12 @@
 #
 # ▶ THE FILTERS
 #
-#   lpf(sig, cutoff, res)  low-pass: keeps what's BELOW
-#                          cutoff Hz. Darker, muffled.
-#   hpf(sig, cutoff, res)  high-pass: keeps what's ABOVE.
-#                          Thinner, tinny.
-#   bpf(sig, cutoff, res)  band-pass: keeps a band around
-#                          cutoff. Telephone, wind, whistle.
+#   lpf(signal, cutoff, res)  low-pass: keeps what's BELOW
+#                             cutoff Hz. Darker, muffled.
+#   hpf(signal, cutoff, res)  high-pass: keeps what's ABOVE.
+#                             Thinner, tinny.
+#   bpf(signal, cutoff, res)  band-pass: keeps a band around
+#                             cutoff. Telephone, wind, whistle.
 #
 #   res (resonance, 0..1) boosts the frequencies right at
 #   the cutoff. High res makes a filter "sing" — that's the
@@ -23,11 +23,11 @@
 #
 # ▶ THE PIPE |>
 #
-#   sig |> lpf(800, 0.5) means lpf(sig, 800, 0.5). It reads
+#   signal |> lpf(800, 0.5) means lpf(signal, 800, 0.5). It reads
 #   left to right like a signal flowing through cables:
 #     osc(saw, 110) |> lpf(800, 0.5) |> gain(0.3)
 #
-#   Careful: (sig |> lpf(800, 0.5)) * 0.3 needs the brackets.
+#   Careful: (signal |> lpf(800, 0.5)) * 0.3 needs the brackets.
 #   The pipe binds last, after * and +.
 #
 # ▶ THIS PATCH

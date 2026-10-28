@@ -674,10 +674,10 @@ play coupled:
   $bus        = $bus * 0.95 + strike * 0.1
 
   let drive = $bus * 1.0
-  let v1 = dho(trig * 1e7 + drive, 220.0,  0.001)[0]   # struck
-  let v2 = dho(            drive,  277.18, 0.001)[0]   # sympathising
-  let v3 = dho(            drive,  329.63, 0.001)[0]   # sympathising
-  (v1 + v2 + v3) * 0.15
+  let v1 = dho(trig * 1e7 + drive, 220.0,  0.001)   # struck
+  let v2 = dho(            drive,  277.18, 0.001)   # sympathising
+  let v3 = dho(            drive,  329.63, 0.001)   # sympathising
+  (v1 + v2 + v3) * 0.15      # three phasors, played whole: a little wide
 ```
 
 The shape: a leaky-integrator bus (`$bus = $bus * decay + drive *
@@ -722,7 +722,7 @@ frequency shift, a radio tuned down (`turn(iq, conj(spin(f)))`),
 single-sideband mixing and octave doubling (`turn(p, p)`) are all it.
 
 `+`, `-`, `*` and `/` stay side by side: `p * q` multiplies each side
-(`sig * [0.8, 0.6]` is a gain a side), never the complex product. Reach
+(`sound * [0.8, 0.6]` is a gain a side), never the complex product. Reach
 for `turn` when you mean the algebra. A number times a pair scales it:
 `0.5 * p`.
 
@@ -1162,7 +1162,8 @@ let kickA    = sin(TAU * phasor(pSweep)) * kEnv
 
 # B — DHO body strike: damp tightens with K2
 let bodyDamp = 0.04 - kickPunch * 0.025
-let kickB    = dho(kTrig * 50000000.0, 200, bodyDamp)[0] * 0.5
+let [body, _] = dho(kTrig * 50000000.0, 200, bodyDamp)   # one side: the low end stays centred
+let kickB    = body * 0.5
 
 # C — FM-distorted boom: sine modulating sine, deeper with K2
 let fmDepth  = 0.5 + kickPunch * 4.0
@@ -1196,16 +1197,19 @@ subterranean-thud territory without changing the recipe.
 # A — Acid: saw → DHO resonant LPF
 let saw   = additive(bFreq, saw_shape, 10)
 let cutA  = 600 + bEnv * 3200 * (0.5 + bAcc * 0.5)
-let bassA = dho(saw * 80000.0, cutA, 0.025)[0] * bEnv * (0.4 + bAcc * 0.6)
+let [acid, _] = dho(saw * 80000.0, cutA, 0.025)          # one side: bass stays centred
+let bassA = acid * bEnv * (0.4 + bAcc * 0.6)
 
 # B — Bell-bass: struck DHO at the note pitch (force scaled by
 # frequency so peak amplitude stays consistent across notes)
 let bForceB = 22000.0 * bFreq
-let bassB   = dho(bTrig * bForceB, bFreq, 0.008)[0] * bEnv * (0.5 + bAcc * 0.5) * 0.4
+let [bellBass, _] = dho(bTrig * bForceB, bFreq, 0.008)
+let bassB   = bellBass * bEnv * (0.5 + bAcc * 0.5) * 0.4
 
 # C — Noise-formant: white noise into resonant DHO BPF at 3rd harmonic
 let nAmp  = bEnv * (0.3 + bAcc * 0.7) * 6000000.0
-let bassC = dho(noise() * nAmp, bFreq * 3, 0.025)[0] * 6.0
+let [formant, _] = dho(noise() * nAmp, bFreq * 3, 0.025)
+let bassC = formant * 6.0
 
 # Same triangular crossfade
 let bwA = max(0, 1 - bassParadigm * 2)

@@ -23,11 +23,11 @@
 #   gate(pos, t0, t1)    our own helper below: fades IN
 #                        around t0 and OUT around t1. Each
 #                        layer's whole life is one line.
-#   pan(sig, p)          place a mono sound in stereo:
+#   pan(signal, p)       place a mono sound in stereo:
 #                        -1 left, 0 centre, 1 right
-#   haas(sig, ms)        delay one ear by a few ms: makes a
+#   haas(signal, ms)     delay one ear by a few ms: makes a
 #                        mono sound feel wide
-#   reverb(sig, rt60, wet)  a room. rt60 = seconds to die
+#   reverb(signal, rt60, wet)  a room. rt60 = seconds to die
 #                        away, wet = how much room vs dry.
 #
 # ▶ A SIGNAL THAT IS A BAR

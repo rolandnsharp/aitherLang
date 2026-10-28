@@ -27,7 +27,7 @@
 # ▶ FREQUENCY SHIFTING
 #
 #   Doubling a sound's pitch multiplies every partial by 2,
-#   so harmonics stay harmonic. freq_shift(sig, hz) instead
+#   so harmonics stay harmonic. freq_shift(signal, hz) instead
 #   ADDS the same number of Hz to every partial:
 #
 #     200, 400, 600  shifted by +50  →  250, 450, 650
