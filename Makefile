@@ -34,13 +34,13 @@ tools/tv: tools/tv.c tools/display.h
 # runs ./aither itself, so make builds it first. The corpus, exact and
 # temporal_audit are programs of their own.
 TESTCFLAGS := -std=gnu23 -O2 -Wall -ffp-contract=off -pthread
-TOOLS  := tests/corpus.c tests/exact.c tests/temporal_audit.c
+TOOLS  := tests/corpus.c tests/exact.c tests/temporal_audit.c tests/bench.c
 TESTS  := $(filter-out $(TOOLS),$(wildcard tests/*.c))
 
 tests/run: $(TESTS) tests/check.h $(ENGINE) $(HDR) stdlib.aither
 	$(CC) $(TESTCFLAGS) -o $@ $(TESTS) $(ENGINE) $(LIBS)
 
-tests/corpus tests/exact tests/temporal_audit: tests/%: tests/%.c $(ENGINE) $(HDR) stdlib.aither
+tests/corpus tests/exact tests/temporal_audit tests/bench: tests/%: tests/%.c $(ENGINE) $(HDR) stdlib.aither
 	$(CC) $(TESTCFLAGS) -o $@ $< $(ENGINE) $(LIBS)
 
 test: aither tests/run
@@ -54,12 +54,17 @@ corpus: tests/corpus
 corpus-update: tests/corpus
 	tests/corpus update
 
+# What sines cost in each shape a patch writes them, and how far the
+# compiler's fast forms stray from sin() (tests/bench.c).
+bench: tests/bench
+	tests/bench
+
 # Every patch rendered with TCC's code and with the cc -O2 build: the bits
 # must match (tests/exact.c). About 10 minutes on the uConsole.
 exact: tests/exact
 	tests/exact
 
 clean:
-	rm -rf aither nimcache/ tests/run tests/corpus tests/exact tests/temporal_audit tools/play tools/card tools/pad tools/scope tools/tv
+	rm -rf aither nimcache/ tests/run tests/corpus tests/exact tests/temporal_audit tests/bench tools/play tools/card tools/pad tools/scope tools/tv
 
-.PHONY: all clean test corpus corpus-update exact
+.PHONY: all clean test corpus corpus-update exact bench
