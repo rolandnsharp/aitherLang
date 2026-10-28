@@ -228,7 +228,7 @@ signals instead:
 | "ADSR envelope per note"           | "amplitude as a function of `pos`"      |
 | "instant pitch change"             | frequency is continuous by default      |
 | "play section B at 1:00"           | crossfade A→B centered on `pos = 60`    |
-| "sequence of events"               | `wave`, LFO, or `freq(t)` directly      |
+| "sequence of events"               | clocks, ratios, a contour held at strikes |
 | "quantized grid"                   | only quantize if the *music* wants it   |
 | "bar counter variable"             | a slow phasor *is* the bar position     |
 | "shift note offsets for swing"     | warp the phase: `p + sin(p*π) * swing`  |
@@ -352,21 +352,41 @@ def gate(pos, t0, t1):
 let breath = (sin(TAU * pos / 20) + 1) * 0.5   # 20s period, 0..1
 ```
 
-### Slow pitch drift through a scale (signal-native melody)
+### Melody from a contour (signal-native melody)
 
-Instead of `wave(...)` stepping through notes, quantize a
-slow LFO to scale intervals:
+A tune is a line that rises, falls and answers itself, and a line is
+a few slow waves summed. Hold it at each strike and put it on a
+scale. Nothing is listed: change a wave's phase and the tune changes
+everywhere at once.
 
 ```
-let scale = [0, 2, 4, 7, 9]   # pentatonic semitone offsets
-let drift = (sin(TAU * pos * 0.03) + 1) * 0.5 * 5
-let step  = scale[int(drift) mod 5]
-let freq  = 261.6 * pow(2, step / 12)
+let phrase = phasor(tempo / 16)                 # four bars of four
+let line = (sin(TAU * phrase) + 0.6 * sin(TAU * 2 * phrase + 1.3) +
+            0.35 * sin(TAU * 3 * phrase + 2.1)) * 4     # in scale degrees
+
+play tune:
+  let hit = impulse(tempo * 2)
+  $degree = 0.0
+  $degree = if hit > 0 then floor(line + 0.5) else $degree    # held at each strike
+  let f = scale($degree, 7, 293.66)
+  ...
 ```
 
-Use `wave` + `impulse` when you want *discrete events*
-(bells, plucks). Use the quantized-LFO trick when you
-want a melody that *breathes*.
+The scale is a formula too. `steps` even divisions of the octave,
+rounded to the nearest semitone: seven of them are exactly the Dorian
+mode (0 2 3 5 7 9 10), five a pentatonic (0 2 5 7 10). One number
+picks the mode, and a knob can move it.
+
+```
+def scale(degree, steps, root):
+  let octave = floor(degree / steps)
+  let within = degree - octave * steps
+  root * pow(2, octave + floor(within * 12 / steps + 0.5) / 12)
+```
+
+For a melody that breathes rather than steps, drop the hold: read
+`line` every sample, `slew` it, and the voice glides between the
+degrees it passes.
 
 ### Tempo, beats, bars (drop-in helpers)
 
@@ -424,19 +444,47 @@ reloads, so subsequent edits don't re-snap.
 ### Rhythm is oscillation (see docs/guides/RHYTHM_PHILOSOPHY.md)
 
 The phasor *is* the clock. Every rhythmic concept derives
-from it by math — no scheduler, no event list. A gate is
-a phasor crossing a threshold. An envelope is a function
-of the phasor. A velocity pattern is an amplitude
-wavetable.
+from it by math — no scheduler, no event list, no table. A
+gate is a phasor crossing a threshold. An envelope is a
+function of the phasor. An accent is a wave over the bar.
 
 ```
 let beat    = phasor(tempo)                   # 0..1 across each beat
 let eighths = phasor(tempo * 2)               # eighth-note phasor
-let bar     = phasor(tempo / 16)              # 16-beat bar cycle
-let vel     = wave(tempo * 4, [1, .6, .8, .5, 1, .4, .9, .7])
+let bar     = phasor(tempo / 4)               # a bar of four
+let accent  = 0.5 + 0.5 * max(0, cos(TAU * 2 * bar))   # strong on 1 and 3
 ```
 
 No special "sequencer," no "bar counter" variable.
+
+### Rhythm by ratio
+
+Where the strikes fall is a ratio. Run a grid of `n` pulses a bar:
+the pulses where `i * k / n` crosses a whole number are `k` strikes
+spread as evenly as the grid allows. That is the Euclidean rhythm
+E(k, n), and most traditional rhythms are such: E(3, 8) is the Cuban
+tresillo, E(5, 8) the cinquillo, E(5, 12) a bodhrán's jig, E(7, 12)
+the West African bell (Toussaint, "The Euclidean Algorithm Generates
+Traditional Musical Rhythms", BRIDGES 2005,
+http://jeff.cs.mcgill.ca/~godfried/publications/banff.pdf).
+
+```
+# k strikes on an n-pulse grid: floor(i * k / n) steps up exactly
+# where a strike goes.
+def euclid(k, n, pulse, bar):
+  let i = floor(bar * n + 0.001)
+  pulse * (floor(i * k / n) - floor((i - 1) * k / n))
+
+let bar   = phasor(tempo / 8)
+let pulse = impulse(tempo)                    # eight pulses a bar
+let clave = euclid(3, 8, pulse, bar)          # the tresillo
+```
+
+Several drums on the same grid with different `k` interlock, as
+players do. A polyrhythm needs no grid at all: two clocks at rates in
+a ratio (`impulse(tempo)` against `impulse(tempo * 3 / 2)`), or three
+at rates that never line up (orrery's bells, every 7, 11 and 13 s,
+meet once in 1001 s).
 
 ### Swing / groove via phase warping
 
@@ -1401,100 +1449,82 @@ bar's tuning than in 12-note equal temperament.
 
 ## Drums that sound like a player, not a sequencer
 
-The trick: don't trigger drums at constant velocity from `impulse(rate)`.
-Use a **velocity array** indexed by a step phasor, multiply the trigger
-by the velocity, and you get instant per-step dynamics that read as a
-real player's intent — accents on downbeats, ghost notes on off-beats,
-the whole "feel" of human playing — without per-note envelopes or
-event sequencing.
+A drum struck at the same force every time sounds like a machine. A
+player's feel is a shape over the bar: strong on the one, a lift on
+the other beats, ghosts between. That shape repeats every bar, so it
+is a periodic wave, and a few harmonics of the bar make it. Changing
+feel is crossfading shapes. No velocity table, no steps.
 
-The pattern (from `patches/gaelic_fairy.aither`'s bodhrán):
+From `patches/contour.aither`'s bodhrán (6/8, twelve pulses a bar):
 
 ```
-# 1. Velocity arrays of equal length per playing "style"
-let bodSlow = [1.0, 0,   0,   0,   0,   0,   0.7, 0,   0,   0,   0,   0]
-let bodJig  = [1.0, 0,   0.4, 0.5, 0,   0.4, 0.7, 0,   0.4, 0.5, 0,   0.4]
-let bodReel = [1.0, 0.4, 0.6, 0.4, 0.7, 0.4, 0.5, 0.4, 0.7, 0.4, 0.6, 0.4]
+let tempo = 2.2                                # pulses a second
+let bar   = phasor(tempo / 12)
+let pulse = impulse(tempo)
+
+# 1. The feel: accents as harmonics of the bar. One knob morphs from
+#    a heartbeat (one accent a bar) through a jig (two) to a reel (four).
+let feel      = midi_cc(74)
+let heartbeat = 0.35 + 0.65 * max(0, cos(TAU * bar))
+let jig       = 0.45 + 0.55 * max(0, cos(TAU * 2 * bar))
+let reel      = 0.55 + 0.45 * max(0, cos(TAU * 4 * bar))
+let accent    = heartbeat * max(0, 1 - feel * 2) +
+                jig * (1 - abs(feel * 2 - 1)) + reel * max(0, feel * 2 - 1)
+
+# 2. The strike: a push that rises from nothing (see "Strike what you
+#    play whole with a short push").
+def push(strike): (discharge(strike, 1 / 0.001) - discharge(strike, 1 / 0.0003)) / 0.0007
 
 play bodhran:
-  # 2. Step phasor + step trigger at the step rate
-  let stepRate = 6.0
-  let stepPh   = phasor(stepRate / 12)
-  let idx      = int(stepPh * 12)
-  let trig     = impulse(stepRate)
+  # 3. Where it strikes (E(5, 12), "Rhythm by ratio"), times how hard.
+  let hit = euclid(5, 12, pulse, bar) * accent
 
-  # 3. Triangular crossfade between three velocity arrays — one knob
-  #    morphs continuously from "slow heartbeat" through "6/8 jig"
-  #    to "driving 4/4 reel". Same rate, completely different feel.
-  let vSlow = bodSlow[idx]
-  let vJig  = bodJig[idx]
-  let vReel = bodReel[idx]
-  let pwA = max(0, 1 - bodPattern * 2)
-  let pwB = (if bodPattern < 0.5 then bodPattern * 2
-             else 1 - (bodPattern - 0.5) * 2)
-  let pwC = max(0, (bodPattern - 0.5) * 2)
-  let vel = vSlow * pwA + vJig * pwB + vReel * pwC
-
-  # 4. velTrig = trig × velocity. The drum hears a strike whose
-  #    intensity is the array's value at this step. Soft hits =
-  #    muffled tap, loud hits = full boom — zero per-note envelopes.
-  let velTrig = trig * vel
-
-  # 5. Two-layer drum body — pitched sub-thump (boom) + filtered
-  #    noise burst (tap), BOTH scaled by velocity. This split is
-  #    how every real percussion synth (TR-808, hand pan, kalimba)
-  #    models a struck membrane: pitched body + noise transient.
-  let pSweep  = 50 + discharge(velTrig, 35) * 50
-  let boomEnv = discharge(velTrig, 18)
-  let boom    = sin(TAU * phasor(pSweep)) * boomEnv * 0.7
-
-  let tapEnv  = discharge(velTrig, 80) * 0.5
-  let tap     = (noise() |> hpf(2000, 0.5)) * tapEnv
-
-  # 6. Drive the mix for wooden saturation character
-  let raw    = boom + tap
-  let driven = drive(raw, 1 + bodDrive * 4)
-  ...
+  # 4. Two layers, both scaled by the strike: a pitched body (a dho
+  #    struck, one side so the low end stays centred) and a noise
+  #    transient. Every struck-membrane synth is built so.
+  let w = TAU * 75
+  let [boom, _] = dho(push(hit) * w * 0.6, 75, 0.12)
+  let tap = bpf(noise(), 1800, 0.4) * discharge(hit, 60) * 0.5
+  (boom + tap) * 0.5
 ```
 
 ### Why this sounds like a real drummer
 
-Every step gets its own velocity. Downbeats are `1.0`, the "and"s
-are `0.4`, the ghost notes might be `0.5` — the array IS the
-drummer's accent map. Multiplying `trig * vel` shapes both the
-boom amplitude AND the tap brightness in one move (because both
-are proportional to the velocity-scaled trigger).
+The accent wave read at each strike is the drummer's intent: full on
+the one, less on the off-beats. Multiplying the strike by it sizes
+the push, so a soft hit is both quieter and duller (the dho is driven
+less, the tap is quieter) in one move.
 
-A drum machine that hits at constant velocity sounds robotic.
-A drum machine that has per-step accents sounds programmed.
-This pattern sounds *played*, because the velocity contour is
-itself a continuous signal — and crossfading between contours is
-the drummer changing feel mid-piece.
+A drum machine at constant force sounds robotic; a step table of
+accents sounds programmed. The accent here is a continuous signal, so
+it can be swung by warping the bar's phase, morphed between feels
+mid-piece, and nudged: a harmonic's phase moves its accents earlier or
+later, and its weight makes them stronger.
 
 ### Adapting to other drum types
 
 The same skeleton works for kick, snare, hi-hat, conga, tabla,
 djembe — anything struck. Change three things:
 
-- **The body sound**: kick = pitch-swept low sine; snare = noise +
-  bandpass at ~200 Hz; hi-hat = high-passed noise burst; tabla =
-  modal physical model (DHO chain).
-- **The velocity arrays**: 16-step for 4/4, 12-step for 6/8, 7-step
-  for 7/8, etc. Three contrasting velocity contours per knob zone.
-- **The crossfade weights**: the triangular three-zone shape is the
-  proven default. For two styles use a simple linear crossfade.
+- **The body sound**: kick = a low dho struck hard, or a pitch-swept
+  sine; snare = noise + bandpass at ~200 Hz plus a short dho; hi-hat =
+  high-passed noise burst; tabla = modal physical model (DHO chain).
+- **Where it strikes**: `euclid(k, n, …)` with the grid of the metre
+  (16 for 4/4 sixteenths, 12 for 6/8, 7 for 7/8) and `k` for the
+  density.
+- **The feel**: which harmonics of the bar, how strong. The nth
+  harmonic accents n times a bar; a sum of two gives the strong-weak
+  pattern of most metres.
 
 ### When to reach for this
 
 - Any auto-rhythmic instrument (drums, plucked patterns, arpeggios).
-- When a normal `impulse + envelope` drum sounds too mechanical.
-- When you want one knob to morph between musical styles
-  (jig ↔ reel, march ↔ shuffle, four-on-floor ↔ broken-beat) on the
-  same underlying rate.
+- When `impulse + envelope` sounds too mechanical.
+- When one knob should morph between feels (jig ↔ reel, march ↔
+  shuffle, four-on-floor ↔ broken beat) at the same tempo.
 
-The whole pattern is ~12 lines of aither for any drum. No event
-list, no scheduler, no per-step state — just a phasor, an array
-lookup, and a multiplication.
+A clock, a ratio and a few harmonics. No event list, no scheduler,
+no per-step state.
 
 ## Versioning while you compose
 
