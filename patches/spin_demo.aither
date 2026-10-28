@@ -2,8 +2,8 @@
 #
 # Every voice in this patch OPENS with `spin(rate)` rather than
 # `sin(TAU * phasor(rate))`. The producer is a true rotating two-component
-# value; downstream operations (cmul, rotate, freq_shift, magnitude,
-# squaring via cmul of analytic signal) all consume pairs directly.
+# value; downstream operations (turn, rotate, freq_shift, magnitude,
+# squaring via turn of analytic signal) all consume pairs directly.
 #
 # Compare these voices to "the same thing in scalar DSP" — each one would
 # normally require multiple stages (oscillator + Hilbert transform +
@@ -37,8 +37,8 @@ play pure:
   let w1 = max(0, 1 - voiceMix * 4)
   [s * w1, s * w1]
 
-# ===== VOICE 2 — HETERODYNE VIA cmul =====
-# cmul(spin_a, spin_b) is a TRUE single-sideband mixer:
+# ===== VOICE 2 — HETERODYNE VIA turn =====
+# turn(spin_a, spin_b) is a TRUE single-sideband mixer:
 # the result rotates at (rate_a + rate_b), with the lower sideband
 # suppressed by construction (because the analytic-signal nature of
 # both phasor pairs cancels it). This is what radio engineers call
@@ -51,7 +51,7 @@ play heterodyne:
   let carrier = spin(220)
   let modf = 50 + driveFreq * 150
   let modu = spin(modf)
-  let mixed = cmul(carrier[0], carrier[1], modu[0], modu[1])
+  let mixed = turn(carrier, modu)
   let s = mixed[0] * 0.15
   let w2 = max(0, 1 - abs(voiceMix - 0.333) * 4)
   [s * w2, s * w2]
@@ -68,13 +68,13 @@ play heterodyne:
 play halo:
   let p = spin(220)
   let drone = p[0] * 0.5
-  let shifted = freq_shift(drone, shimmerAmt * 100)
+  let [shifted, _] = freq_shift(drone, shimmerAmt * 100)
   let s = shifted * 0.15
   let w3 = max(0, 1 - abs(voiceMix - 0.667) * 4)
   [s * w3, s * w3]
 
 # ===== VOICE 4 — PHASE-FRACTAL OCTAVE =====
-# Squaring a spin via cmul(p, p) doubles its phase angle —
+# Squaring a spin via turn(p, p) doubles its phase angle —
 # mathematically (not via pitch detection) producing an octave-up
 # version of the source. The doubling is exact and phase-coherent;
 # add it back to the original and you get a perfectly-locked octave
@@ -82,8 +82,8 @@ play halo:
 # accumulator.
 play fractal:
   let p = spin(220)
-  let p2 = cmul(p[0], p[1], p[0], p[1])      # rotation at 440 Hz
-  let p4 = cmul(p2[0], p2[1], p2[0], p2[1])  # rotation at 880 Hz
+  let p2 = turn(p, p)      # rotation at 440 Hz
+  let p4 = turn(p2, p2)  # rotation at 880 Hz
   let s = (p[0] * 0.5 + p2[0] * 0.3 + p4[0] * 0.15) * 0.15
   let w4 = max(0, 1 - abs(voiceMix - 1.000) * 4)
   [s * w4, s * w4]

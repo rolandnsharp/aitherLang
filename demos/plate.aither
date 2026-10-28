@@ -55,9 +55,9 @@ each(9, i =>
 
 # Each note's figure, its size what is heard, its colour the note's place
 # in the octave, turning at the note's frequency slowed 256 times.
-def turn(i): TAU * log2(notes[i] / 220) + TAU * notes[i] / 256 * t
-let re = sum(9, n => shape[n - 1] * heard[n - 1] * cos(turn(n - 1)))
-let im = sum(9, n => shape[n - 1] * heard[n - 1] * sin(turn(n - 1)))
+def angle(i): TAU * log2(notes[i] / 220) + TAU * notes[i] / 256 * t
+let re = sum(9, n => shape[n - 1] * heard[n - 1] * cos(angle(n - 1)))
+let im = sum(9, n => shape[n - 1] * heard[n - 1] * sin(angle(n - 1)))
 # Softly bounded rather than clipped, so a bell's swell over the pad shows.
 let z = [re, im] * 40
 z / (1 + magnitude(z))

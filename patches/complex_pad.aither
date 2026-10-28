@@ -5,7 +5,7 @@
 #
 # Both knobs do things no real-arithmetic synth can do in one step,
 # but you never see a complex number in the patch — the algebra
-# lives inside `freq_shift`, `analytic`, and `cmul`.
+# lives inside `freq_shift`, `analytic`, and `turn`.
 #
 # ============================================================ KNOBS
 #   K1 (CC 74) — SPECTRAL SHIFT    ±300 Hz frequency shift on the
@@ -14,7 +14,7 @@
 #                                   (not ratio), walking from
 #                                   harmonic → inharmonic territory.
 #
-#   K2 (CC 71) — SPECTRAL SQUARE   blend in cmul(analytic, analytic).
+#   K2 (CC 71) — SPECTRAL SQUARE   blend in turn(analytic, analytic).
 #                                   For a pure sine at f, this is a
 #                                   sine at 2f (complex squaring
 #                                   doubles the phase angle). For
@@ -44,15 +44,15 @@ play pad:
 # under the hood: Hilbert → analytic signal → rotate by 2π·hz·t → real).
 let dry     = pad
 let mono    = (dry[0] + dry[1]) * 0.5
-let shifted = freq_shift(mono, shiftHz)
+let [shifted, _] = freq_shift(mono, shiftHz)
 
 # K2 — spectral square. Build the analytic signal of the post-shift
-# pad, then complex-multiply it by itself. cmul((re, im), (re, im))
+# pad, then complex-multiply it by itself. turn((re, im), (re, im))
 # = (re² − im², 2·re·im), which for an analytic signal is exactly
 # the frequency-doubled, phase-locked version (and intermod
 # sidebands for chord input). Take the real part.
 let pair    = analytic(shifted)
-let sq      = cmul(pair[0], pair[1], pair[0], pair[1])
+let sq      = turn(pair, pair)
 let squared = sq[0]
 
 # Crossfade dry vs squared. Clamp the squared term — chord magnitudes

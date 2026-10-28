@@ -285,6 +285,7 @@ typedef struct {
   int nscopes;
   int body_depth;        /* def/play bodies we're in: `import` only at 0 */
   Vec top;               /* the program's statements so far */
+  Vec extra;             /* bindings a `let [a, b] =` adds after its own */
 } P;
 
 static Token peek_at(P* p, int off) {
@@ -352,6 +353,51 @@ static Node* node2(P* p, NodeKind k, const char* str, Node* a, Node* b, int line
   n->kids = alloc(p->c->a, 2 * sizeof(Node*));
   n->kids[0] = a; n->kids[1] = b; n->nkids = 2;
   return n;
+}
+
+static Node* parse_expr(P* p);
+
+/* After `let`: `name = expr`, or `[a, b] = expr`, which names a pair's
+ * two sides: a hidden let of the pair, and `a`, `b` as its [0] and [1]
+ * (queued in p->extra; `_` names a side not wanted). */
+static Node* parse_let_rest(P* p, int line) {
+  if (peek(p).kind != tkLBracket) {
+    const char* name = expect(p, tkIdent, "binding name").str;
+    expect(p, tkAssign, NULL);
+    return node1(p, nkLet, name, parse_expr(p), line);
+  }
+  advance(p);
+  const char* names[2];
+  int n = 0;
+  for (;;) {
+    const char* nm = expect(p, tkIdent, "a name for a side").str;
+    if (n == 2) fail(p, "let [a, b] names a pair's two sides: two names");
+    names[n++] = nm;
+    if (peek(p).kind != tkComma) break;
+    advance(p);
+  }
+  expect(p, tkRBracket, NULL);
+  if (n != 2) fail(p, "let [a, b] names a pair's two sides: two names");
+  expect(p, tkAssign, NULL);
+  char buf[256];
+  snprintf(buf, sizeof buf, "__pair_%s_%s_%d", names[0], names[1], line);
+  const char* tmp = dup(p->c->a, buf, strlen(buf));
+  Node* whole = node1(p, nkLet, tmp, parse_expr(p), line);
+  for (int k = 0; k < 2; k++) {
+    if (eq(names[k], "_")) continue;
+    Node* id = node(p, nkIdent, line);
+    id->str = tmp;
+    Node* ix = node(p, nkNum, line);
+    ix->num = k;
+    push(&p->extra, node1(p, nkLet, names[k], node2(p, nkIdx, "", id, ix, line), line));
+  }
+  return whole;
+}
+
+/* Move the bindings a `let [a, b] =` queued onto `out`. */
+static void drain_extra(P* p, Vec* out) {
+  for (int i = 0; i < p->extra.n; i++) push(out, p->extra.v[i]);
+  p->extra.n = 0;
 }
 static Node* node3(P* p, NodeKind k, Node* a, Node* b, Node* c3, int line) {
   Node* n = node(p, k, line);
@@ -428,9 +474,8 @@ static Node* parse_lambda_body(P* p, int line, Vec* params) {
     if (is_kw(p, "let")) {
       int ll = peek(p).line;
       advance(p);
-      const char* name = expect(p, tkIdent, "binding name").str;
-      expect(p, tkAssign, NULL);
-      push(&stmts, node1(p, nkLet, name, parse_expr(p), ll));
+      push(&stmts, parse_let_rest(p, ll));
+      drain_extra(p, &stmts);
       while (peek(p).kind == tkSemi) advance(p);
     } else if (peek(p).kind == tkStateIdent && p->idx + 1 < p->ts.n && p->ts.t[p->idx + 1].kind == tkAssign) {
       int sl = peek(p).line;
@@ -681,6 +726,7 @@ static Node* parse_body(P* p, int line, const char* what) {
     }
     Node* s = parse_stmt(p);
     push(&stmts, s);
+    drain_extra(p, &stmts);
     if (!is_binding(s)) break;
   }
   p->body_depth--;
@@ -746,9 +792,7 @@ static Node* parse_stmt(P* p) {
     n = node1(p, k, t.str, v, t.line);
   } else if (t.kind == tkKeyword && eq(t.str, "let")) {
     advance(p);
-    const char* name = expect(p, tkIdent, NULL).str;
-    expect(p, tkAssign, NULL);
-    n = node1(p, nkLet, name, parse_expr(p), t.line);
+    n = parse_let_rest(p, t.line);
   } else if (t.kind == tkKeyword && eq(t.str, "def")) {
     n = parse_def(p);
   } else if (t.kind == tkKeyword && eq(t.str, "play")) {
@@ -792,7 +836,7 @@ Node* parse_program(Arena* a, const char* source, char* err, int errlen) {
   if (setjmp(c.jump)) {
     free(p->top.v);
     for (int i = 0; i < p->nscopes; i++) free(p->scopes[i].names);
-    free(p->ts.t);
+    free(p->ts.t); free(p->extra.v);
     free(p);
     return NULL;
   }
@@ -813,6 +857,7 @@ Node* parse_program(Arena* a, const char* source, char* err, int errlen) {
       expr_line = s->line;
     }
     push(&p->top, s);
+    drain_extra(p, &p->top);
     skip_newlines(p);
   }
   pop_scope(p);
@@ -820,7 +865,7 @@ Node* parse_program(Arena* a, const char* source, char* err, int errlen) {
   prog->kind = nkBlock; prog->line = 1; prog->str = ""; prog->source = "";
   prog->nkids = p->top.n;
   prog->kids = (Node**)keep(a, &p->top);
-  free(p->ts.t);
+  free(p->ts.t); free(p->extra.v);
   free(p);
   return prog;
 }

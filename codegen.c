@@ -529,12 +529,11 @@ static const char* const BUILTIN_FNS[] = {
   "magnitude", "phase", NULL};
 
 /* Pair-returning builtins, and the reductions of a pair to a number. */
-static const char* const PAIR_CALLS[] = {"cmul", "cdiv", "rotate", "analytic", "conj", "input", NULL};
+static const char* const PAIR_CALLS[] = {"turn", "analytic", "conj", "input", NULL};
 static const char* const PAIR_READERS[] = {"magnitude", "phase", NULL};
 
 /* Whether argument j of a pair builtin (called with n) is a pair. */
 static int takes_pair_at(const char* name, int j, int n) {
-  if (eq(name, "rotate")) return !(n == 2 && j == 1);
   if (eq(name, "analytic") || eq(name, "input")) return 0;
   return 1;
 }
@@ -930,13 +929,17 @@ static void cycle_error(Ctx* c, Node* def, Node* call) {
        bstr(&chain), def->str, err_loc(c, call));
 }
 
-/* Does `n` index `name` anywhere? */
-static int indexes(Node* n, const char* name) {
+/* Does `n` index `name` anywhere, directly or through a let that names
+ * it again (`let [a, b] = name` indexes its hidden let)? */
+static int indexes_in(Node* n, const char* name, Node* body) {
   if (!n) return 0;
   if (n->kind == nkIdx && n->kids[0]->kind == nkIdent && eq(n->kids[0]->str, name)) return 1;
-  for (int i = 0; i < n->nkids; i++) if (indexes(n->kids[i], name)) return 1;
+  if (n->kind == nkLet && n->kids[0] && n->kids[0]->kind == nkIdent && eq(n->kids[0]->str, name) &&
+      !eq(n->str, name) && indexes_in(body, n->str, body)) return 1;
+  for (int i = 0; i < n->nkids; i++) if (indexes_in(n->kids[i], name, body)) return 1;
   return 0;
 }
+static int indexes(Node* n, const char* name) { return indexes_in(n, name, n); }
 
 /* Which params take a pair whole: those the body reads as a pair, and
  * those it indexes (a pair indexes like a two-entry table). */
@@ -1988,25 +1991,10 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
   if (eq(name, "noise")) return mono(emit_noise(c, pre));
   if (in(name, PAIR_CALLS)) {
     const char* f = name;
-    if (eq(f, "cmul")) {
+    if (eq(f, "turn")) {
       const char** a = pair_operands(c, sc, n, pre, 4, "two pairs (or four numbers)");
       return vpair(F(c, "(%s * %s - %s * %s)", a[0], a[2], a[1], a[3]),
                    F(c, "(%s * %s + %s * %s)", a[0], a[3], a[1], a[2]));
-    }
-    if (eq(f, "cdiv")) {
-      const char** a = pair_operands(c, sc, n, pre, 4, "two pairs (or four numbers)");
-      const char* den = fresh(c, "cdiv_den");
-      badd(c, pre, "  double %s = %s * %s + %s * %s;\n", den, a[2], a[2], a[3], a[3]);
-      return vpair(F(c, "(%s == 0.0 ? 0.0 : (%s * %s + %s * %s) / %s)", den, a[0], a[2], a[1], a[3], den),
-                   F(c, "(%s == 0.0 ? 0.0 : (%s * %s - %s * %s) / %s)", den, a[1], a[2], a[0], a[3], den));
-    }
-    if (eq(f, "rotate")) {
-      const char** a = pair_operands(c, sc, n, pre, 3, "a pair and an angle (or three numbers)");
-      const char* cs = fresh(c, "rot_c");
-      const char* sn = fresh(c, "rot_s");
-      badd(c, pre, "  double %s = cos(%s);\n  double %s = sin(%s);\n", cs, a[2], sn, a[2]);
-      return vpair(F(c, "(%s * %s - %s * %s)", a[0], cs, a[1], sn),
-                   F(c, "(%s * %s + %s * %s)", a[0], sn, a[1], cs));
     }
     if (eq(f, "conj")) {
       const char** a = pair_operands(c, sc, n, pre, 2, "one pair (or two numbers)");

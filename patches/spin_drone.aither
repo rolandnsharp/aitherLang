@@ -5,7 +5,7 @@
 # just turn knobs and listen.
 #
 # What you're hearing:
-#   - BASS DRONE on A2 (110 Hz) with cmul-stacked harmonics so it
+#   - BASS DRONE on A2 (110 Hz) with turn-stacked harmonics so it
 #     feels like one thick organ pipe, not five separate sines.
 #   - SLOW SSB BREATH that drifts the drone's pitch through a slow
 #     transit. At low depth: subtle life. At high depth: the drone
@@ -30,7 +30,7 @@
 #   K7 (CC 19) — REVERB          Wet mix. The breath-into-silence is
 #                                 dramatic with reverb up — the tail
 #                                 keeps ringing while the dry vanishes.
-#   K8 (CC 16) — MELODY SHIMMER  Octave-stack on the melody (cmul(p,p))
+#   K8 (CC 16) — MELODY SHIMMER  Octave-stack on the melody (turn(p,p))
 #                                 — phase-locked octave doubling.
 #
 # Try this sequence:
@@ -65,18 +65,18 @@ play drone:
   let lfo = sin(TAU * phasor(lfoRate))
   let modRate = lfo * ssbDepth * 100.0   # ±100 Hz max
 
-  # The carrier is spin-produced; the modulator is too. cmul of
+  # The carrier is spin-produced; the modulator is too. turn of
   # the two gives single-sideband heterodyne — the audible frequency
   # walks smoothly with the LFO, no companion sidebands.
   let carrier = spin(110.0)
   let modu = spin(modRate)
-  let breathed = cmul(carrier[0], carrier[1], modu[0], modu[1])
+  let breathed = turn(carrier, modu)
 
-  # Coherent harmonic stack via repeated cmul. Each layer is exactly
+  # Coherent harmonic stack via repeated turn. Each layer is exactly
   # 2x the previous in frequency, with phase preserved exactly.
-  let p2 = cmul(breathed[0], breathed[1], breathed[0], breathed[1])
-  let p3 = cmul(p2[0], p2[1], breathed[0], breathed[1])
-  let p4 = cmul(p2[0], p2[1], p2[0], p2[1])
+  let p2 = turn(breathed, breathed)
+  let p3 = turn(p2, breathed)
+  let p4 = turn(p2, p2)
 
   let bass = breathed[0]
   let stack = (p2[0] * 0.5 + p3[0] * 0.3 + p4[0] * 0.18) * harmStack
@@ -85,7 +85,7 @@ play drone:
 
 # ===== MELODY — 16-step spin-produced phrase =====
 # Each note built from spin (not sin(TAU*phasor)) so the
-# octave-shimmer knob can do exact phase-locked doubling via cmul(p, p).
+# octave-shimmer knob can do exact phase-locked doubling via turn(p, p).
 # Step rate 2 Hz = 8-second loop. Pluck envelopes give clean attacks.
 # (Pair ops live in the play block directly — they aren't inlinable
 # through user defs in current aither.)
@@ -103,7 +103,7 @@ play melody:
 
   let env = pluck(velTrig, 1.5)
   let p = spin($heldFund)
-  let p2 = cmul(p[0], p[1], p[0], p[1])    # phase-locked octave
+  let p2 = turn(p, p)    # phase-locked octave
   let mix = p[0] + p2[0] * melShimmer * 0.6
   let voice = mix * env
 

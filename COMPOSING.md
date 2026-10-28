@@ -588,7 +588,7 @@ oscillator, one parameter, every paradigm.
 
 `dho(...)[1]` is the velocity divided by `w`, the same oscillator a
 quarter turn on: the whole pair is a phasor, round when `damp` is
-small, so it goes straight into `cmul`, `rotate` or `tv`. The raw
+small, so it goes straight into `turn`, `rotate` or `tv`. The raw
 velocity is `TAU * freq * dho(...)[1]`: chained physics (a damping
 force, one oscillator's velocity driving another) uses it, and as
 audio it is the brighter view, frequency-emphasised. A pair given where
@@ -692,44 +692,38 @@ What you do **not** need: special primitives, "field" types, or
 any engine support. It is ordinary `$state` with a leaky integrator.
 The pattern is what's named, not the cell.
 
-## Pair operations — operations from complex algebra
+## Pair operations — turning
 
 aither has no complex-number TYPE, but it has the OPERATIONS that
-make complex algebra useful: rotate, multiply, magnitude, phase,
-Hilbert transform, frequency shift. They take and return ordinary
-floats — the "pair" is just two scalars, no special type. The
-pair-returning functions reuse aither's existing `[L, R]` plumbing,
-so a result is destructured the same way you index a stereo pan
-output: `out[0]` for the real part, `out[1]` for the imaginary.
+make complex algebra useful, all of them one picture: a pair is a
+point that can turn. They take and return ordinary pairs. Name a
+result's sides where you read them: `let [pos, vel] = dho(...)`,
+`let [x, _] = freq_shift(...)`.
 
-Scalar-in/scalar-out:
+| call                     | does                                                   |
+|--------------------------|--------------------------------------------------------|
+| `spin(hz)`               | the unit pair turning at `hz` Hz: `[cos, sin]` of one phase |
+| `turn(z, w)`             | `z` turned by `w`'s angle, scaled by its size (complex multiplication) |
+| `conj(z)`                | the same pair turning the other way                    |
+| `rotate(z, angle)`       | turned by a fixed angle, in radians                    |
+| `magnitude(z)`           | how big                                                |
+| `phase(z)`               | which way it points                                    |
+| `analytic(signal)`       | `[signal, hilbert(signal)]`: the signal as spins       |
+| `freq_shift(signal, hz)` | the analytic signal turned by a spin: shifted up `hz` Hz, a pair in quadrature |
 
-| call                       | does                              |
-|----------------------------|-----------------------------------|
-| `magnitude(re, im)`        | `sqrt(re² + im²)`                 |
-| `phase(re, im)`            | `atan2(im, re)`                   |
-| `freq_shift(signal, hz)`   | shift signal up by `hz` (negative shifts down) |
+The rule the name carries: **turning by a spin adds its speed.** A
+frequency shift, a radio tuned down (`turn(iq, conj(spin(f)))`),
+single-sideband mixing and octave doubling (`turn(p, p)`) are all it.
 
-Pair-in/pair-out (return a 2-element value; bind with `let p = …`,
-then use `p[0]`, `p[1]`):
-
-| call                           | does                                          |
-|--------------------------------|-----------------------------------------------|
-| `cmul(a_re, a_im, b_re, b_im)` | complex multiplication: `(ac − bd, ad + bc)`  |
-| `cdiv(a_re, a_im, b_re, b_im)` | complex division                              |
-| `rotate(re, im, omega)`        | rotate by `omega` radians                     |
-| `analytic(signal)`             | `(signal, hilbert(signal))` — Hilbert pair    |
-| `spin(rate)`                   | `(cos, sin)` rotating at `rate` Hz            |
-
-`+` and `*` are NOT overloaded for complex. `(re, im) * (re', im')`
-does componentwise multiplication (Hadamard product, NOT `cmul`).
-Reach for the named functions when you mean the algebra. A number
-times a pair scales it: `0.5 * p`.
+`+`, `-`, `*` and `/` stay side by side: `p * q` multiplies each side
+(`sig * [0.8, 0.6]` is a gain a side), never the complex product. Reach
+for `turn` when you mean the algebra. A number times a pair scales it:
+`0.5 * p`.
 
 ### Pair producers — start with `spin`, not `sin(TAU * phasor(…))`
 
-When the next step in your signal chain is a pair operation (`cmul`,
-`rotate`, `freq_shift`, or feeding `cmul(p, p)` for octave doubling),
+When the next step in your signal chain is a pair operation (`turn`,
+`rotate`, `freq_shift`, or feeding `turn(p, p)` for octave doubling),
 **produce the rotation directly with `spin(rate)`** rather than
 building a scalar sine and then converting to analytic. Two reasons:
 
@@ -750,9 +744,9 @@ still right when the consumer is a `sin`/`cos` shape, an
 anything else that needs the angle-as-scalar. Use `spin`
 **when the rotation itself is what you want**.
 
-### `spin` × `cmul` is a single-sideband mixer
+### `turn` by a spin is a single-sideband mixer
 
-`cmul(spin(220), spin(50))` produces a clean tone at
+`turn(spin(220), spin(50))` produces a clean tone at
 **270 Hz only** — the sum frequency. There is no 170 Hz lower
 sideband, no DC, nothing else of significance. The lower sideband is
 suppressed by construction because both inputs are analytic-signal
@@ -762,7 +756,7 @@ component.
 ```
 let carrier = spin(220)
 let modulator = spin(midi_cc(74) * 200)   # K1 sweeps modulator
-let mixed = cmul(carrier[0], carrier[1], modulator[0], modulator[1])
+let mixed = turn(carrier, modulator)
 mixed[0] * 0.3
 ```
 
@@ -773,7 +767,7 @@ DSP it requires explicit Hilbert filters and careful sideband
 cancellation. Here it falls out of the producer-pair × producer-pair
 composition.
 
-### Phase-coherent octave stack via `cmul(p, p)`
+### Phase-coherent octave stack via `turn(p, p)`
 
 Squaring a `spin` doubles its phase angle by construction —
 `(cos θ + i sin θ)² = cos 2θ + i sin 2θ`. That is, mathematically and
@@ -784,8 +778,8 @@ to each other.
 
 ```
 let p  = spin(220)
-let p2 = cmul(p[0],  p[1],  p[0],  p[1])     # 440 Hz, phase-locked
-let p4 = cmul(p2[0], p2[1], p2[0], p2[1])    # 880 Hz, phase-locked
+let p2 = turn(p, p)        # 440 Hz, phase-locked
+let p4 = turn(p2, p2)      # 880 Hz, phase-locked
 (p[0] + p2[0] * 0.5 + p4[0] * 0.25) * 0.3
 ```
 
@@ -818,12 +812,12 @@ inharmonic → enharmonic territory.
 
 ### Mandelbrot iteration as a sound source
 
-`cmul + add` is enough to write a Mandelbrot voice in three lines:
+`turn` and `+` are enough to write a Mandelbrot voice in three lines:
 
 ```
 $zr = 0.0
 $zi = 0.0
-let zsq = cmul($zr, $zi, $zr, $zi)
+let zsq = turn([$zr, $zi], [$zr, $zi])
 $zr = zsq[0] + cReal
 $zi = zsq[1] + cImag
 $zr      # the audio
@@ -851,7 +845,7 @@ def orbit(f, q, c):
   let hop = step < $last                 # the phasor wrapped: hop
   $last = step
   $was = if hop then $z else $was
-  $z = if hop then (if magnitude($z) > 2 then [0, 0] else cmul($z, $z) + c) else $z
+  $z = if hop then (if magnitude($z) > 2 then [0, 0] else turn($z, $z) + c) else $z
   let s = step * step * (3 - 2 * step)   # glide from where it was to where it is
   $was + ($z - $was) * s
 ```
@@ -879,7 +873,7 @@ locks into the next one: a change of chord heard as mode-locking.
 
 ### Cost notes
 
-- Pair ops are 4 mults + 2 adds at most (`cmul`, `rotate`). Trivial.
+- Pair ops are 4 mults + 2 adds at most (`turn`, `rotate`). Trivial.
 - `analytic` and `freq_shift` carry a 32-slot Hilbert pair (4-stage
   IIR allpass per branch). ~30 multiply-adds per sample. Fine for
   one or two voices; don't put one inside a `sum(N, …)` over many

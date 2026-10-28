@@ -15,7 +15,7 @@ let c = [-0.743643887, 0.131825904] + pixel(w, h) * (1.5 * pow(1 / 60, depth))
 # |z|^2 > 4 rather than magnitude(z) > 2: no square root every step.
 def rec escape(z, c, n):
   if n == 0 or z[0] * z[0] + z[1] * z[1] > 4 then [n, z[0] * z[0] + z[1] * z[1]]
-  else escape(cmul(z, z) + c, c, n - 1)
+  else escape(turn(z, z) + c, c, n - 1)
 
 let e = escape([0, 0], c, 64)
 let smooth = 64 - e[0] + 1 - log2(max(log(e[1]) / 2, 0.0001))

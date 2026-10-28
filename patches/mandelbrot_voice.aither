@@ -25,7 +25,7 @@
 # orbit would drift in long-period accumulated error.
 #
 # This is the smallest possible demonstration that aither's pair
-# operations are ergonomic: the entire audio engine is `cmul + add`
+# operations are ergonomic: the entire audio engine is `turn + add`
 # with a guard, and the timbre is whatever the dynamical system
 # produces. No additive synth can write this in fewer lines because
 # none of them HAVE complex multiplication.
@@ -58,10 +58,10 @@ $zr = 0.0
 $zi = 0.0
 
 # Each sample: Z := Z² + C with a magnitude clamp.
-# `cmul(zr, zi, zr, zi)` is Z². Add C. Clamp magnitude to 4 so the
+# `turn([zr, zi], [zr, zi])` is Z². Add C. Clamp magnitude to 4 so the
 # orbit can't blow up to NaN — anything that escaped is dead audio
 # anyway, the clamp just keeps the pool clean.
-let zSquared = cmul($zr, $zi, $zr, $zi)
+let zSquared = turn([$zr, $zi], [$zr, $zi])
 let nextR = if resetTrig > 0.5 then 0.0 else zSquared[0] + cReal
 let nextI = if resetTrig > 0.5 then 0.0 else zSquared[1] + cImag
 

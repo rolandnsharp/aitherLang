@@ -71,7 +71,7 @@ def orbit(f, q, c):
   let hop = step < $last                             # the phasor wrapped: hop
   $last = step
   $was = if hop then $z else $was
-  $z = if hop then (if magnitude($z) > 2 then [0, 0] else cmul($z, $z) + c) else $z
+  $z = if hop then (if magnitude($z) > 2 then [0, 0] else turn($z, $z) + c) else $z
   let s = step * step * (3 - 2 * step)               # glide from where it was to where it is
   $was + ($z - $was) * s
 

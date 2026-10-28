@@ -5,7 +5,7 @@
 # that a mono speaker can't:
 #
 #   • sub-bass below 50 Hz (felt + heard, not just heard)
-#   • phase-coherent octave stacks via spin × cmul — the
+#   • phase-coherent octave stacks via spin × turn — the
 #     "tightness" two independent oscillators can never hit
 #   • per-channel freq_shift creating an inter-aural inharmonic
 #     beat that breathes (left shifts +H, right shifts -H)
@@ -87,15 +87,15 @@ play sympathy:
   [L, R]
 
 # ---- phase-coherent shimmer ----------------------------------------
-# spin × cmul derives every octave from one phase accumulator,
+# spin × turn derives every octave from one phase accumulator,
 # so the four layers (E3 / E4 / E5 / E6) NEVER drift apart — the
 # kind of "ringing tightness" two independent oscillators can't hit.
 
 play shimmer:
   let p   = spin(165.0)
-  let p2  = cmul(p[0],  p[1],  p[0],  p[1])
-  let p4  = cmul(p2[0], p2[1], p2[0], p2[1])
-  let p8  = cmul(p4[0], p4[1], p4[0], p4[1])
+  let p2  = turn(p, p)
+  let p4  = turn(p2, p2)
+  let p8  = turn(p4, p4)
   let stk = p[0] * 0.30 + p2[0] * 0.50 + p4[0] * 0.30 + p8[0] * 0.18
   let trem = 0.5 + 0.5 * sin(TAU * loopPh * 3)
   let amp  = 0.08 * (bloomW * 0.4 + shiftW + collapseW * 0.3) * trem
@@ -110,8 +110,8 @@ play shimmer:
 play drone:
   let warm = additive(220, warm_shape, 14) * 0.4
   let shHz = lfo1 * 80
-  let L    = freq_shift(warm,  shHz)
-  let R    = freq_shift(warm, -shHz)
+  let [L, _]    = freq_shift(warm,  shHz)
+  let [R, _]    = freq_shift(warm, -shHz)
   let amp  = 0.13 * (bloomW * 0.25 + shiftW + collapseW * 0.5)
   [L * amp, R * amp]
 
@@ -128,7 +128,7 @@ play mandel:
   let cR = -0.78 + lfo1 * 0.04
   let cI = 0.156 + lfo2 * 0.025
   let resetTrig = impulse(441.0)
-  let zsq = cmul($zr, $zi, $zr, $zi)
+  let zsq = turn([$zr, $zi], [$zr, $zi])
   let nextR = if resetTrig > 0.5 then 0.0 else zsq[0] + cR
   let nextI = if resetTrig > 0.5 then 0.0 else zsq[1] + cI
   let mag   = magnitude(nextR, nextI)

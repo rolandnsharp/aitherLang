@@ -260,11 +260,11 @@ Defs don't return arrays; the pair is the only multi-value
 return.
 
 A def uses a parameter as a pair when it indexes it (`p[0]`),
-hands it to a pair operation where that takes a pair (`cmul(p, q)`,
-`magnitude(p)`; `rotate`'s angle and `analytic`'s signal are
-numbers),
+hands it to a pair operation where that takes a pair (`turn(p, q)`,
+`magnitude(p)`; `analytic`'s signal is a number),
 passes it to a def that takes a pair there, or does
-arithmetic with it and a pair (`cmul(z, z) + c`); a `def rec`
+arithmetic with it and a pair (`turn(z, z) + c`), or names its sides
+(`let [a, b] = p`); a `def rec`
 that passes itself a pair there counts too. Such a parameter
 takes a pair whole, and a number passed to it fills both
 sides. A def returns a pair when its result is one: a literal
@@ -288,7 +288,7 @@ again, so it is a loop that stops when the data says so:
 ```
 # z -> z^2 + c until it leaves, or n runs out: the steps left
 def rec escape(z, c, n):
-  if n == 0 or magnitude(z) > 2 then n else escape(cmul(z, z) + c, c, n - 1)
+  if n == 0 or magnitude(z) > 2 then n else escape(turn(z, z) + c, c, n - 1)
 
 def rec fib(n, a = 0, b = 1): if n == 0 then a else fib(n - 1, b, a + b)
 fib(30)                            # 832040
@@ -619,8 +619,8 @@ phasor([1, 1.01])                  # two LFOs drifting apart
 
 A number given to the same call runs it once and both sides
 read it. A def's own pair parameters (see "Array parameters":
-`p[0]`, `cmul(p, q)`, arithmetic with a pair) take a pair whole
-instead, so `mono(x)` and `cmul(z, z)` see both sides. A def that
+`p[0]`, `turn(p, q)`, arithmetic with a pair) take a pair whole
+instead, so `mono(x)` and `turn(z, z)` see both sides. A def that
 makes a pair from a number (`pan`) given a pair on that number
 would make a pair of pairs, and says so. A condition is one
 number; an `if` runs only the branch it takes.
@@ -632,6 +632,27 @@ constant or worked out as it runs (`a[int(phasor(2) * 2)]`
 alternates a part's sides). So a pair and a two-entry table
 read alike wherever they meet: indexing, arithmetic (element
 by element), and `wave`, which reads any array as a table.
+
+`let [a, b] = p` names a pair's two sides where the patch reads
+them, with names of its meaning: `let [pos, vel] = dho(...)`,
+`let [l, r] = sig`, `let [i, q] = input()`. `_` names a side not
+wanted; a number gives both names the number; two names, no more.
+
+Operators work side by side: `+`, `-`, `*` and `/` on two pairs
+act on each side (`sig * [0.8, 0.6]` is a gain a side). A pair is
+read as a complex number only by the operations that turn it
+(PHILOSOPHY, "Complex numbers as operations, not types"):
+
+| Function        | Description                                         |
+|-----------------|-----------------------------------------------------|
+| `turn(z, w)`    | `z` turned by `w`'s angle and scaled by its size (complex multiplication); turning by a spin adds its speed |
+| `conj(z)`       | the same pair turning the other way                 |
+| `magnitude(z)`  | how big: `sqrt(z0² + z1²)`                          |
+| `phase(z)`      | which way it points, -π..π                          |
+| `analytic(x)`   | a signal as spins: `x` and its Hilbert transform, a quarter turn behind at every frequency |
+
+Undoing a turn by a unit pair is turning by its conjugate:
+`turn(turn(z, w), conj(w))` is `z`.
 
 Return `[L, R]` for stereo. Plays and the final expression
 may return a float (mono, mirrored to both channels) or a
@@ -1035,19 +1056,25 @@ def spin(freq):                           # the unit pair turning at freq Hz
   [cos(a), sin(a)]
 ```
 
-`spin` is the complex exponential: one phase, both sides. Multiply a
-pair by it to turn the pair (`cmul`), square it to double its rate;
-`cmul(spin(220), spin(50))` is a single tone at 270 Hz.
+`spin` is the unit pair turning at `freq` Hz: one phase, both sides.
+Turn a pair by it to set it spinning; turning by a spin adds speeds,
+so `turn(spin(220), spin(50))` is `spin(270)` and `turn(p, p)` doubles
+`p`'s speed.
 
 ```
-def freq_shift(signal, hz): cmul(analytic(signal), spin(hz))[0]
+def rotate(z, angle): turn(z, [cos(angle), sin(angle)])
+def freq_shift(signal, hz): turn(analytic(signal), spin(hz))
 ```
 
-`freq_shift` moves every frequency in a signal up by `hz` Hz (down if
-negative), with no mirror image, unlike a ring modulator: the analytic
-signal turned by `spin`. Hz are added, not multiplied, so harmonics
-stop being harmonic. Clean above about 30 Hz, where the Hilbert pair
-holds its quarter turn. A pair in shifts each side.
+`rotate` turns a pair by a fixed angle, in radians. `freq_shift` moves
+every frequency in a signal up by `hz` Hz (down if negative), with no
+mirror image, unlike a ring modulator: the analytic signal turned by a
+spin. Hz are added, not multiplied, so harmonics stop being harmonic.
+It returns the pair, the shifted signal in quadrature, and what hears
+it decides: played, its sides are the shifted sound a quarter turn
+apart; an SDR takes it as IQ; `let [x, _] = freq_shift(...)` is one
+number. Clean above about 30 Hz, where the Hilbert pair holds its
+quarter turn.
 
 ### Damped oscillator
 

@@ -312,8 +312,9 @@ all require multi-step real-arithmetic workarounds.
 We add the operations without adding the type.
 
 A "complex number" in aither is just two scalars in a state
-vector. What we add is the algebra: `rotate`, `magnitude`,
-`phase`, `cmul`, `analytic`, `freq_shift`. Each one operates
+vector. What we add is the algebra: `turn`, `conj`, `magnitude`,
+`phase`, `analytic`, and over them `spin`, `rotate`, `freq_shift`.
+Each one operates
 on pairs of floats and returns pairs of floats. There is no
 new type, no value coercion, no commitment to which of the
 several inequivalent mathematical structures of ℂ we mean

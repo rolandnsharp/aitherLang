@@ -12,7 +12,7 @@
 # happens when you rotate a complex pair at a varying rate. No
 # oscillator can do this — oscillators don't have negative frequencies,
 # and pitch shifters introduce grain artifacts at the slow end. Pure
-# spin × cmul produces a glassy, artifact-free glide that
+# spin × turn produces a glassy, artifact-free glide that
 # disappears into silence and re-emerges at a new pitch.
 #
 # Two voices side by side so the contrast is audible:
@@ -50,7 +50,7 @@ play reference:
   let s = p[0] * 0.18 * refVol
   [s, s]
 
-# ===== SWEEPER — heterodyne-shifted via SSB cmul =====
+# ===== SWEEPER — heterodyne-shifted via SSB turn =====
 # Modulator rate is a slow sinusoidal LFO from -depth to +depth Hz.
 # The audible frequency is CARRIER + modRate, which sweeps across zero
 # whenever |modRate| approaches CARRIER. At the zero crossing the
@@ -69,7 +69,7 @@ play sweeper:
 
   let carrier = spin(CARRIER)
   let modu = spin(modRate)
-  let mixed = cmul(carrier[0], carrier[1], modu[0], modu[1])
+  let mixed = turn(carrier, modu)
 
   let s = mixed[0] * 0.18 * sweepVol
   [s, s]

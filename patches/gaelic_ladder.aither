@@ -52,7 +52,7 @@
 #                                                with per-partial FM, the
 #                                                fm_swarm gothic recipe
 #                                  K4=1     L4  PHASE FRACTAL — Tesla
-#                                                + cmul(analytic, analytic)
+#                                                + turn(analytic, analytic)
 #                                                phase-locked octave shimmer
 #                                                (complex algebra applied
 #                                                to its own analytic signal)
@@ -344,14 +344,14 @@ play aitherVoice:
   # offset — the Tesla swarm gains a metallic organ-bell quality.
   # ONLY aither's complex-algebra primitives can do this in one op.
   let baseSig = l1 + l2
-  let l3 = freq_shift(baseSig, 37) * 0.9
+  let [l3, _] = freq_shift(baseSig, 37) * 0.9
 
   # L4 — PHASE FRACTAL: take the analytic signal of the layered
-  # output, square it via cmul. Squaring an analytic signal doubles
+  # output, square it via turn. Squaring an analytic signal doubles
   # its phase angle = mathematically locked octave-up that tracks
   # the source's phase exactly. Pure aither move.
   let pair = analytic(baseSig)
-  let sq = cmul(pair[0], pair[1], pair[0], pair[1])
+  let sq = turn(pair, pair)
   let l4 = sq[0] * 0.4
 
   # Cumulative additive layering

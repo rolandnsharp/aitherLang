@@ -122,8 +122,8 @@ play pad:
   let cosmicMix = breath23 * 0.7
   let blended  = warm * (1 - cosmicMix * 0.5) + alien * cosmicMix
   let shHz = lfo61 * 6.0
-  let L    = freq_shift(blended,  shHz)
-  let R    = freq_shift(blended, -shHz)
+  let [L, _]    = freq_shift(blended,  shHz)
+  let [R, _]    = freq_shift(blended, -shHz)
   let amp  = 0.5 + 0.5 * sin(TAU * t / 29.0)
   [L * 0.09 * amp, R * 0.09 * amp]
 

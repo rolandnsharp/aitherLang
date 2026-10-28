@@ -27,19 +27,24 @@ def osc(shape, freq): shape(TAU * phasor(freq))
 # Pulse with adjustable width (0..1).
 def pulse(freq, width): if phasor(freq) < width then 1 else -1
 
-# The unit pair turning at freq Hz: [cos, sin], one phase for both. The
-# complex exponential, the plainest rotating thing; multiply pairs by
-# it to turn them (cmul), square it to double its rate.
+# The unit pair turning at freq Hz: [cos, sin], one phase for both: the
+# plainest rotating thing. turn a pair by it to set it spinning, turn it
+# by itself to double its speed (turning by a spin adds speeds).
 def spin(freq):
   let a = TAU * phasor(freq)
   [cos(a), sin(a)]
 
+# A pair turned by a fixed angle, in radians.
+def rotate(z, angle): turn(z, [cos(angle), sin(angle)])
+
 # Single-sideband frequency shift: every frequency in the signal moves
 # up by hz Hz (down if negative), with no mirror image, unlike a ring
 # modulator. Hz are added, not multiplied, so harmonics stop being
-# harmonic: metallic, bell-like. The analytic signal, turned by spin;
-# clean above about 30 Hz, where the Hilbert pair holds its quarter turn.
-def freq_shift(signal, hz): cmul(analytic(signal), spin(hz))[0]
+# harmonic: metallic, bell-like. The analytic signal, turned by a spin:
+# a pair in quadrature, so what hears it decides (played, the sides are
+# the shifted sound a quarter turn apart; `let [x, _] =` for one number).
+# Clean above about 30 Hz, where the Hilbert pair holds its quarter turn.
+def freq_shift(signal, hz): turn(analytic(signal), spin(hz))
 
 # The damped harmonic oscillator, the spring every resonance is:
 #   x'' = force - 2 damp w x' - w^2 x,   w = TAU freq
