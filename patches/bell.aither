@@ -63,7 +63,7 @@ let big    = bell(strike([1, 0, 0, 0, 1, 0, 0, 0]), 146.83)   # D3
 let middle = bell(strike([0, 0, 1, 0, 0, 0, 1, 1]), 220.0)    # A3
 let small  = bell(strike([0, 1, 0, 1, 0, 1, 0, 0]), 587.33)   # D5
 
-let bells = (big * 0.9 + middle * 0.7 + small * 0.5) * 3
+let bells = (big * 0.9 + middle * 0.7 + small * 0.5) * (3 - hard * 1.4)   # a hard strike rings fuller: give it room
 
 # The impact: the clapper meeting metal, a few milliseconds of bright
 # noise before the ring, louder the harder the strike.
