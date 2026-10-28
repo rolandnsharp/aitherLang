@@ -1,4 +1,4 @@
 # A ring that keeps itself alive: from a tiny start it spirals out to its
 # own circle and stays.
 import "lib/field.aither"
-vdp(220, 0.05)
+analogue_vdp(220, 0.05)

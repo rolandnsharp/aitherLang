@@ -25,7 +25,7 @@ music wants grit, a part where it wants one.
 
 - **`patches/lib/field.aither`**: analogue parts and oscillators as named defs:
   `rail`, `amplifier`, `summer`, `inverter`, `multiplier`,
-  `integrator`; `ring`, `vdp`, `coupled`. [field-plan.md](field-plan.md) says what comes next
+  `integrator`; `ring`, `analogue_vdp`, `coupled`. [field-plan.md](field-plan.md) says what comes next
   (locking, parametron logic, memory, learning).
 - **`patches/lib/analogue.aither`**: aither's filters and drive as circuits
   (saturating integrators, tolerance, drift, an asymmetric stage), and

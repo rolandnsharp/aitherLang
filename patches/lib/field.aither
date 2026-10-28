@@ -63,8 +63,10 @@ def ring(freq, push = 0, start = 0, leak = 0):
 # A ring that keeps itself alive (Van der Pol): it feeds energy back
 # while it is small and takes it out while it is large, so from a tiny
 # start it spirals out to its own circle (about 0.8) and stays. `mu` is
-# how hard it pulls toward the circle.
-def vdp(freq, mu = 0.1, start = 0.01):
+# how hard it pulls toward the circle. Built from this file's parts
+# (a ring of integrators and an inverter); the stdlib's `vdp` is the
+# same equation written out, with its circle at 1.
+def analogue_vdp(freq, mu = 0.1, start = 0.01):
   $xp = 0.0
   $vp = 0.0
   let r = ring(freq, mu * (1 - ($xp / 0.4) * ($xp / 0.4)) * $vp, start)

@@ -35,7 +35,7 @@ Not exact work: that is aither's `+`, and aitherOS.
   seen.
 - `ring(440, 0, 0.7)`: 440.1 Hz, a cosine and a sine, a circle on the
   scope.
-- `vdp(220, 0.05)`: spirals out from a tiny start to its own circle.
+- `analogue_vdp(220, 0.05)`: spirals out from a tiny start to its own circle.
 - `coupled(f1, f2, k)`, rendered and measured per 50 ms:
   - 440 and 440.5 Hz, `k` 0.002: the energy passes fully across and
     back about once a second.
