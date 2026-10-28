@@ -185,14 +185,18 @@ the second spills out to the top level, which has room for one
 expression, so that is an error too. To call something for its
 effect and drop its value, bind it: `let _ = array_pop(a)`.
 
-Functions have their own local scope — they cannot see
-file-level `let` bindings, nor the names of whoever calls
-them. File-level `$state` slots, other `def`s, constant
-tables (a file-level `let` of literal numbers, like `TAU`
-a constant) and globals are visible. A file-level let used
-in a def is an error that says to pass it in; a name
-neither the def nor the file has is an unknown identifier,
-whatever the caller binds.
+Functions have their own local scope: a def sees the
+file's constants, never its signals, nor the names of
+whoever calls it. A constant is a file-level `let` known
+when the patch compiles: a number, arithmetic on numbers
+(`let root = 293.66 * 2`), or a table of literal numbers,
+like `TAU`. File-level `$state` slots, other `def`s and
+globals are visible too. A file-level let that is a signal
+(a knob, a clock, anything that changes as it runs) used in
+a def is an error that says to pass it in; a name neither
+the def nor the file has is an unknown identifier, whatever
+the caller binds. Turning a constant into a signal makes
+every def that read it say so.
 
 ### Defaults and named arguments
 
@@ -801,10 +805,9 @@ file and line.
 | lambda body `let`    | inside that lambda iteration only        | computed once per iteration        |
 | lambda body `$state` | per-iteration of the unrolled `sum`      | persistent per iteration / sample  |
 
-**`def` cannot see file-level lets** — defs are isolated
-functions that take what they need as parameters (constant
-tables excepted), so a def means the same wherever it is
-called and moves to another file unchanged. **`play`
+**A `def` sees the file's constants, never its signals** —
+defs are isolated functions that are given the signals they
+work on, so a def means the same wherever it is called. **`play`
 can see file-level lets** — plays are inlined blocks that
 share the file's scope.
 

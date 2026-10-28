@@ -67,7 +67,7 @@ Every file has three kinds of thing and exactly one final
 expression. The final expression is the voice's output.
 
 ```
-# 1. helpers (reusable, isolated; do not see file-level lets)
+# 1. helpers (reusable, isolated; see constants, not the file's signals)
 def ease(x):
   let c = clamp(x, 0, 1)
   c * c * (3 - 2 * c)
@@ -104,7 +104,7 @@ do what you'd expect.
 ## `def` vs `play`
 
 - **`def name(args):`** — a function. Reusable, parameterised,
-  sees only what it receives (and constant tables). A note that
+  sees what it receives and the file's constants, never its signals. A note that
   needs the file's knobs is written where it plays, as a lambda
   in the `play`: `midi_keyboard((freq, gate, vel) => ...)` sees
   every file-level let. Good for filters, envelopes,

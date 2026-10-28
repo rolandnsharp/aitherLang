@@ -213,11 +213,24 @@ def inner(h): h(10, 20)
 def outer(h): inner(h)
 outer((a, b) => a + b)
 
-# --- a def sees only its arguments, not the file's lets
-# error: sees only its arguments, and 'k' is the file's
-let k = 0.25
+# --- a def is given the file's signals: it doesn't see them
+# error: and 'k' is a signal: pass it in
+let k = midi_cc(20) * 0.25
 def f(x): x + k
 f(0)
+
+# --- nor a pair worked out as it runs, nor a play
+# error: and 'p' is a signal: pass it in
+let p = [sin(t), cos(t)]
+def f(x): p * x
+f(1)
+
+# --- but sees the file's constants, like TAU
+# expect: 1.25
+let k = 0.25
+let root = k * 4
+def f(x): x + root * k
+f(1)
 
 # --- nor the caller's: a name it wasn't given is unknown, whoever calls it
 # error: unknown identifier: k
@@ -227,7 +240,7 @@ play a:
   f(0)
 a
 
-# --- a constant table is seen everywhere, like TAU
+# --- and a constant table
 # expect: 3
 let table = [1, 2, 3]
 def third(x): table[2] * x

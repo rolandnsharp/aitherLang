@@ -63,6 +63,7 @@ struct Ctx {
   Map user_defs;
   Strs top_var_names;
   Map top_var_set, top_lets, lets_done, let_lines;
+  Scope* top;               /* the file's scope: its constants */
   Strs play_names, unheard;
   int hoist_on;
   Strs hoist_decls, hoist_inits;
@@ -1836,16 +1837,18 @@ static V emit_ident(Ctx* c, Scope* sc, Node* n) {
     if (e) return vpair(e->a, e->b);
     if (lfind(x->arrays, s) || lfind(x->larrays, s) || lfind(x->sarrays, s)) break;
   }
+  /* A def sees the file's constants (numbers and tables known when it
+   * compiles), never its signals: those it is given. */
+  if (in_def(sc) && !builtin_value(s) && !hfind(&c->top_arrays, s) && !(c->top && lfind(c->top->numlits, s)) &&
+      (has(&c->top_lets, s) || has(&c->stereo_lets, s) || has(&c->play_set, s) || hfind(&c->top_larrays, s)))
+    fail(c, "%s sees its arguments and the file's constants, and '%s' is a signal: pass it in %s",
+         c->def_stack.n ? c->def_stack.v[c->def_stack.n - 1] : "a def", s, err_loc(c, n));
   Ent* table = lookup_array(c, sc, s);
   if (has(&c->stereo_lets, s)) return vpair(F(c, "l_%s_l", s), F(c, "l_%s_r", s));
   if (table) fail(c, "%s is a table of %ld numbers, but one number is needed here — index it (%s[i]) "
                   "or hand it to wave %s", s, table->n, s, err_loc(c, n));
   if ((lookup_larray(c, sc, s) || lookup_sarray(c, sc, s)))
     fail(c, "%s is an array, but one number is needed here — index it (%s[i]) %s", s, s, err_loc(c, n));
-  if (in_def(sc) && (has(&c->top_lets, s) || has(&c->stereo_lets, s) || has(&c->play_set, s) ||
-                     hfind(&c->top_larrays, s)) && !builtin_value(s))
-    fail(c, "%s sees only its arguments, and '%s' is the file's: pass it in %s",
-         c->def_stack.n ? c->def_stack.v[c->def_stack.n - 1] : "a def", s, err_loc(c, n));
   if (has(&c->play_set, s)) return vpair(F(c, "p_%s_l", s), F(c, "p_%s_r", s));
   if (has(&c->pair_vars, s)) return vpair(pair_var_ref(c, s, 0), pair_var_ref(c, s, 1));
   if (has(&c->top_lets, s)) {
@@ -2396,6 +2399,7 @@ static const char* emit_program(Ctx* c, Node* program) {
   bcat(c, &body, "  if (s->profiling) { prof_last = n_now(); s->prof_ticks++; }\n");
   Strs prof_names = {0};
   Scope* top = push(c, NULL);
+  c->top = top;
 
   int final_idx = -1;
   for (int i = program->nkids - 1; i >= 0; i--) {
