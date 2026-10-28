@@ -573,7 +573,9 @@ sounds:
 
 ```
 # Bell strike — long ring at 440 Hz, its pair doing the work
-let bell = dho(impulse(0.5) * 100000000, 440, 0.005)
+let hit = impulse(0.5)
+let strike = (discharge(hit, 1 / 0.001) - discharge(hit, 1 / 0.0003)) / 0.0007 * 2765   # a push of area 1, times w
+let bell = dho(strike, 440, 0.005)
 let ring = amplitude(bell)             # how hard it's still ringing: an envelope, at every sample
 let beat = turn(bell, spin(1.5))       # the whole bell 1.5 Hz higher: an even beat against itself
 (bell + beat) * 0.5 + noise() * ring * 0.02   # and a breath that dies with it
@@ -674,7 +676,8 @@ play coupled:
   $bus        = $bus * 0.95 + strike * 0.1
 
   let drive = $bus * 1.0
-  let v1 = dho(trig * 1e7 + drive, 220.0,  0.001)   # struck
+  let push = (discharge(trig, 1 / 0.001) - discharge(trig, 1 / 0.0003)) / 0.0007   # rises, then dies
+  let v1 = dho(push * 1400 + drive, 220.0,  0.001)   # struck
   let v2 = dho(            drive,  277.18, 0.001)   # sympathising
   let v3 = dho(            drive,  329.63, 0.001)   # sympathising
   (v1 + v2 + v3) * 0.15      # three phasors, played whole: a little wide
@@ -759,6 +762,20 @@ broadcaster: `aither patches/station.aither | aither patches/crystal.aither
 The tuned circuit's damping is its selectivity: narrow keeps a
 neighbouring station out but blurs the sound, wide is clear but lets it
 in.
+
+**Strike what you play whole with a short push.** A push of one sample
+changes a `dho`'s velocity at once, so its quarter-turn side jumps from
+one sample to the next. Its position doesn't (position is the integral
+of velocity), so it never showed while only `[0]` was heard. Played
+whole, that step is a click on every strike. Spread the push over a
+millisecond or two, rising from nothing as a mallet's felt does: the
+difference of a slow and a fast decay,
+`(discharge(trig, 1 / 0.001) - discharge(trig, 1 / 0.0003)) / 0.0007`,
+is a push of area 1 that swells and dies. A push that switches on at
+full force still turns the quarter side with a corner: a quieter tick.
+Its swing is `area * force_scale / w`, so scale by `w` for a swing
+that doesn't depend on pitch. Patches that play `dho`s
+whole and are struck (`bell`, `orrery`) do this.
 
 In order of preference:
 
