@@ -52,7 +52,7 @@ play planets:
 # and played whole that step is a click.
 def bell(strike, f):
   let ratios = [1.0, 2.0, 2.4, 3.0]
-  let push = discharge(strike, 1 / 0.0008) / 0.0008
+  let push = (discharge(strike, 1 / 0.0008) - discharge(strike, 1 / 0.00025)) / 0.00055   # rises, then dies
   sum(4, n =>
     let r = ratios[n - 1]
     let w = TAU * f * r

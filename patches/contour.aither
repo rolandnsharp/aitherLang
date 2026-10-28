@@ -51,7 +51,11 @@ let jig = 0.45 + 0.55 * max(0, cos(TAU * 2 * bar))
 let reel = 0.55 + 0.45 * max(0, cos(TAU * 4 * bar))
 let accent = heartbeat * max(0, 1 - feel * 2) + jig * (1 - abs(feel * 2 - 1)) + reel * max(0, feel * 2 - 1)
 
-def push(strike): discharge(strike, 1 / 0.001) / 0.001   # a strike as a 1 ms push, area 1
+# A strike as a push of area 1 that rises from nothing and dies in a
+# millisecond or two (the difference of a slow and a fast decay), as a
+# mallet's felt does: a push that switches on at full force turns a
+# whole-played dho's quarter side with a corner, a tick on every strike.
+def push(strike): (discharge(strike, 1 / 0.001) - discharge(strike, 1 / 0.0003)) / 0.0007
 
 play bodhran:
   let hit = euclid(5) * accent

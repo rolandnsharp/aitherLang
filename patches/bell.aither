@@ -57,7 +57,7 @@ let rate = 0.6                                      # strikes a second
 let step = int(phasor(rate / 8) * 8)
 let hit  = impulse(rate)
 let width = 0.0003 + (1 - hard) * 0.003             # the strike's length, s
-def strike(pattern): discharge(hit * pattern[step], 1 / width) / width   # area 1
+def strike(pattern): (discharge(hit * pattern[step], 1 / width) - discharge(hit * pattern[step], 3 / width)) / (width * 2 / 3)   # area 1, rising from nothing
 
 let big    = bell(strike([1, 0, 0, 0, 1, 0, 0, 0]), 146.83)   # D3
 let middle = bell(strike([0, 0, 1, 0, 0, 0, 1, 1]), 220.0)    # A3
