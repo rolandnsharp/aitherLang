@@ -1,0 +1,78 @@
+# orrery — planets turning round a held D. Three minutes.
+#
+# Written in aither's own terms (PHASORS.md): every voice is a point
+# that turns.
+#
+# - The hum: a low D, centred as a bass should be.
+# - Three planets, D4, A4 and F5: each a spin, with its octave and its
+#   twelfth made by turning it by itself (turn(p, p)), so its harmonics
+#   are locked to it. Each rises and sets on its own slow orbit (23, 31
+#   and 37 s) and is played as a whole pair, so it is naturally wide.
+# - The halo: the planets are already turning pairs, so shifting every
+#   frequency in them is one turn, turn(planets, spin(hz)), with no
+#   Hilbert filters. In the middle of the piece they drift up to 6 Hz
+#   from themselves and back: a slow, even shimmer.
+# - Bells: small modal bells, turning dhos, struck every seven seconds
+#   in a pattern; while one rings, amplitude(bells) brightens the halo.
+#
+# The arrangement runs on sweep (where the piece is), the waves on the
+# clock (COMPOSING.md, "The composition clock").
+#
+#   aither patches/orrery.aither | tools/play hw:rockchipes8388c 20
+#   aither sweep orrery 80          # jump to the halo
+
+let pos = sweep
+let whole = ease(pos / 20) * (1 - ease((pos - 160) / 20))
+let planetsIn = ease((pos - 12) / 25)
+let bellsIn = ease((pos - 40) / 10) * (1 - ease((pos - 150) / 15))
+let haloHz = 6 * ease((pos - 70) / 30) * (1 - ease((pos - 110) / 30))
+
+# ---------------------------------------------------------------- the hum
+
+play hum:
+  let breath = 0.8 + 0.2 * cos(TAU * phasor(1 / 11))
+  (osc(sin, 73.42) + osc(sin, 146.83) * 0.25) * breath * 0.3
+
+# ------------------------------------------------------------- the planets
+
+def planet(f, orbit):
+  let p = spin(f)
+  let octave = turn(p, p)                 # twice as fast: locked to p
+  let twelfth = turn(octave, p)           # three times
+  let glow = 0.5 - 0.5 * cos(TAU * phasor(1 / orbit))   # rises and sets
+  (p + octave * 0.35 * glow + twelfth * 0.12 * glow * glow) * glow
+
+play planets:
+  (planet(293.66, 23) + planet(440.0, 31) * 0.8 + planet(698.46, 37) * 0.5) * 0.12 * planetsIn
+
+# ---------------------------------------------------------------- the bells
+
+def bell(strike, f):
+  let ratios = [1.0, 2.0, 2.4, 3.0]
+  sum(4, n =>
+    let r = ratios[n - 1]
+    let w = TAU * f * r
+    dho(strike * w * sr * 0.15 / r, f * r, 0.0008 * r))
+
+let step = int(phasor(1 / 28) * 4)                     # four strikes, seven seconds apart
+let hit = impulse(1 / 7)
+let highOn = [1, 0, 1, 0]
+let midOn  = [0, 1, 0, 0]
+let lowOn  = [0, 0, 0, 1]
+
+play bells:
+  let high = bell(hit * highOn[step], 1174.66)   # D6
+  let mid  = bell(hit * midOn[step], 880.0)      # A5
+  let low  = bell(hit * lowOn[step], 587.33)     # D5
+  (high * 0.5 + mid * 0.7 + low) * 0.25 * bellsIn
+
+# ----------------------------------------------------------------- the halo
+
+play halo:
+  let shimmer = 0.6 + 0.4 * min(1, amplitude(bells) * 4)
+  turn(planets, spin(haloHz)) * shimmer * (haloHz / 6)
+
+# ----------------------------------------------------------------- the room
+
+let dry = (hum + planets + bells + halo) * whole
+dry + (mono(dry) |> reverb(4.0, 0.9)) * 0.35
