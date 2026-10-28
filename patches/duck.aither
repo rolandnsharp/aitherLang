@@ -1,0 +1,20 @@
+# duck — a pad that makes room for what the mic hears.
+#
+# A sidechain from the real world: the mic's loudness, followed fast on
+# the way up and slow on the way down, pulls the pad down. A kick drum,
+# a clap or a voice into the mic and the pad breathes around it.
+#
+#   tools/card -- aither patches/duck.aither
+#
+# K1 (CC 74) how deep the duck goes; K2 (CC 71) how fast it recovers.
+
+let [mic, _] = input()
+let hit = swell(min(1, abs(mic) * 8), 0.002, 0.05 + midi_cc(71) * 0.6)
+let duck = 1 - hit * (0.3 + midi_cc(74) * 0.65)
+
+let notes = [146.83, 174.61, 220.0, 261.63]
+let pad = sum(4, n =>
+  let f = notes[n - 1]
+  osc(saw, f) + osc(saw, f * 1.006)) * 0.05 |> lpf(1400, 0.2)
+
+pad * duck

@@ -1,0 +1,23 @@
+# sympathetic — strings that ring in tune with whatever the room plays.
+#
+# A sitar's sympathetic strings, or a piano with the pedal down: the mic
+# drives twelve resonators tuned to D minor over two octaves. Anything
+# near one of their pitches sets it ringing, so a voice, a clap or a
+# didge leaves a halo of the scale behind it. The strings are heard
+# alone; the room is what plays them.
+#
+#   tools/card -- aither patches/sympathetic.aither
+#
+# K1 (CC 74) how long the strings ring.
+
+let [mic, _] = input()
+let scale = [146.83, 174.61, 196.0, 220.0, 261.63, 293.66]
+let decay = 1 + (1 - midi_cc(74)) * 6                     # per second: 1 rings long, 7 short
+
+play strings:
+  let low  = sum(6, n => resonator(mic, scale[n - 1], decay))
+  let high = sum(6, n => resonator(mic, scale[n - 1] * 2, decay * 1.5))
+  let s = (low + high * 0.7) * 0.03
+  [s, delay(s, 0.011, 0.02)] |> reverb(2.2, 0.25)
+
+strings

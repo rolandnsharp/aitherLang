@@ -6,9 +6,9 @@ and [GUIDE](../GUIDE.md). Several of these record ideas that were
 tried and dropped; each doc says so near the top where that's the case.
 
 **Directions to chase**
-- [ear-2026-10-28.md](ear-2026-10-28.md) — aither as an ear: a
-  cochlea of resonators (first), measuring on `card` (lock-in, sweeps,
-  the metal detector), and radio receive. Saved to come back to.
+- [listening-2026-10-28.md](listening-2026-10-28.md) — patches that
+  start from `input()`: a vocoder, sympathetic strings, pitch following,
+  ducking (written), a waterfall, radio, measuring on `card` (next).
 - [SOUND_FRONTIERS.md](SOUND_FRONTIERS.md) — unexplored regions of
   additive synthesis.
 - [GAME_AUDIO_ROADMAP.md](GAME_AUDIO_ROADMAP.md) — aither as a
