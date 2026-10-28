@@ -47,12 +47,16 @@ play planets:
 
 # ---------------------------------------------------------------- the bells
 
+# Struck with a push of area 1 lasting about a millisecond, as a clapper
+# is: a one-sample push would jump each dho's quarter-turn side at once,
+# and played whole that step is a click.
 def bell(strike, f):
   let ratios = [1.0, 2.0, 2.4, 3.0]
+  let push = discharge(strike, 1 / 0.0008) / 0.0008
   sum(4, n =>
     let r = ratios[n - 1]
     let w = TAU * f * r
-    dho(strike * w * sr * 0.15 / r, f * r, 0.0008 * r))
+    dho(push * w * 0.15 / r, f * r, 0.0008 * r))
 
 let step = int(phasor(1 / 28) * 4)                     # four strikes, seven seconds apart
 let hit = impulse(1 / 7)

@@ -573,7 +573,8 @@ sounds:
 
 ```
 # Bell strike — long ring at 440 Hz, its pair doing the work
-let bell = dho(impulse(0.5) * 100000000, 440, 0.005)
+let strike = discharge(impulse(0.5), 1 / 0.001) / 0.001 * 2765   # a 1 ms push (area 1) times w
+let bell = dho(strike, 440, 0.005)
 let ring = amplitude(bell)             # how hard it's still ringing: an envelope, at every sample
 let beat = turn(bell, spin(1.5))       # the whole bell 1.5 Hz higher: an even beat against itself
 (bell + beat) * 0.5 + noise() * ring * 0.02   # and a breath that dies with it
@@ -674,7 +675,8 @@ play coupled:
   $bus        = $bus * 0.95 + strike * 0.1
 
   let drive = $bus * 1.0
-  let v1 = dho(trig * 1e7 + drive, 220.0,  0.001)   # struck
+  let push = discharge(trig, 1 / 0.001) / 0.001        # a 1 ms push, not one sample
+  let v1 = dho(push * 1400 + drive, 220.0,  0.001)   # struck
   let v2 = dho(            drive,  277.18, 0.001)   # sympathising
   let v3 = dho(            drive,  329.63, 0.001)   # sympathising
   (v1 + v2 + v3) * 0.15      # three phasors, played whole: a little wide
@@ -759,6 +761,17 @@ broadcaster: `aither patches/station.aither | aither patches/crystal.aither
 The tuned circuit's damping is its selectivity: narrow keeps a
 neighbouring station out but blurs the sound, wide is clear but lets it
 in.
+
+**Strike what you play whole with a short push.** A push of one sample
+changes a `dho`'s velocity at once, so its quarter-turn side jumps from
+one sample to the next. Its position doesn't (position is the integral
+of velocity), so it never showed while only `[0]` was heard. Played
+whole, that step is a click on every strike. Spread the push over a
+millisecond or so, as a clapper or a hammer does:
+`discharge(trig, 1 / 0.001) / 0.001` is a push of area 1 lasting about
+a millisecond. Its swing is `area * force_scale / w`, so scale by `w`
+for a swing that doesn't depend on pitch. Patches that play `dho`s
+whole and are struck (`bell`, `orrery`) do this.
 
 In order of preference:
 
