@@ -41,7 +41,7 @@ let wide   = midi_cc(77)
 # One bell: its strike (a push of unit area), its prime frequency. A
 # push of area 1 swings a mode by 1 / w, so each is pushed by w times
 # the swing wanted.
-def bell(strike, f):
+def bell(strike, f, warble):
   let wob = spin(warble)
   sum(12, n =>
     let r = ratios[n - 1]
@@ -57,11 +57,15 @@ let rate = 0.6                                      # strikes a second
 let step = int(phasor(rate / 8) * 8)
 let hit  = impulse(rate)
 let width = 0.0003 + (1 - hard) * 0.003             # the strike's length, s
-def strike(pattern): (discharge(hit * pattern[step], 1 / width) - discharge(hit * pattern[step], 3 / width)) / (width * 2 / 3)   # area 1, rising from nothing
+def strike(at, width): (discharge(at, 1 / width) - discharge(at, 3 / width)) / (width * 2 / 3)   # area 1, rising from nothing
 
-let big    = bell(strike([1, 0, 0, 0, 1, 0, 0, 0]), 146.83)   # D3
-let middle = bell(strike([0, 0, 1, 0, 0, 0, 1, 1]), 220.0)    # A3
-let small  = bell(strike([0, 1, 0, 1, 0, 1, 0, 0]), 587.33)   # D5
+let bigAt    = [1, 0, 0, 0, 1, 0, 0, 0]
+let middleAt = [0, 0, 1, 0, 0, 0, 1, 1]
+let smallAt  = [0, 1, 0, 1, 0, 1, 0, 0]
+
+let big    = bell(strike(hit * bigAt[step], width), 146.83, warble)   # D3
+let middle = bell(strike(hit * middleAt[step], width), 220.0, warble)    # A3
+let small  = bell(strike(hit * smallAt[step], width), 587.33, warble)   # D5
 
 let bells = (big * 0.9 + middle * 0.7 + small * 0.5) * (3 - hard * 1.4)   # a hard strike rings fuller: give it room
 

@@ -62,15 +62,15 @@ each(6, i =>
 # A croak: a short envelope on a low tone whose pitch drops as it
 # decays, with a breath of noise through a formant on top. Frog n
 # has its own pitch and its own place in the stereo field.
-def frog(n):
-  let env = discharge(fire[n - 1], 16)
+def frog(n, fired):
+  let env = discharge(fired, 16)
   let tone = sin(TAU * phasor(90 + 18 * n + 70 * env)) * env * env
   let breath = bpf(noise(), 1000 + 140 * n, 0.8) * env * 0.5
   tone + breath
 
 play frogs:
-  [sum(6, n => frog(n) * (0.3 + 0.12 * n)),
-   sum(6, n => frog(n) * (1 - 0.12 * n))] * 0.12
+  [sum(6, n => frog(n, fire[n - 1]) * (0.3 + 0.12 * n)),
+   sum(6, n => frog(n, fire[n - 1]) * (1 - 0.12 * n))] * 0.12
 
 # --------------------------------------------------------------- birds
 # A call every so often: a sine that sweeps up and trills, under a

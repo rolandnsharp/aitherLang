@@ -26,7 +26,8 @@ let release = 0.1 * pow(40, midi_cc(25))
 let space   = midi_cc(26)
 let length  = 2 * pow(4, midi_cc(27))
 
-def note(key, gate, vel):
+# The knobs come in as arguments: a def sees only what it's given.
+def note(key, gate, vel, morph, strike, settle, bloom, rolloff, release):
   let hit = if gate > 0.5 and prev(gate) < 0.5 then 1 else 0
   let metal = pluck(hit, settle) * vel * strike
   let grow  = swell(gate, 2.5, 0.3) * bloom
@@ -49,10 +50,10 @@ def held(pos, from, until): if pos >= from and pos < until then 1 else 0
 let hold = length - 0.35                               # a gap, so each chord strikes
 
 play keys:
-  note(chords[chord * 3], held(pos, 0.0, hold), 0.8)
-  + note(chords[chord * 3 + 1], held(pos, 0.05, hold), 0.6)
-  + note(chords[chord * 3 + 2], held(pos, 0.1, hold), 0.7)
-  + note(chords[chord * 3] - 12, held(pos, 0.0, hold), 0.9)
+  note(chords[chord * 3], held(pos, 0.0, hold), 0.8, morph, strike, settle, bloom, rolloff, release)
+  + note(chords[chord * 3 + 1], held(pos, 0.05, hold), 0.6, morph, strike, settle, bloom, rolloff, release)
+  + note(chords[chord * 3 + 2], held(pos, 0.1, hold), 0.7, morph, strike, settle, bloom, rolloff, release)
+  + note(chords[chord * 3] - 12, held(pos, 0.0, hold), 0.9, morph, strike, settle, bloom, rolloff, release)
 
 keys
 |> tanh

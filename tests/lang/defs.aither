@@ -212,3 +212,33 @@ call3((a, b) => a * b)
 def inner(h): h(10, 20)
 def outer(h): inner(h)
 outer((a, b) => a + b)
+
+# --- a def sees only its arguments, not the file's lets
+# error: sees only its arguments, and 'k' is the file's
+let k = 0.25
+def f(x): x + k
+f(0)
+
+# --- nor the caller's: a name it wasn't given is unknown, whoever calls it
+# error: unknown identifier: k
+def f(x): x + k
+play a:
+  let k = 100
+  f(0)
+a
+
+# --- a constant table is seen everywhere, like TAU
+# expect: 3
+let table = [1, 2, 3]
+def third(x): table[2] * x
+third(1)
+
+# --- a lambda sees the names where it was written, not inside the def that calls it
+# expect: 5
+def apply(g, x):
+  let k = 100
+  g(x)
+play a:
+  let k = 4
+  apply(x => x + k, 1)
+a

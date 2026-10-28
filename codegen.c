@@ -46,6 +46,7 @@ struct Scope {
   Ent* larrays;    /* name -> (C array, n): this sample's arrays */
   Ent* numlits;    /* name -> a compile-time number */
   Ent* invs;       /* name -> (block-invariant expression, its scope) */
+  int isolated;    /* a def's root: sees its arguments, not the file's lets */
 };
 
 #define NBUCKETS 1024
@@ -380,6 +381,14 @@ static Scope* push(Ctx* c, Scope* parent) {
   return s;
 }
 
+/* Whether sc is inside a def's body: its chain ends at the def's root,
+ * not at the file. A lambda's body is not: it runs in the scope that
+ * wrote it, wherever it is called. */
+static int in_def(Scope* sc) {
+  while (sc && sc->parent) sc = sc->parent;
+  return sc && sc->isolated;
+}
+
 /* Does the nearest binding of `name` bind it to anything at all? */
 static int binds_any(Scope* s, const char* name) {
   return lfind(s->numlits, name) || lfind(s->names, name) || lfind(s->stereo, name) ||
@@ -417,7 +426,7 @@ static Ent* lookup_array(Ctx* c, Scope* sc, const char* name) {
     Ent* e = lfind(s->arrays, name);
     if (e) return e;
   }
-  return hfind(&c->top_arrays, name);
+  return hfind(&c->top_arrays, name);           /* a constant: seen everywhere */
 }
 
 static Ent* lookup_sarray(Ctx* c, Scope* sc, const char* name) {
@@ -433,7 +442,7 @@ static Ent* lookup_larray(Ctx* c, Scope* sc, const char* name) {
     Ent* e = lfind(s->larrays, name);
     if (e) return e;
   }
-  return hfind(&c->top_larrays, name);
+  return in_def(sc) ? NULL : hfind(&c->top_larrays, name);
 }
 
 /* A compile-time number: a literal, a name bound to one, len(array), or
@@ -515,6 +524,14 @@ static const char* lookup_fn(Scope* sc, const char* name) {
     if (e) return e->a;
   }
   return "";
+}
+
+static Ent* lookup_lambda_ent(Scope* sc, const char* name) {
+  for (Scope* s = sc; s; s = s->parent) {
+    Ent* e = lfind(s->lambdas, name);
+    if (e) return e;
+  }
+  return NULL;
 }
 
 static Node* lookup_lambda(Scope* sc, const char* name) {
@@ -887,10 +904,20 @@ static const char* native_call(Ctx* c, Buf* pre, const char* off, const char* ca
 
 /* An argument bound at compile time: a lambda, a function or an array. */
 static int bind_by_name(Ctx* c, Scope* sc, Scope* inner, const char* p, Node* a, Buf* preface) {
-  if (a->kind == nkLambda) { lput(c, &inner->lambdas, p)->node = a; return 1; }
+  if (a->kind == nkLambda) {
+    Ent* e = lput(c, &inner->lambdas, p);
+    e->node = a;
+    e->sc = sc;
+    return 1;
+  }
   if (a->kind == nkIdent) {
-    Node* lam = lookup_lambda(sc, a->str);
-    if (lam) { lput(c, &inner->lambdas, p)->node = lam; return 1; }
+    Ent* lam = lookup_lambda_ent(sc, a->str);
+    if (lam) {
+      Ent* e = lput(c, &inner->lambdas, p);
+      e->node = lam->node;
+      e->sc = lam->sc;
+      return 1;
+    }
   }
   if (a->kind == nkIdent && is_fn_name(c, sc, a->str)) {
     const char* resolved = lookup_fn(sc, a->str)[0] ? lookup_fn(sc, a->str) : a->str;
@@ -1002,7 +1029,8 @@ static V emit_def(Ctx* c, Scope* sc, Node* def, Node* call, Buf* pre) {
   if (sfind(&c->def_stack, def->str) >= 0) cycle_error(c, def, call);
   int* whole = takes_pair(c, def);
   int np = def->nparams;
-  Scope* names = push(c, sc);              /* what binds by name: lambdas, functions, arrays */
+  Scope* names = push(c, NULL);            /* what binds by name: lambdas, functions, arrays */
+  names->isolated = 1;                     /* the def sees its arguments, not the caller's names */
   V* args = al(c, (np + 1) * sizeof(V));
   int* bound = al(c, (np + 1) * sizeof(int));
   int split = 0;
@@ -1616,7 +1644,8 @@ static V emit_loop(Ctx* c, Scope* sc, Node* def, Node* call, Buf* pre) {
   V* args = al(c, (def->nparams + 1) * sizeof(V));
   int* bound = al(c, (def->nparams + 1) * sizeof(int));
   int split = 0;
-  Scope* names = push(c, sc);
+  Scope* names = push(c, NULL);
+  names->isolated = 1;
   for (int i = 0; i < def->nparams; i++) {
     if (bind_by_name(c, sc, names, def->params[i], call->kids[i], pre)) { bound[i] = 1; continue; }
     Buf own = {0};
@@ -1813,6 +1842,10 @@ static V emit_ident(Ctx* c, Scope* sc, Node* n) {
                   "or hand it to wave %s", s, table->n, s, err_loc(c, n));
   if ((lookup_larray(c, sc, s) || lookup_sarray(c, sc, s)))
     fail(c, "%s is an array, but one number is needed here — index it (%s[i]) %s", s, s, err_loc(c, n));
+  if (in_def(sc) && (has(&c->top_lets, s) || has(&c->stereo_lets, s) || has(&c->play_set, s) ||
+                     hfind(&c->top_larrays, s)) && !builtin_value(s))
+    fail(c, "%s sees only its arguments, and '%s' is the file's: pass it in %s",
+         c->def_stack.n ? c->def_stack.v[c->def_stack.n - 1] : "a def", s, err_loc(c, n));
   if (has(&c->play_set, s)) return vpair(F(c, "p_%s_l", s), F(c, "p_%s_r", s));
   if (has(&c->pair_vars, s)) return vpair(pair_var_ref(c, s, 0), pair_var_ref(c, s, 1));
   if (has(&c->top_lets, s)) {
@@ -1977,11 +2010,12 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
       !is_const(c, sc, n))
     return mono(hoist(c, emit_invariant(c, sc, n)));
   /* A lambda-valued param: its body inline. */
-  Node* lam = lookup_lambda(sc, n->str);
-  if (lam) {
+  Ent* le = lookup_lambda_ent(sc, n->str);
+  if (le) {
+    Node* lam = le->node;
     if (n->nkids < lam->nparams)
       fail(c, "lambda '%s' takes %d args, got %d %s", n->str, lam->nparams, n->nkids, err_loc(c, n));
-    Scope* inner = push(c, sc);
+    Scope* inner = push(c, le->sc ? le->sc : sc);   /* the scope that wrote it */
     for (int i = 0; i < lam->nparams; i++) {
       V v = emit(c, sc, n->kids[i], pre);
       bind_value(c, inner, lam->params[i], v, v.pair, v.pair ? NULL : n->kids[i], sc, pre);

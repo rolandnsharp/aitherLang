@@ -186,8 +186,13 @@ expression, so that is an error too. To call something for its
 effect and drop its value, bind it: `let _ = array_pop(a)`.
 
 Functions have their own local scope — they cannot see
-file-level `let` bindings. File-level `$state` slots,
-other `def`s, and globals are visible.
+file-level `let` bindings, nor the names of whoever calls
+them. File-level `$state` slots, other `def`s, constant
+tables (a file-level `let` of literal numbers, like `TAU`
+a constant) and globals are visible. A file-level let used
+in a def is an error that says to pass it in; a name
+neither the def nor the file has is an unknown identifier,
+whatever the caller binds.
 
 ### Defaults and named arguments
 
@@ -380,8 +385,12 @@ are accepted but optional — newlines inside the enclosing
 Lambdas capture any variable in their enclosing lexical
 scope — enclosing `let`s, `def` parameters, and globals all
 work. Captures are free: the lambda body inlines into each
-call site and resolves identifiers through the normal scope
-walk.
+call site, and its names resolve where the lambda was
+written, never inside the def that calls it. So a lambda
+written in a `play` sees the file's lets even when a def
+runs it: an instrument written where it plays,
+`midi_keyboard((freq, gate, vel) => ...)`, uses the file's
+knobs directly.
 
 ## Compile-time evaluation
 
@@ -793,7 +802,9 @@ file and line.
 | lambda body `$state` | per-iteration of the unrolled `sum`      | persistent per iteration / sample  |
 
 **`def` cannot see file-level lets** — defs are isolated
-functions that take what they need as parameters. **`play`
+functions that take what they need as parameters (constant
+tables excepted), so a def means the same wherever it is
+called and moves to another file unchanged. **`play`
 can see file-level lets** — plays are inlined blocks that
 share the file's scope.
 

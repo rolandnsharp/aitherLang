@@ -69,10 +69,10 @@ $scale[$mutCursor] = if mutTrig > 0.5 then newF else $scale[$mutCursor]
 # additive partial bank with a soft per-voice tremolo so the chord
 # breathes. Voices retune continuously (no envelope) — when a slot's
 # frequency is rewritten, that voice glides via the running phasor.
-def voice(freq):
-  additive(freq, warm_shape, 6) * (1 + sin(TAU * phasor(0.7 * freq / 220.0)) * 0.05) * voiceGain
+def voice(freq, gain):
+  additive(freq, warm_shape, 6) * (1 + sin(TAU * phasor(0.7 * freq / 220.0)) * 0.05) * gain
 
-let pad = sum(8, n => voice($scale[n - 1]))
+let pad = sum(8, n => voice($scale[n - 1], voiceGain))
 
 let dry  = pad
 let wet  = dry |> reverb(3.5, 0.4)

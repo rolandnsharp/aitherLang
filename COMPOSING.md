@@ -104,7 +104,10 @@ do what you'd expect.
 ## `def` vs `play`
 
 - **`def name(args):`** — a function. Reusable, parameterised,
-  sees only what it receives. Good for filters, envelopes,
+  sees only what it receives (and constant tables). A note that
+  needs the file's knobs is written where it plays, as a lambda
+  in the `play`: `midi_keyboard((freq, gate, vel) => ...)` sees
+  every file-level let. Good for filters, envelopes,
   math helpers. Calls get per-call-site state.
 - **`play name:`** — a named block inlined into the file's
   flow. Sees all file-level lets and `$state` slots. Has an
