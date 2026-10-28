@@ -8,11 +8,12 @@ imports.c          ~170 lines   `import`: libraries spliced in, once each
 codegen.c         ~2680 lines   tree → C source + per-helper-type state layout
 ccompile.nim       ~130 lines   the compiler as Nim sees it: source in, C and layout out
 voice.c           ~660 lines   a voice: TCC compile → tick(); hot-reload migration, rollback, the -O2 swap
-voice.nim         ~210 lines   voice.c as the Nim engine sees it (until the engine is C)
+voice.nim         ~210 lines   voice.c as Nim sees it (render and the tests)
 dsp.c              ~360 lines   native DSP primitives (filters, delay, tape, reverb…)
 dsp.nim             ~90 lines   dsp.c's functions for Nim, and the table of natives
 midi.nim           ~360 lines   ALSA seq input thread + auto-resubscribe + held notes
-engine.nim        ~1310 lines   audio callback + UNIX socket server + per-voice stats
+engine.c         ~1620 lines   the pump, voice table, guards, -O2 builds, rollback, UNIX socket + commands
+engine.nim        ~240 lines   engine.c as Nim sees it, and the hooks it calls (text, try's render, MIDI)
 engine_types.nim   ~100 lines   data structs (VoiceInfo, StatsSnapshot, MidiStatus…)
 cli_output.nim     ~250 lines   text formatters for list/scope/parts/spectrum/audit
 analysis.nim       ~250 lines   pure FFT + spectral feature extraction
@@ -28,8 +29,9 @@ tools/tv.c                      a raster display on the pipe: w×h samples a fra
 tools/pad.c                     the uConsole gamepad as MIDI knobs
 ```
 
-The language (parser, imports, compiler, DSP) is about 4,100 lines of
-C; the engine, CLI and tools around it about 3,400 lines of Nim. One
+The language (parser, imports, compiler, DSP), the voice and the engine
+are C; the CLI, text formatting, analysis, render and MIDI around them
+about 2,000 lines of Nim (notes/c-port-2026-10-28.md). One
 binary. No runtime
 dependencies beyond libtcc, ALSA, and the system audio library.
 
@@ -49,7 +51,7 @@ dependencies beyond libtcc, ALSA, and the system audio library.
         │                       + state migration (preserves per-region state
         │                         across hot-reloads, skips NaN-poisoned regions)
         ▼
-  engine.nim (pump)             per-voice tick → per-part gain → master sum
+  engine.c (pump)               per-voice tick → per-part gain → master sum
         │                       + per-voice rolling stats / FFT buffer
         ▼
   stdout                        raw float32 pairs; a player / scope / SDR / file reads them
@@ -122,21 +124,22 @@ type
 
 ### Slot (engine-side per-voice state)
 
-```nim
-type
-  Slot = object
-    name:       string
-    voice:      Voice
-    active:     bool                     # true while audible
-    muted:      bool
-    fadeGain:   float64
-    fadeDelta:  float64
-    stats:      Stats                    # rolling RMS / peak / clips / envelope
-    recent:     RecentRing               # 0.5s float32 buffer for `spectrum`
-    nanLogged:  bool                     # one-shot NaN warning per session
+```c
+typedef struct {
+  char*      name;
+  Voice*     voice;          /* voice.h */
+  int        active;         /* true while audible */
+  int        muted;
+  double     fade_gain, fade_delta;
+  Stats      stats;          /* rolling RMS / peak / clips / envelope */
+  RecentRing recent;         /* 0.5 s float buffer for `spectrum` */
+  int        held, park_at_zero, parked;   /* mute and park */
+  /* the guards' bookkeeping, reset by a send: swap_at, want_rollback,
+     stuck, rolled_back, bad_run, nan_events, runaway_events, retry_at */
+} Slot;
 ```
 
-Master bus has its own `Stats` and `RecentRing`. `MaxVoices = 16`.
+Master bus has its own `Stats` and `RecentRing`. `MAX_VOICES = 16`.
 
 ## Per-sample execution
 
@@ -239,10 +242,11 @@ Per-voice + master both use the same `Stats` struct:
   server-side and returns formatted text.
 
 The engine's command handler returns formatted text directly
-because the response is plain stdout. Internally, engine procs
-return data structures (`VoiceInfo`, `StatsSnapshot`, `MidiStatus`,
-`SpectrumSummary`); `cli_output.nim` formatters turn those into
-text. The split lets engine state be tested without parsing
+because the response is plain stdout. Internally, engine.c takes
+snapshots under the lock (`VoiceSnap`, `StatsSnap`, `CheckSnap`, in
+engine.h) and hands them to hooks in engine.nim, where the
+`cli_output.nim` formatters turn them into text (until stage 3 of the
+port moves the formatters to C). The split lets engine state be tested without parsing
 strings.
 
 ## Parser
@@ -339,7 +343,7 @@ top-N peaks, spectral centroid, RMS, peak dB, zero-crossing rate,
 estimated fundamental.
 
 `render.nim` runs a patch offline (parse → codegen → TCC compile
-→ tick N samples → return buffer). Doesn't touch engine.nim.
+→ tick N samples → return buffer). Doesn't touch the engine.
 
 `./aither audit <patch> [seconds]` composes them: render →
 analyze → format → print. ~100 ms turnaround for a 2-second

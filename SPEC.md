@@ -1451,7 +1451,7 @@ pair behind `analytic`. Each function claims state slots from the per-voice pool
 Pool access is bounds-checked — overflow degrades to a shared
 safe slot rather than segfaulting.
 
-### Engine (`engine.nim`, ~735 lines)
+### Engine (`engine.c`)
 
 The mix, a period at a time, to standard output on its own thread;
 `input()` from standard input. Each voice runs a block at a time

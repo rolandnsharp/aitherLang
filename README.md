@@ -418,11 +418,12 @@ imports.c          ~170 lines   `import`: libraries spliced in, once each
 codegen.c         ~2680 lines   tree → C source + per-helper-type state layout
 ccompile.nim       ~130 lines   the compiler as Nim sees it: source in, C and layout out
 voice.c           ~660 lines   a voice: TCC compile → tick(); hot-reload migration, rollback, the -O2 swap
-voice.nim         ~210 lines   voice.c as the Nim engine sees it (until the engine is C)
+voice.nim         ~210 lines   voice.c as Nim sees it (render and the tests)
 dsp.c              ~360 lines   native DSP primitives (filters, delay, tape, reverb…)
 dsp.nim             ~90 lines   dsp.c's functions for Nim, and the table of natives
 midi.nim           ~360 lines   ALSA seq input thread + auto-resubscribe + held notes
-engine.nim        ~1310 lines   audio callback + UNIX socket server + per-voice stats
+engine.c         ~1620 lines   the pump, voice table, guards, -O2 builds, rollback, UNIX socket + commands
+engine.nim        ~240 lines   engine.c as Nim sees it, and the hooks it calls (text, try's render, MIDI)
 engine_types.nim   ~100 lines   data structs (VoiceInfo, StatsSnapshot, MidiStatus…)
 cli_output.nim     ~250 lines   text formatters for list/scope/parts/spectrum/audit
 analysis.nim       ~250 lines   pure FFT + spectral feature extraction
@@ -431,7 +432,7 @@ aither.nim         ~210 lines   CLI dispatch (entry point — `nim c aither.nim`
 stdlib.aither      ~430 lines   composition layer (pure aither defs)
 ```
 
-About 4800 lines Nim total. A patch is parsed to an AST, transpiled
+About 7,000 lines of C and 2,000 of Nim. A patch is parsed to an AST, transpiled
 to C, handed to TCC which compiles it to machine code in memory, and
 the resulting `tick(state, t)` function pointer is called once per
 sample from the audio callback. Hot reload compiles the new code off
