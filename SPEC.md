@@ -1082,9 +1082,9 @@ mirror image, unlike a ring modulator: the analytic signal turned by a
 spin. Hz are added, not multiplied, so harmonics stop being harmonic.
 It returns the pair, the shifted signal in quadrature, and what hears
 it decides: played, its sides are the shifted sound a quarter turn
-apart; an SDR takes it as IQ; `let [x, _] = freq_shift(...)` is one
-number. Clean above about 30 Hz, where the Hilbert pair holds its
-quarter turn.
+apart, and summed to mono it doesn't cancel; an SDR takes it as IQ.
+Clean above about 30 Hz, where the Hilbert pair holds its quarter
+turn.
 
 ### Damped oscillator
 
@@ -1093,19 +1093,30 @@ def dho(force, freq, damp)                # x'' = force - 2 damp w x' - w^2 x
 def resonator(signal, freq, decay)        # a signal through a resonance
 ```
 
-`dho` is the spring every resonance is (`w = TAU freq`); it is stable
-below `sr / π` (about 14 kHz at 44.1 kHz), where its integrator's step
-stays under two radians. Its phasor is a true circle well below that
-(a driven one's length holds within 1% at 220 Hz) and bends into an
-ellipse as the frequency nears it (at 6 kHz on 44.1 kHz, its length
-swings by a third a cycle), so `magnitude` of a high `dho` ripples. Sweep `damp`
-and it walks through sustained sine (0), bell (~0.005), pluck (~0.2),
-critical (1) and silence (>1); `force` is an acceleration, so a strike
-is a big number. It returns its phasor, the pair `[x, v / w]`: `[0]` is
-the position, the sound; `[1]` the velocity in the same units, a
-quarter turn behind, so a lightly damped one traces a circle. Given a
-pair where it takes a number it would make a pair of pairs, and says
-so: two of them, or `resonator`, make a stereo pair.
+`dho` is the spring every resonance is (`w = TAU freq`). Sweep `damp`
+and it walks through sustained sine (0), bell (~0.005), pluck (~0.2)
+and thud (~0.9); `force` is an acceleration, so a strike is a big
+number, and a constant force stretches it to `force / w²`. It returns
+its phasor, the pair `[x, q]`: `x` is the position, the sound; `q` the
+position a quarter turn behind. The pair turns the way `spin` does, at
+`wd = w · sqrt(1 - damp²)`, its length is how far it swings, and
+`magnitude` and `phase` read it whole (see "Read the whole pair").
+
+Each sample the phasor turns by `wd · dt` and shrinks by
+`exp(-damp · w · dt)`, then the force pushes it by `force · dt / wd`:
+
+```
+$z = turn($z, exp(-damp * w * dt) * [cos(wd * dt), sin(wd * dt)]) + [0, -force * dt / wd]
+```
+
+That is the spring's motion sampled exactly, not stepped towards, so
+the pair is a circle at every frequency up to Nyquist and never runs
+away (the phasor filter: PHASORS.md). An oscillator turns, so `damp`
+stops just under 1; past critical damping a spring only creeps back,
+and `swell` or `slew` is that tool. `q` is the velocity only when
+undamped; the velocity takes both sides, `v = -(wd · q + damp · w · x)`.
+Given a pair where it takes a number it would make a pair of pairs,
+and says so: two of them, or `resonator`, make a stereo pair.
 
 `resonator` is a `dho` driven by a signal and scaled so a steady signal
 comes out at its own level, returning the position: `decay` is the
@@ -1126,7 +1137,8 @@ relaxation tone with odd harmonics (3: 220 Hz sounds at about 168 Hz,
 as the physics says). `push` moves its rest point: a hand, a signal,
 or a spring to another `vdp`, and two detuned ones pushed toward each
 other lock to one pitch (COMPOSING.md, "Voices that lock"). Returns
-the pair `[x, v / w]`, a phasor, round when `mu` is small.
+its phasor `[x, -v / w]`, the position and the position a quarter turn
+behind, turning the way `spin` does; round when `mu` is small.
 
 ### Spectral synthesis (built on `sum`)
 

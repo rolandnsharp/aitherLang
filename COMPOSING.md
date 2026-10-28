@@ -546,9 +546,11 @@ extremes.
 
 ## DHO — the universal oscillator
 
-`dho(force, freq, damp)` is one def that integrates the
-damped harmonic oscillator, and returns its phasor `[x, v / w]`: `[0]`
-is the position, the sound, `[1]` the velocity in the same units:
+`dho(force, freq, damp)` is one def, the damped harmonic oscillator,
+and returns its phasor `[x, q]`: `x` is the position, the sound, `q`
+the position a quarter turn behind. Each sample the phasor turns and
+shrinks and the force pushes it, which is the spring's equation solved
+exactly (PHASORS.md says why it is written as a turn):
 
 ```
 ddx = -k*x - c*dx + force      with k = (TAU*freq)^2, c = 2*damp*omega
@@ -563,7 +565,6 @@ paradigms without ever changing primitive:
 | `damp = 0, force = 0, init dx ≠ 0`      | free sine — an additive partial             |
 | `damp ≈ 0.005, force = impulse`         | struck bell / modal physical instrument     |
 | `damp ≈ 0.2, force = audio_in`          | resonant bandpass — subtractive filter      |
-| `damp = 1.0, force = step`              | critical-damped slew — envelope shape       |
 | `damp ≈ 0, freq = 0.5 Hz, force = 0`    | LFO / sub-audio modulator                   |
 | chained at formant Hz, `force = speech` | vowel / wood-box body resonance             |
 
@@ -572,28 +573,32 @@ sounds:
 
 ```
 # Bell strike — long ring at 440 Hz
-dho(if t < dt then 100000000 else 0, 440, 0.005)[0]
+let bell = dho(impulse(0.5) * 100000000, 440, 0.005)   # the pair: heard, its sides a quarter turn apart
 
 # Resonant filter — narrow bandpass at 800 Hz, driven by external audio
-dho(audio_in * 50000, 800, 0.2)[0]
+let band = dho(audio_in * 50000, 800, 0.2)
 
-# Slow envelope — sub-audio critically-damped slew driven by gate
-dho(g * 1500, 5, 1.0)[0]
+# Its loudness, as a tuned circuit hears it: the phasor's length
+let level = magnitude(dho(audio_in * 50000, 800, 0.2))
 ```
 
 For demonstration, `patches/dho_walk.aither` wires K1 to `damp` on
 a struck DHO. Holding a key and turning the knob walks audibly
-from sustained sine → bell → pluck → thunk → silence — one
-oscillator, one parameter, every paradigm.
+from sustained sine → bell → pluck → thud — one oscillator, one
+parameter, every paradigm. `damp` stops just under 1: an oscillator
+turns, and a spring damped past critical only creeps back, which is an
+envelope's job (`swell`, `slew`).
 
-`dho(...)[1]` is the velocity divided by `w`, the same oscillator a
-quarter turn on: the whole pair is a phasor, round when `damp` is
-small, so it goes straight into `turn`, `rotate` or `tv`. The raw
-velocity is `TAU * freq * dho(...)[1]`: chained physics (a damping
-force, one oscillator's velocity driving another) uses it, and as
-audio it is the brighter view, frequency-emphasised. A pair given where
-`dho` takes a number would make a pair of pairs, which is an error:
-use two, or `resonator`, which returns a number.
+The whole pair is a phasor, a circle at every frequency, so it goes
+straight into `turn`, `rotate`, `magnitude`, `phase` or `tv`. `q` is
+the velocity only when undamped: damped, the phasor also shrinks as it
+turns, so the velocity takes both sides,
+`v = -(wd * q + damp * w * x)` with `wd = w * sqrt(1 - damp^2)`, the
+rate it turns. Chained physics uses it (a damping force, one
+oscillator's velocity driving another); the didge patches show it,
+with a comment. A pair given where `dho` takes a number would make a
+pair of pairs, which is an error: use two, or `resonator`, which
+returns a number.
 
 **Why this is `f(state)`-native.** In a modular synth you pick a
 "filter module" or an "FM module"; the paradigm is baked into
@@ -604,7 +609,7 @@ without re-routing. This is what `f(state) → sample` looks like
 when one equation generalises a half-dozen named techniques.
 
 **Force is in acceleration units.** `force` adds directly to
-`ddx`, so a constant force settles to `x = force / k`. At audio
+`ddx`, so a constant force settles to `x = force / k`, exactly. At audio
 frequencies `k = (TAU*freq)^2` is huge — a 440 Hz oscillator has
 `k ≈ 7.6M`, so impulse-style strikes need force on the order of
 `1e7`–`1e8` to ring at unit amplitude. For LFO/envelope use at
@@ -696,9 +701,9 @@ The pattern is what's named, not the cell.
 
 aither has no complex-number TYPE, but it has the OPERATIONS that
 make complex algebra useful, all of them one picture: a pair is a
-point that can turn. They take and return ordinary pairs. Name a
-result's sides where you read them: `let [pos, vel] = dho(...)`,
-`let [x, _] = freq_shift(...)`.
+point that can turn. They take and return ordinary pairs. Use a pair
+whole where you can (the operations below, or played as it is); name
+its sides where a model needs both: `let [x, q] = dho(...)`.
 
 | call                     | does                                                   |
 |--------------------------|--------------------------------------------------------|
@@ -754,8 +759,10 @@ The tuned circuit's damping is its selectivity: narrow keeps a
 neighbouring station out but blurs the sound, wide is clear but lets it
 in.
 
-`let [x, _] =` is right where one number is all there is room for: a
-sound into a mono mix, a value into a filter that takes one.
+Played, a phasor pair is the same sound with its sides a quarter turn
+apart: a little wide, and summed to mono it doesn't cancel (cos + sin
+is a sine 3 dB up). So even where a patch wants "one sound", the pair
+usually serves. Taking one side is for where only one number fits.
 
 ### Pair producers — start with `spin`, not `sin(TAU * phasor(…))`
 

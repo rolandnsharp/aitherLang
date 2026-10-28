@@ -393,6 +393,9 @@ high-quality reverb tails simultaneously, use a DAW.
 - [PHILOSOPHY.md](PHILOSOPHY.md) — the contract, the five paradigms,
   why composition over graphs
 - [SPEC.md](SPEC.md) — complete language reference
+- [PHASORS.md](PHASORS.md) — why aither turns pairs: phasors, `turn` and
+  `spin`, reading the whole pair, the turning `dho`; the research and
+  measurements behind them, with references
 - [COMPOSING.md](COMPOSING.md) — composition idioms, common patterns,
   what to reach for and when
 - [GUIDE.md](GUIDE.md) — hands-on how-to for writing and performing

@@ -524,11 +524,21 @@ def didge_x(mouth, voiceP, lipF, f0, ft1, ft2, ft3, zt):
   $lv = 0.0
   let pModes = sum(3, k =>
     let fk = f0 * xmode_r(k)
-    xmode_z(k) * 2 * 0.045 * TAU * fk * TAU * fk * dho($u, fk, 0.045)[1])
+    # A mode's velocity, for its damping force. dho gives its phasor [x, q]:
+    # x the position, q the position a quarter turn behind. Undamped, q is
+    # just -v / w; damped, the phasor also shrinks as it turns, so the
+    # velocity takes both sides: v = -(wd q + damp w x), wd = w sqrt(1 -
+    # damp^2) the rate it turns. Reading one side would be off by about the
+    # damping, 5-9% here (PHASORS.md, "the second side isn't velocity").
+    let [mx, mq] = dho($u, fk, 0.045)
+    let mv = -(TAU * fk * sqrt(1 - 0.045 * 0.045) * mq + 0.045 * TAU * fk * mx)   # its velocity
+    xmode_z(k) * 2 * 0.045 * TAU * fk * mv)
   let pTract = sum(3, j =>
     let fj = if j == 1 then ft1 else if j == 2 then ft2 else ft3
     let zj = if j == 2 then 0.06 else 0.08
-    zt * (if j == 2 then 1.4 else 1.0) * 2 * zj * TAU * fj * TAU * fj * dho($u, fj, zj)[1])
+    let [mx, mq] = dho($u, fj, zj)
+    let mv = -(TAU * fj * sqrt(1 - zj * zj) * mq + zj * TAU * fj * mx)   # its velocity
+    zt * (if j == 2 then 1.4 else 1.0) * 2 * zj * TAU * fj * mv)
   let wl = TAU * lipF
   let open = 0.05 + $lx
   let contact = if open < 0 then -open * 30 * wl * wl else 0
@@ -658,7 +668,9 @@ def didge_v2(mouth, voiceP, lipF, f0, ft1, ft2, zt, buzz, modeAmt, steep, turb):
   let pT = sum(2, j =>
     let fj = if j == 1 then ft1 else ft2
     let zj = if j == 1 then 0.09 else 0.07
-    zt * 2 * zj * TAU * fj * TAU * fj * dho(uS, fj, zj)[1])
+    let [mx, mq] = dho(uS, fj, zj)
+    let mv = -(TAU * fj * sqrt(1 - zj * zj) * mq + zj * TAU * fj * mx)   # its velocity
+    zt * 2 * zj * TAU * fj * mv)
   let wl = TAU * lipF
   let open = 0.05 + $lx
   let contact = if open < 0 then -open * buzz * wl * wl else 0
@@ -668,7 +680,9 @@ def didge_v2(mouth, voiceP, lipF, f0, ft1, ft2, zt, buzz, modeAmt, steep, turb):
   $u  = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp)) * (1 + noise() * turb)
   let pM = sum(2, k =>
     let fk = f0 * (if k == 1 then 2.65 else 4.35)
-    modeAmt * (if k == 1 then 4.0 else 2.5) * 2 * 0.05 * TAU * fk * TAU * fk * dho(uS, fk, 0.05)[1])
+    let [mx, mq] = dho(uS, fk, 0.05)
+    let mv = -(TAU * fk * sqrt(1 - 0.05 * 0.05) * mq + 0.05 * TAU * fk * mx)   # its velocity
+    modeAmt * (if k == 1 then 4.0 else 2.5) * 2 * 0.05 * TAU * fk * mv)
   let pplus = $u * 0.8 + $pm
   let p   = pplus + $pm + pM
   $dp = clamp(lp1(mouth * (1 + voiceP) - pT - p, 840.34), -4, 4)
@@ -701,7 +715,9 @@ def didge3(mouth, voiceP, lipF, f0, ft1, ft2, zt, modeAmt, turb):
   let pT = lp1(sum(2, j =>
     let fj = if j == 1 then ft1 else ft2
     let zj = if j == 1 then 0.09 else 0.07
-    zt * 2 * zj * TAU * fj * TAU * fj * dho(uS, fj, zj)[1]), 493.04)
+    let [mx, mq] = dho(uS, fj, zj)
+    let mv = -(TAU * fj * sqrt(1 - zj * zj) * mq + zj * TAU * fj * mx)   # its velocity
+    zt * 2 * zj * TAU * fj * mv), 493.04)
   let wl = TAU * lipF
   $lv = clamp($lv + (-2 * 0.1 * wl * $lv - wl * wl * $lx + $dp * 0.6 * wl * wl) * dt, -3000, 3000)
   $lx = clamp($lx + $lv * dt, -2, 3)
@@ -710,7 +726,9 @@ def didge3(mouth, voiceP, lipF, f0, ft1, ft2, zt, modeAmt, turb):
   $u  = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp)) * (1 + br * turb)
   let pM = sum(2, k =>
     let fk = f0 * (if k == 1 then 2.65 else 4.35)
-    modeAmt * (if k == 1 then 4.0 else 2.5) * 2 * 0.05 * TAU * fk * TAU * fk * dho(uS, fk, 0.05)[1])
+    let [mx, mq] = dho(uS, fk, 0.05)
+    let mv = -(TAU * fk * sqrt(1 - 0.05 * 0.05) * mq + 0.05 * TAU * fk * mx)   # its velocity
+    modeAmt * (if k == 1 then 4.0 else 2.5) * 2 * 0.05 * TAU * fk * mv)
   let pplus = $u * 0.8 + $pm
   let p   = pplus + $pm + pM
   $dp = clamp(lp1(mouth * (1 + voiceP) - pT - p, 840.34), -4, 4)

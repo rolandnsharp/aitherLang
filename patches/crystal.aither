@@ -15,8 +15,7 @@
 #
 #   aither patches/station.aither | aither patches/crystal.aither | tools/play
 #
-# K1 (CC 74) the dial: 4 to 11 kHz (the stations are at 6 and 9). A dho
-# is stable below sr / pi, about 14 kHz at 44.1 kHz, so the band stops there.
+# K1 (CC 74) the dial: 4 to 11 kHz (the stations are at 6 and 9).
 # K2 (CC 71) selectivity: narrow keeps the other station out but blurs
 # the sound, wide is clear but lets it bleed in, as on a real set.
 

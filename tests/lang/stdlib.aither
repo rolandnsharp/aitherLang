@@ -25,25 +25,53 @@ freq_shift(x, 100) - turn(analytic(x), spin(100))
 # expect until 4800: 0
 spin(330) - [cos(TAU * phasor(330)), sin(TAU * phasor(330))]
 
-# --- dho's position is the spring's equation, written out
-# expect until 9600: 0
-let force = if t < dt then 1e8 else 0
+# --- dho is a phasor turning: one turn and a push a sample, written out
+# expect until 9600: 0, 0
+let force = if t < dt * 2 then 1e8 else 0
 let w = TAU * 440
-$x = 0.0
-$v = 0.0
-$v = $v + (-(2 * 0.01 * w) * $v - w * w * $x + force) * dt
-$x = $x + $v * dt
-dho(force, 440, 0.01)[0] - $x
+let wd = w * sqrt(1 - 0.01 * 0.01)
+$z = [0, 0]
+$z = turn($z, exp(-0.01 * w * dt) * [cos(wd * dt), sin(wd * dt)]) + [0, -force * dt / wd]
+dho(force, 440, 0.01) - $z
 
-# --- dho's second side is its velocity over w
-# expect until 9600: 0
-let force = if t < dt then 1e8 else 0
-let w = TAU * 440
-$x = 0.0
-$v = 0.0
-$v = $v + (-(2 * 0.01 * w) * $v - w * w * $x + force) * dt
-$x = $x + $v * dt
-dho(force, 440, 0.01)[1] - $v / w
+# --- a constant force stretches the spring to force / w^2, at any damping below 1
+# expect at 95999: 1, 1
+let w = TAU * 10
+let [a, _] = dho(100, 10, 0.5)
+let [b, _] = dho(100, 10, 0.05)
+let ok = abs(a * w * w / 100 - 1) < 0.001
+[if ok then 1 else 0, if abs(b * w * w / 100 - 1) < 0.01 then 1 else 0]
+
+# --- dho turns the way spin does, at its damped rate
+# expect at 200: 1
+$n = 0
+$n = $n + 1
+let p = dho(if $n == 1 then 1e8 else 0, 440, 0.01)
+let rate = phase(turn(p, conj(prev(p)))) / (TAU * dt)
+if abs(rate - 440 * sqrt(1 - 0.01 * 0.01)) < 0.5 then 1 else 0
+
+# --- its phasor stays a circle near Nyquist: driven at 18 kHz, its length holds
+# expect at 95999: 1
+let w = TAU * 18000
+let len = magnitude(dho(sin(TAU * phasor(18000)) * 0.5 * 2 * 0.05 * w * w, 18000, 0.05))
+$lo = 9
+$hi = 0
+$lo = if t > 1 then min($lo, len) else $lo
+$hi = if t > 1 then max($hi, len) else $hi
+if $lo > 0.4 and $hi < 0.65 then 1 else 0
+
+# --- its velocity takes both sides: v = -(wd q + damp w x) is how fast x moves
+# expect at 50: 1
+# expect at 400: 1
+let w = TAU * 300
+let d = 0.2
+$n = 0
+$n = $n + 1
+let [x, q] = dho(if $n == 1 then 1e7 else 0, 300, d)
+let v = -(w * sqrt(1 - d * d) * q + d * w * x)
+let dx = (x - prev(x)) / dt
+let mid = (v + prev(v)) / 2
+if abs(dx - mid) < 0.001 * abs(mid) + 1e-9 then 1 else 0
 
 # --- a steady signal through a resonator comes out at its own level
 # expect at 47999: 1
@@ -91,3 +119,9 @@ ease(0.5) + ease(-1) + ease(2) - 1
 $n = 0
 $n = $n + 1
 prev($n)
+
+# --- everything that turns, turns anticlockwise, the way spin does: vdp too
+# expect at 47999: 1
+let p = vdp(220)
+let rate = phase(turn(p, conj(prev(p)))) / (TAU * dt)
+if rate > 150 and rate < 250 then 1 else 0

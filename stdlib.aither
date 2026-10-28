@@ -42,24 +42,37 @@ def rotate(z, angle): turn(z, [cos(angle), sin(angle)])
 # modulator. Hz are added, not multiplied, so harmonics stop being
 # harmonic: metallic, bell-like. The analytic signal, turned by a spin:
 # a pair in quadrature, so what hears it decides (played, the sides are
-# the shifted sound a quarter turn apart; `let [x, _] =` for one number).
+# the shifted sound a quarter turn apart).
 # Clean above about 30 Hz, where the Hilbert pair holds its quarter turn.
 def freq_shift(signal, hz): turn(analytic(signal), spin(hz))
 
 # The damped harmonic oscillator, the spring every resonance is:
 #   x'' = force - 2 damp w x' - w^2 x,   w = TAU freq
 # Sweep `damp` and it walks through sustained sine (0), bell (~0.005),
-# pluck (~0.2), critical (1) and silence (>1). Returns the pair
-# [x, v / w], its phasor: [0] is the position, the sound; [1] the
-# velocity in the same units, a quarter turn behind. Semi-implicit
-# (symplectic) Euler, so an undamped one keeps its energy.
+# pluck (~0.2) and thud (~0.9). It returns its phasor, the pair
+# [x, q]: x is the position, the sound; q the position a quarter turn
+# behind, so the pair turns the way spin does and its length is how
+# far it swings.
+#
+# Each sample the phasor turns by the angle the spring turns in a
+# sample and shrinks by the damping, then the force pushes it: the
+# exact solution sampled, not a step towards it, so the pair stays a
+# circle at any frequency up to Nyquist (Mathews and Smith's "phasor
+# filter", 2003; PHASORS.md says why). wd, the rate it turns, is a
+# little under w when damped. The push is force / wd, so a constant
+# force stretches the spring to force / w^2, as the equation says.
+# An oscillator rings, so damp stops just under 1; past that a spring
+# only creeps back, and swell or slew is the tool.
+# The velocity, if a model needs it, takes both sides:
+#   v = -(wd q + damp w x)
 def dho(force, freq, damp):
-  $x = 0.0
-  $v = 0.0
+  $z = [0, 0]
   let w = TAU * freq
-  $v = $v + (-(2 * damp * w) * $v - w * w * $x + force) * dt
-  $x = $x + $v * dt
-  [$x, $v / w]
+  let d = clamp(damp, 0, 0.999)
+  let wd = w * sqrt(1 - d * d)
+  let step = exp(-d * w * dt) * [cos(wd * dt), sin(wd * dt)]
+  $z = turn($z, step) + [0, -force * dt / wd]
+  $z
 
 # A signal through a resonance at freq Hz: a dho driven by it, scaled so
 # a steady signal comes out at its own level. `decay` is the damping
@@ -75,7 +88,8 @@ def resonator(signal, freq, decay):
 # attack of its own; large, a buzzing relaxation tone, lower in pitch.
 # `push` moves its rest point (a hand, a signal, a spring to another
 # vdp: two detuned ones pushed toward each other lock to one pitch).
-# Returns the pair [x, v / w]: a phasor, round when mu is small.
+# Returns its phasor [x, -v / w], the position and the position a
+# quarter turn behind, turning the way spin does; round when mu is small.
 #   x'' = mu w (1 - 4 x^2) x' - w^2 (x - push)
 def vdp(freq, mu = 0.1, push = 0, start = 0.01):
   $x = 0.0
@@ -86,7 +100,7 @@ def vdp(freq, mu = 0.1, push = 0, start = 0.01):
   $on = 1
   $v = $v + (mu * w * (1 - 4 * $x * $x) * $v - w * w * ($x - push)) * dt
   $x = $x + $v * dt
-  [$x, $v / w]
+  [$x, -$v / w]
 
 # ---------------------------------------------------------------- helpers
 
