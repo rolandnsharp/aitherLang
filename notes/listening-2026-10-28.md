@@ -23,6 +23,11 @@ waterfall.
 - `patches/duck.aither`: the mic's loudness, fast up and slow down,
   ducks a pad: a sidechain from the room.
 
+The uConsole's headset mic is differential and quiet (the voice is
+`(l - r) * 0.5`, peaking near 0.02): see
+[card-2026-10-16.md](card-2026-10-16.md), "The input, 2026-10-29";
+`patches/didge_wow.aither` reads it so.
+
 Run on the uConsole with `tools/card -- aither patches/listen.aither`
 (the card on both ends), or `arecord ... | aither ... | tools/play`.
 

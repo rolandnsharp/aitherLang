@@ -33,7 +33,7 @@ below as a record of what went wrong and why.
 | `examples/fm.aither` still used the removed `var`; SPEC's FM-feedback example (feedback 500 on a 440 carrier) locked to a standstill, a constant with no sound, by Adler's equation | RESOLVED (both at 300: √(440² − 300²) ≈ 322 Hz, the reason in SPEC) |
 | `tests/corpus.golden` had flute_dm at −39.9 dB: recorded while the working copy carried an uncommitted gain of 0.7 (committed: 0.18). The committed patch is −51.7 dB; nothing in the engine changed | RESOLVED (re-recorded). `make corpus` renders tracked files as they are on disk, so local edits get into the golden file |
 | the stream had gaps: `mixBlock` took the voice lock with `tryAcquire`, and when a command (send, status, levels, the -O2 swap) held it, wrote a block of silence without advancing `t`. A 12 ms dropout in sound; in `tv`, which counts pixels by samples received while the patch counts by `t`, a shear for the rest of the session. Found building demos/phased_array: 34 878 gaps in 471 040 samples with the socket busy | RESOLVED (the mix waits for the lock; holds are a few ms and the pipe holds far more. Gapless stream in SPEC; tests/engine_live.nim #8) |
-| the uConsole's es8388 capture reads a flat constant on every input, headset plugged in | open, hardware side; see notes/card-2026-10-16.md |
+| the uConsole's es8388 capture reads a flat constant on every input, headset plugged in | RESOLVED by 2026-10-28: it records (~/.local/bin/dictate uses it daily). The headset mic is differential (the voice is L - R), quiet, and starts at a big DC offset that settles in half a second; see notes/card-2026-10-16.md, "The input, 2026-10-29" |
 
 ## Session log: 2026-10-12 parallel session (from notes/handoff-2026-10-11.md)
 
