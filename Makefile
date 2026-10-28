@@ -5,7 +5,23 @@ FLAGS := --mm:arc --threads:on --opt:speed -d:danger \
 
 all: aither
 
+# Nim decides whether to rebuild a binary from its .nim sources alone:
+# when only a C file it {.compile.}s changed, it reruns the old binary,
+# and the tests run the old compiler (it bit on 2026-10-14 and again on
+# 2026-10-28). So when any C source or header is newer than the last
+# build, every test build cache goes, and the engine's compiled objects
+# of our C files with it.
+fresh-c:
+	@if [ ! -f nimcache/.c-stamp ] || [ -n "$$(find . -maxdepth 1 \( -name '*.c' -o -name '*.h' \) -newer nimcache/.c-stamp)" ]; then \
+	  rm -rf nimcache/tests nimcache/dumpc; \
+	  rm -f tests/all tests/corpus tests/exact_builds $(addprefix tests/,cli_output_format midi_resilience slot_sweep solo_mutes engine_live); \
+	  [ -d $(HOME)/.cache/nim/aither_r ] && find $(HOME)/.cache/nim/aither_r -name '@m..@s*.c.o' ! -name '*.nim.c.o' -delete; \
+	  mkdir -p nimcache && touch nimcache/.c-stamp; \
+	fi; true
+.PHONY: fresh-c
+
 aither: aither.nim engine.nim engine_types.nim cli_output.nim analysis.nim render.nim voice.nim tcc.nim dsp.nim dsp.c dsp.h ccompile.nim codegen.c codegen.h parser.c parser.h imports.c imports.h midi.nim alsa_midi.c realtime.c stdlib.aither
+	@$(MAKE) -s fresh-c
 	$(NIM) c $(FLAGS) --out:aither aither.nim
 
 tools/play: tools/play.c realtime.c
@@ -30,22 +46,22 @@ tools/tv: tools/tv.c tools/display.h
 # has already rebuilt a C file they {.compile.} (codegen.c), and ran stale.
 TESTFLAGS := --mm:arc --threads:on --hints:off --warnings:off \
              --passL:"-ltcc -ldl -lasound"
-test: aither
+test: aither fresh-c
 	$(NIM) c -r $(TESTFLAGS) --nimcache:nimcache/tests/all --out:tests/all tests/all.nim
 	for t in cli_output_format midi_resilience slot_sweep solo_mutes engine_live; do \
 	  $(NIM) c -r $(TESTFLAGS) --nimcache:nimcache/tests/$$t --out:tests/$$t tests/$$t.nim || exit 1; done
 
 # Every tracked patch rendered and fingerprinted against tests/corpus.golden
 # (tests/corpus.nim). After an intended change: make corpus-update.
-corpus:
+corpus: fresh-c
 	$(NIM) c -r $(TESTFLAGS) --nimcache:nimcache/tests/corpus --out:tests/corpus tests/corpus.nim
 
-corpus-update:
+corpus-update: fresh-c
 	$(NIM) c -r $(TESTFLAGS) --nimcache:nimcache/tests/corpus --out:tests/corpus tests/corpus.nim update
 
 # Every patch rendered with TCC's code and with the cc -O2 build: the bits
 # must match (tests/exact_builds.nim). About 10 minutes on the uConsole.
-exact:
+exact: fresh-c
 	$(NIM) c -r $(TESTFLAGS) --out:tests/exact_builds tests/exact_builds.nim
 
 clean:

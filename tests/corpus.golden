@@ -78,6 +78,7 @@ patches/backing.aither  A8632CB3E9CEAC0D  -24.8  -3.4
 patches/bass.aither  BF1E8B63B0393171  -11.3  1.7
 patches/bats.aither  AC6A1493AD74B60D  -36.3  -17.1
 patches/becoming.aither  D2BB19DD1D1544BD  -30.4  -18.0
+patches/bell.aither  41984FA61F1EE325  -240.0  -240.0
 patches/bloom.aither  A02466CAB8B59F3B  -26.5  -9.3
 patches/bush_doof.aither  04BCABEA8DB98375  -24.4  -4.9
 patches/bush_doof_d.aither  B70E762C827CC420  -22.2  -7.2

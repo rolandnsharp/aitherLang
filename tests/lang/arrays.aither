@@ -217,6 +217,6 @@ def octaves(i): log2(notes[i] / 220) + 0 * t
 octaves(2)
 
 # --- the same table, read as it runs
-# expect at 12000: 1
+# expect at 6000: 1
 let notes = [220.0, 440.0, 880.0]
 log2(notes[int(t * 10)] / 220)
