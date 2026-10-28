@@ -92,6 +92,7 @@ patches/chaos.aither  C5687E4BD2EC2BA7  -29.7  -12.7
 patches/chimera.aither  03BF9597A9D2E7A1  -30.0  -16.3
 patches/chord.aither  E18667140FADE855  -16.2  -3.4
 patches/complex_pad.aither  B9C8C397D84146D5  -21.1  -9.8
+patches/contour.aither  5D0A6540F6E7C658  -21.9  -13.6
 patches/crystal.aither  41984FA61F1EE325  -240.0  -240.0
 patches/dho_metamorphosis.aither  AA063A9FAE6E0EA9  -10.6  -5.1
 patches/dho_walk.aither  B2BC18FED60740E1  -37.5  -12.4
@@ -124,6 +125,7 @@ patches/metal_keys.aither  536B714FC28A6EF9  -22.8  -10.3
 patches/morph.aither  100F0837D1B17195  -27.9  -17.4
 patches/native.aither  1997EC597E297D81  -24.8  -0.5
 patches/orbits.aither  6FEBC8641C716927  -18.2  -2.0
+patches/orrery.aither  F858B7A149BB607A  -22.2  -7.8
 patches/pad_didge.aither  E38264475749EFAD  -20.6  -12.9
 patches/phi_bush.aither  4EFB3BC905D154E9  -25.9  -5.2
 patches/primes.aither  1A1970268F7AFC09  -15.9  -2.1
