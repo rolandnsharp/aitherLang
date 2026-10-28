@@ -63,13 +63,18 @@ let big    = bell(strike([1, 0, 0, 0, 1, 0, 0, 0]), 146.83)   # D3
 let middle = bell(strike([0, 0, 1, 0, 0, 0, 1, 1]), 220.0)    # A3
 let small  = bell(strike([0, 1, 0, 1, 0, 1, 0, 0]), 587.33)   # D5
 
-let bells = big * 0.9 + middle * 0.7 + small * 0.5
+let bells = (big * 0.9 + middle * 0.7 + small * 0.5) * 3
+
+# The impact: the clapper meeting metal, a few milliseconds of bright
+# noise before the ring, louder the harder the strike.
+# (Some bell sounds on every step, so every hit is a strike.)
+let tick = bpf(noise(), 3500 + hard * 4000, 0.5) * discharge(hit, 400) * (0.25 + hard * 0.5)
 
 # The air of struck metal, as loud as the bells are ringing right now.
 let ring = amplitude(bells)
 let air  = bpf(noise(), 6000, 0.6) * ring * 0.04
 
-let [x, q] = (bells + air) * 0.5
+let [x, q] = (bells + air) * 0.5 + tick
 let angle = wide * PI / 2
 let dry = [x, x * cos(angle) + q * sin(angle)]
 dry * (1 - room * 0.5) + (mono(dry) |> reverb(4.5, 0.9)) * room * 0.6
