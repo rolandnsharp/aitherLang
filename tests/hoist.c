@@ -58,6 +58,12 @@ static double* render(const char* src, int n) {
 enum { N = 2400 };
 
 TEST(hoist) {
+  /* Turning (a sine of a steady phasor or of the clock as a turning
+   * point) needs hoisting too, but changes the last bits: it has its own
+   * bound (tests/lang/clock.aither, make bench). Off here, so this pins
+   * hoisting alone. The compiler reads it once a process: before any
+   * compile. */
+  setenv("AITHER_TURN", "0", 1);
   setenv("AITHER_HOIST", "1", 1);
   char* on_all = csrc_of(Patch);
   /* Past the extern declarations: hoist_init, then the per-sample code. */

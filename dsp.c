@@ -87,6 +87,30 @@ double n_hp1_c(DspState* s, double sig, double a) {
   return sig - s->pool[i];
 }
 
+/* A turning point's step (codegen's turners): the point at p turned by
+ * (cs, sn), then brought back to the unit circle by one Newton step.
+ * Compiled with the engine, so a patch on TCC turns at -O2 speed; the
+ * -O2 build inlines a copy from codegen.c's prelude, kept identical, so
+ * the two give the same bits. */
+static inline void turn_step(double* p, double cs, double sn) {
+  double r = p[0] * cs - p[1] * sn;
+  double i = p[0] * sn + p[1] * cs;
+  double g = 1.5 - 0.5 * (r * r + i * i);
+  p[0] = r * g; p[1] = i * g;
+}
+
+/* A steady turner: it starts at (1, 0); p[2] marks it started. */
+void n_turn(double* p, double cs, double sn) {
+  if (p[2] == 0.0) { p[0] = 1.0; p[1] = 0.0; p[2] = 1.0; }
+  turn_step(p, cs, sn);
+}
+
+/* A clock turner between its settings: p[2] counts the samples left. */
+void n_turn_clock(double* p, double cs, double sn) {
+  turn_step(p, cs, sn);
+  p[2] = p[2] - 1.0;
+}
+
 double n_lp1(DspState* s, double sig, double cut) { return n_lp1_c(s, sig, one_pole_coef(cut, s->sr)); }
 double n_hp1(DspState* s, double sig, double cut) { return n_hp1_c(s, sig, one_pole_coef(cut, s->sr)); }
 

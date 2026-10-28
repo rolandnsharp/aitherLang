@@ -30,3 +30,19 @@ let plain = sin(TAU * phasor(440) + 0)      # + 0: not the turning form
 $worst = 0
 $worst = max($worst, abs(turned - plain))
 if $worst < 1e-9 then 1 else 0
+
+# --- a sine of the clock turns, and matches the sine of its argument
+# expect at 47999: 1
+let turned = sin(TAU * 440 * t + 0.3)
+let plain = sin(TAU * 440 * t + 0.3 + 0 * sin(t))   # not linear in t: not the turning form
+$worst = 0
+$worst = max($worst, abs(turned - plain))
+if $worst < 1e-9 then 1 else 0
+
+# --- and so does its cos, and one of sweep
+# expect at 47999: 1
+let a = cos(3 - sweep * 50)
+let b = cos(3 - sweep * 50 + 0 * sin(t))
+$worst = 0
+$worst = max($worst, abs(a - b))
+if $worst < 1e-9 then 1 else 0

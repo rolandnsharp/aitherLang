@@ -40,6 +40,8 @@ double n_wave(DspState* s, double freq, double* values, int n);
 /* What codegen calls itself: hoisted coefficients and their steps, the
  * shapes, the Hilbert pair and the input. */
 double n_lp1_coef(double cutoff, double sr);
+void n_turn(double* p, double cs, double sn);
+void n_turn_clock(double* p, double cs, double sn);
 double n_lp1_c(DspState* s, double sig, double a);
 double n_hp1_c(DspState* s, double sig, double a);
 void n_svf_coef(double cutoff, double res, double sr, double* o);

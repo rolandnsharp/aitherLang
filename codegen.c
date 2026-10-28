@@ -1269,10 +1269,14 @@ static const char* static_table(Ctx* c, const char* sym, Node* arr, const char**
 
 /* The frequency of `TAU * phasor(f)` (either order), if f is steady over
  * a block; else NULL. */
-static Node* turning_freq(Ctx* c, Scope* sc, Node* a) {
-  static int off = -1;
+static int turning_off(void) {
+  static int off = -1;               /* AITHER_TURN=0: every sine by sin() */
   if (off < 0) { const char* e = getenv("AITHER_TURN"); off = e && eq(e, "0"); }
-  if (off || !c->hoist_on || c->in_hoist || !a || a->kind != nkBinOp || !eq(a->str, "*")) return NULL;
+  return off;
+}
+
+static Node* turning_freq(Ctx* c, Scope* sc, Node* a) {
+  if (turning_off() || !c->hoist_on || c->in_hoist || !a || a->kind != nkBinOp || !eq(a->str, "*")) return NULL;
   Node *x = a->kids[0], *y = a->kids[1], *ph = NULL;
   if (x->kind == nkIdent && eq(x->str, "TAU") && y->kind == nkCall) ph = y;
   else if (y->kind == nkIdent && eq(y->str, "TAU") && x->kind == nkCall) ph = x;
@@ -1291,13 +1295,113 @@ static void emit_turner(Ctx* c, Scope* sc, Node* freq, Buf* pre, const char** re
   const char* o = fresh(c, "tn");
   const char* r = fresh(c, "tn_cos");
   const char* i = fresh(c, "tn_sin");
-  const char* g = fresh(c, "tn_g");
-  badd(c, pre, "  long %s = %s;\n  if (s->pool[%s + 2] == 0.0) { s->pool[%s] = 1.0; s->pool[%s + 1] = 0.0; s->pool[%s + 2] = 1.0; }\n",
-       o, off, o, o, o, o);
-  badd(c, pre, "  double %s = s->pool[%s] * %s - s->pool[%s + 1] * %s;\n  double %s = s->pool[%s] * %s + s->pool[%s + 1] * %s;\n",
-       r, o, cs, o, sn, i, o, sn, o, cs);
-  badd(c, pre, "  double %s = 1.5 - 0.5 * (%s * %s + %s * %s);\n  %s *= %s; %s *= %s;\n  s->pool[%s] = %s; s->pool[%s + 1] = %s;\n",
-       g, r, r, i, i, r, g, i, g, o, r, o, i);
+  badd(c, pre, "  long %s = %s;\n  n_turn(&s->pool[%s], %s, %s);\n", o, off, o, cs, sn);
+  badd(c, pre, "  double %s = s->pool[%s], %s = s->pool[%s + 1];\n", r, o, i, o);
+  *re = r; *im = i;
+}
+
+/* A sine of the clock, sin(k t + c) with k and c steady over a block, is
+ * a point turning by k / sr each sample as well. Its phase is the
+ * clock's, not its own, so the point is set from the patch's own sin and
+ * cos of the argument as written whenever it could have moved off the
+ * turning: on its first sample, when k or c changed (hoist_init compares
+ * them with the last block's: a knob, `aither sweep`), and every 256
+ * samples so rounding can't build up. Between, it turns. Never merely
+ * because a block began, so tick and tick_block stay the same to the
+ * bit, at any block size. */
+
+/* `t` or `sweep`, the built-in, not a name the patch binds. */
+static int is_clock(Ctx* c, Scope* sc, Node* n) {
+  if (n->kind != nkIdent || !(eq(n->str, "t") || eq(n->str, "sweep"))) return 0;
+  for (Scope* x = sc; x; x = x->parent)
+    if (lfind(x->names, n->str) || lfind(x->stereo, n->str) || lfind(x->arrays, n->str) ||
+        lfind(x->larrays, n->str) || lfind(x->sarrays, n->str))
+      return 0;
+  return !has(&c->stereo_lets, n->str) && !has(&c->play_set, n->str) && !has(&c->pair_vars, n->str) &&
+         !(has(&c->top_lets, n->str) && has(&c->lets_done, n->str)) && !has(&c->top_var_set, n->str) &&
+         !has(&c->file_vars, n->str);
+}
+
+/* How fast `n` moves with the clock, as C, if it is k t + c with k and c
+ * steady over a block (built of t, sweep, a * x, x / a, x + y, x - y,
+ * -x, a steady); "0.0" if it doesn't move; NULL if it isn't such. */
+static const char* clock_rate(Ctx* c, Scope* sc, Node* n) {
+  if (is_clock(c, sc, n)) return "1.0";
+  if (is_invariant(c, sc, n)) return "0.0";
+  if (n->kind == nkUnary && eq(n->str, "-") && n->nkids == 1) {
+    const char* r = clock_rate(c, sc, n->kids[0]);
+    return r ? F(c, "(-%s)", r) : NULL;
+  }
+  if (n->kind != nkBinOp || n->nkids != 2) return NULL;
+  Node *a = n->kids[0], *b = n->kids[1];
+  if (eq(n->str, "+") || eq(n->str, "-")) {
+    const char *ra = clock_rate(c, sc, a), *rb = ra ? clock_rate(c, sc, b) : NULL;
+    return rb ? F(c, "(%s %s %s)", ra, n->str, rb) : NULL;
+  }
+  if (eq(n->str, "*")) {
+    if (is_invariant(c, sc, a)) {
+      const char* rb = clock_rate(c, sc, b);
+      return rb ? F(c, "(%s * %s)", emit_invariant(c, sc, a), rb) : NULL;
+    }
+    if (is_invariant(c, sc, b)) {
+      const char* ra = clock_rate(c, sc, a);
+      return ra ? F(c, "(%s * %s)", ra, emit_invariant(c, sc, b)) : NULL;
+    }
+    return NULL;
+  }
+  if (eq(n->str, "/") && is_invariant(c, sc, b)) {    /* x / 0 is 0, as everywhere */
+    const char* ra = clock_rate(c, sc, a);
+    const char* d = emit_invariant(c, sc, b);
+    return ra ? F(c, "((%s) == 0.0 ? 0.0 : %s / (%s))", d, ra, d) : NULL;
+  }
+  return NULL;
+}
+
+/* Where `n` is at t = 0, as C, for an `n` clock_rate accepted: c of k t + c. */
+static const char* clock_offset(Ctx* c, Scope* sc, Node* n) {
+  if (is_clock(c, sc, n)) return eq(n->str, "t") ? "0.0" : "(-s->sweep_origin)";
+  if (is_invariant(c, sc, n)) return emit_invariant(c, sc, n);
+  if (n->kind == nkUnary) return F(c, "(-%s)", clock_offset(c, sc, n->kids[0]));
+  Node *a = n->kids[0], *b = n->kids[1];
+  if (eq(n->str, "+") || eq(n->str, "-"))
+    return F(c, "(%s %s %s)", clock_offset(c, sc, a), n->str, clock_offset(c, sc, b));
+  if (eq(n->str, "*"))
+    return is_invariant(c, sc, a) ? F(c, "(%s * %s)", emit_invariant(c, sc, a), clock_offset(c, sc, b))
+                                  : F(c, "(%s * %s)", clock_offset(c, sc, a), emit_invariant(c, sc, b));
+  const char* d = emit_invariant(c, sc, b);
+  return F(c, "((%s) == 0.0 ? 0.0 : %s / (%s))", d, clock_offset(c, sc, a), d);
+}
+
+/* The point of sin(arg) and cos(arg), arg moving at `rate`: this
+ * sample's cos and sin sides. Its region: the point, and the samples
+ * left before it is set again (0: now; hoist_init zeroes it when k or c
+ * moved). */
+static void emit_clock_turner(Ctx* c, Scope* sc, Node* arg, const char* rate, Buf* pre,
+                              const char** re, const char** im) {
+  const char* k = hoist(c, rate);
+  const char* k0 = hoist(c, clock_offset(c, sc, arg));
+  const char* cs = hoist(c, F(c, "cos(%s / s->sr)", k));
+  const char* sn = hoist(c, F(c, "sin(%s / s->sr)", k));
+  const char* off = register_region(c, "clock_turner", 3, NULL);
+  const char* was_k = fresh(c, "ck_was_k");
+  const char* was_k0 = fresh(c, "ck_was_k0");
+  spush(c, &c->hoist_decls, F(c, "static double %s, %s;\n", was_k, was_k0));
+  spush(c, &c->hoist_inits, F(c, "  if (!(%s == %s && %s == %s)) s->pool[%s + 2] = 0.0;\n  %s = %s; %s = %s;\n",
+                              k, was_k, k0, was_k0, off, was_k, k, was_k0, k0));
+  const char* o = fresh(c, "ck");
+  const char* r = fresh(c, "ck_cos");
+  const char* i = fresh(c, "ck_sin");
+  const char* left = fresh(c, "ck_left");
+  const char* av = fresh(c, "ck_a");
+  Buf at = {0};
+  const char* a = emit1(c, sc, arg, &at, "sin's argument");
+  badd(c, pre, "  long %s = %s;\n  double %s, %s, %s = s->pool[%s + 2];\n  if (%s <= 0.0) {\n%s",
+       o, off, r, i, left, o, left, bstr(&at));
+  badd(c, pre, "    double %s = (%s);\n    %s = cos(%s); %s = sin(%s); s->pool[%s + 2] = 255.0;\n",
+       av, a, r, av, i, av, o);
+  badd(c, pre, "    s->pool[%s] = %s; s->pool[%s + 1] = %s;\n  } else {\n", o, r, o, i);
+  badd(c, pre, "    n_turn_clock(&s->pool[%s], %s, %s);\n    %s = s->pool[%s]; %s = s->pool[%s + 1];\n  }\n",
+       o, cs, sn, r, o, i, o);
   *re = r; *im = i;
 }
 
@@ -2028,7 +2132,8 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
   }
   const char* resolved = lookup_fn(sc, n->str);
   const char* name = resolved[0] ? resolved : n->str;
-  /* sin and cos of a steady TAU * phasor(f): a turning point's sides. */
+  /* sin and cos of a steady TAU * phasor(f), or of the clock at a steady
+   * rate: a turning point's sides. */
   if ((eq(name, "sin") || eq(name, "cos")) && n->nkids == 1 && !user_def(c, name) && c->hoist_on && !c->in_hoist) {
     Node* a = n->kids[0];
     const char *re = NULL, *im = NULL;
@@ -2038,6 +2143,10 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
     } else {
       Node* f = turning_freq(c, sc, a);
       if (f) emit_turner(c, sc, f, pre, &re, &im);
+      else if (!turning_off()) {
+        const char* rate = clock_rate(c, sc, a);
+        if (rate && !eq(rate, "0.0")) emit_clock_turner(c, sc, a, rate, pre, &re, &im);
+      }
     }
     if (re) return mono(eq(name, "cos") ? re : im);
   }
@@ -2556,6 +2665,25 @@ static const char* emit_program(Ctx* c, Node* program) {
   }
   bcat(c, &pre,
     "extern double n_lp1_coef(double,double);\n"
+    /* The turning step: TCC calls dsp.c's, compiled at -O2; the -O2 build
+     * inlines the same code (dsp.c's turn_step, kept identical), so the
+     * two give the same bits. */
+    "#ifdef __TINYC__\n"
+    "extern void n_turn(double*,double,double);\n"
+    "extern void n_turn_clock(double*,double,double);\n"
+    "#else\n"
+    "static inline void turn_step(double* p, double cs, double sn) {\n"
+    "  double r = p[0] * cs - p[1] * sn;\n"
+    "  double i = p[0] * sn + p[1] * cs;\n"
+    "  double g = 1.5 - 0.5 * (r * r + i * i);\n"
+    "  p[0] = r * g; p[1] = i * g;\n"
+    "}\n"
+    "static inline void n_turn(double* p, double cs, double sn) {\n"
+    "  if (p[2] == 0.0) { p[0] = 1.0; p[1] = 0.0; p[2] = 1.0; }\n"
+    "  turn_step(p, cs, sn);\n"
+    "}\n"
+    "static inline void n_turn_clock(double* p, double cs, double sn) { turn_step(p, cs, sn); p[2] = p[2] - 1.0; }\n"
+    "#endif\n"
     "extern double n_lp1_c(DspState*,double,double);\n"
     "extern double n_hp1_c(DspState*,double,double);\n"
     "extern void n_svf_coef(double,double,double,double*);\n"

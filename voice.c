@@ -68,7 +68,8 @@ static void register_natives(TCCState* s) {
   }
   static const struct { const char* name; const void* fn; } extra[] = {
     {"n_overrun", (const void*)n_overrun}, {"n_now", (const void*)n_now},
-    {"n_lp1_coef", (const void*)n_lp1_coef}, {"n_lp1_c", (const void*)n_lp1_c},
+    {"n_lp1_coef", (const void*)n_lp1_coef},
+    {"n_turn", (const void*)n_turn}, {"n_turn_clock", (const void*)n_turn_clock}, {"n_lp1_c", (const void*)n_lp1_c},
     {"n_hp1_c", (const void*)n_hp1_c}, {"n_svf_coef", (const void*)n_svf_coef},
     {"n_lpf_c", (const void*)n_lpf_c}, {"n_hpf_c", (const void*)n_hpf_c},
     {"n_bpf_c", (const void*)n_bpf_c}, {"n_notch_c", (const void*)n_notch_c},
