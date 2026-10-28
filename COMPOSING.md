@@ -572,14 +572,15 @@ Three small expressions, same primitive, categorically different
 sounds:
 
 ```
-# Bell strike — long ring at 440 Hz
-let bell = dho(impulse(0.5) * 100000000, 440, 0.005)   # the pair: heard, its sides a quarter turn apart
+# Bell strike — long ring at 440 Hz, its pair doing the work
+let bell = dho(impulse(0.5) * 100000000, 440, 0.005)
+let ring = magnitude(bell)             # how hard it's still ringing: an envelope, at every sample
+let beat = turn(bell, spin(1.5))       # the whole bell 1.5 Hz higher: an even beat against itself
+(bell + beat) * 0.5 + noise() * ring * 0.02   # and a breath that dies with it
 
 # Resonant filter — narrow bandpass at 800 Hz, driven by external audio
 let band = dho(audio_in * 50000, 800, 0.2)
-
-# Its loudness, as a tuned circuit hears it: the phasor's length
-let level = magnitude(dho(audio_in * 50000, 800, 0.2))
+let level = magnitude(band)            # its loudness, as a tuned circuit hears it
 ```
 
 For demonstration, `patches/dho_walk.aither` wires K1 to `damp` on
