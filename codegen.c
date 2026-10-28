@@ -746,6 +746,9 @@ static const char* emit1(Ctx* c, Scope* sc, Node* n, Buf* pre, const char* what)
 
 /* ---- hoisting: what can't change within a block runs once a block ---- */
 
+static const char* const MIDI_HELD[] = {"midi_cc", "midi_note", "midi_freq", "midi_gate", "midi_vel",
+                                        "midi_voice_freq", "midi_voice_gate", "midi_voice_vel",
+                                        "midi_voice_key", NULL};
 static const char* const PURE_MATH[] = {"sin", "cos", "tan", "tanh", "exp", "log", "log2",
                                         "floor", "ceil", "sqrt", "pow", "min", "max", "clamp",
                                         "abs", "int", NULL};
@@ -770,7 +773,14 @@ static int is_invariant(Ctx* c, Scope* sc, Node* n) {
     return 1;
   case nkIdx: return is_const(c, sc, n);
   case nkCall:
-    if (!(in(n->str, PURE_MATH) || eq(n->str, "midi_cc")) || n->nkids == 0) return 0;
+    /* Maths over invariants, and what MIDI holds: a knob, a note and a
+     * voice's note, gate, velocity and key change between blocks as far
+     * as a block can tell (the input thread's writes are read once a
+     * block; offline, tick reruns hoist_init every sample). midi_trig is
+     * not: it consumes its edge. */
+    if (in(n->str, MIDI_HELD))
+      for (int i = 0; i < n->nkids; i++) { if (!is_invariant(c, sc, n->kids[i])) return 0; }
+    else if (!in(n->str, PURE_MATH) || n->nkids == 0) return 0;
     for (int i = 0; i < n->nkids; i++) if (!is_invariant(c, sc, n->kids[i])) return 0;
     return 1;
   default: return 0;
