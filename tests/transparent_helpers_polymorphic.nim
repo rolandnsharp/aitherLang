@@ -55,7 +55,7 @@ const NativeCases = [
   ("fbdelay",   "let s = [sin(t), cos(t)]\ns |> fbdelay(0.01, 0.05, 0.3)\n", "fbdelay"),
   ("slew",      "let s = [sin(t), cos(t)]\ns |> slew(0.01)\n",          "lp1"),
   ("discharge", "let s = [sin(t), cos(t)]\ns |> discharge(20)\n",       "discharge"),
-  ("tremolo",   "let s = [sin(t), cos(t)]\ns |> tremolo(5, 0.5)\n",     "phasor"),
+  ("tremolo",   "let s = [sin(t), cos(t)]\ns |> tremolo(5, 0.5)\n",     "turner"),   # a steady LFO turns
 ]
 
 for (name, src, region) in NativeCases:
@@ -167,11 +167,12 @@ s |> delay(0.001, 0.05)
 # `lpf(stereo, modulated_cutoff, q)` should NOT register the modulator's
 # state twice. That used to happen via the original-AST-node duplication
 # in the split path; the fix binds via a fresh ident per scalar arg.
-# Region count: 2 stereo source phasors + 1 lfo phasor = 3 total.
+# Region count: 2 stereo source oscillators + 1 lfo = 3 total (each a
+# turning point, its frequency steady).
 doAssert countRegions(
   "let s = [sin(TAU*phasor(440)), sin(TAU*phasor(660))]\n" &
   "s |> lpf(800 + sin(TAU*phasor(2)) * 100, 0.5)\n",
-  "phasor") == 3
+  "turner") == 3
 doAssert countRegions(
   "let s = [sin(TAU*phasor(440)), sin(TAU*phasor(660))]\n" &
   "s |> lpf(800 + sin(TAU*phasor(2)) * 100, 0.5)\n",

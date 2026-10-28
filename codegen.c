@@ -68,6 +68,7 @@ struct Ctx {
   Map hoist_seen;
   int in_hoist;
   Map assigned, play_set, stereo_lets;
+  Map turners;              /* "<scope>/<let>" -> a = cos side, b = sin side */
   Map top_arrays;           /* a = sym, n = length */
   Buf array_decls;
   int tmp_counter;
@@ -1229,6 +1230,60 @@ static const char* static_table(Ctx* c, const char* sym, Node* arr, const char**
 
 /* `let name = rhs` in a scope (a def, lambda or play body): a table, an
  * array of this sample's numbers, a pair, or a number. */
+/* ---------------------------------------------------------------- turning
+ * sin(TAU * phasor(f)) with f steady over a block is a point turning by a
+ * fixed angle each sample: a pair in the pool, turned by [cos, sin] of
+ * TAU f / sr, which is computed once a block. Four multiplies a sample
+ * instead of a sine, and its length is put back to 1 every sample (one
+ * Newton step), so it never drifts. Where f changes within a block (FM,
+ * vibrato) the phasor and the sine stay. */
+
+/* The frequency of `TAU * phasor(f)` (either order), if f is steady over
+ * a block; else NULL. */
+static Node* turning_freq(Ctx* c, Scope* sc, Node* a) {
+  static int off = -1;
+  if (off < 0) { const char* e = getenv("AITHER_TURN"); off = e && eq(e, "0"); }
+  if (off || !c->hoist_on || c->in_hoist || !a || a->kind != nkBinOp || !eq(a->str, "*")) return NULL;
+  Node *x = a->kids[0], *y = a->kids[1], *ph = NULL;
+  if (x->kind == nkIdent && eq(x->str, "TAU") && y->kind == nkCall) ph = y;
+  else if (y->kind == nkIdent && eq(y->str, "TAU") && x->kind == nkCall) ph = x;
+  if (!ph || !eq(ph->str, "phasor") || ph->nkids != 1 || user_def(c, "phasor") ||
+      lookup_fn(sc, "phasor")[0] || user_def(c, "TAU"))
+    return NULL;
+  return is_invariant(c, sc, ph->kids[0]) ? ph->kids[0] : NULL;
+}
+
+/* A turning point at `freq`: this sample's cos and sin sides. */
+static void emit_turner(Ctx* c, Scope* sc, Node* freq, Buf* pre, const char** re, const char** im) {
+  const char* f = emit_invariant(c, sc, freq);
+  const char* cs = hoist(c, F(c, "cos(2.0 * 3.14159265358979323846 * (%s) / s->sr)", f));
+  const char* sn = hoist(c, F(c, "sin(2.0 * 3.14159265358979323846 * (%s) / s->sr)", f));
+  const char* off = register_region(c, "turner", 3, NULL);
+  const char* o = fresh(c, "tn");
+  const char* r = fresh(c, "tn_cos");
+  const char* i = fresh(c, "tn_sin");
+  const char* g = fresh(c, "tn_g");
+  badd(c, pre, "  long %s = %s;\n  if (s->pool[%s + 2] == 0.0) { s->pool[%s] = 1.0; s->pool[%s + 1] = 0.0; s->pool[%s + 2] = 1.0; }\n",
+       o, off, o, o, o, o);
+  badd(c, pre, "  double %s = s->pool[%s] * %s - s->pool[%s + 1] * %s;\n  double %s = s->pool[%s] * %s + s->pool[%s + 1] * %s;\n",
+       r, o, cs, o, sn, i, o, sn, o, cs);
+  badd(c, pre, "  double %s = 1.5 - 0.5 * (%s * %s + %s * %s);\n  %s *= %s; %s *= %s;\n  s->pool[%s] = %s; s->pool[%s + 1] = %s;\n",
+       g, r, r, i, i, r, g, i, g, o, r, o, i);
+  *re = r; *im = i;
+}
+
+/* The turning point a `let` of `TAU * phasor(f)` made, if `name` means it. */
+static Ent* find_turner(Ctx* c, Scope* sc, const char* name) {
+  for (Scope* s = sc; s; s = s->parent) {
+    if (lfind(s->names, name)) return hfind(&c->turners, F(c, "%p/%s", (void*)s, name));
+    if (lfind(s->stereo, name) || lfind(s->numlits, name) || lfind(s->fns, name) ||
+        lfind(s->lambdas, name) || lfind(s->arrays, name) || lfind(s->larrays, name) ||
+        lfind(s->sarrays, name))
+      return NULL;
+  }
+  return NULL;
+}
+
 static void emit_let(Ctx* c, Scope* sc, const char* name, Node* rhs, Buf* pre, const char* cname) {
   int numeric = rhs->kind == nkArr && rhs->nkids > 0 && all_nums(rhs);
   if ((rhs->kind == nkArr && rhs->nkids != 2 && rhs->nkids > 0 && !numeric) || is_array_make(rhs)) {
@@ -1259,6 +1314,13 @@ static void emit_let(Ctx* c, Scope* sc, const char* name, Node* rhs, Buf* pre, c
   const char* t = cname ? cname : fresh(c, F(c, "l_%s", name));
   badd(c, pre, "  double %s = (%s);\n", t, v.l);
   lput(c, &sc->names, name)->a = t;
+  Node* tf = turning_freq(c, sc, rhs);
+  if (tf) {
+    const char *re, *im;
+    emit_turner(c, sc, tf, pre, &re, &im);
+    Ent* te = hput(c, &c->turners, F(c, "%p/%s", (void*)sc, name));
+    te->a = re; te->b = im;
+  }
   double cv;
   if (const_value(c, sc, rhs, &cv)) lput(c, &sc->numlits, name)->v = cv;
   else note_invariant(c, sc, name, rhs, sc);
@@ -1929,6 +1991,19 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
   }
   const char* resolved = lookup_fn(sc, n->str);
   const char* name = resolved[0] ? resolved : n->str;
+  /* sin and cos of a steady TAU * phasor(f): a turning point's sides. */
+  if ((eq(name, "sin") || eq(name, "cos")) && n->nkids == 1 && !user_def(c, name) && c->hoist_on && !c->in_hoist) {
+    Node* a = n->kids[0];
+    const char *re = NULL, *im = NULL;
+    if (a->kind == nkIdent) {
+      Ent* t = find_turner(c, sc, a->str);
+      if (t) { re = t->a; im = t->b; }
+    } else {
+      Node* f = turning_freq(c, sc, a);
+      if (f) emit_turner(c, sc, f, pre, &re, &im);
+    }
+    if (re) return mono(eq(name, "cos") ? re : im);
+  }
   if (eq(name, "sum")) {
     if (n->nkids != 2) fail(c, "sum takes 2 args: sum(N, fn) %s", err_loc(c, n));
     Node* narg = n->kids[0];

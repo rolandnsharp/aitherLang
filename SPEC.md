@@ -1473,9 +1473,12 @@ its next block, so a `send` or `park` answers in milliseconds even
 when an overloaded voice keeps the mix running flat out. `tv`
 and `scope` count pixels and points by the samples they receive, and
 rely on it (`tests/engine_live.nim`). Values that can't change within a block are
-computed once per block instead of every sample: a number, a knob
-(`midi_cc(k)`), a let or def parameter bound to one, and arithmetic
-and pure math over those. That covers `lp1`/`hp1`'s `exp`, the SVF's
+computed once per block instead of every sample: a number, `sr`,
+`dt`, `TAU`, a knob (`midi_cc(k)`) and what MIDI holds for a note or
+a voice (`midi_freq`, `midi_voice_freq(n)`, its gate, velocity and
+key: the input thread's writes are read once a block), an entry of a
+constant table at a compile-time index, a let or def parameter bound
+to one, and arithmetic and pure math over those. That covers `lp1`/`hp1`'s `exp`, the SVF's
 `tan`, `reverb`'s `pow`s and `phasor`'s division when their
 coefficients are invariant, and any `exp`/`log`/`pow`/`sin`/`sqrt`
 ... over invariant inputs, such as a knob-driven spectral morph's
@@ -1484,6 +1487,16 @@ per-partial `exp`. Same arithmetic once, so the same bits
 knob is read at the start of each block, so a knob moved mid-block
 lands at the next one (11 ms at 512 frames). `AITHER_HOIST=0` turns
 it off.
+
+A sine of a steady clock, `sin(TAU * phasor(f))` or `cos` (inline, or
+through a let, as `spin` and `osc(sin, f)` write it) with `f` steady
+over a block, is a point turning by a fixed angle each sample, and the
+compiler writes it so (a `turner` region): a pair turned by
+`[cos, sin]` of `TAU · f / sr`, computed once a block, with its length
+put back to 1 each sample. Four multiplies instead of a sine, and the
+same wave to rounding (within 1e-9). Where `f` moves within a block
+(vibrato, FM) the phasor and the sine stay. `AITHER_TURN=0` turns it
+off (PHASORS.md, "Steady sines turn").
 The live mix thread runs on the audio core (the highest-numbered core
 online, `AITHER_RT_CPU` to choose) at `SCHED_FIFO` priority
 `AITHER_RT_PRIO` (70), with memory locked when `RLIMIT_MEMLOCK` is

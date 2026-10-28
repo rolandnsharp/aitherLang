@@ -197,7 +197,30 @@ doesn't oscillate, it creeps back, and a turning point can't represent
 it. `dho` keeps `damp` just under 1; an envelope that glides is
 `swell` or `slew`'s job.
 
-## 6. Listening
+## 6. Steady sines turn
+
+The same picture makes plain sines cheaper. `sin(TAU * phasor(f))` with
+`f` steady is a point turning by `TAU·f/sr` each sample, so instead of
+a sine a sample the compiler keeps the point and turns it: four
+multiplies by a step computed once a block, then one Newton step,
+`z *= 1.5 − 0.5·|z|²`, to put its length back to 1, so rounding never
+lets it grow or shrink over hours. This is the recursive (rotation)
+sine oscillator of the DSP literature [10]; aither applies it where it
+is safe, when the frequency can't change within a block, and keeps the
+phasor and the sine wherever it can (vibrato, FM). The compiler
+chooses; the patch reads the same.
+
+Measured on the uConsole's CPU, live (`tick_block`, the `cc -O2` build
+that plays; 2026-10-28):
+
+| patch         | before | turning |
+|---------------|-------:|--------:|
+| `acid_lead`   | 64% of a core | 43% |
+| `complex_pad` | 16%    | 6%      |
+
+and it matches the sine it replaces to within 1e-9.
+
+## 7. Listening
 
 Patches that start from `input()` are plain aither on these ideas, not
 features (notes/listening-2026-10-28.md):
@@ -240,3 +263,6 @@ features (notes/listening-2026-10-28.md):
    and the modified energy it conserves).
 9. H. Dudley, "Remaking speech", Journal of the Acoustical Society of
    America, 11, 1939. https://doi.org/10.1121/1.1916020
+10. P. Symons, "Recursive sine wave oscillators", book chapter,
+    Cambridge University Press, 2013.
+    https://doi.org/10.1017/cbo9781139108072.004

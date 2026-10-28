@@ -22,3 +22,11 @@ tone
 # --- combined with a pair, still once
 # expect at 4800: 0.0022916666667, 0.0022916666667
 phasor(110.0) + [0, 0]
+
+# --- a steady sine turns, and matches the sine of its phasor
+# expect at 47999: 1
+let turned = sin(TAU * phasor(440))
+let plain = sin(TAU * phasor(440) + 0)      # + 0: not the turning form
+$worst = 0
+$worst = max($worst, abs(turned - plain))
+if $worst < 1e-9 then 1 else 0

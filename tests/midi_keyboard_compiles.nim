@@ -23,7 +23,7 @@ kbd
   let regions = gen.regions
   var phasorCount = 0
   for r in regions:
-    if r.typeName == "phasor": inc phasorCount
+    if r.typeName in ["phasor", "turner"]: inc phasorCount   # a steady sine is a turning point
   doAssert phasorCount == 8,
     "midi_keyboard fanout to 8 phasor regions, got " & $phasorCount
   doAssert parts == @["kbd"]
@@ -38,7 +38,7 @@ kbd
   let regions = compile(p, "", 48000.0).regions
   var phasorCount = 0
   for r in regions:
-    if r.typeName == "phasor": inc phasorCount
+    if r.typeName in ["phasor", "turner"]: inc phasorCount   # a steady sine is a turning point
   doAssert phasorCount == 4,
     "poly(4, ...) should produce 4 phasor regions, got " & $phasorCount
 
