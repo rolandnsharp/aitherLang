@@ -2494,6 +2494,9 @@ static const char* emit_program(Ctx* c, Node* program) {
     for (int i = 0; i < c->play_names.n; i++) badd(c, &body, i ? " + p_%s_r" : "p_%s_r", c->play_names.v[i]);
     bcat(c, &body, ";\n");
   }
+  /* Nothing to play (a library, the stdlib): silence, not whatever the
+   * caller's outputs held. */
+  if (final_idx < 0 && c->play_names.n == 0) bcat(c, &body, "  *outL = 0.0; *outR = 0.0;\n");
   bcat(c, &body, "}\n\n");
   bcat(c, &body, "const char* const prof_names[] = {");
   for (int i = 0; i < prof_names.n; i++) badd(c, &body, i ? ", \"%s\"" : "\"%s\"", escape_prof(c, prof_names.v[i]));
