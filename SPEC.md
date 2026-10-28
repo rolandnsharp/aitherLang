@@ -732,6 +732,17 @@ sum(16, n =>
   sin(TAU * phasor(pf)) / n)
 ```
 
+A call's `(` and an index's `[` must be on the same line as
+the name or value they apply to. A `[` or `(` that starts a
+line begins a new expression, so a lambda body can end on a
+pair of its own:
+
+```
+sum(8, n =>
+  let a = band(mic, 250 * n, 0.12)
+  [a, a * a])                     # a pair, not a[...] of the line above
+```
+
 Outside brackets, a newline ends a statement unless the
 statement can't end there or the next line can't begin one:
 

@@ -291,3 +291,11 @@ a + b
 # error: two names
 let [a, b, c] = [1, 2]
 a
+
+# --- a pair starting a line in a lambda body is a pair, not an index into the line above
+# expect: 9
+let s = sum(2, n =>
+  let a = n
+  [a, a * 2])
+let [x, y] = s
+x + y

@@ -545,6 +545,14 @@ static Node* try_paren_lambda(P* p) {
   return parse_lambda_body(p, line, &params);
 }
 
+/* Whether the next token is on the line of the one before it. A call's
+ * `(` and an index's `[` must be: inside brackets newlines are dropped,
+ * and a lambda body's next line starting with `[a, b]` is a pair, not an
+ * index into the line above. */
+static int same_line(P* p) {
+  return p->idx > 0 && peek(p).line == p->ts.t[p->idx - 1].line;
+}
+
 /* `-` on a number is a negative number, so `[0, -0.5, 1]` is a table. */
 static Node* negate(P* p, Node* kid, int line) {
   if (kid->kind == nkNum) { Node* n = node(p, nkNum, line); n->num = -kid->num; return n; }
@@ -572,7 +580,7 @@ static Node* parse_primary(P* p) {
     return NULL;
   case tkIdent:
     advance(p);
-    if (peek(p).kind == tkLParen) {
+    if (peek(p).kind == tkLParen && same_line(p)) {
       Vec args = {0};
       parse_arg_list(p, &args);
       Node* n = node(p, nkCall, t.line);
@@ -607,7 +615,7 @@ static Node* parse_primary(P* p) {
 
 static Node* parse_postfix(P* p) {
   Node* n = parse_primary(p);
-  while (peek(p).kind == tkLBracket) {
+  while (peek(p).kind == tkLBracket && same_line(p)) {
     int line = peek(p).line;
     advance(p);
     Node* idx = parse_expr(p);
