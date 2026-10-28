@@ -12,8 +12,8 @@
 #   frequency in them is one turn, turn(planets, spin(hz)), with no
 #   Hilbert filters. In the middle of the piece they drift up to 6 Hz
 #   from themselves and back: a slow, even shimmer.
-# - Bells: small modal bells, turning dhos, struck every seven seconds
-#   in a pattern; while one rings, amplitude(bells) brightens the halo.
+# - Bells: small modal bells, turning dhos, each on its own clock (7, 11
+#   and 13 s); while one rings, amplitude(bells) brightens the halo.
 #
 # The arrangement runs on sweep (where the piece is), the waves on the
 # clock (COMPOSING.md, "The composition clock").
@@ -58,16 +58,14 @@ def bell(strike, f):
     let w = TAU * f * r
     dho(push * w * 0.15 / r, f * r, 0.0008 * r))
 
-let step = int(phasor(1 / 28) * 4)                     # four strikes, seven seconds apart
-let hit = impulse(1 / 7)
-let highOn = [1, 0, 1, 0]
-let midOn  = [0, 1, 0, 0]
-let lowOn  = [0, 0, 0, 1]
-
+# Each bell is its own clock, as each planet is: struck every 7, 11 and
+# 13 seconds, so they meet only rarely and the peal never quite repeats
+# (all three together once in 1001 s). Rhythm as oscillation, not a
+# sequence (COMPOSING.md, "Rhythm is oscillation").
 play bells:
-  let high = bell(hit * highOn[step], 1174.66)   # D6
-  let mid  = bell(hit * midOn[step], 880.0)      # A5
-  let low  = bell(hit * lowOn[step], 587.33)     # D5
+  let high = bell(impulse(1 / 7), 1174.66)    # D6
+  let mid  = bell(impulse(1 / 11), 880.0)     # A5
+  let low  = bell(impulse(1 / 13), 587.33)    # D5
   (high * 0.5 + mid * 0.7 + low) * 0.25 * bellsIn
 
 # ----------------------------------------------------------------- the halo
