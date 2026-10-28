@@ -47,7 +47,6 @@ proc nImpulse*(s: var DspState; freq: float64): float64 {.importc: "n_impulse".}
 proc nDischarge*(s: var DspState; input, rate: float64): float64 {.importc: "n_discharge".}
 proc nHilbertA*(s: var DspState; signal: float64): float64 {.importc: "n_hilbert_a".}
 proc nHilbertB*(s: var DspState; signal: float64): float64 {.importc: "n_hilbert_b".}
-proc nFreqShift*(s: var DspState; signal, hz: float64): float64 {.importc: "n_freq_shift".}
 proc nInputL*(): float64 {.importc: "n_input_l".}
 proc nInputR*(): float64 {.importc: "n_input_r".}
 {.pop.}

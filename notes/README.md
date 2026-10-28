@@ -6,6 +6,9 @@ and [GUIDE](../GUIDE.md). Several of these record ideas that were
 tried and dropped; each doc says so near the top where that's the case.
 
 **Directions to chase**
+- [ear-2026-10-28.md](ear-2026-10-28.md) — aither as an ear: a
+  cochlea of resonators (first), measuring on `card` (lock-in, sweeps,
+  the metal detector), and radio receive. Saved to come back to.
 - [SOUND_FRONTIERS.md](SOUND_FRONTIERS.md) — unexplored regions of
   additive synthesis.
 - [GAME_AUDIO_ROADMAP.md](GAME_AUDIO_ROADMAP.md) — aither as a

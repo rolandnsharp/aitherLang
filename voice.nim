@@ -159,7 +159,6 @@ proc registerNatives(s: TccState) =
   discard s.addSymbol("n_reverb_c",  cast[pointer](nReverbC))
   discard s.addSymbol("n_hilbert_a", cast[pointer](nHilbertA))
   discard s.addSymbol("n_hilbert_b", cast[pointer](nHilbertB))
-  discard s.addSymbol("n_freq_shift", cast[pointer](nFreqShift))
   discard s.addSymbol("n_input_l",   cast[pointer](nInputL))
   discard s.addSymbol("n_input_r",   cast[pointer](nInputR))
   discard s.addSymbol("shape_saw",   cast[pointer](shapeSaw))

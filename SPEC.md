@@ -1039,6 +1039,16 @@ def spin(freq):                           # the unit pair turning at freq Hz
 pair by it to turn the pair (`cmul`), square it to double its rate;
 `cmul(spin(220), spin(50))` is a single tone at 270 Hz.
 
+```
+def freq_shift(signal, hz): cmul(analytic(signal), spin(hz))[0]
+```
+
+`freq_shift` moves every frequency in a signal up by `hz` Hz (down if
+negative), with no mirror image, unlike a ring modulator: the analytic
+signal turned by `spin`. Hz are added, not multiplied, so harmonics
+stop being harmonic. Clean above about 30 Hz, where the Hilbert pair
+holds its quarter turn. A pair in shifts each side.
+
 ### Damped oscillator
 
 ```

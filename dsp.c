@@ -314,21 +314,6 @@ static inline double hilbert(DspState* s, long base, double sig, const double* c
 double n_hilbert_a(DspState* s, double sig) { return hilbert(s, claim(s, 16), sig, hilbert_a); }
 double n_hilbert_b(DspState* s, double sig) { return hilbert(s, claim(s, 16), sig, hilbert_b); }
 
-/* Single-sideband frequency shift: the analytic signal turned at hz Hz,
- * its real part. hz > 0 shifts up, < 0 down, with no mirror image (unlike
- * a ring modulator); clean above about 30 Hz. The b branch gives -H[m],
- * so the sign of its term is +. */
-double n_freq_shift(DspState* s, double sig, double hz) {
-  long ab = claim(s, 32);
-  double re = hilbert(s, ab, sig, hilbert_a);
-  double im = hilbert(s, ab + 16, sig, hilbert_b);
-  long ph = claim(s, 1);
-  s->pool[ph] = fmod(s->pool[ph] + hz / s->sr, 1.0);
-  if (s->pool[ph] < 0.0) s->pool[ph] += 1.0;
-  double phase = s->pool[ph] * TAU_;
-  return re * cos(phase) + im * sin(phase);
-}
-
 /* ------------------------------------------------------------------- input */
 
 double dsp_input_l, dsp_input_r;

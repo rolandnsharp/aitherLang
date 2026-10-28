@@ -526,7 +526,7 @@ static const char* const BUILTIN_FNS[] = {
   "midi_cc", "midi_note", "midi_freq", "midi_gate",
   "midi_trig", "midi_voice_freq", "midi_voice_gate",
   "midi_voice_vel", "midi_voice_key", "midi_vel",
-  "magnitude", "phase", "freq_shift", NULL};
+  "magnitude", "phase", NULL};
 
 /* Pair-returning builtins, and the reductions of a pair to a number. */
 static const char* const PAIR_CALLS[] = {"cmul", "cdiv", "rotate", "analytic", "conj", "input", NULL};
@@ -1656,11 +1656,6 @@ static const char* s_phasor(Ctx* c, Scope* sc, Node* n, const char** x, Buf* pre
   (void)ud;
   return emit_phasor(c, sc, n->kids[0], x[0], pre);
 }
-static const char* s_freq_shift(Ctx* c, Scope* sc, Node* n, const char** x, Buf* pre, void* ud) {
-  (void)sc; (void)n; (void)ud;
-  const char* off = register_region(c, "freq_shift", 33, NULL);
-  return native_call(c, pre, off, F(c, "n_freq_shift((DspState*)s, %s, %s)", x[0], x[1]));
-}
 static const char* s_midi_trig(Ctx* c, Scope* sc, Node* n, const char** x, Buf* pre, void* ud) {
   (void)sc; (void)n; (void)ud;
   const char* off = register_region(c, "midi_trig", 1, NULL);
@@ -2077,11 +2072,6 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
   }
   if (eq(name, "clamp") && n->nkids == 3) { V* a = emit_args(c, sc, n, pre, &any); return map_pure(c, name, a, 3, any, b_clamp, pre); }
   if (eq(name, "int") && n->nkids == 1) { V* a = emit_args(c, sc, n, pre, &any); return map_pure(c, name, a, 1, any, b_int, pre); }
-  if (eq(name, "freq_shift")) {
-    if (n->nkids != 2) fail(c, "freq_shift(signal, hz) takes exactly 2 args %s", err_loc(c, n));
-    V* a = emit_args(c, sc, n, pre, &any);
-    return per_side(c, sc, n, a, any, s_freq_shift, pre, NULL);
-  }
   if (eq(name, "midi_trig") && n->nkids == 1) {
     V* a = emit_args(c, sc, n, pre, &any);
     return per_side(c, sc, n, a, any, s_midi_trig, pre, NULL);
@@ -2448,7 +2438,6 @@ static const char* emit_program(Ctx* c, Node* program) {
     "extern double n_wave(DspState*,double,double*,int);\n"
     "extern double n_hilbert_a(DspState*,double);\n"
     "extern double n_hilbert_b(DspState*,double);\n"
-    "extern double n_freq_shift(DspState*,double,double);\n"
     "extern double shape_saw(double);\n"
     "extern double shape_tri(double);\n"
     "extern double shape_sqr(double);\n"

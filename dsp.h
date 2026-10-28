@@ -51,7 +51,6 @@ void n_reverb_coef(double rt60, double sr, double* o);
 double n_reverb_c(DspState* s, double sig, double wet, const double* g);
 double n_hilbert_a(DspState* s, double sig);
 double n_hilbert_b(DspState* s, double sig);
-double n_freq_shift(DspState* s, double sig, double hz);
 double shape_saw(double x);
 double shape_tri(double x);
 double shape_sqr(double x);
