@@ -5,7 +5,6 @@ tools/card
 tools/pad
 tools/scope
 tools/tv
-nimcache/
 *.so
 .DS_Store
 .claude/
@@ -15,7 +14,8 @@ nimcache/
 *.wav
 # test binaries (source files tracked, compiled outputs aren't)
 tests/*
-!tests/*.nim
+!tests/*.c
+!tests/*.h
 !tests/*.aither
 !tests/corpus.golden
 !tests/lang/

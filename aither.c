@@ -17,10 +17,7 @@
 #include "analysis.h"
 #include "cli_output.h"
 
-static const char stdlib_src[] = {
-#embed "stdlib.aither"
-  , 0
-};
+extern const char aither_stdlib[];     /* stdlib.c */
 
 static const char* socket_path(void) {
   const char* s = getenv("AITHER_SOCK");
@@ -184,7 +181,7 @@ static void audit(const char* path, double seconds, double skip) {
   char err[4096] = "";
   double *in_l = NULL, *in_r = NULL;
   long n_in = 0;
-  int calls = render_calls_input(stdlib_src, src, path, err, sizeof err);
+  int calls = render_calls_input(aither_stdlib, src, path, err, sizeof err);
   if (calls < 0) {
     first_line(err);
     fprintf(stderr, "audit: %s\n", err);
@@ -194,7 +191,7 @@ static void audit(const char* path, double seconds, double skip) {
   if (n_in > 0 && seconds <= 0.0) seconds = (double)n_in / (double)rate - skip;
   if (seconds <= 0.0) seconds = 1.0;
   Rendered r;
-  if (render_source(stdlib_src, src, path, seconds, rate, in_l, in_r, n_in, skip, &r, err, sizeof err) != 0) {
+  if (render_source(aither_stdlib, src, path, seconds, rate, in_l, in_r, n_in, skip, &r, err, sizeof err) != 0) {
     first_line(err);
     fprintf(stderr, "audit: %s\n", err);
     exit(1);
@@ -303,7 +300,7 @@ static void usage(void) {
 /* ---------------------------------------------------------------------- main */
 
 int main(int argc, char** argv) {
-  engine_init(stdlib_src);
+  engine_init(aither_stdlib);
   int n = argc - 1;
   char** a = argv + 1;
   double x;

@@ -97,11 +97,10 @@ of the pipe (a player, a scope, an SDR, a file) gives them their
 meaning. Linux-only for now (MIDI via ALSA seq).
 
 Needs GCC 15 or later (the stdlib is `#embed`ded), libtcc and the ALSA
-headers; `make` builds `aither` with `cc` alone. The test suite still
-needs Nim, until its tests are C or aither too. On Alpine/postmarketOS:
+headers; `make` builds `aither` with `cc` alone. On Alpine/postmarketOS:
 
 ```
-apk add nim build-base tcc-dev tcc-libs-static alsa-lib-dev
+apk add build-base tcc-dev tcc-libs-static alsa-lib-dev
 ```
 
 `tcc-libs-static` provides TCC's runtime library (`libtcc1.a`), which
@@ -138,7 +137,7 @@ knob(1) * 0.01 + knob(1, 3) * 0.001 + knob(1, m = 5) * 0.0001 + knob(1, 7, m = 1
 `# expect: v` is sample 0 (`v, w` for the two sides), `# expect at N:`
 sample N, `# expect until N:` every sample before N, and `# error: text`
 a compile error saying that. Two forms that must agree are one case,
-`A - B`, expected 0. The rest of the suite is Nim, testing the engine:
+`A - B`, expected 0. The rest of the suite is C (`tests/run`), testing the engine:
 hot reload, MIDI, the socket, the guards.
 
 ## Use
@@ -428,10 +427,10 @@ midi.c             ~290 lines   MIDI as signals: held notes, the natives, the in
 alsa_midi.c        ~170 lines   ALSA seq client (small wrapper)
 realtime.c          ~85 lines   the mix thread on the audio core, at real-time priority
 stdlib.aither      ~460 lines   composition layer (pure aither defs), embedded in the binary
-*.nim              ~960 lines   the C as the Nim tests see it, until they are C too
+tests/*.c                       the suite (tests/run), the corpus, exact
 ```
 
-About 8,200 lines of C, and Nim bindings for the tests. A patch is parsed to an AST, transpiled
+About 8,200 lines of C. A patch is parsed to an AST, transpiled
 to C, handed to TCC which compiles it to machine code in memory, and
 the resulting `tick(state, t)` function pointer is called once per
 sample from the audio callback. Hot reload compiles the new code off
@@ -445,5 +444,4 @@ glitch. Heavy additive patches run up to ~5x cheaper once it lands
 (the engine logs `optimized (cc -O2)`). A reload while it builds
 just drops the stale result. Needs a C compiler on the PATH; set
 `AITHER_OPT=0` to turn it off.
-Dependencies: Nim's stdlib, libtcc, ALSA, and the system audio
-library.
+Dependencies: libtcc, ALSA, and the system audio library.

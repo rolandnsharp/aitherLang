@@ -553,7 +553,7 @@ def tube(src, a1, a2, a3, a4):
 ```
 
 The 24-section vocal tract this replaces was 219 generated lines.
-See `tests/state_arrays.nim` for the full one.
+See `tests/state_arrays.c` for the full one.
 
 ### Stepped state arrays (every)
 
@@ -920,8 +920,8 @@ unless you have a reason to push higher.
 
 ### Native DSP functions
 
-These are C (in `dsp.c`) called from a patch's generated C; `dsp.nim`
-lists them for the compiler. A function is native only when it needs
+These are C (in `dsp.c`) called from a patch's generated C; `dsp.c`'s
+`dsp_natives` lists them for the compiler. A function is native only when it needs
 a buffer or a C loop; whatever a few lines of aither can say (the
 oscillators, `slew`, `tremolo`, `resonator`) is a stdlib def.
 Each call-site gets its own state slots from a per-voice
@@ -1459,7 +1459,7 @@ inside its compiled code (`tick_block`: the clock, `input()`, the
 parts, the voice fade and part-gain ramps, park and the part meters
 all advance per sample in C); the engine's own work is per block,
 and the output is bit-identical to ticking one sample at a time
-(`tests/block_tick.nim`). Each voice starts on TCC's code and swaps to
+(`tests/block_tick.c`). Each voice starts on TCC's code and swaps to
 a `cc -O2` build of the same C when that's ready, keeping its state
 (the live engine builds at `nice 19`, so the audio wins any core both
 want; offline renders build at normal priority);
@@ -1472,7 +1472,7 @@ command waiting for the lock goes first: the mix yields to it before
 its next block, so a `send` or `park` answers in milliseconds even
 when an overloaded voice keeps the mix running flat out. `tv`
 and `scope` count pixels and points by the samples they receive, and
-rely on it (`tests/engine_live.nim`). Values that can't change within a block are
+rely on it (`tests/engine_live.c`). Values that can't change within a block are
 computed once per block instead of every sample: a number, `sr`,
 `dt`, `TAU`, a knob (`midi_cc(k)`) and what MIDI holds for a note or
 a voice (`midi_freq`, `midi_voice_freq(n)`, its gate, velocity and
@@ -1483,7 +1483,7 @@ to one, and arithmetic and pure math over those. That covers `lp1`/`hp1`'s `exp`
 coefficients are invariant, and any `exp`/`log`/`pow`/`sin`/`sqrt`
 ... over invariant inputs, such as a knob-driven spectral morph's
 per-partial `exp`. Same arithmetic once, so the same bits
-(`tests/hoist.nim`); a modulated value keeps the per-sample path. A
+(`tests/hoist.c`); a modulated value keeps the per-sample path. A
 knob is read at the start of each block, so a knob moved mid-block
 lands at the next one (11 ms at 512 frames). `AITHER_HOIST=0` turns
 it off.
@@ -1556,8 +1556,8 @@ prev. Pure aither code, baked into the binary as a const string.
 ### Totals
 
 About 8,200 lines of C (the language, the engine and the CLI) and
-460 of aither (the stdlib). One binary, built by `cc`; the test suite's
-Nim bindings go when its tests are C or aither too.
+460 of aither (the stdlib). One binary, built by `cc`; the tests are
+C and aither too.
 Runtime dependencies: libtcc, ALSA, the system audio library.
 
 ---

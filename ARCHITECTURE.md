@@ -17,7 +17,7 @@ midi.c             ~290 lines   MIDI as signals: held notes, the natives, the in
 alsa_midi.c        ~170 lines   ALSA seq client (small wrapper)
 realtime.c          ~85 lines   the mix thread on the audio core, at real-time priority
 stdlib.aither      ~460 lines   composition layer (pure aither defs), embedded in the binary
-*.nim              ~960 lines   the C as the Nim tests see it, until they are C too
+tests/*.c                       the suite (tests/run), the corpus, exact
 tools/play.c                    a speaker on the end of the pipe (ALSA, not part of aither)
 tools/scope.c, tools/display.h  a vector display on the pipe (SDL3, OpenGL ES 3); display.h is
                                 what scope and tv share (stdin, pass-through, the heard-sample
@@ -26,9 +26,8 @@ tools/tv.c                      a raster display on the pipe: w×h samples a fra
 tools/pad.c                     the uConsole gamepad as MIDI knobs
 ```
 
-All of it is C, about 8,200 lines, built by `cc` alone (`make`); the
-Nim files are bindings the test suite still uses until its tests are
-C or aither too (notes/c-port-2026-10-28.md). One binary. No runtime
+All of it is C, about 8,200 lines, built by `cc` alone (`make`), and
+so are the tests (notes/c-port-2026-10-28.md). One binary. No runtime
 dependencies beyond libtcc, ALSA, and the system audio library.
 
 ## Layers
@@ -92,31 +91,31 @@ storage of everything after them.
 
 ### Patch state region map
 
-```nim
-type
-  Region = object
-    typeName:    string   # "phasor", "lpf", "discharge", …
-    perTypeIdx:  int      # nth phasor / nth lpf / … in source order
-    offset:      int      # byte offset into the float64 pool
-    size:        int      # slots claimed
+```c
+typedef struct {            /* codegen.h */
+  const char* type_name;    /* "phasor", "lpf", "discharge", … */
+  int per_type_idx;         /* nth phasor / nth lpf / … in source order */
+  const char* scope;        /* the statement it sits in: `let bass`, `play drums/out` */
+  int scope_idx;            /* its index among same-type calls there */
+  const char* owner;        /* the defs it is inlined through, and `/$name` for state */
+  long offset, size;        /* in slots of the pool */
+} Region;
 ```
 
 Codegen counts every stateful helper call site and records its
 region. Both old and new compiles produce a region list; migration
-matches them by `(typeName, perTypeIdx, size)`.
+matches them by `(scope, type, owner, scope_idx)`, then by
+`(type, owner, per_type_idx)`.
 
 ### Voice
 
-```nim
-type
-  Voice = ref object
-    sr:           float64
-    startT:       float64                # composition clock zero
-    pool:         seq[float64]           # state pool (sized by codegen)
-    regions:      seq[Region]            # for migration
-    tickFn:       TickFn                 # dlopen'd from TCC
-    libHandle:    pointer                # for dlclose on swap
-```
+`Voice` (voice.h) holds the current `Version` (its TCC state, `tick`
+and `tick_block`, its state buffer: the generated struct, then its
+pool, and its layout: var names, part names, regions), the version
+before the last commit for rollback, the code of old versions the
+audio thread may still be running, the voice's sweep origin, its
+generation (so a stale -O2 build is refused), and its parts' gains,
+fades, meters and park flags.
 
 ### Slot (engine-side per-voice state)
 
