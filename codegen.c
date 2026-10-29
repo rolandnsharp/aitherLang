@@ -31,6 +31,7 @@ struct Ent {
   long n;             /* arrays, larrays, sarrays: length; counters */
   long wo;            /* sarrays: where stores go */
   int pairs;          /* sarrays, larrays: each element a pair, two slots */
+  int edged;          /* larrays made by array(): 0 past the ends, not cycling */
   double v;           /* numlits */
   Node* node;         /* lambdas, invs; userDefs; arrays: the table's literal */
   Scope* sc;          /* invs */
@@ -1027,7 +1028,7 @@ static int bind_by_name(Ctx* c, Scope* sc, Scope* inner, const char* p, Node* a,
     }
     if ((e = lookup_larray(c, sc, a->str))) {
       Ent* d = lput(c, &inner->larrays, p);
-      d->a = e->a; d->n = e->n; d->pairs = e->pairs;
+      d->a = e->a; d->n = e->n; d->pairs = e->pairs; d->edged = e->edged;
       return 1;
     }
     if ((e = lookup_array(c, sc, a->str))) {
@@ -1304,7 +1305,7 @@ static void declare_local_array(Ctx* c, Scope* sc, const char* name, Node* rhs, 
       badd(c, pre, "  double %s[%d];\n  { double _v = (%s); for (long _k = 0; _k < %d; ++_k) %s[_k] = _v; }\n",
            sym, n, iv.l, n, sym);
     Ent* e = top_level ? hput(c, &c->top_larrays, name) : lput(c, &sc->larrays, name);
-    e->a = sym; e->n = n; e->pairs = iv.pair;
+    e->a = sym; e->n = n; e->pairs = iv.pair; e->edged = 1;
   }
 }
 
@@ -1337,6 +1338,20 @@ static const char* emit_idx_assign(Ctx* c, Scope* sc, Node* st) {
       return sdup(c, bstr(&pre));
     }
     Ent* la = lookup_larray(c, sc, base->str);
+    if (la && la->edged) {              /* made by array(): a store past either end is dropped */
+      Buf pre = {0};
+      const char* ix = emit1(c, sc, st->kids[1], &pre, "an index");
+      if (la->pairs) {
+        V v = emit(c, sc, st->kids[2], &pre);
+        badd(c, &pre, "  { long _i = (long)(%s); double _l = (%s), _r = (%s); if (_i >= 0 && _i < %ld) { %s[2 * _i] = _l; %s[2 * _i + 1] = _r; } }\n",
+             ix, v.l, v.r, la->n, la->a, la->a);
+        return sdup(c, bstr(&pre));
+      }
+      const char* v = emit1(c, sc, st->kids[2], &pre, F(c, "%s[i]", base->str));
+      badd(c, &pre, "  { long _i = (long)(%s); double _v = (%s); if (_i >= 0 && _i < %ld) %s[_i] = _v; }\n",
+           ix, v, la->n, la->a);
+      return sdup(c, bstr(&pre));
+    }
     if (la) {
       Buf pre = {0};
       const char* ix = emit1(c, sc, st->kids[1], &pre, "an index");
@@ -2289,6 +2304,21 @@ static V emit(Ctx* c, Scope* sc, Node* n, Buf* pre) {
       }
       Ent* la = lookup_larray(c, sc, a->str);
       Ent* found = la ? la : lookup_array(c, sc, a->str);
+      if (found && found->edged && found->n > 0 && const_value(c, sc, i, &kv)) {
+        long k = (long)kv;           /* made by array(): past either end, 0 */
+        if (k < 0 || k >= found->n) return found->pairs ? vpair("0.0", "0.0") : mono("0.0");
+        if (found->pairs) return vpair(F(c, "%s[%ld]", found->a, 2 * k), F(c, "%s[%ld]", found->a, 2 * k + 1));
+        return mono(F(c, "%s[%ld]", found->a, k));
+      }
+      if (found && found->edged) {
+        const char* ix = emit1(c, sc, i, pre, "an index");
+        const char* t = fresh(c, "ix");
+        badd(c, pre, "  long %s = (long)(%s);\n", t, ix);
+        if (found->pairs)
+          return vpair(F(c, "((%s >= 0 && %s < %ld) ? %s[2 * %s] : 0.0)", t, t, found->n, found->a, t),
+                       F(c, "((%s >= 0 && %s < %ld) ? %s[2 * %s + 1] : 0.0)", t, t, found->n, found->a, t));
+        return mono(F(c, "((%s >= 0 && %s < %ld) ? %s[%s] : 0.0)", t, t, found->n, found->a, t));
+      }
       if (found && found->n > 0 && const_value(c, sc, i, &kv)) {
         long k = (long)kv % found->n;
         if (k < 0) k += found->n;

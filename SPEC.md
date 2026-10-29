@@ -515,9 +515,18 @@ k[3] = (p[0] - p[1]) / (p[0] + p[1])
 len(k)                            # 23, a constant
 ```
 
-Indexes are truncated to `int` and cycle like a constant table's
-(`a[-1]` is the last element). A constant table (all literals) is
-hoisted and read-only; storing into one is a compile error.
+Indexes are truncated to `int`. The edge is how the array was made:
+
+- **A list** (`[p1, p2, p3]`) is a sequence, and cycles like a constant
+  table's (`p[-1]` is the last element), so a melody or a set of roots
+  indexed by a counter goes round.
+- **`array(N)`** is a field or a buffer: past either end it reads 0
+  (`[0, 0]` for pairs) and a store there is dropped, as a state array's
+  does. Beyond the end of a tube there is nothing, whether the tube
+  keeps its values or not.
+
+A constant table (all literals) is hoisted and read-only; storing into
+one is a compile error.
 
 ### State arrays (a field that persists)
 
@@ -546,8 +555,8 @@ an array's elements are no exception: `array(N, [1, 0])` makes `N`
 pairs, as `$z = [0, 0]` makes pair state. `$z[i]` is then a pair,
 `$z[i] = p` stores one (a number fills both sides). It holds for state
 arrays, local arrays and stepped arrays alike, and a pair array passed
-to a def is a pair array there. Indexing is as for numbers: a state
-array reads `[0, 0]` past either end, a local array cycles. A
+to a def is a pair array there. Indexing is as for numbers: `array(N, [1, 0])`,
+state or local, reads `[0, 0]` past either end. A
 field of phasors (a ring of coupled oscillators, a complex wave on tv,
 each pixel's z) is then one array:
 
