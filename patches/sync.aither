@@ -1,0 +1,77 @@
+# sync: thirty-two oscillators that pull each other into one.
+#
+# Every oscillator is a spin, a point turning at its own pitch, spread
+# about a percent around A3. Each one feels the crowd: the average of all
+# the spins, and is pulled toward where it points. That is Kuramoto's
+# model, the one fireflies, pacemaker cells and applauding audiences
+# follow (Strogatz, Physica D 2000,
+# https://doi.org/10.1016/s0167-2789(00)00094-4; an audience clapping
+# in step: Néda et al., Nature 2000, https://doi.org/10.1038/35002660).
+# In aither it is one line: the crowd is the mean of the spins,
+#   Z = r e^(iψ) = (1/N) Σ z_j
+# and each spin turns at its own speed plus K times how far the crowd
+# is round from it, K r sin(ψ - θ_j), which is the cross product of Z
+# with z_j.
+#
+# Below a critical pull the spins drift through each other: a cloud of
+# beating voices, and on the scope a small scribble, as their average
+# nearly cancels. Above it they fall into step all at once: the cloud
+# collapses to one pitch, the scribble opens into one bright figure,
+# and it gets loud, as thirty-two voices that add instead of cancelling.
+# With the pitches spread evenly, as here, the change is sudden, a
+# first-order transition (Pazó, PRE 2005,
+# https://doi.org/10.1103/physreve.72.046211), at K = 4 Δ / π for a
+# spread of ±Δ.
+#
+# The pair you hear is the pair you see: the crowd's mean, Z, with
+# each voice's harmonics made by turning its spin by itself: turn(z, z)
+# goes twice as fast, and its conj turns the other way, so the second
+# harmonic runs backwards and the figure in step has three lobes.
+#
+#   make tools/pad tools/scope
+#   tools/pad &                                         # the gamepad: start it first
+#   ./aither patches/sync.aither | tools/scope | tools/play hw:rockchipes8388c 20
+#
+# It starts in step, with the pull just short of enough, and comes
+# apart. The buttons, no d-pad (tools/pad sends each as a note):
+#   A   hold: pull harder, until they fall into step
+#   B   hold: pull less, until they drift apart
+#   X   scatter them: every spin to a random place round the circle
+#   Y   hold: a conductor, a semitone above, that they all feel; strong
+#       enough, it drags the whole crowd up to its pitch, and let go
+#       they sink back to their own
+
+let N = 32
+let f0 = 220
+let spread = 0.012                                  # ±1.2% around f0
+let Kc = 4 * TAU * f0 * spread / PI                 # the critical pull, rad/s
+
+# The pull, held between none and three times the critical.
+$K = Kc * 0.85
+$K = clamp($K + dt * Kc * 0.5 * (midi_note(36) - midi_note(37)), 0, Kc * 3)
+
+# The conductor: how hard it pulls, rising while Y is held.
+$F = 0.0
+$F = $F + dt * (if midi_note(39) > 0 then (TAU * 40 - $F) * 1.5 else -$F * 1.5)
+let lead = spin(f0 * pow(2, 1 / 12))
+
+$z = array(32, [1, 0])                              # every spin, starting together
+let Z = sum(32, m => $z[m - 1]) / N
+let [Zx, Zy] = Z
+let [Lx, Ly] = lead
+let scatter = midi_trig(38) > 0
+
+each(32, j =>
+  let w = TAU * f0 * (1 + spread * (2 * (j + 0.5 + 0.45 * sin(j * 7.3)) / N - 1))   # even, but not quite: an even comb cancels too well
+  let [x, y] = $z[j]
+  let pull = $K * (Zy * x - Zx * y) + $F * (Ly * x - Lx * y)   # K r sin(ψ - θ), the conductor's likewise
+  let a = (w + pull) * dt
+  let next = turn($z[j], [cos(a), sin(a)])
+  let r = TAU * noise()
+  $z[j] = if scatter then [cos(r), sin(r)] else next / amplitude(next))
+
+let voices = sum(32, m =>
+  let z = $z[m - 1]
+  let z2 = turn(z, z)
+  z + conj(z2) * 0.4 + turn(z2, z2) * 0.12) / N
+voices * 0.6 |> tanh
