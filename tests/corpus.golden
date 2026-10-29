@@ -73,6 +73,7 @@ patches/acid_state.aither  DAEB072F3D4D3229  -17.2  -6.1
 patches/adaptive_scale.aither  17A91A749289553D  -7.0  2.4
 patches/additive_swarm.aither  546A454583CDFCAD  -35.8  -22.2
 patches/aeolian.aither  83158EF2A7777C5F  -3.5  -0.0
+patches/around.aither  34D3AAE92F76192C  -20.8  -3.5
 patches/attractor.aither  354A9228D639CE29  -30.2  -17.6
 patches/aura.aither  1985316C626BF781  -22.0  -7.4
 patches/backing.aither  2EFC4E7E253F31C9  -24.8  -3.4
