@@ -1,0 +1,45 @@
+# phasor_ring: twelve oscillators in a ring, each pulled toward its two
+# neighbours, which is the one thing a sum of waves can't say.
+#
+# Every oscillator is a unit phasor near 220 Hz, each a little detuned, so
+# apart they beat in a slow swarm. Each sample it turns by its own step and
+# is pulled toward the phasors beside it (Kuramoto's coupling, written as a
+# turn and an add), then put back on the unit circle. Turn the coupling up
+# and neighbours lock: the swarm's beating slows and stops, the ring falls
+# into one pitch, and the phase that is left winds round the ring as a
+# travelling wave. Each oscillator has a place in the stereo field, so the
+# wave is heard moving.
+#
+# Why this needs a field: oscillator i reads oscillator i - 1 and i + 1 as
+# they were last sample. sum(N, ...) gives each copy its own state, which
+# no other copy can read, and polyphase (three_phase.aither) needs none of
+# this: its phases are turns of one phasor. Here each phasor lives in two
+# state arrays of numbers, its first and second side, because an array
+# holds numbers. That split is what a field of phasors would remove.
+#
+#   ./aither patches/phasor_ring.aither | tools/play hw:rockchipes8388c 20     (make tools/pad && tools/pad &)
+#
+# Gamepad: A up/down, coupling (0: a free swarm); A left/right, detuning.
+
+let n = 12
+let couple = midi_cc(20) * midi_cc(20) * 0.0006   # how hard a neighbour pulls, per sample: locks near 0.3 of the knob
+let spread = 0.004 + midi_cc(21) * 0.02        # each oscillator's detuning, as a fraction of 220 Hz
+
+# Each oscillator's own turn a sample: 220 Hz, detuned by a fixed amount per place.
+def step(i, spread): rotate([1, 0], TAU * 220 * (1 + spread * sin(i * 2.399)) / sr)
+
+$a = array(n, 1)                               # first sides: every phasor starts at [1, 0]
+$b = array(n)                                  # second sides
+each(n, i =>
+  let me = [$a[i], $b[i]]
+  let left = [$a[(i + n - 1) mod n], $b[(i + n - 1) mod n]]
+  let right = [$a[(i + 1) mod n], $b[(i + 1) mod n]]
+  let moved = turn(me, step(i, spread)) + (left + right - me * 2) * couple
+  let z = moved / amplitude(moved)             # back on the unit circle: a phase oscillator
+  $a[i] = z[0]
+  $b[i] = z[1])
+
+play ring:
+  sum(n, k => pan($a[k - 1] * 0.09, (k - 1) / (n - 1) * 1.6 - 0.8))
+
+ring |> reverb(1.8, 0.15)

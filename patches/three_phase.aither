@@ -1,0 +1,59 @@
+# three_phase: a chord turned by a rotating field, as a motor's three coils
+# are, and the hum an unbalanced supply makes.
+#
+# Polyphase is phasor algebra (Steinmetz's whole point): a three-phase set
+# is one turning pair and its turns by a third. Nothing is stored or
+# indexed; every phase is a function of one phasor.
+#
+#   field     = spin(rate)                      the rotating field
+#   coil k    = rotate([1, 0], TAU * k / 3)     three coils a third of a turn apart
+#   drive k   = the field seen by coil k        turn(field, conj(coil k)), its first side
+#
+# Each coil sounds one note of the chord while the field faces it, so the
+# chord turns, A to C# to E and round, and its stereo place follows the
+# field. The three drives always sum to zero and their squares to a
+# constant: the chord's power never wavers, as a balanced supply's doesn't.
+#
+# Unbalance the coils (one stronger, one weaker) and Fortescue's
+# symmetrical components appear. The positive sequence turns with the
+# field, the negative sequence against it: the turn of the chord starts to
+# rock, and the negative sequence's strength sounds as a low hum, as an
+# unbalanced transformer's does. Both are sums of turns:
+#
+#   positive  = sum of coil k's phasor turned back by its own k thirds, / 3
+#   negative  = sum turned forward instead, / 3
+#
+#   ./aither patches/three_phase.aither | tools/play hw:rockchipes8388c 20     (make tools/pad && tools/pad &)
+#
+# Gamepad (every knob 0 is the default): A up/down, how fast the field
+# turns (0.1 to 2 turns a second); A left/right, imbalance.
+
+let rate  = 0.1 + midi_cc(20) * 1.9
+let imb   = midi_cc(21) * 0.8
+let field = spin(rate)
+
+def coil(k): rotate([1, 0], TAU * k / 3)
+def gain(k, imb): if k == 1 then 1 + imb else if k == 2 then 1 - imb else 1
+
+# Coil k's phasor: the field as coil k sees it, scaled by the coil's
+# strength. Its first side is the coil's drive.
+def seen(field, k, imb): turn(field, conj(coil(k))) * gain(k, imb)
+
+let notes = [220, 277.18, 329.63]              # A, C#, E
+play chord:
+  sum(3, n =>
+    let d = seen(field, n - 1, imb)[0]
+    let loud = max(0, d) * max(0, d)           # the half-turn this coil faces the field
+    additive(notes[n - 1], warm_shape, 8) * loud * 0.12)
+
+# Fortescue: the three phasors turned back (positive) or forward
+# (negative) by their own thirds, averaged. Balanced, positive is the
+# field and negative is nothing.
+let positive = sum(3, n => rotate(seen(field, n - 1, imb), TAU * (n - 1) / 3)) / 3
+let negative = sum(3, n => rotate(seen(field, n - 1, imb), -TAU * (n - 1) / 3)) / 3
+
+play hum:
+  additive(55, warm_shape, 6) * amplitude(negative) * 0.6
+
+let where = phase(positive) / PI               # the field's direction, as a stereo place
+(pan(mono(chord), clamp(where, -1, 1) * 0.8) + hum) |> reverb(2.2, 0.2)

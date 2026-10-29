@@ -1010,6 +1010,56 @@ locks into the next one: a change of chord heard as mode-locking.
   one or two voices; don't put one inside a `sum(N, …)` over many
   partials.
 
+## Polyphase: phases are turns of one phasor
+
+aither has pairs, not triples, and that is enough for polyphase: it was
+Steinmetz's point that the phasor algebra *is* the polyphase calculus. A
+balanced three-phase set has two degrees of freedom (the phases sum to
+zero), which is one turning pair (the Clarke transform), and phase k is
+that pair turned back by k thirds of a turn. Nothing is stored or
+indexed; every phase is a function of one phasor.
+
+```
+let field = spin(rate)                                   # the rotating field
+def coil(k): rotate([1, 0], TAU * k / 3)                 # three coils a third of a turn apart
+def seen(field, k): turn(field, conj(coil(k)))           # the field as coil k sees it: phase k
+sum(3, n => seen(field, n - 1)[0])                       # the three drives: always 0
+```
+
+An unbalanced set (one coil stronger, one weaker) is Fortescue's
+symmetrical components: a positive sequence turning with the field, a
+negative sequence turning against it, and a zero sequence that doesn't
+turn. Each is a sum of turns: the phases turned back by their own
+thirds, forward by them, or not at all, and averaged.
+
+```
+let positive = sum(3, n => rotate(v(n - 1), TAU * (n - 1) / 3)) / 3
+let negative = sum(3, n => rotate(v(n - 1), -TAU * (n - 1) / 3)) / 3
+let zero     = sum(3, n => v(n - 1)) / 3
+```
+
+For N phases, `TAU * k / N`: the symmetrical components are the discrete
+Fourier transform over the phase index, written as a sum of rotations.
+`patches/three_phase.aither` turns a chord with a rotating field (each
+coil sounds one note while the field faces it) and sounds the negative
+sequence as an unbalanced transformer's hum. Balanced, the negative
+sequence is exactly 0 and the positive has length 1; unbalanced by half,
+the negative rises to 0.29.
+
+### When phases need a field
+
+Phases that each run their own physics are copies: `sum(N, n => …)`,
+every copy with its own state. What a sum can't say is one copy reading
+another: oscillator i pulled toward oscillators i - 1 and i + 1 as they
+were last sample. That is a field, and it needs state arrays, one entry
+per place, stepped together with `each`. `patches/phasor_ring.aither` is
+twelve detuned oscillators in a ring, each pulled toward its neighbours:
+apart they beat in a swarm, coupled they lock into one pitch with a
+travelling wave of phase round the ring. An array holds numbers, so each
+phasor lives split across two arrays, its first side and its second.
+That split is the one thing a field of phasors asks of the language; it
+is the case to reopen "pairs in arrays" with when a second patch needs it.
+
 ## State that holds an array
 
 `$state` holds one number by default. When a voice needs to remember

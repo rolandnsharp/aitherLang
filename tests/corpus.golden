@@ -128,6 +128,7 @@ patches/native.aither  403D24522D295415  -24.8  -0.5
 patches/orbits.aither  6FEBC8641C716927  -18.2  -2.0
 patches/orrery.aither  F858B7A149BB607A  -22.2  -7.8
 patches/pad_didge.aither  E38264475749EFAD  -20.6  -12.9
+patches/phasor_ring.aither  6C740EB00727F652  -13.4  -4.3
 patches/phi_bush.aither  4EFB3BC905D154E9  -25.9  -5.2
 patches/primes.aither  366C73E3F5E68905  -15.9  -2.1
 patches/qigong_drift.aither  3DDAD1BE60561F82  -28.4  -18.3
@@ -147,6 +148,7 @@ patches/sympathy.aither  05EFE72E51EE8BE1  -36.3  -23.6
 patches/tesla.aither  74822890147D5B91  -40.5  -14.9
 patches/tesla2.aither  03FBB7FE055858DD  -35.2  -20.4
 patches/tesla_jam.aither  2C2CDDBD86821873  -26.1  -10.4
+patches/three_phase.aither  F32BC4C5DB4486EC  -20.5  -9.1
 patches/tide.aither  1709F1E12D7309EA  -16.4  -6.6
 patches/tuned_chords.aither  63793FDFF3E920BD  -20.4  -8.1
 patches/tuned_keys.aither  13014E187A2EB921  -22.5  -8.5
