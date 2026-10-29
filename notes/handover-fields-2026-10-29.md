@@ -113,6 +113,9 @@ low-pass.
 
 ## Where to start
 
+(Item 1 done the same evening: [spatial-2026-10-29.md](spatial-2026-10-29.md),
+`patches/around.aither`. No construct needed in 2-D; the brief is there.)
+
 1. Work M through for spatial audio on paper: a source at a direction
    projected into a few spherical-harmonic modes, the field rotated, the
    modes decoded to two ears. Write it in today's aither by hand

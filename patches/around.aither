@@ -1,0 +1,141 @@
+# around: three sounds round a listener, held as a field of modes and
+# heard through a head. For headphones.
+#
+# The sound field in the plane of the ears is its circular modes (2-D
+# ambisonics): mode m is one pair, how much of the field winds m times
+# round the listener and which way it points. A sound s from azimuth θ
+# is s · e^{imθ} in every mode, so the direction is the phase of mode 1
+# and the higher modes sharpen it. Turning the head turns mode m by m
+# times the angle: the whole scene rotates with one turn per mode. Space
+# enters only where the field is heard: from eight fixed directions
+# round the head, each through a round head's delay and shadow to each
+# ear (Brown and Duda, 1998).
+#
+# The sounds are in a room: each reaches the listener straight and off
+# the four walls, the floor and the ceiling, 21 arrivals in all, and the
+# field holds them for what it costs to hold three. Without the room the
+# sound stays inside the head. Heard on headphones it goes round outside
+# it, left and right; front and back stay ambiguous, as they do with any
+# head that isn't the listener's own and doesn't move with them
+# (notes/spatial-2026-10-29.md).
+#
+# Azimuth counts anticlockwise from straight ahead: 90° is the left ear.
+#
+#   ./aither patches/around.aither | tools/play hw:rockchipes8388c 20
+#
+# Gamepad: hold A and press the d-pad right to turn the head right, left to turn back (CC 21, 17° a press).
+
+let order = 3                         # modes 0..order; order 1 is first-order ambisonics
+let n = order + 1
+let K = 8                             # directions it is heard from, at least 2·order + 1
+let head = 0.0875                     # head radius, metres
+let c = 343                           # speed of sound, m/s
+let pinna = 1                         # how much treble the pinna shadows from straight behind
+let ear_at = 1.75                     # the ears' axes, ±100°: a little behind, as on a real head
+
+# The room: W × D × H metres, the listener at (lx, ly) with ears at
+# ear_h, facing +x (azimuth 0). Each wall gives back `wall` of what it is
+# sent.
+let W = 6
+let D = 4.5
+let H = 2.8
+let ear_h = 1.2
+let lx = 2.4
+let ly = 2.0
+let wall = 0.7
+
+# e^{imθ}: a source at θ, in mode m.
+def toward(m, theta): rotate([1, 0], m * theta)
+
+# The same from the unit pair pointing at θ, by turning it by itself m
+# times, for orders up to 3 (m is known when the patch compiles, so this
+# is m - 1 turns and no trigonometry).
+def wound(u, m): if m == 0 then [1, 0] else if m == 1 then u else if m == 2 then turn(u, u) else turn(turn(u, u), u)
+
+# The field heard from direction phi: each mode turned back by m·phi and
+# its real side taken, weighted so the beam has no side lobes (max-rE).
+def heard(a, phi):
+  let n = len(a)
+  sum(n, k =>
+    let m = k - 1
+    let [re, _] = turn(a[m], toward(-m, phi))
+    re * (if m == 0 then 1 else 2 * cos(m * PI / (2 * n)))) / K
+
+# A round head, one ear: theta is the angle between the sound and the
+# ear's axis (0 facing it, PI behind the head). The far side is later
+# (Woodworth's path round the sphere) and darker (a shelf at c / head:
+# up 6 dB facing the ear, down past 1.2 kHz in the shadow).
+def ear(p, lo, theta):
+  let th = abs(theta)
+  let alpha = 1.05 + 0.95 * cos(th * 1.2)
+  let path = if th < PI / 2 then 1 - cos(th) else 1 + th - PI / 2
+  delay(alpha * p + (1 - alpha) * lo, head / c * path, 0.002)
+
+# Wrapped to -PI..PI.
+def wrap_angle(x): x - TAU * floor((x + PI) / TAU)
+
+# The field heard by two ears: from K directions round the head, each
+# through the head to the left ear (its axis at ear_at) and the right.
+# A sound from behind reaches the ear canal round the back of the pinna,
+# which faces forward, and loses its treble: `pinna` of what is above
+# 3 kHz is taken away, all of it straight behind, none from the side.
+# The K directions reach an ear at different delays, so above about
+# 1.5 kHz they add with random phases and the field comes out duller
+# than the sound itself; the last shelf puts the treble back (measured
+# for order 3 and K = 8: within 2 dB of the true direction to 8 kHz).
+def ears(a, K):
+  let both = sum(K, j =>
+    let phi = TAU * (j - 1) / K
+    let heard_p = heard(a, phi)
+    let p = heard_p - max(0, -cos(phi)) * pinna * (heard_p - lp1(heard_p, 3000))   # behind, the pinna's shadow
+    let lo = lp1(p, c / head / PI)    # the shelf's corner, 2c / head in rad/s
+    [ear(p, lo, wrap_angle(phi - ear_at)), ear(p, lo, wrap_angle(phi + ear_at))])
+  let dull = lp1(both, 1500)
+  dull + 1.6 * (both - dull)
+
+# One path from a source at (x, y) to the listener, by its image in the
+# room: straight (w = 0), off one of the four walls (1-4), off the floor
+# (5) or the ceiling (6). The floor and ceiling paths come from the
+# source's own bearing, longer and from above or below, which a field in
+# the plane of the ears hears only as their delay.
+def image_x(x, w): if w == 1 then -x else if w == 2 then 2 * W - x else x
+def image_y(y, w): if w == 3 then -y else if w == 4 then 2 * D - y else y
+def image_up(w): if w == 5 then 2 * ear_h else if w == 6 then 2 * (H - ear_h) else 0
+
+# The sources, and where they are in the room.
+let shaker = noise() * pluck(impulse(5), 0.08) * 0.5
+let bell = resonator(impulse(0.7) * 3, 660, 2.5) + resonator(impulse(0.7) * 1.5, 1803, 4)
+let drone = lp1(osc(saw, 98) + osc(saw, 98.4), 600) * 0.12
+
+let round = TAU * t / 7               # the shaker goes round 1.6 m away, once every 7 s
+let sx = [lx + 1.6 * cos(round), lx + 2 * cos(2.4), lx + 2.5 * cos(-0.6)]   # shaker, bell behind left, drone ahead right
+let sy = [ly + 1.6 * sin(round), ly + 2 * sin(2.4), ly + 2.5 * sin(-0.6)]
+let ss = [shaker, bell, drone]
+
+# Every arrival at the listener: three sources by seven paths, each
+# delayed by its length, weaker with distance, and from its bearing.
+let paths = 7
+let arrivals = 3 * paths
+let heard_s = array(arrivals)
+let bearing = array(arrivals, [0, 0])    # each arrival's direction, as a unit pair
+each(arrivals, k =>
+  let i = int(k / paths)
+  let w = k mod paths
+  let x = image_x(sx[i], w) - lx
+  let y = image_y(sy[i], w) - ly
+  let r = sqrt(x * x + y * y + image_up(w) ^ 2)
+  heard_s[k] = delay(ss[i], r / c, 0.1) * (if w == 0 then 1 else wall) / max(r, 0.5) * 2
+  bearing[k] = [x, y] / max(sqrt(x * x + y * y), 0.01))
+
+let yaw = -TAU * midi_cc(21)          # the head turned anticlockwise by yaw: d-pad right turns it right
+
+let a = array(n, [0, 0])
+each(n, m =>
+  a[m] = sum(arrivals, k => heard_s[k - 1] * wound(bearing[k - 1], m))
+  a[m] = rotate(a[m], -m * yaw))      # the head turns one way, the field the other
+
+# The late room: what is left after the walls, a reverb fed from the
+# field's left and right halves, so the two ears' tails differ.
+let late = reverb([heard(a, PI / 2), heard(a, -PI / 2)], 1.1, 1) * 0.5
+
+(ears(a, K) + late) * 0.7
