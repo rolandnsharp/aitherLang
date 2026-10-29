@@ -12,7 +12,6 @@
 #   breathy and they never quite shut: softer, with air through them.
 # - Raise your tongue toward the palate (ee) and your tract's own
 #   resonances choke the sound beside your F2, as in a real didge.
-# - Growl and your voice goes into the lips, the two beating.
 #
 # Where didge_wow hears one thing of your vowel (oo or ah), this hears
 # where your mouth's two resonances are: F1, how open the jaw is (about
@@ -42,6 +41,7 @@
 #   A up/down     mic sensitivity, up to 30 dB more
 #   A left/right  key: D, up a semitone a step to A
 #   B up/down     your own voice sung into the lips as well, as growling does
+#                 (the mic into the lips: up high, the speaker can feed back)
 #   B left/right  clapsticks on your pops
 #   X up/down     room
 #   X left/right  colour: the bright digital didge toward the physical one
@@ -311,13 +311,7 @@ let key   = pow(2, floor(midi_cc(21) * 7.99) / 12)      # D, then up to A
 let vTap  = slew(discharge(pop * popV, 16), 0.004)      # the tongue strikes on your pops
 let press = breath * (0.85 + vTap * 0.4 + toot * 0.35)  # nothing in, nothing out; a trumpet is blown hard
 let vWah  = open
-# Growl: your voice into the lips, as a player sings into the bore while
-# playing and the two beat. You growl, the didge growls: a rough voice's
-# loudness flutters 20 to 80 Hz, and that flutter over the loudness
-# says how rough (a plain vowel reads 0.25 to 0.4, a growl 0.7 and up).
-let flutter = band(hp1(loud, 15), 40, 0.7)
-let rough = clamp((lp1(flutter / (loud + 0.000001), 4) - 0.5) * 2, 0, 1)   # smoothed first: a plain vowel spikes
-let voiceIn = mic * (midi_cc(22) + rough * 0.3) * 60   # a full growl is the knob a third up
+let voiceIn = mic * midi_cc(22) * 60                    # your voice into the lips, as a player sings into the bore
 let blend = (0.5 - midi_cc(25) * 0.45) * (1 - toot * 0.6)   # the digital didge ducks under toots, as in didge_sticks
 
 play didge:
