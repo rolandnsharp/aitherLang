@@ -9,6 +9,9 @@
    midi_cc(20) etc.
        A: cc20 up/down  cc21 left/right      B: cc22 cc23
        X: cc24 cc25                          Y: cc26 cc27
+   Each button is also a note, sent as it goes down and up: A 36, B 37,
+   X 38, Y 39 (midi_trig(36) strikes on A). A patch that plays every note
+   it hears, as midi_keyboard does, hears these too.
    The d-pad is the keyboard's arrow keys, so while a button is held the
    keyboard is grabbed (arrows don't reach the terminal); release and it
    is yours again. Buttons come from the gamepad device.
@@ -29,7 +32,7 @@
 static const char *names[4] = {"A", "B", "X", "Y"};
 
 static int bank_of(int code) {            /* the gamepad's button codes */
-    switch (code) { case 288: return 0; case 290: return 1; case 289: return 2; case 291: return 3; }
+    switch (code) { case 289: return 0; case 290: return 1; case 288: return 2; case 291: return 3; }   /* A B X Y, read off the uConsole 2026-10-29 */
     return -1;
 }
 
@@ -61,6 +64,9 @@ int main(int argc, char **argv) {
            300 ms, as a keyboard's repeat does (at 45 ms every tap swept too) */
         int r = poll(pf, 2, (held >= 0 && arrow) ? (ticks == 0 ? 300 : 45) : -1);
         if (r < 0) break;
+        /* the gamepad or keyboard gone (unplugged, the session ended): poll
+           would report it at once, every time, and the loop would spin */
+        if ((pf[0].revents | pf[1].revents) & (POLLERR | POLLHUP | POLLNVAL)) break;
         struct input_event ev;
         if (r == 0 && held >= 0 && arrow) {         /* d-pad held: sweep */
             ticks++;
@@ -81,8 +87,19 @@ int main(int argc, char **argv) {
             continue;
         }
         if (pf[0].revents & POLLIN) {
-            if (read(fp, &ev, sizeof ev) == sizeof ev && ev.type == EV_KEY) {
+            if (read(fp, &ev, sizeof ev) != sizeof ev) break;   /* the gamepad is gone */
+            if (ev.type == EV_KEY) {
                 int b = bank_of(ev.code);
+                if (b >= 0 && (ev.value == 0 || ev.value == 1)) {
+                    snd_seq_event_t e;                    /* the button as a note */
+                    snd_seq_ev_clear(&e);
+                    snd_seq_ev_set_source(&e, port);
+                    snd_seq_ev_set_subs(&e);
+                    snd_seq_ev_set_direct(&e);
+                    if (ev.value == 1) snd_seq_ev_set_noteon(&e, 0, 36 + b, 100);
+                    else snd_seq_ev_set_noteoff(&e, 0, 36 + b, 0);
+                    snd_seq_event_output_direct(seq, &e);
+                }
                 if (b >= 0) {
                     if (ev.value == 1) { held = b; arrow = 0; ioctl(fk, EVIOCGRAB, 1); }
                     else if (ev.value == 0 && held == b) { held = -1; arrow = 0; ioctl(fk, EVIOCGRAB, 0); }
