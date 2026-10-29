@@ -30,7 +30,6 @@ let n = order + 1
 let K = 8                             # directions it is heard from, at least 2·order + 1
 let head = 0.0875                     # head radius, metres
 let c = 343                           # speed of sound, m/s
-let pinna = 1                         # how much treble the pinna shadows from straight behind
 let ear_at = 1.75                     # the ears' axes, ±100°: a little behind, as on a real head
 
 # The room: W × D × H metres, the listener at (lx, ly) with ears at
@@ -76,9 +75,6 @@ def wrap_angle(x): x - TAU * floor((x + PI) / TAU)
 
 # The field heard by two ears: from K directions round the head, each
 # through the head to the left ear (its axis at ear_at) and the right.
-# A sound from behind reaches the ear canal round the back of the pinna,
-# which faces forward, and loses its treble: `pinna` of what is above
-# 3 kHz is taken away, all of it straight behind, none from the side.
 # The K directions reach an ear at different delays, so above about
 # 1.5 kHz they add with random phases and the field comes out duller
 # than the sound itself; the last shelf puts the treble back (measured
@@ -86,8 +82,7 @@ def wrap_angle(x): x - TAU * floor((x + PI) / TAU)
 def ears(a):
   let both = sum(K, j =>
     let phi = TAU * (j - 1) / K
-    let heard_p = heard(a, phi)
-    let p = heard_p - max(0, -cos(phi)) * pinna * (heard_p - lp1(heard_p, 3000))   # behind, the pinna's shadow
+    let p = heard(a, phi)
     let lo = lp1(p, c / head / PI)    # the shelf's corner, 2c / head in rad/s
     [ear(p, lo, wrap_angle(phi - ear_at)), ear(p, lo, wrap_angle(phi + ear_at))])
   let dull = lp1(both, 1500)
