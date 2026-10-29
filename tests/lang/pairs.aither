@@ -221,3 +221,15 @@ unturn([1, 0], [0, 2])
 # --- unturn by nothing is nothing, as x / 0 is 0
 # expect: 0, 0
 unturn([1, 2], [0, 0])
+
+# --- a parameter in arithmetic inside turn is a pair
+# expect: 0, 0.2
+def f(a): turn(a * 0.2, [0, 1])
+f([1, 0])
+
+# --- a turning let read only through cos and sin
+# expect at 11999: 0, 1
+def g(freq):
+  let a = TAU * phasor(freq)
+  [cos(a), sin(a)]
+g(1)

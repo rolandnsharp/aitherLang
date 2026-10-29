@@ -72,6 +72,7 @@ struct Ctx {
   int in_hoist;
   Map assigned, play_set, stereo_lets;
   Map turners;              /* "<scope>/<let>" -> a = cos side, b = sin side */
+  Node* blk; int blk_i;     /* the block being emitted, and the statement */
   Map top_arrays;           /* a = sym, n = length */
   Buf array_decls;
   int tmp_counter;
@@ -668,7 +669,9 @@ static void pp_mark(Ctx* c, int* res, Node* def, Node* n) {
     for (int j = 0; j < n->nkids; j++) {
       Node* arg = n->kids[j];
       if (eq(n->str, def->str) && j < def->nparams && pp_is_pair(res, def, arg)) res[j] = 1;
-      if (arg->kind != nkIdent) continue;
+      int wants = ((in(n->str, PAIR_CALLS) || in(n->str, PAIR_READERS)) && takes_pair_at(n->str, j, n->nkids)) ||
+                  (j < ncallee && callee[j]);
+      if (arg->kind != nkIdent) { if (wants) pp_mark_arith(res, def, arg); continue; }
       int k = param_index(def, arg->str);
       if (k < 0) continue;
       if (((in(n->str, PAIR_CALLS) || in(n->str, PAIR_READERS)) && takes_pair_at(n->str, j, n->nkids)) ||
@@ -1355,6 +1358,20 @@ static const char* static_table(Ctx* c, const char* sym, Node* arr, const char**
   return sym;
 }
 
+/* Is `name` read only as cos(name) or sin(name) in n? A rebinding of it
+ * counts as a read, to be safe. */
+static int trig_only(Ctx* c, Node* n, Node* parent, const char* name) {
+  if (!n) return 1;
+  if (n->kind == nkIdent && eq(n->str, name))
+    return parent && parent->kind == nkCall && parent->nkids == 1 &&
+           (eq(parent->str, "sin") || eq(parent->str, "cos")) && !user_def(c, parent->str);
+  if ((n->kind == nkLet || n->kind == nkVar) && n->str && eq(n->str, name)) return 0;
+  if (n->kind == nkLambda)
+    for (int i = 0; i < n->nparams; i++) if (eq(n->params[i], name)) return 0;
+  for (int i = 0; i < n->nkids; i++) if (!trig_only(c, n->kids[i], n, name)) return 0;
+  return 1;
+}
+
 /* `let name = rhs` in a scope (a def, lambda or play body): a table, an
  * array of this sample's numbers, a pair, or a number. */
 /* ---------------------------------------------------------------- turning
@@ -1533,6 +1550,23 @@ static void emit_let(Ctx* c, Scope* sc, const char* name, Node* rhs, Buf* pre, c
     s2->a = items[0]; s2->b = items[1];
     return;
   }
+  /* A steady turning (`let a = TAU * phasor(f)`) read only through
+   * cos(a) and sin(a), the rest of its block: the turner is all that is
+   * heard, so the phasor isn't kept. */
+  if (!cname && c->blk) {
+    Node* tf = turning_freq(c, sc, rhs);
+    int only = tf != NULL;
+    for (int i = c->blk_i + 1; only && i < c->blk->nkids; i++)
+      only = trig_only(c, c->blk->kids[i], c->blk, name);
+    if (only) {
+      const char *re, *im;
+      emit_turner(c, sc, tf, pre, &re, &im);
+      lput(c, &sc->names, name)->a = "0.0";
+      Ent* te = hput(c, &c->turners, F(c, "%p/%s", (void*)sc, name));
+      te->a = re; te->b = im;
+      return;
+    }
+  }
   V v = emit(c, sc, rhs, pre);
   if (v.pair) {
     const char* tl = cname ? F(c, "%s_l", cname) : fresh(c, F(c, "l_%s_l", name));
@@ -1609,7 +1643,12 @@ static void emit_local_stmt(Ctx* c, Scope* sc, Node* st, Buf* pre) {
 
 /* A body: its statements, then the value of its last expression. */
 static V emit_block(Ctx* c, Scope* sc, Node* blk, Buf* pre) {
-  for (int i = 0; i < blk->nkids - 1; i++) emit_local_stmt(c, sc, blk->kids[i], pre);
+  Node* was = c->blk; int was_i = c->blk_i;
+  for (int i = 0; i < blk->nkids - 1; i++) {
+    c->blk = blk; c->blk_i = i;
+    emit_local_stmt(c, sc, blk->kids[i], pre);
+  }
+  c->blk = was; c->blk_i = was_i;
   if (blk->nkids == 0) return mono("0.0");
   return emit(c, sc, blk->kids[blk->nkids - 1], pre);
 }

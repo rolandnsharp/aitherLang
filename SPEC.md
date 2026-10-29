@@ -487,8 +487,9 @@ play bass:
 
 The index expression is truncated to `int` and wrapped to
 the table size (`p[n] === p[(int)n % len]`), so out-of-range
-reads cycle rather than crash. v1 doesn't allow passing
-arrays into `def` parameters or returning them from a `def`.
+reads cycle rather than crash. An array can be passed to a `def`
+(which reads it, and can store into a state array), but not returned
+from one, and not passed to a lambda.
 
 ### Local arrays (this sample's numbers)
 
@@ -535,9 +536,10 @@ Stores happen at once, in order, like `$x = ...` does, except inside
 **Elements are what the initial value is.** Every value is a pair, and
 an array's elements are no exception: `array(N, [1, 0])` makes `N`
 pairs, as `$z = [0, 0]` makes pair state. `$z[i]` is then a pair,
-`$z[i] = p` stores one (a number fills both sides), and past either end
-reads `[0, 0]`. It holds for state arrays, local arrays and stepped
-arrays alike, and a pair array passed to a def is a pair array there. A
+`$z[i] = p` stores one (a number fills both sides). It holds for state
+arrays, local arrays and stepped arrays alike, and a pair array passed
+to a def is a pair array there. Indexing is as for numbers: a state
+array reads `[0, 0]` past either end, a local array cycles. A
 field of phasors (a ring of coupled oscillators, a complex wave on tv,
 each pixel's z) is then one array:
 
