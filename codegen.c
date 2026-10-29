@@ -1578,6 +1578,13 @@ static void emit_let(Ctx* c, Scope* sc, const char* name, Node* rhs, Buf* pre, c
       return;
     }
   }
+  /* A number known now is that number: nothing is computed each sample. */
+  double known;
+  if (!cname && const_value(c, sc, rhs, &known)) {
+    lput(c, &sc->names, name)->a = num_lit(c, known);
+    lput(c, &sc->numlits, name)->v = known;
+    return;
+  }
   V v = emit(c, sc, rhs, pre);
   if (v.pair) {
     const char* tl = cname ? F(c, "%s_l", cname) : fresh(c, F(c, "l_%s_l", name));
@@ -2378,8 +2385,12 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
       if (terms[k - 1].pair) pair = 1;
     }
     Buf l = {0}, r = {0};
-    for (long k = 0; k < N; k++) {
-      if (k) { bcat(c, &l, " + "); bcat(c, &r, " + "); }
+    long kept = 0;
+    for (long k = 0; k < N; k++) {        /* a term that is 0 (a folded-away branch) adds nothing */
+      int zero = (eq(terms[k].l, "0.0") || eq(terms[k].l, "0.0000000000000000")) &&
+                 (eq(terms[k].r, "0.0") || eq(terms[k].r, "0.0000000000000000"));
+      if (zero && (kept || k < N - 1)) continue;
+      if (kept++) { bcat(c, &l, " + "); bcat(c, &r, " + "); }
       bcat(c, &l, terms[k].l);
       bcat(c, &r, terms[k].r);
     }
