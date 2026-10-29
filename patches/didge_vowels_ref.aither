@@ -1,0 +1,374 @@
+# didge_vowels_ref: didge_vowels as it stood on 2026-10-29 (5cc3423), when
+# Roland called it pretty awesome. Kept unchanged, to compare later
+# versions against. It feeds back too easily through the speaker.
+#
+# didge_vowels: didge_wow with your mouth's own formants. It is silent
+# until you make a didge sound into the mic; then your breath is its
+# breath, your vowels its tongue and jaw, your pops its tongue strikes,
+# and your voice its lips:
+# - Bend your pitch from your drone and the lips bend with it; the bore
+#   holds the note, so the drone bends a semitone or two.
+# - Jump 1.8 times above your drone or more (a toot, a whoop) and it
+#   trumpets: the lips tighten and the bore jumps to its second
+#   resonance, about 2.6 times the drone, brassy and loud, as a player
+#   overblows.
+# - Voice pressed and the lips shut hard each cycle, gritty; voice
+#   breathy and they never quite shut: softer, with air through them.
+# - Raise your tongue toward the palate (ee) and your tract's own
+#   resonances choke the sound beside your F2, as in a real didge.
+# - Growl and your voice goes into the lips, the two beating.
+#
+# Where didge_wow hears one thing of your vowel (oo or ah), this hears
+# where your mouth's two resonances are: F1, how open the jaw is (about
+# 250 to 850 Hz), and F2, where the tongue is (about 800 to 2500 Hz).
+# Together they tell ee, ih, eh, ah, aw, oh and oo apart, and the
+# didge's tract follows them, as a player's tongue and cheeks shape a
+# real didge's formants. A good didge lets them through: its impedance
+# is low from 1 to 2 kHz, so the player's tract resonances dominate the
+# sound (Smith, Rey, Dickens, Fletcher, Hollenberg and Wolfe, JASA 2007,
+# https://doi.org/10.1121/1.2384849).
+#
+# Each formant is found by a bank of crystal sets (a dho driven by the
+# mic, its amplitude the detector), each band a pointer as long as its
+# power, pointing at its place along half a turn; their sum's phase is
+# where the peak is. The mic is tilted up 6 dB an octave first, as
+# formant trackers do, or the voice's loud low harmonics would reach
+# every band. The drone stays in its key, so whatever you do comes
+# out in tune. The instrument is didge_sticks' (both didges, blended, and
+# the clapsticks), which notes/field-ab.md records as Roland's favourite.
+#
+#   make tools/pad && tools/pad &                    # the gamepad as knobs
+#   amixer -c 1 sset Speaker on                      # the speaker, though a headset is in
+#   tools/card -- ./aither patches/didge_vowels.aither  # the headset mic in, the card out
+#
+# The gamepad (tools/pad: hold a button, press the d-pad). Every knob
+# starts at 0, and 0 is the default sound:
+#   A up/down     mic sensitivity, up to 30 dB more
+#   A left/right  key: D, up a semitone a step to A
+#   B up/down     your own voice sung into the lips as well, as growling does
+#   B left/right  clapsticks on your pops
+#   X up/down     room
+#   X left/right  colour: the bright digital didge toward the physical one
+#   Y up/down     the bore: didge3 (0), then the flared bore, its bell
+#                 widening from 1.5 to 3.5 times the mouthpiece
+#   Y left/right  vowel depth: how far the didge's mouth exaggerates yours
+#
+# The speaker reaches the mic too, and the didge could play itself; keep
+# the mic close to your mouth and the sensitivity down if it does.
+
+def formant(x, f, res):
+  bpf(x, f, res) * (2 * (1 - res))       # unity gain at the peak
+
+# A resonance of the player's tract, seen from the lips: it sits in
+# series with them, so where its impedance peaks the flow is choked, by
+# 1 + k at the peak. The tract's dips, as a divider.
+def choke(x, f, k):
+  x - formant(x, f, 0.85) * (k / (1 + k))
+
+# Clapsticks, the physics:
+# - The collision: two hardwood sticks meet for tau seconds; the contact
+#   force is a half-sine (Hertz contact). A harder hit is a shorter
+#   contact (tau ~ v^-1/5), and a shorter pulse reaches higher modes.
+# - Each stick is a free-free bar: modes at 1, 2.756, 5.404 x f1. The
+#   holding hand damps the higher modes faster (T60 / 2.2, / 4.5).
+# - Where on the stick the hit lands sets how much of each mode it
+#   excites (a2, a3), and it changes every hit.
+# - A bar radiates its surface velocity, so the output is the modes' v.
+def contact(trig, tau):
+  $touch = 1.0
+  $touch = if trig > 0 then 0 else min(1, $touch + dt / tau)
+  if $touch < 1 then sin(PI * $touch) else 0
+
+def bar(force, f1, t60, a2, a3):
+  sum(3, n =>
+    let r = if n == 1 then 1 else if n == 2 then 2.756 else 5.404
+    let w = TAU * f1 * r
+    let g = 6.91 * (if n == 1 then 1 else if n == 2 then 2.2 else 4.5) / t60
+    let a = if n == 1 then 1 else if n == 2 then a2 else a3
+    $bv = 0.0
+    $bx = 0.0
+    $bv = clamp($bv + (-2 * g * $bv - w * w * $bx + force * a * 4000) * dt, -50, 50)
+    $bx = $bx + $bv * dt
+    $bv)
+
+# The first didge (2026-10-10, didge_minor): the same lips with a rest
+# opening, into a loop that returns the wave in phase after a full period,
+# so every harmonic resonates. Physically wrong for a didge, digitally cool:
+# bright, even, buzzy. Kept as its own colour and blended with didge3.
+def didge_bore(mouth, lipF, lipD, f0):
+  $pm = 0.0                             # wave arriving back at the lips
+  $dp = 0.0                             # pressure drop across the lips
+  let lip = dho($dp * 1200000.0, lipF, lipD)[0]
+  let a   = clamp(0.05 + lip, 0.0, 1.0) # lip opening; 0 = lips shut
+  let u   = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp))   # Bernoulli flow
+  let pplus = u * 0.8 + $pm             # outgoing wave: injected flow + reflection
+  let p     = pplus + $pm               # pressure at the lips
+  $dp = lp1(mouth - p, 840.34)
+  let back = delay(pplus, 1.0 / f0, 0.05)
+  $pm = lp1(back, 358.42) * 0.93          # reflected, in phase, lossy
+  back - lp1(back, 28.702)                 # what leaves the bell
+
+# didge3: lips at the closed end of a tube that is open at the bell.
+# - Lips (outward-striking valve): a mass-spring at lipF, pressed shut at
+#   rest (opening = $lx - 0.4) and blown open by the pressure drop $dp, so
+#   they shut once a cycle: that shut is the buzz.
+# - Flow: Bernoulli, u = a * sqrt(dp), with breath turbulence below 3 kHz.
+# - Bore: a pressure wave travels to the bell and back in half a period
+#   and comes back inverted (an open end reflects -1). Its impedance peaks
+#   sit at the odd harmonics 1, 3, 5..., so h2 and h4 come out weak, as in
+#   real drones. Two inharmonic modes (2.65, 4.35 x f0) add the flare.
+# - Player's tract: two resonances (ft1, ft2) loading the lips from
+#   upstream. Where they peak the flow is choked: they carve the moving
+#   dips that make the vowels.
+# - Radiation: the bell radiates the time derivative of the wave below
+#   ~2.5 kHz (+6 dB per octave), flat above.
+def didge3(mouth, voiceP, lipF, f0, ft1, ft2, zt, modeAmt, turb, tight):
+  $pm = 0.0
+  $dp = 0.0
+  $lx = 0.0
+  $lv = 0.0
+  $u  = 0.0
+  let uS = lp1($u, 408.62)
+  let pT = lp1(sum(2, j =>
+    let fj = if j == 1 then ft1 else ft2
+    let zj = if j == 1 then 0.09 else 0.07
+    # A mode's velocity, for its damping force. dho gives its phasor [x, q]:
+    # x the position, q the position a quarter turn behind. Undamped, q is
+    # just -v / w; damped, the phasor also shrinks as it turns, so the
+    # velocity takes both sides: v = -(wd q + damp w x), wd = w sqrt(1 -
+    # damp^2) the rate it turns. Reading one side would be off by about the
+    # damping, 5-9% here (PHASORS.md, "the second side isn't velocity").
+    let [mx, mq] = dho(uS, fj, zj)
+    let mv = -(TAU * fj * sqrt(1 - zj * zj) * mq + zj * TAU * fj * mx)   # its velocity
+    zt * 2 * zj * TAU * fj * mv), 493.04)
+  let wl = TAU * lipF
+  $lv = clamp($lv + (-2 * 0.1 * wl * $lv - wl * wl * $lx + $dp * 0.6 * wl * wl) * dt, -3000, 3000)
+  $lx = clamp($lx + $lv * dt, -2, 3)
+  let a = clamp($lx - 0.4, 0.25 * (1 - tight), 1.0)   # tight shuts; looser, a leak stays open
+  let br = lp1(lp1(noise(), 459.16), 459.16)
+  $u  = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp)) * (1 + br * turb * (3 - 2 * tight))   # a leak hisses
+  let pM = sum(2, k =>
+    let fk = f0 * (if k == 1 then 2.65 else 4.35)
+    let [mx, mq] = dho(uS, fk, 0.05)
+    let mv = -(TAU * fk * sqrt(1 - 0.05 * 0.05) * mq + 0.05 * TAU * fk * mx)   # its velocity
+    modeAmt * (if k == 1 then 4.0 else 2.5) * 2 * 0.05 * TAU * fk * mv)
+  let pplus = $u * 0.8 + $pm
+  let p   = pplus + $pm + pM
+  $dp = clamp(lp1(mouth * (1 + voiceP) - pT - p, 840.34), -4, 4)
+  let back = delay(pplus, 0.5 / f0, 0.05)
+  $pm = clamp(-lp1(back, 358.42) * 0.93, -20, 20)
+  hp1(back, 408.62) + hp1(pM, 23.911) * 0.08 * modeAmt
+
+# didge_flare: didge3's lips and player's tract, into a bore that widens.
+# - Bore: eight sections, mouthpiece to bell, each a delay each way, and
+#   where two meet, the wider one reflects part of each wave back
+#   (Kelly-Lochbaum, as in lib/tube.aither). The radius grows as the cube
+#   of the way along, so most of the flare is near the bell.
+# - The flare is what puts a didge's resonances off the odd harmonics
+#   (Tarnopolsky et al., JASA 2006, https://doi.org/10.1121/1.2146089;
+#   Wolfe and Smith's review, JASA 2023, https://doi.org/10.1121/10.0023207).
+#   A bell 1.5 times the mouthpiece's radius puts them at 2.65 and 4.34 x
+#   f0, the two modes didge3 adds by hand; wider, they move toward
+#   harmonic (3 times: 2.14, 3.40) and the upper ones weaken.
+# - A wider bore at the bell sounds higher, so the bore is lengthened to
+#   stay at f0: by 1.20 at 1.5 times, 1.48 at 3 (this bore's impedance
+#   worked out offline, the lips' pull on the pitch measured, fitted).
+# - Bell: an open end, reflecting the wave inverted below where it
+#   radiates (1500 Hz over its width) and letting the rest out.
+def didge_flare(mouth, voiceP, lipF, f0, ft1, ft2, zt, wide, turb, tight):
+  $dp = 0.0
+  $lx = 0.0
+  $lv = 0.0
+  $u  = 0.0
+  let uS = lp1($u, 408.62)
+  let pT = lp1(sum(2, j =>
+    let fj = if j == 1 then ft1 else ft2
+    let zj = if j == 1 then 0.09 else 0.07
+    let [mx, mq] = dho(uS, fj, zj)
+    let mv = -(TAU * fj * sqrt(1 - zj * zj) * mq + zj * TAU * fj * mx)   # its velocity (see didge3)
+    zt * 2 * zj * TAU * fj * mv), 493.04)
+  let wl = TAU * lipF
+  $lv = clamp($lv + (-2 * 0.1 * wl * $lv - wl * wl * $lx + $dp * 0.6 * wl * wl) * dt, -3000, 3000)
+  $lx = clamp($lx + $lv * dt, -2, 3)
+  let a = clamp($lx - 0.4, 0.25 * (1 - tight), 1.0)   # tight shuts; looser, a leak stays open
+  let br = lp1(lp1(noise(), 459.16), 459.16)
+  $u  = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp)) * (1 + br * turb * (3 - 2 * tight))   # a leak hisses
+  let s = array(8)                                  # each section's area
+  each(8, j => s[j] = pow(1 + (wide - 1) * pow((j + 0.5) / 8, 3), 2))
+  let x = wide - 1.5
+  let hop = (1.1959 + 0.2639 * x - 0.0518 * x * x) / (4 * f0 * 8) - dt   # one section's travel
+  $f = array(8)                                     # waves leaving each section's near end
+  $b = array(8)                                     # waves leaving its far end, back
+  let ff = array(8)                                 # what reaches the far end
+  let bb = array(8)                                 # what reaches the near end
+  each(8, j =>
+    ff[j] = delay($f[j], hop, 0.01)
+    bb[j] = delay($b[j], hop, 0.01))
+  let pplus = $u * 0.8 + bb[0]                      # the lips' end is closed: back comes back
+  let p = pplus + bb[0]
+  each(7, j =>
+    let k = (s[j] - s[j + 1]) / (s[j] + s[j + 1])
+    $f[j + 1] = clamp(((1 + k) * ff[j] - k * bb[j + 1]) * 0.997, -20, 20)
+    $b[j]     = clamp((k * ff[j] + (1 - k) * bb[j + 1]) * 0.997, -20, 20))
+  $f[0] = pplus
+  $b[7] = -lp1(ff[7], 1500 / wide) * 0.98
+  $dp = clamp(lp1(mouth * (1 + voiceP) - pT - p, 840.34), -4, 4)
+  hp1(ff[7], 408.62) * 1.37 * sqrt(wide)           # as loud as didge3
+
+# ------------------------------------------------------------- the mouth
+# A band's loudness is the length of a dho the mic drives (listen.aither,
+# PHASORS.md section 4): unity gain at its frequency, no rectifying.
+def band(x, f, damp):
+  let w = TAU * f
+  dho(x * 2 * damp * w * w, f, damp) |> amplitude
+
+# Where the strongest of eight bands from lo to hi is: each band a
+# pointer as long as its power (to the fourth, so the peak wins), at its
+# place along half a turn; the sum's phase is the peak's place.
+def peak(x, lo, hi):
+  let z = sum(8, n =>
+    let a = band(x, lo * pow(hi / lo, (n - 1) / 7), 0.12)
+    [a * a * a * a, 0] |> rotate(PI * (n - 1) / 7))
+  let at = z |> phase
+  lo * pow(hi / lo, at / PI)
+
+# The headset mic is differential: the codec gives it as the left side and
+# an inverted right (as ~/.local/bin/dictate reads it), so the voice is the
+# difference and noise common to both cancels. It comes in quiet, so the
+# gate works in decibels: open from -62 dBFS, fully 16 dB above that.
+let [l, r]  = input()
+let mic   = hp1((l - r) * 0.5, 60)      # the es8388 starts at a big DC offset and settles over half a second
+let lo    = band(mic, 150, 0.4)         # the buzz's body
+let oo    = band(mic, 300, 0.25)        # first formant of oo, w
+let ah    = band(mic, 750, 0.25)        # first formant of ah, ow
+let loud  = lo + oo + ah
+let level = 20 * log(loud + 0.000001) / log(10)
+let g     = clamp((level + 62 + midi_cc(20) * 30) / 16, 0, 1)   # 0 silence .. 1 playing
+let breath = swell(g, 0.01, 0.12)                                # the player's breath: in fast, out slower
+let open  = slew(clamp((ah / (oo + ah + 0.000001) - 0.25) * 2, 0, 1), 0.04)   # 0 oo, 1 ah
+
+# Your formants, held while you're not clearly playing.
+let tilted = (mic - prev(mic)) * 10     # +6 dB an octave: the voice's tilt undone
+let f1now = peak(tilted, 250, 900)
+let f2now = peak(tilted, 900, 2600)
+$jaw = 500.0                            # F1: how open
+$tongue = 1500.0                        # F2: where the tongue is
+$jaw = if g > 0.3 then f1now else $jaw
+$tongue = if g > 0.3 then f2now else $tongue
+# Exaggerated about the middle of each range, as far as the depth says,
+# so ee, oo and ah land far apart in the didge's mouth.
+let depth = 2 + midi_cc(27) * 1.5
+let f1 = clamp(480 * pow(slew($jaw, 0.03) / 480, depth), 220, 1000)
+let f2 = clamp(1500 * pow(slew($tongue, 0.03) / 1500, depth), 700, 2900)
+
+# Pops: the voice jumping well above where it just was. A fast and a slow
+# follower; a pop is the fast one leaping past twice the slow one, and it
+# can't fire again for 60 ms.
+let fast  = swell(loud, 0.001, 0.03)
+let slow  = swell(loud, 0.08, 0.25)
+$hold = 0.0
+let pop   = if fast > slow * 2 + 0.0005 and $hold <= 0 and g > 0.2 then 1 else 0
+$hold = if pop > 0 then 0.06 else $hold - dt
+let popV  = clamp(fast / (slow * 4 + 0.000001), 0.3, 1)        # how hard: how far it leapt
+
+# Your pitch: how fast the fundamental turns (follow.aither). The
+# low-pass sits at the pitch it last heard, four poles deep, so the
+# fundamental is what's left even where the second harmonic is louder
+# (your jaw's resonance on it), and a toot gets through because then
+# it is all there is.
+$heard = 120.0
+let z     = analytic(mic |> lp1($heard) |> lp1($heard) |> lp1($heard) |> lp1($heard))
+let turned = z |> turn(prev(z) |> conj) |> phase   # how far it turned this sample
+$heard = if g > 0.4 then $heard + (clamp(turned / (TAU * dt), 50, 1000) - $heard) * dt / 0.01 else $heard
+let sung  = 120 + slew($heard - 120, 0.03)   # slews start at 0: smooth the offset from where it starts
+# Your drone: where your pitch sits while you play and don't toot. The
+# rest is measured from it, so whatever pitch you drone at is the drone.
+# It waits a moment while the tracker finds you, locks on over a third
+# of a second, then settles over two, so a bend held a moment stays a
+# bend. $played counts playing time, and silence counts it back down.
+$drone = 120.0
+$played = 0.0
+$played = clamp($played + (if g > 0.4 then dt else -dt), 0, 2)
+let rise  = sung / $drone
+$drone = if g > 0.4 and rise < 1.8 and $played > 0.15 then $drone + (sung - $drone) * dt / max($played, 0.3) else $drone
+# Your pitch 1.8 times your drone or more is a toot. Below that it bends
+# the lips, up to 1.3 times either way; the bore holds the note, so the
+# drone bends a semitone or two.
+let toot  = slew(if g > 0.4 and rise > 1.8 then 1 else 0, 0.04)
+let horn  = 1 + toot * 1.62               # the bore's second resonance over its first, about 2.6
+let lean  = if g > 0.4 and rise < 1.8 then clamp(rise, 1 / 1.3, 1.3) - 1 else 0
+let bend  = 1 + slew(lean - clamp(lean, -0.04, 0.04), 0.02)   # within 4% is a voice's wobble, not a bend
+
+# How you voice: your first harmonic over your second (H1-H2), which
+# follows how long the folds stay open each cycle (Iseli and Alwan,
+# ICASSP 2004, https://doi.org/10.1109/icassp.2004.1326074). Pressed, it
+# is low, and the didge's lips shut hard every cycle; breathy, it is
+# high, and the lips never quite shut: the buzz softens and air hisses.
+# A jaw resonance on your second harmonic reads as pressed (oo, low).
+let h1    = band(mic, sung, 0.1)
+let h2    = band(mic, sung * 2, 0.1)
+let h12   = 20 * log((h1 + 0.000001) / (h2 + 0.000001)) / log(10)
+let tight = 1 - slew(if g > 0.4 then 1 - clamp((14 - h12) / 10, 0, 1) else 0, 0.05)
+
+# ------------------------------------------------------------- the didge
+let key   = pow(2, floor(midi_cc(21) * 7.99) / 12)      # D, then up to A
+let vTap  = slew(discharge(pop * popV, 16), 0.004)      # the tongue strikes on your pops
+let press = breath * (0.85 + vTap * 0.4 + toot * 0.35)  # nothing in, nothing out; a trumpet is blown hard
+let vWah  = open
+# Growl: your voice into the lips, as a player sings into the bore while
+# playing and the two beat. You growl, the didge growls: a rough voice's
+# loudness flutters 20 to 80 Hz, and that flutter over the loudness
+# says how rough (a plain vowel reads 0.25 to 0.4, a growl 0.7 and up).
+let flutter = band(hp1(loud, 15), 40, 0.7)
+let rough = clamp((lp1(flutter / (loud + 0.000001), 4) - 0.5) * 2, 0, 1)   # smoothed first: a plain vowel spikes
+let voiceIn = mic * (midi_cc(22) + rough * 0.3) * 60   # a full growl is the knob a third up
+let blend = (0.5 - midi_cc(25) * 0.45) * (1 - toot * 0.6)   # the digital didge ducks under toots, as in didge_sticks
+
+play didge:
+  # Trumpeting: the lips tighten to the second resonance and the bore
+  # speaks there, its modes louder.
+  let bore = midi_cc(26)
+  let d3 = if bore > 0
+    then didge_flare(press * 1.6, voiceIn, 58.6 * horn * bend * key, 71.6 * horn * key, 300 + vWah * 480, 950 + vTap * 1500, 1.5, 1.5 + bore * 2, 0.8, tight)
+    else didge3(press * 1.6, voiceIn, 58.6 * horn * bend * key, 71.6 * horn * key, 300 + vWah * 480, 950 + vTap * 1500, 1.5, 0.4 + toot * 0.8, 0.8, tight)
+  let d1 = didge_bore(press * (1 + voiceIn), 60 * horn * bend * key, 0.1, 73.4 * horn * key)
+  let d = d3 * cos(blend * PI / 2) + d1 * 1.26 * sin(blend * PI / 2)
+  # Your formants shape the sound here, at the mouth, not inside the
+  # bore: in a didge a resonance of the player's tract makes a dip in
+  # the sound beside it, so fed to didge3 a high F2 darkened ee instead
+  # of brightening it. The mouth filters a source tilted up 6 dB an
+  # octave, as the lips' buzz radiates: the bore alone is too dark for
+  # F2 to lift.
+  let gritty = d |> drive(0.7 + tight * 0.7 + toot * 0.6)   # the lips' slap made rich first, for F2 to shape; breathy, softer
+  let bright = gritty - prev(gritty) * 0.9
+  let tract = formant(bright, f1 - vTap * 60, 0.95) + formant(bright, f2 + vTap * 1100 + toot * 400, 0.95) * 3 + formant(bright, 2300 + vWah * 300 + vTap * 500, 0.95) * 0.8
+  # The tract's own resonances choke the flow beside your formants: one
+  # between F1 and F2, one above F2, so F2 stands out between dips as in
+  # a real didge's spectrum. The closer the tongue to the palate (F2
+  # high, ee), the stronger they are (Tarnopolsky et al. 2006). They
+  # can't be made inside the bore: its lips' loop is low-passed below
+  # 1 kHz, where a tract coupled there only adds a peak.
+  let palate = clamp((f2 - 1000) / 1300, 0, 1)
+  let choked = tract * 1.1 + gritty * 0.15
+    |> choke(sqrt(f1 * f2), 0.5 + palate * 6)
+    |> choke(f2 * 1.35, 0.5 + palate * 6)
+  choked |> hpf(200, 0.29) |> hpf(200, 0.29) |> lpf(7000, 0.2)
+
+# ------------------------------------------------------------- the sticks
+# Struck on your pops, as hard as you popped, each time at a new spot on
+# the sticks.
+let sticksOn = midi_cc(23)
+$hitN = 0.0
+$hitN = $hitN + pop
+let hPos  = (sin($hitN * 78.233) * 12543.871) mod 1
+let hPos2 = (sin($hitN * 39.425) * 23421.631) mod 1
+play sticks:
+  let v  = popV * sticksOn
+  let f  = contact(pop * v, 0.0001 * pow(max(v, 0.05), -0.2)) * v
+  let sA = bar(f, 1650, 0.14, 0.25 + 0.6 * hPos, 0.1 + 0.4 * hPos2)
+  let sB = bar(f, 1750, 0.14 * 0.8, 0.9 - 0.6 * hPos, 0.5 - 0.4 * hPos2)
+  (sA + sB * 0.85) * 0.85 |> lpf(7000, 0.2)
+
+let roomD = reverb(mono(didge), 1.3, 0.1 + midi_cc(24) * 0.4)
+let roomS = reverb(mono(sticks), 0.6, 0.06 + midi_cc(24) * 0.3)
+(haas(roomD * 3.2 * 0.8, 8) + pan(roomS, 0.35)) * 0.78
