@@ -12,6 +12,17 @@
    it. Without permission it says so once and carries on as before;
    notes/realtime-2026-10-19.md has the limits file that grants it.
 
+   While it runs, the process also asks the kernel to keep every core out
+   of idle states slower than AITHER_IDLE_US (100) microseconds to wake,
+   by holding /dev/cpu_dma_latency open (the PM QoS request JACK and
+   PipeWire make). On the uConsole's RK3399, a period interrupt that lands
+   while the cluster sleeps waits up to 0.9 ms, and the es8388 clicks:
+   speaker-test with 512-frame periods clicked every few seconds, and was
+   clean holding this (2026-10-29). The request ends with the process.
+   Opening the device needs the audio group's rule
+   (~/uconsole/install/aither-realtime.sh); without it, it says so once.
+   AITHER_IDLE_US=0 doesn't ask.
+
    A pinned thread whose core goes offline is moved off it by the kernel,
    so the engine calls aither_repin about once a second: it pins the
    thread again to whichever core is now the audio core. */
@@ -24,9 +35,26 @@
 #include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/syscall.h>
+#include <fcntl.h>
+#include <stdint.h>
 
 static pid_t rt_tid;        /* the thread aither_realtime set up, 0 if none */
 static int rt_cpu = -1;     /* the core it was last pinned to */
+static int idle_fd = -1;    /* /dev/cpu_dma_latency, held open while the process runs */
+
+/* Keep the cores out of idle states slower than AITHER_IDLE_US to wake.
+   The request lasts as long as the file stays open: until the process ends. */
+static const char *hold_idle(void) {
+    const char *env = getenv("AITHER_IDLE_US");
+    int32_t us = env && *env ? atoi(env) : 100;
+    if (us <= 0) return "";
+    if (idle_fd >= 0) return ", deep idle held off";
+    int fd = open("/dev/cpu_dma_latency", O_WRONLY | O_CLOEXEC);
+    if (fd < 0) return "; deep idle not held off (no access to /dev/cpu_dma_latency: ~/uconsole/install/aither-realtime.sh)";
+    if (write(fd, &us, sizeof us) != (ssize_t)sizeof us) { close(fd); return "; deep idle not held off"; }
+    idle_fd = fd;
+    return ", deep idle held off";
+}
 
 /* The highest-numbered core online, from "0-5" or "0-3,5". */
 static int last_online(void) {
@@ -69,12 +97,13 @@ int aither_realtime(const char *who) {
     struct rlimit ml;
     int locked = getrlimit(RLIMIT_MEMLOCK, &ml) == 0 && ml.rlim_cur == RLIM_INFINITY &&
                  mlockall(MCL_CURRENT | MCL_FUTURE) == 0;
+    const char *idle = hold_idle();
     if (!fifo)
         fprintf(stderr, "[%s] no real-time priority (rtprio limit): audio runs as before, "
-                        "see notes/realtime-2026-10-19.md\n", who);
+                        "see notes/realtime-2026-10-19.md%s\n", who, idle);
     else
-        fprintf(stderr, "[%s] real-time: SCHED_FIFO %d on core %d%s\n", who,
-                sp.sched_priority, rt_cpu, locked ? ", memory locked" : "");
+        fprintf(stderr, "[%s] real-time: SCHED_FIFO %d on core %d%s%s\n", who,
+                sp.sched_priority, rt_cpu, locked ? ", memory locked" : "", idle);
     return rt_cpu;
 }
 
