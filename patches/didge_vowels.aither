@@ -10,6 +10,8 @@
 #   overblows.
 # - Voice pressed and the lips shut hard each cycle, gritty; voice
 #   breathy and they never quite shut: softer, with air through them.
+# - Your voice beats with the lips: a buzz at your pitch, fluttering
+#   with you, sung into the bore. That's the growl.
 # - Raise your tongue toward the palate (ee) and your tract's own
 #   resonances choke the sound beside your F2, as in a real didge.
 #
@@ -40,8 +42,8 @@
 # starts at 0, and 0 is the default sound:
 #   A up/down     mic sensitivity, up to 30 dB more
 #   A left/right  key: D, up a semitone a step to A
-#   B up/down     your own voice sung into the lips as well, as growling does
-#                 (the mic into the lips: up high, the speaker can feed back)
+#   B up/down     growl: how hard your voice beats with the lips (0 as
+#                 your voice did through the mic, up to 5 times that)
 #   B left/right  clapsticks on your pops
 #   X up/down     room
 #   X left/right  colour: the bright digital didge toward the physical one
@@ -311,7 +313,17 @@ let key   = pow(2, floor(midi_cc(21) * 7.99) / 12)      # D, then up to A
 let vTap  = slew(discharge(pop * popV, 16), 0.004)      # the tongue strikes on your pops
 let press = breath * (0.85 + vTap * 0.4 + toot * 0.35)  # nothing in, nothing out; a trumpet is blown hard
 let vWah  = open
-let voiceIn = mic * midi_cc(22) * 60                    # your voice into the lips, as a player sings into the bore
+# Your voice in the lips, as a player sings into the bore while playing
+# and the two beat: the growl. Not the mic itself, which carried the
+# speaker back into the lips and squealed at 3 kHz, but a voice made
+# from what the mic measures: a buzz at your pitch, as loud as you,
+# fluttering as your loudness does. At 0 it drives the lips as hard as
+# your voice did when the mic fed them (0.22 rms while you played).
+# Harder, the lips stop locking into a steady buzz, and it gets rougher
+# and a little quieter, as a growl does.
+let flutterBy = clamp(fast / (slow + 0.000001), 0, 2)
+let sungVoice = saw(phasor(sung)) |> lp1(1200)
+let voiceIn = sungVoice * flutterBy * breath * 0.4 * (1 + midi_cc(22) * 4)   # B up/down: deeper, to 5 times
 let blend = (0.5 - midi_cc(25) * 0.45) * (1 - toot * 0.6)   # the digital didge ducks under toots, as in didge_sticks
 
 play didge:
