@@ -1,9 +1,15 @@
 # didge_vowels: didge_wow with your mouth's own formants. It is silent
 # until you make a didge sound into the mic; then your breath is its
 # breath, your vowels its tongue and jaw, your pops its tongue strikes,
-# and a whoop up high makes it trumpet: the lips tighten and the bore
-# jumps to its second resonance, about 2.6 times the drone, brassy and
-# loud, as a player overblows.
+# and your voice its lips:
+# - Bend your pitch from your drone and the lips bend with it; the bore
+#   holds the note, so the drone bends a semitone or two.
+# - Jump 1.8 times above your drone or more (a toot, a whoop) and it
+#   trumpets: the lips tighten and the bore jumps to its second
+#   resonance, about 2.6 times the drone, brassy and loud, as a player
+#   overblows.
+# - Voice pressed and the lips shut hard each cycle, gritty; voice
+#   breathy and they never quite shut: softer, with air through them.
 #
 # Where didge_wow hears one thing of your vowel (oo or ah), this hears
 # where your mouth's two resonances are: F1, how open the jaw is (about
@@ -103,7 +109,7 @@ def didge_bore(mouth, lipF, lipD, f0):
 #   dips that make the vowels.
 # - Radiation: the bell radiates the time derivative of the wave below
 #   ~2.5 kHz (+6 dB per octave), flat above.
-def didge3(mouth, voiceP, lipF, f0, ft1, ft2, zt, modeAmt, turb):
+def didge3(mouth, voiceP, lipF, f0, ft1, ft2, zt, modeAmt, turb, tight):
   $pm = 0.0
   $dp = 0.0
   $lx = 0.0
@@ -125,9 +131,9 @@ def didge3(mouth, voiceP, lipF, f0, ft1, ft2, zt, modeAmt, turb):
   let wl = TAU * lipF
   $lv = clamp($lv + (-2 * 0.1 * wl * $lv - wl * wl * $lx + $dp * 0.6 * wl * wl) * dt, -3000, 3000)
   $lx = clamp($lx + $lv * dt, -2, 3)
-  let a = clamp($lx - 0.4, 0.0, 1.0)
+  let a = clamp($lx - 0.4, 0.25 * (1 - tight), 1.0)   # tight shuts; looser, a leak stays open
   let br = lp1(lp1(noise(), 459.16), 459.16)
-  $u  = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp)) * (1 + br * turb)
+  $u  = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp)) * (1 + br * turb * (3 - 2 * tight))   # a leak hisses
   let pM = sum(2, k =>
     let fk = f0 * (if k == 1 then 2.65 else 4.35)
     let [mx, mq] = dho(uS, fk, 0.05)
@@ -156,7 +162,7 @@ def didge3(mouth, voiceP, lipF, f0, ft1, ft2, zt, modeAmt, turb):
 #   worked out offline, the lips' pull on the pitch measured, fitted).
 # - Bell: an open end, reflecting the wave inverted below where it
 #   radiates (1500 Hz over its width) and letting the rest out.
-def didge_flare(mouth, voiceP, lipF, f0, ft1, ft2, zt, wide, turb):
+def didge_flare(mouth, voiceP, lipF, f0, ft1, ft2, zt, wide, turb, tight):
   $dp = 0.0
   $lx = 0.0
   $lv = 0.0
@@ -171,9 +177,9 @@ def didge_flare(mouth, voiceP, lipF, f0, ft1, ft2, zt, wide, turb):
   let wl = TAU * lipF
   $lv = clamp($lv + (-2 * 0.1 * wl * $lv - wl * wl * $lx + $dp * 0.6 * wl * wl) * dt, -3000, 3000)
   $lx = clamp($lx + $lv * dt, -2, 3)
-  let a = clamp($lx - 0.4, 0.0, 1.0)
+  let a = clamp($lx - 0.4, 0.25 * (1 - tight), 1.0)   # tight shuts; looser, a leak stays open
   let br = lp1(lp1(noise(), 459.16), 459.16)
-  $u  = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp)) * (1 + br * turb)
+  $u  = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp)) * (1 + br * turb * (3 - 2 * tight))   # a leak hisses
   let s = array(8)                                  # each section's area
   each(8, j => s[j] = pow(1 + (wide - 1) * pow((j + 0.5) / 8, 3), 2))
   let x = wide - 1.5
@@ -252,14 +258,44 @@ let pop   = if fast > slow * 2 + 0.0005 and $hold <= 0 and g > 0.2 then 1 else 0
 $hold = if pop > 0 then 0.06 else $hold - dt
 let popV  = clamp(fast / (slow * 4 + 0.000001), 0.3, 1)        # how hard: how far it leapt
 
-# Your pitch, for the toot: how fast the fundamental turns (follow.aither).
-let z     = analytic(lp1(lp1(lp1(mic, 200), 200), 200))   # the fundamental alone
-$pitch = 120.0
+# Your pitch: how fast the fundamental turns (follow.aither). The
+# low-pass sits at the pitch it last heard, four poles deep, so the
+# fundamental is what's left even where the second harmonic is louder
+# (your jaw's resonance on it), and a toot gets through because then
+# it is all there is.
+$heard = 120.0
+let z     = analytic(mic |> lp1($heard) |> lp1($heard) |> lp1($heard) |> lp1($heard))
 let turned = z |> turn(prev(z) |> conj) |> phase   # how far it turned this sample
-$pitch = if g > 0.4 then clamp(turned / (TAU * dt), 40, 1500) else $pitch
-let sung  = slew($pitch, 0.05)
-let toot  = slew(if g > 0.4 and sung > 250 then 1 else 0, 0.04)   # whoop up high: trumpet
+$heard = if g > 0.4 then $heard + (clamp(turned / (TAU * dt), 50, 1000) - $heard) * dt / 0.01 else $heard
+let sung  = 120 + slew($heard - 120, 0.03)   # slews start at 0: smooth the offset from where it starts
+# Your drone: where your pitch sits while you play and don't toot. The
+# rest is measured from it, so whatever pitch you drone at is the drone.
+# It waits a moment while the tracker finds you, locks on over a third
+# of a second, then settles over two, so a bend held a moment stays a
+# bend. $played counts playing time, and silence counts it back down.
+$drone = 120.0
+$played = 0.0
+$played = clamp($played + (if g > 0.4 then dt else -dt), 0, 2)
+let rise  = sung / $drone
+$drone = if g > 0.4 and rise < 1.8 and $played > 0.15 then $drone + (sung - $drone) * dt / max($played, 0.3) else $drone
+# Your pitch 1.8 times your drone or more is a toot. Below that it bends
+# the lips, up to 1.3 times either way; the bore holds the note, so the
+# drone bends a semitone or two.
+let toot  = slew(if g > 0.4 and rise > 1.8 then 1 else 0, 0.04)
 let horn  = 1 + toot * 1.62               # the bore's second resonance over its first, about 2.6
+let lean  = if g > 0.4 and rise < 1.8 then clamp(rise, 1 / 1.3, 1.3) - 1 else 0
+let bend  = 1 + slew(lean - clamp(lean, -0.04, 0.04), 0.02)   # within 4% is a voice's wobble, not a bend
+
+# How you voice: your first harmonic over your second (H1-H2), which
+# follows how long the folds stay open each cycle (Iseli and Alwan,
+# ICASSP 2004, https://doi.org/10.1109/icassp.2004.1326074). Pressed, it
+# is low, and the didge's lips shut hard every cycle; breathy, it is
+# high, and the lips never quite shut: the buzz softens and air hisses.
+# A jaw resonance on your second harmonic reads as pressed (oo, low).
+let h1    = band(mic, sung, 0.1)
+let h2    = band(mic, sung * 2, 0.1)
+let h12   = 20 * log((h1 + 0.000001) / (h2 + 0.000001)) / log(10)
+let tight = 1 - slew(if g > 0.4 then 1 - clamp((14 - h12) / 10, 0, 1) else 0, 0.05)
 
 # ------------------------------------------------------------- the didge
 let key   = pow(2, floor(midi_cc(21) * 7.99) / 12)      # D, then up to A
@@ -274,9 +310,9 @@ play didge:
   # speaks there, its modes louder.
   let bore = midi_cc(26)
   let d3 = if bore > 0
-    then didge_flare(press * 1.6, voiceIn, 58.6 * horn * key, 71.6 * horn * key, 300 + vWah * 480, 950 + vTap * 1500, 1.5, 1.5 + bore * 2, 0.8)
-    else didge3(press * 1.6, voiceIn, 58.6 * horn * key, 71.6 * horn * key, 300 + vWah * 480, 950 + vTap * 1500, 1.5, 0.4 + toot * 0.8, 0.8)
-  let d1 = didge_bore(press * (1 + voiceIn), 60 * horn * key, 0.1, 73.4 * horn * key)
+    then didge_flare(press * 1.6, voiceIn, 58.6 * horn * bend * key, 71.6 * horn * key, 300 + vWah * 480, 950 + vTap * 1500, 1.5, 1.5 + bore * 2, 0.8, tight)
+    else didge3(press * 1.6, voiceIn, 58.6 * horn * bend * key, 71.6 * horn * key, 300 + vWah * 480, 950 + vTap * 1500, 1.5, 0.4 + toot * 0.8, 0.8, tight)
+  let d1 = didge_bore(press * (1 + voiceIn), 60 * horn * bend * key, 0.1, 73.4 * horn * key)
   let d = d3 * cos(blend * PI / 2) + d1 * 1.26 * sin(blend * PI / 2)
   # Your formants shape the sound here, at the mouth, not inside the
   # bore: in a didge a resonance of the player's tract makes a dip in
@@ -284,7 +320,7 @@ play didge:
   # of brightening it. The mouth filters a source tilted up 6 dB an
   # octave, as the lips' buzz radiates: the bore alone is too dark for
   # F2 to lift.
-  let gritty = d |> drive(1.4 + toot * 0.6)     # the lips' slap made rich first: harmonics up high for F2 to shape
+  let gritty = d |> drive(0.7 + tight * 0.7 + toot * 0.6)   # the lips' slap made rich first, for F2 to shape; breathy, softer
   let bright = gritty - prev(gritty) * 0.9
   let tract = formant(bright, f1 - vTap * 60, 0.95) + formant(bright, f2 + vTap * 1100 + toot * 400, 0.95) * 3 + formant(bright, 2300 + vWah * 300 + vTap * 500, 0.95) * 0.8
   (tract * 1.1 + gritty * 0.15) |> hpf(200, 0.29) |> hpf(200, 0.29) |> lpf(7000, 0.2)
