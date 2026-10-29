@@ -30,6 +30,20 @@ play p:
   shift($line, t)
 p
 
+# --- a file constant counts inside a def, as a sum's count
+# expect: 0.06
+let k = 3
+def count(x):
+  sum(k, i => x * i)
+count(0.01)
+
+# --- a def's own name shadows the file's constant
+# expect: 0.03
+let k = 3
+def count(x, k):
+  sum(2, i => x * k)
+count(0.005, 3)
+
 # --- defaults, positional and named
 # expect: 0.04707
 def knob(a, k = 2, m = TAU / TAU + 1):

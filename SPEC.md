@@ -291,7 +291,9 @@ pair, pair state (`$z = [0, 0]`), or arithmetic on one
 
 `sum`, `each` and `array(N)` accept any compile-time number:
 a literal, a name bound to one, `len(array)`, or arithmetic
-over those (`each(n - 1, …)`).
+over those (`each(n - 1, …)`). In a def that includes the
+file's constants, which a def sees (`let K = 8` at the top,
+`sum(K, …)` in a def), unless the def binds the name itself.
 
 ### Recursion
 

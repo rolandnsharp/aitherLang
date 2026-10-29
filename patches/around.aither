@@ -83,7 +83,7 @@ def wrap_angle(x): x - TAU * floor((x + PI) / TAU)
 # 1.5 kHz they add with random phases and the field comes out duller
 # than the sound itself; the last shelf puts the treble back (measured
 # for order 3 and K = 8: within 2 dB of the true direction to 8 kHz).
-def ears(a, K):
+def ears(a):
   let both = sum(K, j =>
     let phi = TAU * (j - 1) / K
     let heard_p = heard(a, phi)
@@ -138,4 +138,4 @@ each(n, m =>
 # field's left and right halves, so the two ears' tails differ.
 let late = reverb([heard(a, PI / 2), heard(a, -PI / 2)], 1.1, 1) * 0.5
 
-(ears(a, K) + late) * 0.7
+(ears(a) + late) * 0.7

@@ -456,7 +456,19 @@ static int const_value(Ctx* c, Scope* sc, Node* n, double* v) {
   if (!n) return 0;
   switch (n->kind) {
   case nkNum: *v = n->num; return 1;
-  case nkIdent: return sc ? lookup_num_lit(sc, n->str, v) : 0;
+  case nkIdent: {
+    if (!sc) return 0;
+    if (lookup_num_lit(sc, n->str, v)) return 1;
+    /* A def sees the file's constants: a name the def doesn't bind is
+     * the file's, as emit_ident reads it. */
+    if (!in_def(sc) || !c->top) return 0;
+    for (Scope* s = sc; s; s = s->parent)
+      if (binds_any(s, n->str)) return 0;
+    Ent* e = lfind(c->top->numlits, n->str);
+    if (!e) return 0;
+    *v = e->v;
+    return 1;
+  }
   case nkCall:
     if (eq(n->str, "len") && n->nkids == 1 && n->kids[0]->kind == nkIdent) {
       const char* a = n->kids[0]->str;
