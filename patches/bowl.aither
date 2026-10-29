@@ -1,0 +1,122 @@
+# bowl: a singing bowl you rub and strike with the gamepad.
+#
+# A bowl rings in modes with n waves round its rim, n = 2 to 6. Thin
+# shells put them at n(n² - 1) / sqrt(n² + 1) (Rayleigh's law for bells
+# and glasses), about 1 : 2.8 : 5.4 : 8.8 : 12.9, the ratios measured on
+# Tibetan bowls (Terwagne and Bush, Nonlinearity 2011,
+# https://doi.org/10.1088/0951-7715/24/8/r01). Every mode is two of the
+# same shape turned a quarter wave apart, and no hand-made bowl is round
+# enough to tune them alike: they sit a fraction of a percent apart and
+# beat, which is the bowl's slow wobble.
+#
+# The puja, the stick, drags on the rim. Friction is stronger stuck than
+# sliding, so the rim sticks to it, slips back, sticks again, once a
+# cycle: stick-slip, the same self-oscillation as a bow on a string,
+# pumping whichever modes move where it touches. The modal model of
+# rubbed and struck bowls is Inácio, Henrique and Antunes (2006,
+# https://openalex.org/W17737396), who found the vibration pattern
+# turning with the puja round the bowl, as it does here. The high modes
+# live near the rim and the low ones reach down the wall: rub the rim
+# and every partial sings; rub low and only the fundamental does.
+# Water lowers every mode, by about the fill to the fourth power
+# (Terwagne and Bush, after French's wine glass).
+#
+# Two microphones a little way round the bowl hear the pattern turn.
+#
+#   make tools/pad tools/scope
+#   tools/pad &                                         # the gamepad as knobs: start it first
+#   ./aither patches/bowl.aither | tools/scope | tools/play hw:rockchipes8388c 20
+#
+# The gamepad (tools/pad: hold a button, press the d-pad). Every knob
+# starts at 0, and 0 is the default sound: the bowl struck once, then
+# left to ring. A stroke is a knob moving: hold the button and the
+# d-pad, and the sweep is your hand going round the rim, the longer you
+# hold the faster. Right strokes one way and left the other.
+#   A up/down     the puja circling by itself: resting (0), faster a tap,
+#                 up to ten
+#   A left/right  pressure, for every rub: harder a tap (too hard and it
+#                 chatters, as a real bowl does)
+#   B up/down     water: more a tap, the pitch falling
+#   B left/right  stroke the rim: bright, every partial
+#   X up/down     a bigger bowl: a semitone lower a tap
+#   X left/right  stroke the middle of the wall
+#   Y up/down     strike: each tap a hit of the mallet, up on the rim,
+#                 down lower and softer
+#   Y left/right  stroke low on the wall: pure, the fundamental
+
+# Taps of the gamepad: tools/pad steps a knob by 6 of 127 a tap.
+def taps(n): floor(midi_cc(n) * 127 / 6 + 0.5)
+
+# Mode j: n = 2 + j / 2 waves round the rim, the cosine shape (even j)
+# or the sine one (odd j).
+def wavesof(j): 2 + floor(j / 2)
+def shape(j, th): if j mod 2 == 0 then cos(wavesof(j) * th) else sin(wavesof(j) * th)
+def depth(j, z): pow(1 - z, wavesof(j) - 1)          # how much of mode j reaches z down the wall
+
+# Friction, stuck stronger than sliding: the force a contact moving at
+# v against the rim drags it with, pressed with N newtons.
+def friction(v, N): N * tanh(v / 0.002) * (0.2 + 0.2 * exp(-abs(v) / 0.3))
+
+# How fast the rim moves at angle th, z down the wall.
+def rim(vel, th, z): sum(10, m => depth(m - 1, z) * shape(m - 1, th) * vel[m - 1])
+
+let ratio = [1, 2.829, 5.424, 8.770, 12.87]
+let ring  = [24, 12, 7, 4, 2.5]                          # seconds to die away, each n
+let split = [0.0045, 0.003, 0.0025, 0.002, 0.0015]      # the two shapes' tuning apart
+
+let fill  = min(taps(22), 10) / 10
+let f2    = 220 * pow(2, -min(taps(24), 12) / 12) / sqrt(1 + 0.6 * pow(fill, 4))
+let R     = 0.1                                          # the rim's radius, m
+let press = 1 + taps(21) * 0.7                           # N
+
+# The puja circling: its place round the rim and its speed.
+let turns = if taps(20) > 0 then 0.1 + min(taps(20), 10) * 0.08 else 0   # turns a second: 0.1 to 0.6 m/s round the rim, where a puja sings
+let puja  = TAU * phasor(turns)
+let pujaV = TAU * turns * R
+
+# A hand on a knob: where it is (a half turn across the knob's range)
+# and how fast it moves, smoothed over the pad's steps.
+def hand(cc): midi_cc(cc) * PI
+def handV(cc): lp1(lp1((midi_cc(cc) - prev(midi_cc(cc))) * PI / dt, 4), 4) * R
+def touching(v): clamp((abs(v) - 0.03) / 0.02, 0, 1)    # a stopping hand lifts off, and the bowl rings on
+
+let vRim = handV(23)
+let vMid = handV(25)
+let vLow = handV(27)
+
+# The mallet: a tap of Y up/down is a hit; a hit at the start too.
+$started = 0
+let dy    = midi_cc(26) - prev(midi_cc(26))
+let hit   = abs(dy) * 127 / 6 + (if $started == 0 then 1 else 0)
+let hitZ  = if dy < 0 then 0.4 else 0
+$started = 1
+
+$z = array(10, [0, 0])                                   # each mode's phasor [x, q]
+let w   = array(10)
+let d   = array(10)
+let vel = array(10)
+each(10, j =>
+  let k = floor(j / 2)
+  w[j] = TAU * f2 * ratio[k] * (1 + (j mod 2) * split[k])
+  d[j] = 6.91 / (ring[k] * (1 - 0.4 * fill) * w[j])
+  vel[j] = -(w[j] * sqrt(1 - d[j] * d[j]) * $z[j][1] + d[j] * w[j] * $z[j][0]))
+
+# Each contact's drag: the puja at the rim, the three hands down the wall.
+let fPuja = if turns > 0 then friction(pujaV - rim(vel, puja, 0), press) else 0
+let fRim  = friction(vRim - rim(vel, hand(23), 0), press) * touching(vRim)
+let fMid  = friction(vMid - rim(vel, hand(25), 0.25), press) * touching(vMid)
+let fLow  = friction(vLow - rim(vel, hand(27), 0.5), press) * touching(vLow)
+
+each(10, j =>
+  let wd = w[j] * sqrt(1 - d[j] * d[j])
+  let force = 20 * (fPuja * depth(j, 0) * shape(j, puja)
+                  + fRim * depth(j, 0) * shape(j, hand(23))
+                  + fMid * depth(j, 0.25) * shape(j, hand(25))
+                  + fLow * depth(j, 0.5) * shape(j, hand(27)))
+            + hit / dt * 0.2 * depth(j, hitZ) * shape(j, 0.3) * exp(-0.5 * floor(j / 2))
+  $z[j] = turn($z[j], exp(-d[j] * w[j] * dt) * [cos(wd * dt), sin(wd * dt)]) + [0, -force * dt / wd])
+
+# Two microphones, a little way round the bowl.
+let left  = sum(10, m => vel[m - 1] * shape(m - 1, 0))
+let right = sum(10, m => vel[m - 1] * shape(m - 1, 0.7))
+[left, right] * 0.5 |> reverb(2, 0.2) |> tanh

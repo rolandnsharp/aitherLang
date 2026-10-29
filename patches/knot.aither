@@ -1,0 +1,82 @@
+# knot: a knot in space, drawn by the beam and heard as a chord.
+#
+# Watch it on the scope: left is x and right is y, so the sound you hear
+# and the picture you see are one signal. The beam runs round a knot
+# tied on a doughnut, 55 times a second, and the screen shows its
+# shadow.
+#
+# A torus knot goes p times round the doughnut's hole while it winds q
+# times through it. Seen from above, its shadow is
+#   (R + r cos qφ) · e^(ipφ) = R e^(ipφ) + r/2 e^(i(p+q)φ) + r/2 e^(i(p-q)φ)
+# three spins at p, p + q and p - q times 55 Hz: the knot is a chord,
+# and the trefoil (p 2, q 3) is 110, 275 and 55 Hz, the last turning
+# backwards. Its height, r sin qφ, is a fourth note you can't see or
+# hear from straight above. Tip the knot and the height comes into the
+# shadow: the fourth note comes in, and as it turns the chord's voices
+# swell and fade with their share of the picture. Everything that moves
+# here is a turn (PHASORS.md): tipping is turning the y-z plane or the
+# z-x plane, and spinning it in the screen is turning the pair itself,
+# which adds the spin's speed to every note. Spin it fast and the
+# chord goes out of tune, every note shifted by the same few Hz, and
+# the knot smears into a rosette; let go and it comes back together.
+#
+#   make tools/pad tools/scope
+#   tools/pad &                                         # the gamepad: start it first
+#   ./aither patches/knot.aither | tools/scope | tools/play hw:rockchipes8388c 20
+#
+# The buttons, no d-pad (tools/pad sends each as a note). Held, a button
+# turns the knot faster and faster; let go and it slows to a stop
+# where it is.
+#   A   tip it forward (the y-z plane)
+#   B   turn it sideways (the z-x plane)
+#   X   spin it in the screen: the chord shifts out of tune, and comes
+#       back when you let go
+#   Y   the next knot, morphing over a second: trefoil, figure-eight,
+#       cinquefoil, (3, 4), (3, 5), (2, 7), then round again
+
+let f = 55                                       # the beam's laps a second: the chord's root
+
+# The knots: shadow e^(ipφ) scaled by R + r cos qφ, height r sin sφ.
+# s is q for a torus knot; the figure-eight is the same shape with p 3,
+# q 2, s 4 (it is not a torus knot, but it draws as one).
+let ps = [2, 3, 2, 3, 3, 2]
+let qs = [3, 2, 5, 4, 5, 7]
+let ss = [3, 4, 5, 4, 5, 7]
+
+def shadow(k, ph, ps, qs): (1.6 + cos(qs[k] * ph)) * [cos(ps[k] * ph), sin(ps[k] * ph)]
+def height(k, ph, ss): sin(ss[k] * ph)
+
+# Y: the next knot, morphing from the one before.
+$from = 0
+$to = 0
+$mix = 1.0
+$from = if midi_trig(39) > 0 then $to else $from
+$to = if midi_trig(39) > 0 then ($to + 1) mod 6 else $to
+$mix = if midi_trig(39) > 0 then 0 else min($mix + dt, 1)
+let m = $mix * $mix * (3 - 2 * $mix)            # eased
+
+let ph = TAU * phasor(f)
+let xy = shadow($from, ph, ps, qs) * (1 - m) + shadow($to, ph, ps, qs) * m
+let z  = height($from, ph, ss) * (1 - m) + height($to, ph, ss) * m
+
+# How fast each turn goes, radians a second: a held button speeds it
+# up, and let go it slows to a stop. Unheld, the knot drifts.
+def speed(held, top, drift, settle):
+  $w = 0.0
+  $w = $w + dt * (if held > 0 then (top - $w) * 1.5 else (drift - $w) * settle)
+  $w
+
+$tip = 0.0
+$side = 0.0
+$spin = 0.0
+$tip = $tip + speed(midi_note(36), 2.5, 0.05, 0.7) * dt
+$side = $side + speed(midi_note(37), 2.5, 0.08, 0.7) * dt
+$spin = $spin + speed(midi_note(38), TAU * 12, 0, 3) * dt   # up to 12 turns a second, and back fast
+
+# Tip (turn y and z), turn sideways (z and x), then look from in front:
+# nearer is bigger, which shows which way round it is.
+let [x, y] = xy
+let [y1, z1] = rotate([y, z], $tip)
+let [z2, x2] = rotate([z1, x], $side)
+let near = 3 / (4 - z2)
+rotate([x2, y1] * near, $spin) * 0.36
