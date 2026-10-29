@@ -54,7 +54,11 @@ def bell(strike, f, warble):
 
 # The peal: eight steps, three bells, each struck on its own steps.
 let rate = 0.6                                      # strikes a second
-let step = int(phasor(rate / 8) * 8)
+# Which strike of eight: read half a step off, since a strike lands just
+# as the count turns over, and which side of it a sample falls on would
+# otherwise be rounding (at 176.4 kHz it fell the other way and a bell
+# was skipped).
+let step = int(phasor(rate / 8) * 8 + 0.5) mod 8
 let hit  = impulse(rate)
 let width = 0.0003 + (1 - hard) * 0.003             # the strike's length, s
 def strike(at, width): (discharge(at, 1 / width) - discharge(at, 3 / width)) / (width * 2 / 3)   # area 1, rising from nothing
