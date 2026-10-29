@@ -3,8 +3,8 @@
    Hold A, B, X or Y and press the d-pad: up/down moves that button's
    first knob, left/right its second. Knobs are 0..127 and keep their
    value when you let go. A press steps by 6 (about 20 presses across
-   the range); holding the d-pad sweeps, faster the longer it is held
-   (our own repeat: this keyboard sends none). Sent as MIDI CC 20..27 on a virtual ALSA
+   the range); holding the d-pad for 300 ms sweeps, faster the longer it
+   is held (our own repeat: this keyboard sends none). Sent as MIDI CC 20..27 on a virtual ALSA
    sequencer port called "aither-pad"; a patch reads them with
    midi_cc(20) etc.
        A: cc20 up/down  cc21 left/right      B: cc22 cc23
@@ -57,7 +57,9 @@ int main(int argc, char **argv) {
 
     struct pollfd pf[2] = {{fp, POLLIN, 0}, {fk, POLLIN, 0}};
     for (;;) {
-        int r = poll(pf, 2, (held >= 0 && arrow) ? 45 : -1);
+        /* a tap is one step: the sweep waits until the d-pad has been held
+           300 ms, as a keyboard's repeat does (at 45 ms every tap swept too) */
+        int r = poll(pf, 2, (held >= 0 && arrow) ? (ticks == 0 ? 300 : 45) : -1);
         if (r < 0) break;
         struct input_event ev;
         if (r == 0 && held >= 0 && arrow) {         /* d-pad held: sweep */

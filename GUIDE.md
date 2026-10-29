@@ -261,8 +261,9 @@ MIDI knobs on a virtual ALSA port called `aither-pad`; the engine
 connects to it by itself when it is the only MIDI source (otherwise
 `./aither midi connect <client:port>`, the number the tool prints).
 Hold A, B, X or Y and press the d-pad: up/down moves that button's
-first knob, left/right its second. A press steps, holding sweeps,
-and a knob keeps its value when you let go. In a patch they are
+first knob, left/right its second. A tap steps by 6 (of 127), holding
+for 300 ms sweeps, and a knob keeps its value when you let go. In a
+patch they are
 `midi_cc(20)` .. `midi_cc(27)`, each 0..1:
 
 | hold | up / down | left / right |
