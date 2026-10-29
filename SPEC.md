@@ -660,6 +660,7 @@ read as a complex number only by the operations that turn it
 |-----------------|-----------------------------------------------------|
 | `turn(z, w)`    | `z` turned by `w`'s angle and scaled by its size (complex multiplication); turning by a spin adds its speed |
 | `conj(z)`       | the same pair turning the other way                 |
+| `unturn(z, w)`  | `z` turned back by `w`'s angle and divided by its size (complex division); `unturn(turn(z, w), w)` is `z`, and by `[0, 0]` it is `[0, 0]`, as `x / 0` is 0 |
 | `amplitude(z)`  | how big: `sqrt(z0² + z1²)`                          |
 | `phase(z)`      | which way it points, -π..π                          |
 | `analytic(x)`   | a signal as spins: `x` and its Hilbert transform, a quarter turn behind at every frequency |
@@ -855,8 +856,7 @@ per-mode physics state without delegating to a helper def.
 | `cos(x)`        | cosine          |
 | `tan(x)`        | tangent         |
 | `exp(x)`        | e^x             |
-| `log(x)`        | natural log     |
-| `log2(x)`       | log base 2      |
+| `log(x, base)`  | logarithm; `base` defaults to e (natural log): `log(x, 2)` octaves, `20 * log(a, 10)` decibels |
 | `abs(x)`        | absolute value  |
 | `floor(x)`      | floor           |
 | `ceil(x)`       | ceiling         |

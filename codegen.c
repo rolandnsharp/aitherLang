@@ -244,7 +244,7 @@ static Node* mknum(Ctx* c, double v, int line, const char* source) {
   return n;
 }
 
-static const char* const LIBM1[] = {"sin", "cos", "tan", "tanh", "exp", "log", "log2",
+static const char* const LIBM1[] = {"sin", "cos", "tan", "tanh", "exp", "log",
                                     "floor", "ceil", "sqrt", NULL};
 
 /* The two entry points, after every patch's tick1. */
@@ -559,7 +559,7 @@ static const char* const BUILTIN_FNS[] = {
   "amplitude", "phase", NULL};
 
 /* Pair-returning builtins, and the reductions of a pair to a number. */
-static const char* const PAIR_CALLS[] = {"turn", "analytic", "conj", "input", NULL};
+static const char* const PAIR_CALLS[] = {"turn", "unturn", "analytic", "conj", "input", NULL};
 static const char* const PAIR_READERS[] = {"amplitude", "phase", NULL};
 
 /* Whether argument j of a pair builtin (called with n) is a pair. */
@@ -768,7 +768,7 @@ static const char* emit1(Ctx* c, Scope* sc, Node* n, Buf* pre, const char* what)
 static const char* const MIDI_HELD[] = {"midi_cc", "midi_note", "midi_freq", "midi_gate", "midi_vel",
                                         "midi_voice_freq", "midi_voice_gate", "midi_voice_vel",
                                         "midi_voice_key", NULL};
-static const char* const PURE_MATH[] = {"sin", "cos", "tan", "tanh", "exp", "log", "log2",
+static const char* const PURE_MATH[] = {"sin", "cos", "tan", "tanh", "exp", "log",
                                         "floor", "ceil", "sqrt", "pow", "min", "max", "clamp",
                                         "abs", "int", NULL};
 
@@ -1880,7 +1880,7 @@ static const char* const KIND_NAMES[] = {
   "nkVar", "nkLet", "nkDef", "nkAssign", "nkArr", "nkIdx", "nkIdxAssign", "nkBlock",
   "nkPlay", "nkLambda", "nkImport", "nkStr", "nkNamedArg"};
 
-static const char* const HOISTED_MATH[] = {"exp", "log", "log2", "pow", "sin", "cos", "tan", "tanh", "sqrt", NULL};
+static const char* const HOISTED_MATH[] = {"exp", "log", "pow", "sin", "cos", "tan", "tanh", "sqrt", NULL};
 static const char* const MIDI_FNS[] = {"midi_cc", "midi_note", "midi_trig", "midi_freq",
                                        "midi_gate", "midi_voice_freq", "midi_voice_gate",
                                        "midi_voice_vel", "midi_voice_key", "midi_vel", NULL};
@@ -1915,6 +1915,10 @@ static const char* b_fn1(Ctx* c, const char* name, const char** x, int n) { (voi
 static const char* b_abs(Ctx* c, const char* name, const char** x, int n) { (void)n; (void)name; return F(c, "fabs(%s)", x[0]); }
 static const char* b_shape(Ctx* c, const char* name, const char** x, int n) { (void)n; return F(c, "shape_%s(%s)", name, x[0]); }
 static const char* b_pow(Ctx* c, const char* name, const char** x, int n) { (void)n; (void)name; return F(c, "pow(%s, %s)", x[0], x[1]); }
+/* log(x, base): C's exact log2 and log10 for those bases, else the quotient. */
+static const char* b_log2(Ctx* c, const char* name, const char** x, int n) { (void)n; (void)name; return F(c, "log2(%s)", x[0]); }
+static const char* b_log10(Ctx* c, const char* name, const char** x, int n) { (void)n; (void)name; return F(c, "log10(%s)", x[0]); }
+static const char* b_logb(Ctx* c, const char* name, const char** x, int n) { (void)n; (void)name; return F(c, "(log(%s) / log(%s))", x[0], x[1]); }
 static const char* b_minmax(Ctx* c, const char* name, const char** x, int n) {
   const char* acc = x[0];
   for (int i = 1; i < n; i++) acc = F(c, "f%s(%s, %s)", name, acc, x[i]);
@@ -2328,6 +2332,13 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
       return vpair(F(c, "(%s * %s - %s * %s)", a[0], a[2], a[1], a[3]),
                    F(c, "(%s * %s + %s * %s)", a[0], a[3], a[1], a[2]));
     }
+    if (eq(f, "unturn")) {                 /* z turned back by w's angle, divided by its size */
+      const char** a = pair_operands(c, sc, n, pre, 4, "two pairs (or four numbers)");
+      const char* d = fresh(c, "unturn_d");
+      badd(c, pre, "  double %s = %s * %s + %s * %s;\n", d, a[2], a[2], a[3], a[3]);
+      return vpair(F(c, "(%s == 0.0 ? 0.0 : (%s * %s + %s * %s) / %s)", d, a[0], a[2], a[1], a[3], d),
+                   F(c, "(%s == 0.0 ? 0.0 : (%s * %s - %s * %s) / %s)", d, a[1], a[2], a[0], a[3], d));
+    }
     if (eq(f, "conj")) {
       const char** a = pair_operands(c, sc, n, pre, 2, "one pair (or two numbers)");
       return vpair(a[0], F(c, "(-%s)", a[1]));
@@ -2386,6 +2397,15 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
     return map_pure(c, name, a, 1, any, b_shape, pre);
   }
   if (eq(name, "pow") && n->nkids == 2) { V* a = emit_args(c, sc, n, pre, &any); return map_pure(c, name, a, 2, any, b_pow, pre); }
+  if (eq(name, "log2") || eq(name, "log10"))
+    fail(c, "%s is log(x, %s): one log, its base an argument %s", name, eq(name, "log2") ? "2" : "10", err_loc(c, n));
+  if (eq(name, "log") && n->nkids == 2) {
+    double b;
+    int k = const_value(c, sc, n->kids[1], &b);
+    V* a = emit_args(c, sc, n, pre, &any);
+    if (k && b == 2.718281828459045) return map_pure(c, name, a, 1, any, b_fn1, pre);   /* the default: log(x) */
+    return map_pure(c, name, a, 2, any, k && b == 2 ? b_log2 : k && b == 10 ? b_log10 : b_logb, pre);
+  }
   if ((eq(name, "min") || eq(name, "max")) && n->nkids >= 2) {
     V* a = emit_args(c, sc, n, pre, &any);
     return map_pure(c, name, a, n->nkids, any, b_minmax, pre);
@@ -2894,6 +2914,7 @@ static const char* builtin_params_of(const char* name) {
   if (s) return s->params;
   if (eq(name, "phasor")) return "freq";
   if (eq(name, "pow") || eq(name, "min") || eq(name, "max")) return "a,b";
+  if (eq(name, "log")) return "x,base=2.718281828459045";
   if (eq(name, "clamp")) return "x,l,h";
   if (eq(name, "array")) return "n,init=0,every=0";
   return NULL;

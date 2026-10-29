@@ -206,3 +206,18 @@ phase(turn(p, conj(prev(p)))) / (TAU * dt)
 let w = TAU * 1000
 let ring = dho(sin(TAU * phasor(1000)) * 0.5 * 2 * 0.05 * w * w, 1000, 0.05)
 if abs(amplitude(ring) - 0.5) < 0.02 then 1 else 0
+
+# --- unturn undoes turn
+# expect: 0
+let z = [0.3, -0.7]
+let w = [1.7, 0.4]
+let d = unturn(turn(z, w), w) - z
+if amplitude(d) < 1e-12 then 0 else 1
+
+# --- unturn divides: [1, 0] by [0, 2] is [0, -0.5]
+# expect: 0, -0.5
+unturn([1, 0], [0, 2])
+
+# --- unturn by nothing is nothing, as x / 0 is 0
+# expect: 0, 0
+unturn([1, 2], [0, 0])

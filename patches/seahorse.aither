@@ -18,5 +18,5 @@ def rec escape(z, c, n):
   else escape(turn(z, z) + c, c, n - 1)
 
 let e = escape([0, 0], c, 64)
-let smooth = 64 - e[0] + 1 - log2(max(log(e[1]) / 2, 0.0001))
+let smooth = 64 - e[0] + 1 - log(max(log(e[1]) / 2, 0.0001), 2)
 if e[0] == 0 then [0, 0] else rotate([0.9, 0], TAU * smooth / 16)

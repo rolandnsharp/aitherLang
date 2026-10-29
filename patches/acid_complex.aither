@@ -205,7 +205,7 @@ play flute:
   midi_keyboard((freq, gate, vel) =>
     # SCALE LOCK — snap incoming pitch to nearest D-minor pentatonic
     # note. Every key (white or black) lands on a scale tone.
-    let n   = 12 * log2(freq / 440) + 69
+    let n   = 12 * log(freq / 440, 2) + 69
     let oct = floor(n / 12)
     let pc  = n - oct * 12
     let q   = (if pc <= 1     then 0

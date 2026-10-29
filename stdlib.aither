@@ -1,7 +1,7 @@
 # aither stdlib — small composition layer over native primitives.
 #
 # Built into the compiler:
-#   math:      sin cos tan exp log log2 abs floor ceil min max
+#   math:      sin cos tan exp log(x, base) abs floor ceil min max
 #              pow sqrt clamp int
 #   shapes:    saw tri sqr  (also usable as osc shape values)
 #   stateful:  phasor noise

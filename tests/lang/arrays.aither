@@ -213,10 +213,10 @@ osc(sin, 440, every = 2)
 # --- a constant table at a compile-time index is a number, inside maths computed once
 # expect: 2, 2
 let notes = [220.0, 440.0, 880.0]
-def octaves(i): log2(notes[i] / 220) + 0 * t
+def octaves(i): log(notes[i] / 220, 2) + 0 * t
 octaves(2)
 
 # --- the same table, read as it runs
 # expect at 6000: 1
 let notes = [220.0, 440.0, 880.0]
-log2(notes[int(t * 10)] / 220)
+log(notes[int(t * 10)] / 220, 2)

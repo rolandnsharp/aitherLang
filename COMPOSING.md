@@ -764,6 +764,7 @@ its sides where a model needs both: `let [x, q] = dho(...)`.
 | `spin(hz)`               | the unit pair turning at `hz` Hz: `[cos, sin]` of one phase |
 | `turn(z, w)`             | `z` turned by `w`'s angle, scaled by its size (complex multiplication) |
 | `conj(z)`                | the same pair turning the other way                    |
+| `unturn(z, w)`           | `z` turned back by `w`'s angle, divided by its size (complex division: an impedance V / I, a transfer function) |
 | `rotate(z, angle)`       | turned by a fixed angle, in radians                    |
 | `amplitude(z)`           | how big                                                |
 | `phase(z)`               | which way it points                                    |

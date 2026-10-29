@@ -299,3 +299,15 @@ let s = sum(2, n =>
   [a, a * 2])
 let [x, y] = s
 x + y
+
+# --- log takes its base: e by default, 2 and 10 exactly
+# expect: 3.5
+log(exp(1)) * 0.5 + log(8, 2) + log(1000, 10) * 0 + log(81, 3) * 0
+
+# --- log's base can be named, and any base works
+# expect: 6
+log(100, base = 10) + log(81, 3)
+
+# --- log2 is gone: one log, its base an argument
+# error: log2 is log(x, 2)
+log2(8)

@@ -49,6 +49,6 @@ $fall = array(w * h, every = w * h)
 $fall[k] = if y == 0 then amplitude(under) else $fall[k - w]
 let level = $fall[k]
 
-let db = 20 * log(level + 0.0000001) / log(10)
+let db = 20 * log(level + 0.0000001, 10)
 let bright = clamp((db + 72 + midi_cc(20) * 30) / 60, 0, 1)   # -72 dBFS dark, -12 full
-rotate([bright, 0], TAU * log2(bandf(x) / 55))
+rotate([bright, 0], TAU * log(bandf(x) / 55, 2))
