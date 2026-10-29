@@ -1719,6 +1719,13 @@ static void mark_recursion(Ctx* c) {
       Node* def = e->node;
       Node* call = self_call_walk(def->str, def->kids[0]);
       if (!call) continue;
+      Node* body = def->kids[0];
+      if (!def->is_rec && body->kind == nkBlock && body->nkids > 1 &&
+          body->kids[body->nkids - 1] == call && call->line > def->line)
+        fail(c, "%s's body runs on to the call %s: a body is its lets, $state and stores, ended by "
+             "the expression that is its value, and %s's has none before it. End the body with its "
+             "value (after a store, 0 will do), or write def rec %s if it is meant to repeat.",
+             def->str, err_loc(c, call), def->str, def->str);
       if (!def->is_rec)
         fail(c, "%s calls itself %s. Write def rec %s to make it repeat. (A def can't call the "
              "one it replaces: a wrapper needs a name of its own.)", def->str, err_loc(c, call), def->str);

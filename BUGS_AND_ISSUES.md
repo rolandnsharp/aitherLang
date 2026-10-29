@@ -287,6 +287,12 @@ user "another reload" once, not blocking ongoing work.
 
 ## 4b. Arrays are second-class — can't be let-bound or indexed in def bodies
 
+**Resolved (checked 2026-10-29).** The symptom's own example compiles
+and runs: a def holds a table and indexes it (`prime_ratio(3)` is 5).
+`else if` chaining shipped, and COMPOSING no longer offers `wave` as
+the workaround. What is still open for arrays: a def can't return one,
+and a lambda can't take one (notes/fields-2026-10-29.md).
+
 **Symptom**
 
 ```aither

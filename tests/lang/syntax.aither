@@ -340,3 +340,10 @@ log(100, base = 10) + log(81, 3)
 # --- log2 is gone: one log, its base an argument
 # error: log2 is log(x, 2)
 log2(8)
+
+# --- a def whose body is only a store runs on to the next expression
+# error: body runs on to the call
+def poke(a): a[0] = [0.5, 0]
+$z = array(3, [0.1, 0])
+poke($z)
+$z[0][0]
