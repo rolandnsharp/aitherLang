@@ -236,6 +236,13 @@ What survived into the codebase:
   cell (`$bus`) acts as a shared excitation bus; three `dho` voices
   read from it, each filtering out its own resonant frequency. This
   is the "function of state" pattern — no special primitive needed.
+  **Corrected 2026-10-29:** that wasn't sympathy. Only the strike was
+  written into `$bus`, so the "sympathising" voices were each struck by
+  the same hit through their own filters, and deleting the struck voice
+  changed nothing. The patch now couples its strings through a bridge
+  every string moves and every string feels (COMPOSING.md, "Coupling:
+  one sample of shared state"); the untouched strings fall silent when
+  the struck one is left out of it.
 - `patches/al_muqabala.aither` — the cybernetic stabilisation patch,
   which never depended on a substrate convention.
 - The Hilbert-pair primitives (`analytic`, `rotate`, `freq_shift`,

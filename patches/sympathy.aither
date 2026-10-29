@@ -1,73 +1,68 @@
-# sympathy — sympathetic resonance via a shared broadband excitation bus.
+# sympathy: strings that ring because another string moves the bridge.
 #
-# Three voices tuned to A / C# / E. v1 is struck directly with a broadband
-# event (impulse + brief noise burst). v2 and v3 receive NO direct strike;
-# their only input is what they read from `$bus`, a single leaky-integrator
-# state cell that the strike writes into. Each voice is a damped harmonic
-# oscillator (dho) — its bandpass extracts its own frequency from the
-# broadband bus signal, exactly as a real piano string responds to ambient
-# air pressure.
+# Four strings share one bridge. Only the first, A (220 Hz), is struck.
+# The others are never touched: an octave up (440), E (330) and C# (277).
+# Each string is four modes (dhos at 1, 2, 3 and 4 times its pitch); every
+# mode pushes the bridge, and the bridge pushes every mode back, a sample
+# later. That one sample of state, $board, is the whole coupling: a
+# feedback loop needs one sample of memory, and nothing else here is
+# stored.
 #
-# This is the pattern: a shared state cell as an excitation bus. There is
-# nothing special about the bus — it's a normal state variable holding a
-# leaky-integrated drive signal. Any voice reading it gets a copy of the
-# broadband content, decayed.
+# The physics then decides who sympathises, and with what. A string rings
+# where its partials meet the struck string's. Measured 2.5 to 4 s after a
+# strike: the octave rings on the A's own partials (440 Hz, the loudest);
+# E on the 660 Hz they share (E's 2nd, A's 3rd), 32 dB under the octave,
+# its own 330 Hz 53 dB under; C# only with the strike's onset, dying away
+# (30 dB under). Together they sound 27 dB under the struck A, raised 12
+# dB in the mix. Strike a different string and the sympathy changes with
+# it: that's a sitar's sympathetic strings, or a piano with its dampers up.
 #
-# DIAGNOSTIC
-#   master = coupled - monopole, where monopole = an isolated copy of v1
-#   with the same input. Subtracting cancels v1, so the audit spectrum
-#   reads what v2 and v3 contributed — the sympathy itself.
+# Until 2026-10-29 this patch wrote only the strike into a shared bus that
+# the strings read: no string's motion reached any other, so the "sympathy"
+# was each string struck by the same hit through its own filter, and
+# deleting the first string changed nothing. Here the first string is the
+# only source the others have.
 #
-# FALSIFICATION CHECK
-#   Set v2v3Couple = 0.0 — v2 and v3 then receive zero force. If 277/330
-#   peaks vanish from the diff signal, the bus IS doing real work. If they
-#   persist, the strike is leaking through v1 alone and there is no
-#   sympathy. (Verified: peaks drop to numerical zero with v2v3Couple = 0.)
+# FALSIFICATION
+#   couple = 0: the bridge carries nothing, and the three untouched strings
+#   are silent (the `sympathetic` part reads -inf in the audit). And with
+#   couple at 1, leave the struck string out of the bridge
+#   ($board = mono(sympathetic)) and they are silent too: they ring only
+#   from the A. Both checked, 2026-10-29: exactly 0. Stable: every strike's
+#   cycle measures the same over 40 s.
 #
-# AUDIT (default: master = coupled - monopole — diff isolates v2/v3)
-#   ./aither audit patches/sympathy.aither 4.0
-#     1.  330.0 Hz   0.0 dB    ← E (v3, sympathising)
-#     2.  278.0 Hz  -2.5 dB    ← C# (v2, sympathising)
-#     5.  329.4 Hz  -7.5 dB
-#     220 Hz absent (v1 cancelled by monopole)
-#
-# FULL-MIX (swap master to `coupledTotal`)
-#     1.  220.0 Hz   0.0 dB    ← A (v1, struck)
-#     2.  330.0 Hz -12.6 dB    ← E (v3, sympathy)
-#     3.  278.0 Hz -14.9 dB    ← C# (v2, sympathy)
-#   Sympathy peaks ~13-15 dB below the struck note — louder than piano
-#   sympathy (30-40 dB down), comparable to a sympathetic-string ensemble.
+#   ./aither audit patches/sympathy.aither 4     the part table: struck, then sympathetic
+#   ./aither patches/sympathy.aither | tools/play hw:rockchipes8388c 20
 
-$bus = 0.0
+$board = 0.0                                    # the bridge, as the strings moved it last sample
 
-let driveAmp      = 10000000.0
-let burstAmp      = 1000000.0
-let useNoiseBurst = 1.0
-let burstDecaySec = 0.03
-let busWrite      = 0.1
-let busDecay      = 0.95
-let coupling      = 1.0
-let v2v3Couple    = 1.0   # set to 0.0 for the falsification check
-let damping       = 0.001
+let couple = 1.0                                # how hard the bridge and the strings push each other
+let damp   = 0.0005                             # a string's: about a second and a half to die at 220 Hz
 
-play coupled:
-  let trig    = impulse(2)
-  let burst   = pluck(trig, burstDecaySec)
-  let strike  = trig * driveAmp + noise() * burst * burstAmp * useNoiseBurst
-  $bus        = $bus * busDecay + strike * busWrite
+# A mallet's push: a short swell of area 1 (COMPOSING, "Strike what you
+# play whole with a short push").
+def push(trig): (discharge(trig, 1 / 0.001) - discharge(trig, 1 / 0.0003)) / 0.0007
 
-  let bRead = $bus * coupling
+# A string's mode n: struck in proportion to 1/n, pushed by the bridge.
+# Returns the mode's position.
+def mode(strike, board, f, n, damp):
+  let w = TAU * f * n
+  dho(strike * w * 0.3 / n + board, f * n, damp)[0]
 
-  let v1 = dho(trig * driveAmp + bRead,        220.0,  damping)[0]
-  let v2 = dho(           bRead * v2v3Couple,  277.18, damping)[0]
-  let v3 = dho(           bRead * v2v3Couple,  329.63, damping)[0]
+$started = 0.0                                  # strike at once when sent, then every 4 s
+let hit   = push(impulse(0.25) + 1 - $started)
+$started = 1.0
+let bridge = $board * couple * 15000
 
-  # monopole control — same input as v1, separate state slot
-  let mv1 = dho(trig * driveAmp + bRead, 220.0, damping)[0]
+play struck:
+  sum(4, n => mode(hit, bridge, 220, n, damp))
 
-  let coupledTotal  = (v1 + v2 + v3) * 0.15
-  let monopoleTotal = mv1 * 0.15
-  let s = coupledTotal - monopoleTotal
-  [s, s]
+play sympathetic:
+  sum(4, n => mode(0, bridge, 440, n, damp)) +
+  sum(4, n => mode(0, bridge, 329.63, n, damp)) +
+  sum(4, n => mode(0, bridge, 277.18, n, damp))
 
-coupled
+# What every mode did to the bridge this sample, felt by them all at the next.
+$board = mono(struck) + mono(sympathetic)
+
+(struck + sympathetic * 4) * 0.25 |> reverb(1.6, 0.15)

@@ -707,51 +707,49 @@ With `k` 0 they beat at 3 Hz; at 0.03 they pull at each other and
 wobble; at 0.1 they sound one pitch, 221.7 Hz, between the two. Let
 `k` follow a knob and the beating slows and stops under your hand.
 
-## Shared state as an excitation bus
+## Coupling: one sample of shared state
 
-A single file-level state cell is a coupling primitive. Write a
-broadband drive into it; let several voices read from it; each
-voice's own resonance picks out its own component. This is how
-real piano sympathy works (one string's vibration drives the air,
-other strings' bandpasses respond) and there is no special
-machinery needed to build it in aither — a one-line leaky
-integrator carries the bus signal, and each `dho` filters out its
-own frequency.
+Voices that should move each other share a state cell, and both read and
+write it. The cell holds what they did last sample; that one sample of
+memory is all any feedback loop needs, and it is the only thing stored.
+
+Sympathetic strings are the example. Strings share a bridge: every
+string moves it, and the bridge pushes every string back.
 
 ```
-$bus = 0.0
-
-play coupled:
-  let trig    = impulse(2)
-  let burst   = pluck(trig, 0.03)
-  let strike  = trig * 1e7 + noise() * burst * 1e6
-  $bus        = $bus * 0.95 + strike * 0.1
-
-  let drive = $bus * 1.0
-  let push = (discharge(trig, 1 / 0.001) - discharge(trig, 1 / 0.0003)) / 0.0007   # rises, then dies
-  let v1 = dho(push * 1400 + drive, 220.0,  0.001)   # struck
-  let v2 = dho(            drive,  277.18, 0.001)   # sympathising
-  let v3 = dho(            drive,  329.63, 0.001)   # sympathising
-  (v1 + v2 + v3) * 0.15      # three phasors, played whole: a little wide
+$board = 0.0                                     # the bridge, as the strings moved it last sample
+let bridge = $board * 15000
+play struck:                                      # the one string that is played
+  sum(4, n => mode(hit, bridge, 220, n, damp))
+play sympathetic:                                 # never touched: driven by the bridge alone
+  sum(4, n => mode(0, bridge, 440, n, damp)) + sum(4, n => mode(0, bridge, 329.63, n, damp))
+$board = mono(struck) + mono(sympathetic)         # what every string did to it, felt by all next sample
 ```
 
-The shape: a leaky-integrator bus (`$bus = $bus * decay + drive *
-gain`) acts as a dimensionless coupling medium — no spatial extent,
-no frequency response of its own. The voices subscribe to it. The
-bus's broadband content (an impulse + brief noise burst is enough)
-seeds every voice's bandpass simultaneously. `patches/sympathy.
-aither` is the worked example with falsification check and audit
-results.
+(`mode` is one dho: a string's nth mode, struck or pushed by the bridge.)
+Now the untouched strings ring only because the struck one moves the
+bridge, and the physics decides where: a string sympathises on the
+partials it shares with the struck one. In `patches/sympathy.aither`
+the octave rings loudest (on the A's own partials), E only on the
+660 Hz they share, 32 dB under it, and C# barely. Strike another string
+and the sympathy follows. The test that it is coupling: leave the struck
+string out of the bridge, and the others are silent.
 
-This pattern generalises beyond resonators: any time several voices
-should respond to one shared "ambient" signal — a struck-tongue
-drum exciting a body resonator, a sidechain envelope shared across
-a layer, multiple FM operators reading a common modulator — a
-shared `$bus` cell is the right shape.
+A feedback loop has a gain, so keep it under 1 at every mode's
+resonance (a mode driven at its own frequency swings by
+`force / (2 damp w²)`): too much coupling and the strings feed each
+other without bound, and the runaway guard steps in. `sympathy`'s
+15000 is measured stable over 40 s.
 
-What you do **not** need: special primitives, "field" types, or
-any engine support. It is ordinary `$state` with a leaky integrator.
-The pattern is what's named, not the cell.
+**A shared drive is not coupling.** One signal that several voices
+read, written by nobody they make (a strike every string hears, a
+sidechain envelope, a common modulator), is just a `let`: it is a
+function of its source, and no `$` is needed. Until 2026-10-29 this
+section and `sympathy.aither` wrote only the strike into a `$bus` the
+strings read, and called that sympathy; deleting the struck string
+changed nothing, because no string's motion reached another. The
+difference is who writes: a cell is a medium only when the voices write
+back into it.
 
 ## Pair operations — turning
 
