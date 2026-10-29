@@ -36,7 +36,8 @@
 #   B left/right  clapsticks on your pops
 #   X up/down     room
 #   X left/right  colour: the bright digital didge toward the physical one
-#   Y up/down     your formants (0) toward didge_wow's oo-ah (1)
+#   Y up/down     the bore: didge3 (0), then the flared bore, its bell
+#                 widening from 1.5 to 3.5 times the mouthpiece
 #   Y left/right  vowel depth: how far the didge's mouth exaggerates yours
 #
 # The speaker reaches the mic too, and the didge could play itself; keep
@@ -139,6 +140,62 @@ def didge3(mouth, voiceP, lipF, f0, ft1, ft2, zt, modeAmt, turb):
   $pm = clamp(-lp1(back, 358.42) * 0.93, -20, 20)
   hp1(back, 408.62) + hp1(pM, 23.911) * 0.08 * modeAmt
 
+# didge_flare: didge3's lips and player's tract, into a bore that widens.
+# - Bore: eight sections, mouthpiece to bell, each a delay each way, and
+#   where two meet, the wider one reflects part of each wave back
+#   (Kelly-Lochbaum, as in lib/tube.aither). The radius grows as the cube
+#   of the way along, so most of the flare is near the bell.
+# - The flare is what puts a didge's resonances off the odd harmonics
+#   (Tarnopolsky et al., JASA 2006, https://doi.org/10.1121/1.2146089;
+#   Wolfe and Smith's review, JASA 2023, https://doi.org/10.1121/10.0023207).
+#   A bell 1.5 times the mouthpiece's radius puts them at 2.65 and 4.34 x
+#   f0, the two modes didge3 adds by hand; wider, they move toward
+#   harmonic (3 times: 2.14, 3.40) and the upper ones weaken.
+# - A wider bore at the bell sounds higher, so the bore is lengthened to
+#   stay at f0: by 1.20 at 1.5 times, 1.48 at 3 (this bore's impedance
+#   worked out offline, the lips' pull on the pitch measured, fitted).
+# - Bell: an open end, reflecting the wave inverted below where it
+#   radiates (1500 Hz over its width) and letting the rest out.
+def didge_flare(mouth, voiceP, lipF, f0, ft1, ft2, zt, wide, turb):
+  $dp = 0.0
+  $lx = 0.0
+  $lv = 0.0
+  $u  = 0.0
+  let uS = lp1($u, 408.62)
+  let pT = lp1(sum(2, j =>
+    let fj = if j == 1 then ft1 else ft2
+    let zj = if j == 1 then 0.09 else 0.07
+    let [mx, mq] = dho(uS, fj, zj)
+    let mv = -(TAU * fj * sqrt(1 - zj * zj) * mq + zj * TAU * fj * mx)   # its velocity (see didge3)
+    zt * 2 * zj * TAU * fj * mv), 493.04)
+  let wl = TAU * lipF
+  $lv = clamp($lv + (-2 * 0.1 * wl * $lv - wl * wl * $lx + $dp * 0.6 * wl * wl) * dt, -3000, 3000)
+  $lx = clamp($lx + $lv * dt, -2, 3)
+  let a = clamp($lx - 0.4, 0.0, 1.0)
+  let br = lp1(lp1(noise(), 459.16), 459.16)
+  $u  = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp)) * (1 + br * turb)
+  let s = array(8)                                  # each section's area
+  each(8, j => s[j] = pow(1 + (wide - 1) * pow((j + 0.5) / 8, 3), 2))
+  let x = wide - 1.5
+  let hop = (1.1959 + 0.2639 * x - 0.0518 * x * x) / (4 * f0 * 8) - dt   # one section's travel
+  $f = array(8)                                     # waves leaving each section's near end
+  $b = array(8)                                     # waves leaving its far end, back
+  let ff = array(8)                                 # what reaches the far end
+  let bb = array(8)                                 # what reaches the near end
+  each(8, j =>
+    ff[j] = delay($f[j], hop, 0.01)
+    bb[j] = delay($b[j], hop, 0.01))
+  let pplus = $u * 0.8 + bb[0]                      # the lips' end is closed: back comes back
+  let p = pplus + bb[0]
+  each(7, j =>
+    let k = (s[j] - s[j + 1]) / (s[j] + s[j + 1])
+    $f[j + 1] = clamp(((1 + k) * ff[j] - k * bb[j + 1]) * 0.997, -20, 20)
+    $b[j]     = clamp((k * ff[j] + (1 - k) * bb[j + 1]) * 0.997, -20, 20))
+  $f[0] = pplus
+  $b[7] = -lp1(ff[7], 1500 / wide) * 0.98
+  $dp = clamp(lp1(mouth * (1 + voiceP) - pT - p, 840.34), -4, 4)
+  hp1(ff[7], 408.62) * 1.37 * sqrt(wide)           # as loud as didge3
+
 # ------------------------------------------------------------- the mouth
 # A band's loudness is the length of a dho the mic drives (listen.aither,
 # PHASORS.md section 4): unity gain at its frequency, no rectifying.
@@ -179,14 +236,11 @@ $jaw = 500.0                            # F1: how open
 $tongue = 1500.0                        # F2: where the tongue is
 $jaw = if g > 0.3 then f1now else $jaw
 $tongue = if g > 0.3 then f2now else $tongue
-let yours = 1 - midi_cc(26)             # 1 your formants, 0 didge_wow's oo-ah
 # Exaggerated about the middle of each range, as far as the depth says,
 # so ee, oo and ah land far apart in the didge's mouth.
 let depth = 2 + midi_cc(27) * 1.5
-let f1x = clamp(480 * pow(slew($jaw, 0.03) / 480, depth), 220, 1000)
-let f2x = clamp(1500 * pow(slew($tongue, 0.03) / 1500, depth), 700, 2900)
-let f1 = f1x * yours + (320 + open * 420) * (1 - yours)
-let f2 = f2x * yours + (850 + open * 350) * (1 - yours)
+let f1 = clamp(480 * pow(slew($jaw, 0.03) / 480, depth), 220, 1000)
+let f2 = clamp(1500 * pow(slew($tongue, 0.03) / 1500, depth), 700, 2900)
 
 # Pops: the voice jumping well above where it just was. A fast and a slow
 # follower; a pop is the fast one leaping past twice the slow one, and it
@@ -218,7 +272,10 @@ let blend = (0.5 - midi_cc(25) * 0.45) * (1 - toot * 0.6)   # the digital didge 
 play didge:
   # Trumpeting: the lips tighten to the second resonance and the bore
   # speaks there, its modes louder.
-  let d3 = didge3(press * 1.6, voiceIn, 58.6 * horn * key, 71.6 * horn * key, 300 + vWah * 480, 950 + vTap * 1500, 1.5, 0.4 + toot * 0.8, 0.8)
+  let bore = midi_cc(26)
+  let d3 = if bore > 0
+    then didge_flare(press * 1.6, voiceIn, 58.6 * horn * key, 71.6 * horn * key, 300 + vWah * 480, 950 + vTap * 1500, 1.5, 1.5 + bore * 2, 0.8)
+    else didge3(press * 1.6, voiceIn, 58.6 * horn * key, 71.6 * horn * key, 300 + vWah * 480, 950 + vTap * 1500, 1.5, 0.4 + toot * 0.8, 0.8)
   let d1 = didge_bore(press * (1 + voiceIn), 60 * horn * key, 0.1, 73.4 * horn * key)
   let d = d3 * cos(blend * PI / 2) + d1 * 1.26 * sin(blend * PI / 2)
   # Your formants shape the sound here, at the mouth, not inside the
