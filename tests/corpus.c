@@ -12,6 +12,11 @@
  *   150 s      a fresh voice started with its clock at 150 s, the C-E-G
  *              chord held, for 0.5 s: timeline pieces whose sections
  *              fade in on `t` (cathedral's bells, rhythm, lead) are heard
+ * and with a voice on input() throughout, so patches that listen are
+ * heard too (test_voice below): on the left side only, so a patch that
+ * reads the left, the two sides' difference (the uConsole's headset mic)
+ * or their mono sum all hear it. Patches that don't call input() never
+ * read it.
  * All on TCC (AITHER_OPT=0): no compile wait, and the same bits as the
  * cc -O2 build (tests/exact). Switching heavy patches to cc was
  * tried and was slower: on the A53s a cc compile costs a minute or more
@@ -155,6 +160,31 @@ static char* error_line(const char* msg) {
   return o;
 }
 
+/* The voice every render hears on input(), from its window's own clock: a
+ * 110 Hz voice of 30 harmonics singing "wow", its two formants gliding
+ * from oo (300, 870 Hz) to ah (750, 1200 Hz) and back once a second, with
+ * a pop (a 3 ms burst three times as loud) every half second. Peak about
+ * 0.2. Deterministic: the same samples on every machine. */
+static void test_voice(double t0, double seconds, int sr, double** l, double** r, long* n) {
+  *n = (long)(seconds * sr + 0.5);
+  *l = malloc(sizeof(double) * *n);
+  *r = malloc(sizeof(double) * *n);
+  for (long i = 0; i < *n; i++) {
+    double t = t0 + (double)i / sr;
+    double m = (1 - cos(2 * M_PI * t)) * 0.5;
+    double f1 = 300 + 450 * m, f2 = 870 + 330 * m, x = 0;
+    for (int k = 1; k <= 30; k++) {
+      double f = 110.0 * k;
+      double g = exp(-pow((f - f1) / 120, 2)) + 0.5 * exp(-pow((f - f2) / 160, 2)) + 0.05;
+      x += g / k * sin(2 * M_PI * f * t);
+    }
+    double since = fmod(t, 0.5);
+    x *= 0.08 * (1 + 2 * exp(-since / 0.003));
+    (*l)[i] = x;
+    (*r)[i] = 0;
+  }
+}
+
 static char* fingerprint(const char* path) {
   static const int ceg[3] = {60, 64, 67}, fac[3] = {65, 69, 72};
   char err[4096];
@@ -162,6 +192,11 @@ static char* fingerprint(const char* path) {
   int nw = 0;
   Voice *v = NULL, *late = NULL;
   char* out = NULL;
+  double* in[3][2];
+  long nin[3];
+  test_voice(0.0, 0.5, 48000, &in[0][0], &in[0][1], &nin[0]);
+  test_voice(0.5, 1.0, 48000, &in[1][0], &in[1][1], &nin[1]);
+  test_voice(LATE, 0.5, 48000, &in[2][0], &in[2][1], &nin[2]);
   knobs_half();
   char* src = slurp(path);
   if (!src) {
@@ -170,16 +205,16 @@ static char* fingerprint(const char* path) {
   }
   chord(ceg, 100);
   if (!(v = loaded(src, path, err, sizeof err))) goto fail;
-  if (render_voice(v, 0.5, 48000, NULL, NULL, 0, 0, 0.0, 1, &w[nw], err, sizeof err)) goto fail;
+  if (render_voice(v, 0.5, 48000, in[0][0], in[0][1], nin[0], 0, 0.0, 1, &w[nw], err, sizeof err)) goto fail;
   nw++;
   for (int i = 0; i < 3; i++) midi_note_off(ceg[i]);
   chord(fac, 50);
-  if (render_voice(v, 1.0, 48000, NULL, NULL, 0, 0, 0.5, 1, &w[nw], err, sizeof err)) goto fail;
+  if (render_voice(v, 1.0, 48000, in[1][0], in[1][1], nin[1], 0, 0.5, 1, &w[nw], err, sizeof err)) goto fail;
   nw++;
   knobs_half();
   chord(ceg, 100);
   if (!(late = loaded(src, path, err, sizeof err))) goto fail;
-  if (render_voice(late, 0.5, 48000, NULL, NULL, 0, 0, LATE, 1, &w[nw], err, sizeof err)) goto fail;
+  if (render_voice(late, 0.5, 48000, in[2][0], in[2][1], nin[2], 0, LATE, 1, &w[nw], err, sizeof err)) goto fail;
   nw++;
   uint64_t h = 0xcbf29ce484222325ull;          /* FNV-1a over the samples' bits */
   double sum = 0, peak = 0;
@@ -205,6 +240,7 @@ fail:
   out = error_line(err);
 done:
   for (int k = 0; k < nw; k++) rendered_free(&w[k]);
+  for (int k = 0; k < 3; k++) free(in[k][0]), free(in[k][1]);
   if (v) voice_dispose(v);
   if (late) voice_dispose(late);
   free(src);
