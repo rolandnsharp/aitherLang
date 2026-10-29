@@ -1,0 +1,54 @@
+# waterfall: what the mic (or the music) holds, frequency across and time
+# down, drawn by tv. A spectrogram, made the way a cochlea makes one: 64
+# tuned circuits from 50 Hz to 10 kHz, eight to the octave, each a dho the
+# sound drives, its loudness the length of its phasor (listen.aither,
+# PHASORS.md section 4). Each frame the newest spectrum enters at the top
+# and the older ones move down a row, so a held note is a vertical line,
+# a glide a slanting one, a pop a bright row.
+#
+# Brightness is loudness in decibels; colour is pitch class, a band's
+# place in the octave, so every A is the same hue (as in demos/plate) and
+# a voice's harmonics show their octaves in one colour.
+#
+#   the mic:   arecord -D plughw:1 -f FLOAT_LE -c 2 -r 44100 -q | ./aither patches/waterfall.aither | tools/tv --size 64x36 --smooth > /dev/null
+#   a patch:   ./aither patches/didge_sticks.aither | tools/play hw:rockchipes8388c 20 |
+#                AITHER_SOCK=/tmp/aither-picture.sock ./aither patches/waterfall.aither | tools/tv --size 64x36 --smooth
+#   your didge: tools/card -- ./aither patches/didge_wow.aither |
+#                AITHER_SOCK=/tmp/aither-picture.sock ./aither patches/waterfall.aither | tools/tv --size 64x36 --smooth
+#
+# At 44.1 kHz a 64x36 picture is 19 frames a second, 1.9 s of history.
+# The left side of the input is read: the music's left, or the headset
+# mic's voice (the right is its inverse). Gamepad A up/down (cc 20):
+# sensitivity, up to 30 dB more.
+
+let w = 64
+let h = 36
+let k = pixel_index(w, h)
+let x = k mod w
+let y = int(k / w)
+
+# A band: a dho the sound drives, scaled to unity gain at its frequency,
+# returned as its phasor, whole. All 64 turn every sample; only the one
+# under the pixel being drawn is measured (its length), so 63 of 64 square
+# roots a sample are skipped.
+def band(signal, f, damp):
+  let wf = TAU * f
+  dho(signal * 2 * damp * wf * wf, f, damp)
+
+def bandf(i): 50 * pow(2, i / 8)               # 50 Hz, then eight bands to the octave: up to 11.7 kHz
+
+let [heard, _] = input()                         # one side: the music's left, or the headset mic's voice
+let sound = hp1(heard, 30)                       # the es8388 starts at a big DC offset
+let under = sum(64, n =>                         # the phasor of the band in this pixel's column
+  let p = band(sound, 50 * pow(2, (n - 1) / 8), 0.04)   # bandf written out: a def's result isn't hoisted yet
+  if x == n - 1 then p else 0)
+
+# The picture's memory: row 0 is this frame's spectrum, row y last
+# frame's row y - 1. Stepped once a frame, so every row moves together.
+$fall = array(w * h, every = w * h)
+$fall[k] = if y == 0 then amplitude(under) else $fall[k - w]
+let level = $fall[k]
+
+let db = 20 * log(level + 0.0000001) / log(10)
+let bright = clamp((db + 72 + midi_cc(20) * 30) / 60, 0, 1)   # -72 dBFS dark, -12 full
+rotate([bright, 0], TAU * log2(bandf(x) / 55))
