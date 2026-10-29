@@ -67,6 +67,13 @@ int main(int argc, char **argv) {
         (step = "buffer", err = snd_pcm_hw_params_set_buffer_size_near(pcm, hw, &buffer)) >= 0)
         step = "hw_params", err = snd_pcm_hw_params(pcm, hw);
     if (err < 0) { fprintf(stderr, "play: %s on %s: %s\n", step, dev, snd_strerror(err)); return 1; }
+    /* Start the card only once the buffer is full, as aplay does: started
+       on the first small write, the es8388 clicked as it began. */
+    snd_pcm_sw_params_t *sw;
+    snd_pcm_sw_params_alloca(&sw);
+    snd_pcm_sw_params_current(pcm, sw);
+    snd_pcm_sw_params_set_start_threshold(pcm, sw, buffer);
+    if ((err = snd_pcm_sw_params(pcm, sw)) < 0) { fprintf(stderr, "play: sw_params on %s: %s\n", dev, snd_strerror(err)); return 1; }
     if (r != rate) fprintf(stderr, "play: %s plays %u Hz, not %u: use plughw: or set AITHER_RATE\n", dev, r, rate);
     struct sigaction sa = {0};
     sa.sa_handler = on_int;                        /* no SA_RESTART: a read in progress returns */
