@@ -3,6 +3,7 @@
  * a region is sequenced into its own statement: the C written for a
  * patch is the same on every build. */
 
+#include <math.h>
 #include <setjmp.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -472,6 +473,16 @@ static int const_value(Ctx* c, Scope* sc, Node* n, double* v) {
     if (eq(n->str, "-")) { *v = a - b; return 1; }
     if (eq(n->str, "*")) { *v = a * b; return 1; }
     if (eq(n->str, "/")) { if (b != 0.0) { *v = a / b; return 1; } return 0; }
+    /* as emit_binop computes them */
+    if (eq(n->str, "mod")) { *v = b == 0.0 ? 0.0 : a - floor(a / b) * b; return 1; }
+    if (eq(n->str, "==")) { *v = a == b; return 1; }
+    if (eq(n->str, "!=")) { *v = a != b; return 1; }
+    if (eq(n->str, "<")) { *v = a < b; return 1; }
+    if (eq(n->str, ">")) { *v = a > b; return 1; }
+    if (eq(n->str, "<=")) { *v = a <= b; return 1; }
+    if (eq(n->str, ">=")) { *v = a >= b; return 1; }
+    if (eq(n->str, "and")) { *v = (a != 0.0) & (b != 0.0); return 1; }
+    if (eq(n->str, "or")) { *v = (a != 0.0) | (b != 0.0); return 1; }
     return 0;
   }
   case nkUnary:
@@ -2122,6 +2133,9 @@ static V emit_ident(Ctx* c, Scope* sc, Node* n) {
 /* An `if`: only the branch taken runs. Plain values pick with `?:`;
  * a branch with statements becomes a real branch. */
 static V emit_if(Ctx* c, Scope* sc, Node* n, Buf* pre) {
+  double known;           /* a condition known now: only the branch taken is there */
+  if (const_value(c, sc, n->kids[0], &known))
+    return known != 0.0 ? emit(c, sc, n->kids[1], pre) : n->kids[2] ? emit(c, sc, n->kids[2], pre) : mono("0.0");
   const char* cond = emit1(c, sc, n->kids[0], pre, "the condition");
   Buf pt = {0}, pe = {0};
   V t = emit(c, sc, n->kids[1], &pt);
@@ -2217,6 +2231,14 @@ static V emit(Ctx* c, Scope* sc, Node* n, Buf* pre) {
     Node* i = n->kids[1];
     if (a->kind == nkIdent) {
       Ent* sa = lookup_sarray(c, sc, a->str);
+      double kv;
+      if (sa && const_value(c, sc, i, &kv)) {   /* an index known now: the element, or 0 past the ends */
+        long k = (long)kv;
+        if (k < 0 || k >= sa->n) return sa->pairs ? vpair("0.0", "0.0") : mono("0.0");
+        if (sa->pairs)
+          return vpair(F(c, "s->pool[%s + %ld]", sa->a, 1 + 2 * k), F(c, "s->pool[%s + %ld]", sa->a, 2 + 2 * k));
+        return mono(F(c, "s->pool[%s + %ld]", sa->a, 1 + k));
+      }
       if (sa) {
         const char* ix = emit1(c, sc, i, pre, "an index");
         const char* t = fresh(c, "ix");
@@ -2228,6 +2250,12 @@ static V emit(Ctx* c, Scope* sc, Node* n, Buf* pre) {
       }
       Ent* la = lookup_larray(c, sc, a->str);
       Ent* found = la ? la : lookup_array(c, sc, a->str);
+      if (found && found->n > 0 && const_value(c, sc, i, &kv)) {
+        long k = (long)kv % found->n;
+        if (k < 0) k += found->n;
+        if (found->pairs) return vpair(F(c, "%s[%ld]", found->a, 2 * k), F(c, "%s[%ld]", found->a, 2 * k + 1));
+        return mono(F(c, "%s[%ld]", found->a, k));
+      }
       if (found) {     /* local arrays and tables wrap round, as a table should */
         const char* ix = emit1(c, sc, i, pre, "an index");
         const char* t = fresh(c, "ix");
