@@ -59,13 +59,13 @@ play spring:
   $x * 0.5
 
 play bar:
-  dho(impulse(beat / 4) * 40000000, 660, 0.002)[0]
+  dho(impulse(beat / 4) / dt * 833, 660, 0.002)[0]
 
 play marimba:
   let notes = [440, 523, 587, 659, 784, 659, 587, 523]
   let idx   = int(phasor(beat * 2 / 8) * 8)
   let f     = notes[idx]
-  dho(impulse(beat * 2) * 40000 * f, f, 0.006)[0] * 1.5
+  dho(impulse(beat * 2) / dt * 0.833 * f, f, 0.006)[0] * 1.5
 
 spring + bar + marimba
 

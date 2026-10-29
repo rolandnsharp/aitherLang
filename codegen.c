@@ -1978,7 +1978,9 @@ static const char* emit_phasor(Ctx* c, Scope* sc, Node* freq_node, const char* f
 
 /* noise(): xorshift32 in a slot, seeded from where the call is (its
  * statement, its defs, which noise() there), so each call site is its
- * own stream, the same on every run. */
+ * own stream, the same on every run. It is white noise with a fixed
+ * level per Hz, the level ±1 uniform noise has at 48 kHz, so what is
+ * heard is the same at any rate: its samples scale by sqrt(sr / 48000). */
 static const char* emit_noise(Ctx* c, Buf* pre) {
   const char* slot = fresh(c, "nz");
   const char* off = register_region(c, "noise", 1, NULL);
@@ -1991,12 +1993,14 @@ static const char* emit_noise(Ctx* c, Buf* pre) {
   badd(c, pre, "  double %s; { long %s = %s; unsigned int r = (unsigned int)s->pool[%s]; if (r == 0) r = %uu; "
        "r ^= r << 13; r ^= r >> 17; r ^= r << 5; s->pool[%s] = (double)r; "
        "%s = ((double)r / 4294967295.0) * 2.0 - 1.0; }\n", t, slot, off, slot, seed, slot, t);
-  return t;
+  const char* per_hz = c->hoist_on && !c->in_hoist ? hoist(c, "sqrt(s->sr / 48000.0)") : "sqrt(s->sr / 48000.0)";
+  return F(c, "(%s * %s)", t, per_hz);
 }
 
 /* The slots one call site of a native claims. */
 static long native_slot_size(Ctx* c, const char* name, Node** kids) {
   const NativeSpec* spec = native(name);
+  if (eq(name, "reverb")) return dsp_reverb_slots(c->sr);   /* its room is in seconds */
   if (spec->buf_arg < 0) return spec->slots;
   Node* a = kids[spec->buf_arg];
   if (a->kind != nkNum) {
@@ -2643,7 +2647,7 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
     return per_side(c, sc, n, a, a[0].pair, s_lp1_c, pre, &h);
   }
   if (c->hoist_on && eq(name, "reverb") && n->nkids == 3 && is_invariant(c, sc, n->kids[1])) {
-    Hoisted h = {hoist_arr(c, 4, F(c, "n_reverb_coef(%s, s->sr, $H)", emit_invariant(c, sc, n->kids[1])))};
+    Hoisted h = {hoist_arr(c, 5, F(c, "n_reverb_coef(%s, s->sr, $H)", emit_invariant(c, sc, n->kids[1])))};
     V* a = emit_args(c, sc, n, pre, &any);
     return per_side(c, sc, n, a, a[0].pair || a[2].pair, s_reverb_c, pre, &h);
   }

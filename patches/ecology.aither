@@ -33,7 +33,7 @@ play wind:
 # at `rate` per second. Each insect is its own call site, so its own
 # clock, noise and envelope.
 def insect(n, rate):
-  let hit  = if noise() > 1 - 2 * rate / sr then 1 else 0
+  let hit  = if noise() * sqrt(48000 * dt) > 1 - 2 * rate / sr then 1 else 0   # noise() as a die in -1..1 (its level is per Hz)
   let env  = discharge(hit, 9)
   let buzz = 0.5 + 0.5 * sqr(TAU * phasor(19 + 6 * n))
   let tone = sin(TAU * phasor(3100 + 650 * n + 400 * env))
@@ -76,7 +76,7 @@ play frogs:
 # A call every so often: a sine that sweeps up and trills, under a
 # bump-shaped envelope. Four birds, two each side.
 def bird(n, rate):
-  let hit   = if noise() > 1 - 2 * rate / sr then 1 else 0
+  let hit   = if noise() * sqrt(48000 * dt) > 1 - 2 * rate / sr then 1 else 0
   let env   = discharge(hit, 2.5)
   let shape = env * (1 - env) * 4
   let trill = sin(TAU * phasor(11 + 3 * n)) * 250 * env

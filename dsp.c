@@ -237,31 +237,41 @@ double n_tape(DspState* s, double sig, double on, double w, double r, double max
 }
 
 /* ------------------------------------------------------------------ reverb
- * Schroeder: 4 parallel comb filters into 2 series allpass. */
+ * Schroeder: 4 parallel comb filters into 2 series allpass. The room is in
+ * seconds, so it is the same room at any rate: Schroeder's lengths are
+ * samples at 44.1 kHz, kept as those times, and the combs' damping is a
+ * one-pole whose pole is 0.3 at 44.1 kHz, kept as its time constant. */
 
-static const long comb_lens[4] = {1557, 1617, 1491, 1422};
-static const long ap_lens[2] = {225, 556};
+static const double comb_secs[4] = {1557 / 44100.0, 1617 / 44100.0, 1491 / 44100.0, 1422 / 44100.0};
+static const double ap_secs[2] = {225 / 44100.0, 556 / 44100.0};
+
+static long reverb_len(double secs, double sr) {
+  long n = lround(secs * sr);
+  return n > 1 ? n : 1;
+}
 
 /* Each comb's cursor, damp state and buffer; each allpass's cursor and
  * buffer. */
-long dsp_reverb_slots(void) {
+long dsp_reverb_slots(double sr) {
   long n = 0;
-  for (int i = 0; i < 4; i++) n += 2 + comb_lens[i];
-  for (int i = 0; i < 2; i++) n += 1 + ap_lens[i];
+  for (int i = 0; i < 4; i++) n += 2 + reverb_len(comb_secs[i], sr);
+  for (int i = 0; i < 2; i++) n += 1 + reverb_len(ap_secs[i], sr);
   return n;
 }
 
-/* Each comb's feedback gain from the decay time: one pow per comb. */
+/* Each comb's feedback gain from the decay time (one pow per comb), and
+ * the combs' damping pole at this rate: o[0..3] the gains, o[4] the pole. */
 void n_reverb_coef(double rt60, double sr, double* o) {
-  for (int ci = 0; ci < 4; ci++) o[ci] = pow(10.0, -3.0 * (double)comb_lens[ci] / (rt60 * sr));
+  for (int ci = 0; ci < 4; ci++) o[ci] = pow(10.0, -3.0 * (double)reverb_len(comb_secs[ci], sr) / (rt60 * sr));
+  o[4] = pow(0.3, 44100.0 / sr);
 }
 
 double n_reverb_c(DspState* s, double sig, double wet, const double* gains) {
-  const double ap_fb = 0.5, damp = 0.3;
-  long off = claim(s, dsp_reverb_slots());
+  const double ap_fb = 0.5, damp = gains[4];
+  long off = claim(s, dsp_reverb_slots(s->sr));
   double comb_sum = 0.0;
   for (int ci = 0; ci < 4; ci++) {
-    long len = comb_lens[ci];
+    long len = reverb_len(comb_secs[ci], s->sr);
     long cur_slot = off, damp_slot = off + 1, buf = off + 2;
     off += 2 + len;
     long cur = (long)s->pool[cur_slot] % len;
@@ -274,7 +284,7 @@ double n_reverb_c(DspState* s, double sig, double wet, const double* gains) {
   }
   double ap = comb_sum * 0.25;
   for (int ai = 0; ai < 2; ai++) {
-    long len = ap_lens[ai];
+    long len = reverb_len(ap_secs[ai], s->sr);
     long cur_slot = off, buf = off + 1;
     off += 1 + len;
     long cur = (long)s->pool[cur_slot] % len;
@@ -287,7 +297,7 @@ double n_reverb_c(DspState* s, double sig, double wet, const double* gains) {
 }
 
 double n_reverb(DspState* s, double sig, double rt60, double wet) {
-  double g[4];
+  double g[5];
   n_reverb_coef(rt60, s->sr, g);
   return n_reverb_c(s, sig, wet, g);
 }
@@ -346,7 +356,8 @@ double n_input_r(void) { return dsp_input_r; }
 
 /* ------------------------------------------------------------- the natives */
 
-#define REVERB_SLOTS ((2 + 1557) + (2 + 1617) + (2 + 1491) + (2 + 1422) + (1 + 225) + (1 + 556))
+/* reverb's slots depend on the rate (its room is in seconds):
+ * native_slot_size asks dsp_reverb_slots. */
 
 const NativeSpec dsp_natives[] = {
   {"lp1", "signal,cut", 1, -1, (void*)n_lp1},
@@ -358,7 +369,7 @@ const NativeSpec dsp_natives[] = {
   {"delay", "signal,time,max_time", 1, 2, (void*)n_delay},
   {"fbdelay", "signal,time,max_time,fb", 1, 2, (void*)n_fbdelay},
   {"tape", "signal,on,w,r,max_time,keep=0", 0, 4, (void*)n_tape},
-  {"reverb", "signal,rt60,wet", REVERB_SLOTS, -1, (void*)n_reverb},
+  {"reverb", "signal,rt60,wet", 0, -1, (void*)n_reverb},
   {"impulse", "freq", 1, -1, (void*)n_impulse},
   {"discharge", "signal,rate", 1, -1, (void*)n_discharge},
   {"wave", "freq,arr", 1, -1, (void*)n_wave},     /* its table is emitted (codegen) */

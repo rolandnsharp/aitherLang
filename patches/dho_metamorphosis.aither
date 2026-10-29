@@ -56,7 +56,7 @@ let freq_A = 220 - ease((pos - 70) / 15) * 215
 #   step:   sub-audio DC step at end → envelope role
 # (The one-shot kickoff impulse fires inside the play block via a
 # per-voice $state flag — see below.)
-let f_imps  = ((impulse(2.0) + impulse(2.7) * 0.6) * 100000000.0
+let f_imps  = ((impulse(2.0) + impulse(2.7) * 0.6) / dt * 2083.0
                * ease((pos - 35) / 5) * (1 - ease((pos - 75) / 10)))
 let f_step  = if pos > 80 then 80.0 else 0.0
 
@@ -78,7 +78,7 @@ play metamorphosis:
   $kicked = 0.0
   let kick_now = if $kicked < 0.5 then 1.0 else 0.0
   $kicked = 1.0
-  let f_kick = kick_now * 100000000.0
+  let f_kick = kick_now / dt * 2083.0
   let force_A = f_kick + f_imps + f_step
 
   # A — protagonist DHO. Reads (force_A, freq_A, damp_A) which all

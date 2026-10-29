@@ -101,7 +101,7 @@ play acid:
   let kickA    = sin(TAU * phasor(pSweep)) * kEnv
 
   let bodyDamp = 0.04 - kickPunch * 0.025
-  let kickB    = dho(kTrig * 50000000.0, 200, bodyDamp)[0] * 0.5
+  let kickB    = dho(kTrig / dt * 1042.0, 200, bodyDamp)[0] * 0.5
 
   let fmDepth  = 0.5 + kickPunch * 4.0
   let modSig   = sin(TAU * phasor(pSweep * 1.5)) * fmDepth
@@ -122,7 +122,7 @@ play acid:
   let cutA  = 600 + bEnv * 3200 * (0.5 + bAcc * 0.5)
   let bassA = dho(saw * 80000.0, cutA, 0.025)[0] * bEnv * (0.4 + bAcc * 0.6)
 
-  let bForceB = 22000.0 * bFreq
+  let bForceB = 0.458 * bFreq / dt
   let bassB   = dho(bTrig * bForceB, bFreq, 0.008)[0] * bEnv * (0.5 + bAcc * 0.5) * 0.4
 
   let nAmp  = bEnv * (0.3 + bAcc * 0.7) * 6000000.0
@@ -295,12 +295,12 @@ def handPan(trig, fund):
   # recipes. Octave is detuned 3 cents flat for natural beating
   # (perfect octaves sound artificial; real expensive pans are
   # tuned with deliberate slight imperfection).
-  let force = trig * 22000.0 * fund
+  let force = trig / dt * 0.458 * fund
   let d1 = 1 + 0.0010 * sin(t * 0.71 + 0.3)
   let d2 = 1 + 0.0008 * sin(t * 1.13 + 1.7)
   let d3 = 1 + 0.0012 * sin(t * 1.39 + 2.4)
   let d4 = 1 + 0.0015 * sin(t * 1.91 + 0.9)
-  let body = dho(trig * 4000.0 * fund,  fund * 0.5,         0.0035)[0] * 0.22
+  let body = dho(trig / dt * 0.0833 * fund,  fund * 0.5,         0.0035)[0] * 0.22
   let f1   = dho(force,                 fund * d1,           0.00020)[0]
   let f2   = dho(force * 0.55,          fund * 1.998 * d2,   0.00050)[0] * 0.55
   let f3   = dho(force * 0.32,          fund * 3.0 * d3,     0.00170)[0] * 0.40

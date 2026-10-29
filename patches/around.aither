@@ -99,7 +99,7 @@ def image_up(w): if w == 5 then 2 * ear_h else if w == 6 then 2 * (H - ear_h) el
 
 # The sources, and where they are in the room.
 let shaker = noise() * pluck(impulse(5), 0.08) * 0.5
-let bell = resonator(impulse(0.7) * 3, 660, 2.5) + resonator(impulse(0.7) * 1.5, 1803, 4)
+let bell = resonator(impulse(0.7) / dt * 0.00006, 660, 2.5) + resonator(impulse(0.7) / dt * 0.00003, 1803, 4)
 let drone = lp1(osc(saw, 98) + osc(saw, 98.4), 600) * 0.12
 
 let round = TAU * t / 7               # the shaker goes round 1.6 m away, once every 7 s

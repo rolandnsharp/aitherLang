@@ -915,7 +915,7 @@ sin(TAU * phasor(220))
 | Function      | Description                                  |
 |---------------|----------------------------------------------|
 | `phasor(freq)`| the clock: ramp 0→1 at freq Hz, with state   |
-| `noise()`     | white noise; each call its own stream, the same every run, seeded by where the call is (its statement, the defs it is inlined through, which `noise()` it is there), so editing other code leaves it unchanged |
+| `noise()`     | white noise with a fixed level per Hz, the level uniform noise in −1..1 has at 48 kHz, so it sounds the same at any rate (its samples are ±`sqrt(sr / 48000)`); a die in −1..1 each sample is `noise() * sqrt(48000 * dt)`. Each call is its own stream, the same every run, seeded by where the call is (its statement, the defs it is inlined through, which `noise()` it is there), so editing other code leaves it unchanged |
 
 `phasor` is the only stateful part. Its output is a
 *position in the cycle*, 0..1 — a fraction of time, not an
@@ -1050,9 +1050,21 @@ middle.** Whatever touches a device or a file (`play`, `card`,
 is steered by signals or feeds back is a function in aither.
 
 **Reverb**: `reverb(signal, rt60, wet)` (Schroeder); a pair in runs one
-reverb per side.
+reverb per side. Its room is in seconds, so it is the same room at any
+rate: four combs of 35.3, 36.7, 33.8 and 32.2 ms into two allpasses of
+5.1 and 12.6 ms (Schroeder's lengths in samples at 44.1 kHz), each comb
+damped by a one-pole whose time constant is the same at every rate.
 
 **Physics**: `impulse(freq)`, `discharge(signal, rate)`.
+
+`impulse(freq)` is an event: 1 for one sample, `freq` times a second,
+and 0 between. That is what a trigger wants (`pluck`, `discharge`,
+`swell`) at any rate. As a force it is a push of area `dt`, so it is
+weaker as the rate rises. A strike, a push of unit area at any rate, is
+`impulse(freq) / dt` times its size: `dho(impulse(2) / dt * 2000, 440,
+0.005)`. A shaped strike of unit area in seconds (`bell`'s and
+`contour`'s, rising and falling over a millisecond or so) is softer and
+also the same at any rate.
 
 **Sequence**: `wave(freq, arr)` — wavetable oscillator;
 with low freq it's a step sequencer, with audio freq it's
@@ -1143,8 +1155,10 @@ spin. Hz are added, not multiplied, so harmonics stop being harmonic.
 It returns the pair, the shifted signal in quadrature, and what hears
 it decides: played, its sides are the shifted sound a quarter turn
 apart, and summed to mono it doesn't cancel; an SDR takes it as IQ.
-Clean above about 30 Hz, where the Hilbert pair holds its quarter
-turn.
+Clean above about 30 Hz at 48 kHz, where the Hilbert pair holds its
+quarter turn. The pair's band is a fraction of the rate, clean above
+about `sr / 1600` and up to Nyquist: above about 1.5 kHz at an SDR's
+2.4 MHz, the whole sampled band as an IQ band wants it.
 
 ### Damped oscillator
 
@@ -1155,8 +1169,9 @@ def resonator(signal, freq, decay)        # a signal through a resonance
 
 `dho` is the spring every resonance is (`w = TAU freq`). Sweep `damp`
 and it walks through sustained sine (0), bell (~0.005), pluck (~0.2)
-and thud (~0.9); `force` is an acceleration, so a strike is a big
-number, and a constant force stretches it to about `force / w²`
+and thud (~0.9); `force` is an acceleration, so a strike is
+`impulse(freq) / dt` times its size (about 2000 for unit amplitude at
+audio frequencies; see "Physics" above), and a constant force stretches it to about `force / w²`
 (within 0.03% below 500 Hz; short of it towards Nyquist, since each
 sample's force is a strike at that instant, which keeps a strike and the
 resonance itself exact: PHASORS.md, "The push"). It returns

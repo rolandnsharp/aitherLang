@@ -108,7 +108,7 @@ play acid:
   # B — Bell-bass: struck DHO at the note pitch, very low damp so
   # the bell sustains and rings — clearly distinct from the acid
   # squelch when you hold the knob there.
-  let bForceB = 22000.0 * bFreq
+  let bForceB = 0.458 * bFreq / dt
   let bassB   = dho(bTrig * bForceB, bFreq, 0.008)[0] * bEnv * (0.5 + bAcc * 0.5) * 0.4
 
   # C — Noise-formant: very narrow Q (damp 0.025) so noise →
@@ -142,7 +142,7 @@ play acid:
   # === KICK ===
   let pSweep   = 35 + discharge(kTrig, 30) * 130
   let kickSub  = sin(TAU * phasor(pSweep)) * kEnv
-  let kickBody = dho(kTrig * 50000000.0, 200, 0.012)[0] * 0.4
+  let kickBody = dho(kTrig / dt * 1042.0, 200, 0.012)[0] * 0.4
   let kickClick = noise() * discharge(kTrig, 200) * 0.4
   let kickSig  = kickSub * 0.7 + kickBody * 0.4 + kickClick * 0.25
 

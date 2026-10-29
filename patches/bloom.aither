@@ -58,7 +58,7 @@ play sub:
   $kph = 0.0
   $kph = if trig > 0.5 then 0.0 else ($kph + pSwp * dt) mod 1.0
   let body  = sin(TAU * $kph) * env
-  let dho_b = dho(trig * 50000000.0, 55, 0.06)[0] * env * 0.4
+  let dho_b = dho(trig / dt * 1042.0, 55, 0.06)[0] * env * 0.4
   let m     = (body + dho_b) * 0.30
   let amp   = bloomW + shiftW * 0.7 + collapseW * 0.3
   [m * amp, m * amp]
@@ -73,11 +73,11 @@ $bus = 0.0
 play sympathy:
   let trig   = impulse(0.5)
   let burst  = pluck(trig, 0.03)
-  let strike = trig * 8000000.0 + noise() * burst * 800000.0
+  let strike = trig / dt * 167.0 + noise() * burst * 800000.0
   $bus       = $bus * 0.96 + strike * 0.08
 
   let drv = $bus * 0.8
-  let v1  = dho(trig * 8000000.0 + drv, 220.0,  0.0008)[0]
+  let v1  = dho(trig / dt * 167.0 + drv, 220.0,  0.0008)[0]
   let v2  = dho(                   drv, 277.18, 0.0008)[0]
   let v3  = dho(                   drv, 329.63, 0.0008)[0]
 
@@ -171,7 +171,7 @@ play sparkle:
   let rate = 8.0 / LOOP_SEC
   let trig = impulse(rate)
   let env  = pluck(trig, 0.06)
-  let bell = dho(trig * 200000.0, 4400 + lfo4 * 600, 0.0009)[0] * env
+  let bell = dho(trig / dt * 4.17, 4400 + lfo4 * 600, 0.0009)[0] * env
   let pos  = sin(TAU * loopPh * 8 + PI / 4)
   let amp  = 0.10 * (bloomW * 0.4 + shiftW * 0.8 + collapseW * 0.6)
   bell * amp |> pan(pos)

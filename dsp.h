@@ -64,7 +64,7 @@ double n_input_l(void);
 double n_input_r(void);
 
 /* The slots one reverb claims. */
-long dsp_reverb_slots(void);
+long dsp_reverb_slots(double sr);
 
 /* Every native a patch calls by name, in one place: its parameters as
  * SPEC names them (comma-separated; `name=v` has a default), the slots

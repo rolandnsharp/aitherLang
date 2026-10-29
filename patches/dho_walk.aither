@@ -28,12 +28,13 @@ let g    = midi_gate()
 #              the DHO acts as a narrow resonator on noise:
 #                low damp  → sustained tone (subtractive territory)
 #                high damp → resonator absorbs noise (envelope/silence)
-# Force is in acceleration units; ~1e8 → unit amplitude at audio freq
-# for impulses; sustained noise needs much less because it pumps
-# energy continuously.
+# Force is in acceleration units. A strike is a one-sample trigger over
+# dt, a push of unit area whatever the rate, times its size (about 2000
+# for unit amplitude at audio frequencies); sustained noise needs much
+# less because it pumps energy continuously.
 let held    = if g > 0.5 then 1.0 else 0.0
-let kickoff = if t < dt then 100000000.0 else 0.0
-let edge    = (if g > 0.5 and prev(g) < 0.5 then 1.0 else 0.0) * 100000000.0
+let kickoff = if t < dt then 2083 / dt else 0.0
+let edge    = (if g > 0.5 and prev(g) < 0.5 then 1.0 else 0.0) / dt * 2083
 let sustain = noise() * held * 1500000.0
 let strike  = kickoff + edge + sustain
 

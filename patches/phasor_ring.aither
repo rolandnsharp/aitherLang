@@ -23,7 +23,7 @@
 # Gamepad: A up/down, coupling (0: a free swarm); A left/right, detuning.
 
 let n = 12
-let couple = midi_cc(20) * midi_cc(20) * 0.0006   # how hard a neighbour pulls, per sample: locks near 0.3 of the knob
+let couple = midi_cc(20) * midi_cc(20) * 29 * dt   # how hard a neighbour pulls, per second (times dt, as the law is stepped): locks near 0.3 of the knob
 let spread = 0.004 + midi_cc(21) * 0.02        # each oscillator's detuning, as a fraction of 220 Hz
 
 # Each oscillator's own turn a sample: 220 Hz, detuned by a fixed amount per place.
