@@ -13,9 +13,10 @@
 # Why this needs a field: oscillator i reads oscillator i - 1 and i + 1 as
 # they were last sample. sum(N, ...) gives each copy its own state, which
 # no other copy can read, and polyphase (three_phase.aither) needs none of
-# this: its phases are turns of one phasor. Here each phasor lives in two
-# state arrays of numbers, its first and second side, because an array
-# holds numbers. That split is what a field of phasors would remove.
+# this: its phases are turns of one phasor. So the ring is a state array
+# of phasors, and each sample `each` applies the medium's law at every
+# place at once, every place reading its neighbours as they were. The law
+# is a def: what a phasor does given itself and its neighbours.
 #
 #   ./aither patches/phasor_ring.aither | tools/play hw:rockchipes8388c 20     (make tools/pad && tools/pad &)
 #
@@ -28,18 +29,16 @@ let spread = 0.004 + midi_cc(21) * 0.02        # each oscillator's detuning, as 
 # Each oscillator's own turn a sample: 220 Hz, detuned by a fixed amount per place.
 def step(i, spread): rotate([1, 0], TAU * 220 * (1 + spread * sin(i * 2.399)) / sr)
 
-$a = array(n, 1)                               # first sides: every phasor starts at [1, 0]
-$b = array(n)                                  # second sides
-each(n, i =>
-  let me = [$a[i], $b[i]]
-  let left = [$a[(i + n - 1) mod n], $b[(i + n - 1) mod n]]
-  let right = [$a[(i + 1) mod n], $b[(i + 1) mod n]]
-  let moved = turn(me, step(i, spread)) + (left + right - me * 2) * couple
-  let z = moved / amplitude(moved)             # back on the unit circle: a phase oscillator
-  $a[i] = z[0]
-  $b[i] = z[1])
+# The ring's law: turn by its own step, pulled toward its neighbours,
+# then back on the unit circle (a phase oscillator).
+def law(me, left, right, step, couple):
+  let moved = turn(me, step) + (left + right - me * 2) * couple
+  moved / amplitude(moved)
+
+$z = array(n, [1, 0])                          # the field: twelve phasors, each starting at [1, 0]
+each(n, i => $z[i] = law($z[i], $z[(i + n - 1) mod n], $z[(i + 1) mod n], step(i, spread), couple))
 
 play ring:
-  sum(n, k => pan($a[k - 1] * 0.09, (k - 1) / (n - 1) * 1.6 - 0.8))
+  sum(n, k => pan($z[k - 1][0] * 0.09, (k - 1) / (n - 1) * 1.6 - 0.8))
 
 ring |> reverb(1.8, 0.15)

@@ -532,6 +532,20 @@ the patch writes at `$f[0]` and `$f[len($f) - 1]`.
 Stores happen at once, in order, like `$x = ...` does, except inside
 `each`.
 
+**Elements are what the initial value is.** Every value is a pair, and
+an array's elements are no exception: `array(N, [1, 0])` makes `N`
+pairs, as `$z = [0, 0]` makes pair state. `$z[i]` is then a pair,
+`$z[i] = p` stores one (a number fills both sides), and past either end
+reads `[0, 0]`. It holds for state arrays, local arrays and stepped
+arrays alike, and a pair array passed to a def is a pair array there. A
+field of phasors (a ring of coupled oscillators, a complex wave on tv,
+each pixel's z) is then one array:
+
+```
+$z = array(12, [1, 0])            # twelve phasors
+each(12, i => $z[i] = law($z[i], $z[i - 1], $z[i + 1]))   # the medium's law, at every place at once
+```
+
 ### each: one simultaneous step
 
 ```

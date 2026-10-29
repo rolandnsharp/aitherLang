@@ -1045,19 +1045,52 @@ sequence as an unbalanced transformer's hum. Balanced, the negative
 sequence is exactly 0 and the positive has length 1; unbalanced by half,
 the negative rises to 0.29.
 
-### When phases need a field
+### Fields: waves first, stored fields last
 
-Phases that each run their own physics are copies: `sum(N, n => …)`,
-every copy with its own state. What a sum can't say is one copy reading
-another: oscillator i pulled toward oscillators i - 1 and i + 1 as they
-were last sample. That is a field, and it needs state arrays, one entry
-per place, stepped together with `each`. `patches/phasor_ring.aither` is
-twelve detuned oscillators in a ring, each pulled toward its neighbours:
-apart they beat in a swarm, coupled they lock into one pitch with a
-travelling wave of phase round the ring. An array holds numbers, so each
-phasor lives split across two arrays, its first side and its second.
-That split is the one thing a field of phasors asks of the language; it
-is the case to reopen "pairs in arrays" with when a second patch needs it.
+Most fields are written as waves, and should be. Reach for these, in
+this order, before storing anything per place:
+
+| the field | write it as |
+|---|---|
+| a medium rung at its modes (a plate, a drum, a room) | a sum of its modes, each a `dho` (demos/chladni) |
+| a medium carrying waves (a string, a tube, echoes) | travelling waves as delays: `delay` is the field |
+| oscillators all coupled to all (a bridge, a soundboard, Kuramoto) | one shared cell, the mean field, every copy reading and writing it (sympathy, "Coupling: one sample of shared state") |
+| polyphase, a rotating field | turns of one phasor (above) |
+| oscillators coupled to their neighbours, nonlinear | a stored field: a state array, one value per place, stepped by `each` |
+
+All-to-all coupling is the shared cell, with no array: Kuramoto's own
+model, twelve detuned oscillators each pulled toward their mean, locks
+into one pitch at a coupling of 0.002:
+
+```
+$mean = [0, 0]                                     # the field's mean, as the oscillators left it
+let ring = sum(12, k =>
+  $z = [1, 0]
+  let moved = turn($z, step(k)) + $mean * couple
+  $z = moved / amplitude(moved)
+  $z)
+$mean = ring / 12
+```
+
+Only the last row needs one value per place: what a sum can't say is one
+copy reading another, oscillator i pulled toward i - 1 and i + 1 as they
+were last sample. Write the medium's law as a def, the field as a state
+array of phasors (an array's elements are what its initial value is), and
+the step as `each`, which moves every place from the same moment:
+
+```
+def law(me, left, right, step, couple):            # what a phasor does, given itself and its neighbours
+  let moved = turn(me, step) + (left + right - me * 2) * couple
+  moved / amplitude(moved)
+
+$z = array(n, [1, 0])                              # the field
+each(n, i => $z[i] = law($z[i], $z[(i + n - 1) mod n], $z[(i + 1) mod n], step(i), couple))
+```
+
+`patches/phasor_ring.aither` is that ring: apart, a swarm; coupled, one
+pitch with a travelling wave of phase round it. A medium with ends needs
+no `mod`: past either end reads `[0, 0]`, which is a string with fixed
+ends.
 
 ## State that holds an array
 
