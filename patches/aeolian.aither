@@ -1,0 +1,129 @@
+# aeolian: a harp the wind plays. Five strings, all tuned to one note
+# but of different thicknesses, stretched across a soundbox in the
+# wind. Nobody plucks them: wind past a string sheds vortices from its
+# two sides in turn, and each one pushes it sideways. When that push
+# comes near one of the string's harmonics, the string answers, and its
+# swinging pulls the shedding onto its own pitch. So the strings sing
+# harmonics of the one note, thin strings high and thick strings low,
+# and as the wind rises and falls they jump from harmonic to harmonic,
+# some swelling out of nothing and others fading back into the air.
+#
+# The physics, string by string:
+# - The wind sheds vortices at f = St U / d (U the wind speed, d the
+#   string's diameter), with the Strouhal number St about 0.2 over the
+#   whole range a harp sees (Fey, Koenig and Eckelmann, Physics of
+#   Fluids 1998, https://doi.org/10.1063/1.869675). A 0.45 mm string in
+#   a 3 m/s breeze sheds at 1.3 kHz.
+# - The wake is an oscillator of its own, a van der Pol at that
+#   frequency, and its lift pushes the string with a force that grows
+#   as U². The string's acceleration where the wind meets it pushes the
+#   wake back. That is the wake-oscillator model of vortex-induced
+#   vibration (Tamura 1978, https://doi.org/10.3130/aijsaxx.266.0_87;
+#   its coupling schemes compared in Feng et al. 2026,
+#   https://doi.org/10.3389/fbuil.2026.1773931), as in Selfridge,
+#   Moffat, Reiss and Avital's real-time Aeolian harp
+#   (https://doi.org/10.25144/24498).
+# - The string is a waveguide: waves running from the point the wind
+#   drives to the bridge and to the nut, and back inverted. The wind
+#   is strongest on a different stretch of each string, and a harmonic
+#   with a node there can't be driven, so each string favours its own
+#   harmonics. The nut end loses its highs as a real string does.
+#   The soundbox hears the wave arriving at the bridge.
+# - Lock-in is what the coupling gives. Without it, the string just
+#   follows the wind's pitch, quiet and out of tune. With it, the string
+#   holds a harmonic while the wind drifts as much as a fifth away, and
+#   it sounds 25 dB louder. As the wind changes, the harmonic jumps, and
+#   it jumps at a different point going up than coming down.
+#
+# The wind is two things: slow gusts shared by all the strings, and
+# faster turbulence that each string feels on its own.
+#
+#   make tools/pad tools/scope
+#   tools/pad &                                         # the gamepad as knobs: start it first
+#   ./aither patches/aeolian.aither | tools/scope | tools/play hw:rockchipes8388c 20
+#
+# (the engine connects to the pad's MIDI port when it starts). On the
+# scope, left is x and right is y: the strings, panned apart, draw a
+# cloud that breathes with the wind.
+#
+# The gamepad (tools/pad: hold a button, press the d-pad). Every knob
+# starts at 0, and 0 is the default sound:
+#   A up/down     wind: a breeze (0), 15% more a tap; ten taps is a gale
+#   A left/right  key: D, up a semitone a tap to A
+#   B up/down     gusts: more a tap, ten taps to squalls
+#   B left/right  thinner strings: 15% a tap, so higher harmonics sing
+#   X up/down     room: a bigger, wetter space a tap
+#   X left/right  soundbox: none (0), more wood and body a tap
+#   Y up/down     tuning: unison (0), toward a D major chord in four
+#                 taps (D, A, D, F sharp, A over two octaves)
+#   Y left/right  darker strings: duller and shorter-ringing a tap
+
+# One string in the wind: u the wind (m/s), f0 its tuning, d its
+# thickness (m), p where along it the wind drives it hardest (a
+# fraction of its length), bright how much high end the nut keeps (Hz).
+# Returns the wave at the bridge.
+def harpstring(u, f0, d, p, bright):
+  $outB = 0.0
+  $outN = 0.0
+  $acc = 0.0
+  $y1 = 0.0
+  $y2 = 0.0
+  $swing = 0.0
+  let T = 1 / (2 * f0)                         # end to end
+  let fs = clamp(0.2 * u / d, 20, 4000)        # the shedding frequency
+  let w = TAU * fs
+  let wake = vdp(fs, 0.3, 0.5 * $acc / (w * w))   # pushed by the string's acceleration
+  let e = 0.001 * u * u * wake[0] / (1 + pow($swing * 50, 4))   # lift grows as U², and falls once the swing is big
+  let aIn = -delay($outB, 2 * p * T - dt, 0.05) * 0.998
+  let bIn = -lp1(delay($outN, 2 * (1 - p) * T - dt, 0.05), bright) * 0.995
+  $outN = aIn + e
+  $outB = bIn + e
+  let y = aIn + bIn + e
+  $acc = (y - 2 * $y1 + $y2) / (dt * dt)
+  $y2 = $y1
+  $y1 = y
+  $swing = lp1(abs(y), 5)
+  delay($outB, p * T, 0.05)
+
+# Taps of the gamepad: tools/pad steps a knob by 6 of 127 a tap.
+def taps(n): floor(midi_cc(n) * 127 / 6 + 0.5)
+
+let key   = 146.83 * pow(2, min(taps(21), 7) / 12)      # a semitone a tap
+let calm  = 1.4 * pow(1.15, taps(20))                    # m/s: 15% more wind a tap
+let gusty = 0.4 + taps(22) * 0.06
+let thin  = pow(0.85, min(taps(23), 10))                # thinner strings, higher harmonics
+let room  = min(taps(24), 10)
+let wood  = taps(25)
+let chord = min(taps(26) / 4, 1)                         # 0 unison .. 1 the chord
+let bright = 5000 * pow(0.75, min(taps(27), 10))
+
+# Gusts: smoothed noise and three slow swells at prime periods.
+let swell = sin(TAU * t / 23) * 0.5 + sin(TAU * t / 37 + 1) * 0.3 + sin(TAU * t / 61 + 2) * 0.2
+let gust  = lp1(lp1(noise(), 0.15), 0.15) * 300 + swell * 0.6
+let u     = max(calm * (1 + gusty * gust), 0.3)
+
+def air(u): u * (1 + lp1(noise(), 2) * 1.8)        # what one string feels: about 12% turbulence
+
+play strings:
+  let s1 = harpstring(air(u), key * pow(0.5, chord) * 1.0000, 0.00080 * thin, 0.19, bright)
+  let s2 = harpstring(air(u), key * pow(0.75, chord) * 1.0012, 0.00060 * thin, 0.29, bright)
+  let s3 = harpstring(air(u), key * pow(1, chord) * 0.9991, 0.00045 * thin, 0.43, bright)
+  let s4 = harpstring(air(u), key * pow(1.25, chord) * 1.0007, 0.00035 * thin, 0.23, bright)
+  let s5 = harpstring(air(u), key * pow(1.5, chord) * 0.9995, 0.00028 * thin, 0.31, bright)
+  pan(s1, -0.7) + pan(s2, 0.5) + pan(s3, -0.2) + pan(s4, 0.8) + pan(s5, 0.1)
+
+play box:
+  # The soundbox: its board passes the strings' sound on, and adds its
+  # wood and air resonances, broad ones (a resonator's peak is w / decay
+  # times its input: scaled back to 1, or a string landing on one booms).
+  let m = (strings[0] + strings[1]) * 0.5
+  let body = m * 0.5
+           + resonator(m, 196, 150) * (150 / (TAU * 196)) * 4
+           + resonator(m, 415, 200) * (200 / (TAU * 415)) * 3
+  [body, delay(body, 0.007, 0.02)]
+
+play wind:
+  let hiss = noise() |> bpf(250 + u * 150, 0.3)
+  [hiss, lp1(hiss, 2000)] * (u * u * 0.0015)
+
+(strings * 11 + box * wood * 3 + wind) |> reverb(2.5 + room * 0.6, 0.25 + room * 0.06) |> tanh    # a gale's peaks rounded off
