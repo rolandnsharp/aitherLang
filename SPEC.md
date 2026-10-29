@@ -1506,7 +1506,11 @@ computed once per block instead of every sample: a number, `sr`,
 a voice (`midi_freq`, `midi_voice_freq(n)`, its gate, velocity and
 key: the input thread's writes are read once a block), an entry of a
 constant table at a compile-time index, a let or def parameter bound
-to one, and arithmetic and pure math over those. That covers `lp1`/`hp1`'s `exp`, the SVF's
+to one, arithmetic and pure math over those, and a call to a def whose
+body is one expression of its parameters, given such arguments (a def
+sees only its arguments, so `def bandf(i): 50 * pow(2, i / 8)` called
+as `bandf(n - 1)` in a `sum` is computed once a block, as the
+expression written out would be). That covers `lp1`/`hp1`'s `exp`, the SVF's
 `tan`, `reverb`'s `pow`s and `phasor`'s division when their
 coefficients are invariant, and any `exp`/`log`/`pow`/`sin`/`sqrt`
 ... over invariant inputs, such as a knob-driven spectral morph's

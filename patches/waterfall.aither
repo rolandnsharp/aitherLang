@@ -40,7 +40,7 @@ def bandf(i): 50 * pow(2, i / 8)               # 50 Hz, then eight bands to the 
 let [heard, _] = input()                         # one side: the music's left, or the headset mic's voice
 let sound = hp1(heard, 30)                       # the es8388 starts at a big DC offset
 let under = sum(64, n =>                         # the phasor of the band in this pixel's column
-  let p = band(sound, 50 * pow(2, (n - 1) / 8), 0.04)   # bandf written out: a def's result isn't hoisted yet
+  let p = band(sound, bandf(n - 1), 0.04)
   if x == n - 1 then p else 0)
 
 # The picture's memory: row 0 is this frame's spectrum, row y last

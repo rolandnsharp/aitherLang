@@ -772,6 +772,48 @@ static const char* const PURE_MATH[] = {"sin", "cos", "tan", "tanh", "exp", "log
                                         "floor", "ceil", "sqrt", "pow", "min", "max", "clamp",
                                         "abs", "int", NULL};
 
+static int is_invariant(Ctx* c, Scope* sc, Node* n);
+
+/* A call to a def that is one expression of its parameters: not `rec`,
+ * not shadowed by a parameter or lambda of that name, given every
+ * argument. A def sees only its arguments, so such a def is invariant
+ * exactly when its arguments are and its expression is over them
+ * (`def bandf(i): 50 * pow(2, i / 8)` with i a number), and the hoist
+ * computes it once a block like any other maths. NULL otherwise. */
+/* The pure defs being read through right now, innermost last: a def
+ * already among them is a cycle (ping -> pong -> ping), which is an
+ * error the emitter reports, so it isn't pure here. */
+static Node* pure_path[64];
+static int pure_depth;
+
+static Node* pure_def(Ctx* c, Scope* sc, Node* n) {
+  if (!n || n->kind != nkCall || lookup_fn(sc, n->str)[0] || lookup_lambda(sc, n->str)) return NULL;
+  Node* d = user_def(c, n->str);
+  if (!d || d->is_rec || !d->kids || !d->kids[0] || d->kids[0]->kind == nkBlock ||
+      n->nkids != d->nparams || pure_depth >= 64)
+    return NULL;
+  for (int i = 0; i < pure_depth; i++) if (pure_path[i] == d) return NULL;
+  return d;
+}
+
+/* The scope a pure def's expression is read in: each parameter bound to
+ * its argument, a compile-time number as that number, anything else as
+ * the invariant expression it is in the caller's scope. NULL when an
+ * argument isn't invariant. */
+static Scope* def_arg_scope(Ctx* c, Scope* sc, Node* call, Node* d) {
+  Scope* ds = push(c, NULL);
+  for (int i = 0; i < d->nparams; i++) {
+    Node* arg = call->kids[i];
+    double v;
+    if (const_value(c, sc, arg, &v)) { lput(c, &ds->numlits, d->params[i])->v = v; continue; }
+    if (!is_invariant(c, sc, arg)) return NULL;
+    Ent* e = lput(c, &ds->invs, d->params[i]);
+    e->node = arg;
+    e->sc = sc;
+  }
+  return ds;
+}
+
 static int is_invariant(Ctx* c, Scope* sc, Node* n) {
   if (!n) return 0;
   switch (n->kind) {
@@ -797,6 +839,15 @@ static int is_invariant(Ctx* c, Scope* sc, Node* n) {
      * as a block can tell (the input thread's writes are read once a
      * block; offline, tick reruns hoist_init every sample). midi_trig is
      * not: it consumes its edge. */
+    Node* d = sc ? pure_def(c, sc, n) : NULL;
+    if (d) {
+      Scope* ds = def_arg_scope(c, sc, n, d);
+      if (!ds) return 0;
+      pure_path[pure_depth++] = d;
+      int r = is_invariant(c, ds, d->kids[0]);
+      pure_depth--;
+      return r;
+    }
     if (in(n->str, MIDI_HELD))
       for (int i = 0; i < n->nkids; i++) { if (!is_invariant(c, sc, n->kids[i])) return 0; }
     else if (!in(n->str, PURE_MATH) || n->nkids == 0) return 0;
@@ -835,6 +886,16 @@ static Node* spell(Ctx* c, Scope* sc, Node* n) {
     if (lookup_num_lit(sc, n->str, &v)) return mknum(c, v, n->line, n->source);
     Ent* inv = lookup_inv(sc, n->str);
     if (inv) return spell(c, inv->sc, inv->node);
+  }
+  Node* d = sc ? pure_def(c, sc, n) : NULL;       /* a pure def's call: its expression, spelled out */
+  if (d) {
+    Scope* ds = def_arg_scope(c, sc, n, d);
+    if (ds) {
+      pure_path[pure_depth++] = d;
+      Node* r = spell(c, ds, d->kids[0]);
+      pure_depth--;
+      return r;
+    }
   }
   Node* r = mknode(c, n->kind, n->line, n->source);
   r->str = n->str; r->num = n->num; r->params = n->params; r->defaults = n->defaults;
@@ -2110,7 +2171,32 @@ static V emit(Ctx* c, Scope* sc, Node* n, Buf* pre) {
   }
 }
 
+/* Does the expression do costly maths (exp, pow, sin ...), directly or
+ * through a pure def it calls? */
+static int costly(Ctx* c, Node* n) {
+  if (!n) return 0;
+  if (n->kind == nkCall) {
+    if (in(n->str, HOISTED_MATH) && !user_def(c, n->str)) return 1;
+    Node* d = user_def(c, n->str);
+    int seen = 0;
+    for (int i = 0; i < pure_depth; i++) if (pure_path[i] == d) seen = 1;
+    if (d && !seen && pure_depth < 64 && !d->is_rec && d->kids && d->kids[0] && d->kids[0]->kind != nkBlock) {
+      pure_path[pure_depth++] = d;
+      int r = costly(c, d->kids[0]);
+      pure_depth--;
+      if (r) return 1;
+    }
+  }
+  for (int i = 0; i < n->nkids; i++) if (costly(c, n->kids[i])) return 1;
+  return 0;
+}
+
 static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
+  /* A def that is costly maths over invariant arguments (a frequency from
+   * a helper: bandf(i), with i a number): its expression, once a block. */
+  if (c->hoist_on && !c->in_hoist && pure_def(c, sc, n) && costly(c, n) &&
+      is_invariant(c, sc, n) && !is_const(c, sc, n))
+    return mono(hoist(c, emit_invariant(c, sc, n)));
   /* Costly pure maths over invariant inputs: once a block. */
   if (c->hoist_on && !c->in_hoist && in(n->str, HOISTED_MATH) && !user_def(c, n->str) &&
       !lookup_fn(sc, n->str)[0] && !lookup_lambda(sc, n->str) && is_invariant(c, sc, n) &&

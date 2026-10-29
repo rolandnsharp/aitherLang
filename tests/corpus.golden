@@ -10,7 +10,7 @@ edc/02_tau.aither  AEA07F0344FC8CE1  -18.2  -14.0
 edc/02_tau_puzzle.aither  6B11B588846D40B1  -9.9  -6.9
 edc/03_waveforms.aither  373DC805DD230619  -17.8  -14.0
 edc/03_waveforms_puzzle.aither  00AEAD169405DAA5  -21.2  -16.5
-edc/04_mixing.aither  749936612294BA9D  -19.2  -11.5
+edc/04_mixing.aither  729BE49D986A9631  -19.2  -11.5
 edc/04_mixing_puzzle.aither  347B61C526A6EF29  -24.9  -21.9
 edc/05_additive.aither  8858D01164388441  -19.6  -13.9
 edc/05_additive_puzzle.aither  6C0BA724368D3315  -15.2  -9.5
@@ -90,7 +90,7 @@ patches/cello.aither  5FE65DE9DD863B21  -36.4  -22.5
 patches/cello_max.aither  227DA8874FAC05D5  -20.0  -6.0
 patches/chaos.aither  C5687E4BD2EC2BA7  -29.7  -12.7
 patches/chimera.aither  72FA3BF8BBED7239  -30.0  -16.3
-patches/chord.aither  E18667140FADE855  -16.2  -3.4
+patches/chord.aither  308A22FE3EBD25D1  -16.2  -3.4
 patches/complex_pad.aither  B9C8C397D84146D5  -21.1  -9.8
 patches/contour.aither  5D0A6540F6E7C658  -21.9  -13.6
 patches/crystal.aither  425938CAE791C1C9  -34.7  -14.2
