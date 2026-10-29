@@ -474,6 +474,13 @@ static int const_value(Ctx* c, Scope* sc, Node* n, double* v) {
     if (eq(n->str, "*")) { *v = a * b; return 1; }
     if (eq(n->str, "/")) { if (b != 0.0) { *v = a / b; return 1; } return 0; }
     /* as emit_binop computes them */
+    if (eq(n->str, "^")) {
+      long k = (long)b;
+      if ((double)k == b && k >= 0 && k <= 4) { double r = 1.0; if (k) { r = a; for (long j = 1; j < k; j++) r = r * a; } *v = r; return 1; }
+      double r = pow(a, b);
+      if (!isfinite(r)) return 0;
+      *v = r; return 1;
+    }
     if (eq(n->str, "mod")) { *v = b == 0.0 ? 0.0 : a - floor(a / b) * b; return 1; }
     if (eq(n->str, "==")) { *v = a == b; return 1; }
     if (eq(n->str, "!=")) { *v = a != b; return 1; }
@@ -630,7 +637,7 @@ static int pp_is_pair(int* res, Node* def, Node* n) {
   case nkArr: return n->nkids == 2;
   case nkCall: return in(n->str, PAIR_CALLS);
   case nkBinOp:
-    if (!(eq(n->str, "+") || eq(n->str, "-") || eq(n->str, "*") || eq(n->str, "/"))) return 0;
+    if (!(eq(n->str, "+") || eq(n->str, "-") || eq(n->str, "*") || eq(n->str, "/") || eq(n->str, "^"))) return 0;
     for (int i = 0; i < n->nkids; i++) if (pp_is_pair(res, def, n->kids[i])) return 1;
     return 0;
   case nkUnary: return eq(n->str, "-") && pp_is_pair(res, def, n->kids[0]);
@@ -645,7 +652,7 @@ static int pp_is_pair(int* res, Node* def, Node* n) {
 static void pp_mark_arith(int* res, Node* def, Node* n) {
   if (!n) return;
   if (n->kind == nkIdent) { int k = param_index(def, n->str); if (k >= 0) res[k] = 1; return; }
-  if ((n->kind == nkBinOp && (eq(n->str, "+") || eq(n->str, "-") || eq(n->str, "*") || eq(n->str, "/"))) ||
+  if ((n->kind == nkBinOp && (eq(n->str, "+") || eq(n->str, "-") || eq(n->str, "*") || eq(n->str, "/") || eq(n->str, "^"))) ||
       (n->kind == nkUnary && eq(n->str, "-")))
     for (int i = 0; i < n->nkids; i++) pp_mark_arith(res, def, n->kids[i]);
 }
@@ -663,7 +670,7 @@ static void pp_mark(Ctx* c, int* res, Node* def, Node* n) {
     break;
   }
   case nkBinOp:
-    if (eq(n->str, "+") || eq(n->str, "-") || eq(n->str, "*") || eq(n->str, "/")) {
+    if (eq(n->str, "+") || eq(n->str, "-") || eq(n->str, "*") || eq(n->str, "/") || eq(n->str, "^")) {
       int any = 0;
       for (int i = 0; i < n->nkids; i++) if (pp_is_pair(res, def, n->kids[i])) any = 1;
       if (any) pp_mark_arith(res, def, n);
@@ -2166,13 +2173,38 @@ static V emit_if(Ctx* c, Scope* sc, Node* n, Buf* pre) {
   return pair ? vpair(vl, vr) : mono(vl);
 }
 
+/* x ^ k for a whole k from 0 to 4 known now: the products, so x^2 is x * x
+ * to the bit. */
+static int small_power(Ctx* c, Scope* sc, Node* e, long* k) {
+  double v;
+  if (!const_value(c, sc, e, &v)) return 0;
+  *k = (long)v;
+  return (double)*k == v && *k >= 0 && *k <= 4;
+}
+
+static const char* power_of(Ctx* c, const char* x, long k) {
+  if (k == 0) return "1.0";
+  const char* r = x;
+  for (long j = 1; j < k; j++) r = F(c, "((%s) * (%s))", r, x);
+  return r;
+}
+
 static V emit_binop(Ctx* c, Scope* sc, Node* n, Buf* pre) {
   V ab[2];
   emit_seq(c, sc, n->kids, 2, ab, pre);
   V a = ab[0], b = ab[1];
   const char* op = n->str;
   const char* fmt = NULL;
-  if (eq(op, "+")) fmt = "((%1$s) + (%2$s))";
+  if (eq(op, "^")) {
+    long k;
+    if (small_power(c, sc, n->kids[1], &k)) {
+      if (k >= 2) { a.l = once(c, pre, a.l); a.r = a.pair ? once(c, pre, a.r) : a.l; }
+      if (!a.pair) return mono(power_of(c, a.l, k));
+      return vpair(power_of(c, a.l, k), power_of(c, a.r, k));
+    }
+    fmt = "pow((%1$s), (%2$s))";
+  }
+  else if (eq(op, "+")) fmt = "((%1$s) + (%2$s))";
   else if (eq(op, "-")) fmt = "((%1$s) - (%2$s))";
   else if (eq(op, "*")) fmt = "((%1$s) * (%2$s))";
   else if (eq(op, "/")) fmt = "((%2$s) == 0.0 ? 0.0 : (%1$s) / (%2$s))";
@@ -2294,6 +2326,11 @@ static V emit(Ctx* c, Scope* sc, Node* n, Buf* pre) {
  * through a pure def it calls? */
 static int costly(Ctx* c, Node* n) {
   if (!n) return 0;
+  if (n->kind == nkBinOp && eq(n->str, "^")) {
+    double v;
+    long k = 0;
+    if (!(const_value(c, NULL, n->kids[1], &v) && (k = (long)v) == v && k >= 0 && k <= 4)) return 1;
+  }
   if (n->kind == nkCall) {
     if (in(n->str, HOISTED_MATH) && !user_def(c, n->str)) return 1;
     Node* d = user_def(c, n->str);

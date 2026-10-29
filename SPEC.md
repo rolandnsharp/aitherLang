@@ -85,12 +85,20 @@ Arithmetic (precedence high to low):
 
 | Operator       | Description              |
 |----------------|--------------------------|
+| `x ^ y`        | power                    |
 | `-x`, `not x`  | unary                    |
 | `*`, `/`, `mod` | multiplicative          |
 | `+`, `-`       | additive                 |
 | `==`, `<`, `>`, `<=`, `>=`, `!=` | comparison |
 | `and`, `or`    | logical                  |
 | `\|>`          | pipe (lowest)            |
+
+`^` is the power, as mathematics writes it: tighter than a sign, so
+`-x^2` is `-(x^2)`, and grouping to the right, so `2^3^2` is `2^9`. A
+whole power from 0 to 4 that is known when the patch is compiled is
+the products (`x^2` is `x * x` to the bit, and costs what it does);
+any other is `pow(x, y)`. On a pair it takes each side. There is no
+bitwise xor, so `^` means nothing else.
 
 Arithmetic is polymorphic for length-2 arrays (stereo pairs):
 
@@ -100,7 +108,7 @@ Arithmetic is polymorphic for length-2 arrays (stereo pairs):
 - Any other array in arithmetic is a compile error: index it, or
   hand it to `wave`
 
-Same for `-`, `*`, `/`.
+Same for `-`, `*`, `/`, `^`.
 
 `a mod b` is floored: it takes the sign of `b`, so `-1 mod 4` is 3,
 and `mod 0` is 0. `%` is not an operator; written, it is an error that
@@ -878,7 +886,7 @@ per-mode physics state without delegating to a helper def.
 | `ceil(x)`       | ceiling         |
 | `min(a, b)`     | minimum         |
 | `max(a, b)`     | maximum         |
-| `pow(a, b)`     | exponentiation  |
+| `pow(a, b)`     | exponentiation, also written `a ^ b` |
 | `sqrt(x)`       | square root     |
 | `clamp(x, l, h)`| clamp to range  |
 | `int(x)`        | truncate to int |

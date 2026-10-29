@@ -259,6 +259,8 @@ static Toks tokenize(Ctx* c, const char* src) {
         buf[0] = ch;
         EMIT(tkOp, dup(c->a, buf, 1), 0); i++; col++;
       }
+    } else if (ch == '^') {
+      EMIT(tkOp, "^", 0); i++; col++;
     } else if (ch == '%') {
       fail_at(c, "'%%' is spelled `mod` in aither (`a mod b`) at %d:%d", line, col);
     } else {
@@ -625,11 +627,25 @@ static Node* parse_postfix(P* p) {
   return n;
 }
 
+static Node* parse_unary(P* p);
+
+/* x ^ y, the power: tighter than a sign (-x^2 is -(x^2)), and grouping to
+ * the right (2^3^2 is 2^9), as mathematics writes it. */
+static Node* parse_power(P* p) {
+  Node* n = parse_postfix(p);
+  Token t = peek(p);
+  if (t.kind == tkOp && eq(t.str, "^")) {
+    advance(p);
+    return node2(p, nkBinOp, "^", n, parse_unary(p), t.line);
+  }
+  return n;
+}
+
 static Node* parse_unary(P* p) {
   Token t = peek(p);
   if (t.kind == tkOp && eq(t.str, "-")) { advance(p); return negate(p, parse_unary(p), t.line); }
   if (t.kind == tkKeyword && eq(t.str, "not")) { advance(p); return node1(p, nkUnary, "not", parse_unary(p), t.line); }
-  return parse_postfix(p);
+  return parse_power(p);
 }
 
 static Node* parse_mul(P* p) {

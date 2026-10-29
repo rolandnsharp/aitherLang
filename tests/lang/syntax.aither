@@ -12,6 +12,35 @@
 # error: is spelled `mod`
 7 % 4
 
+# --- ^ is the power
+# expect: 0.9
+3 ^ 2 / 10
+
+# --- ^ binds tighter than a sign: -2^2 is -(2^2)
+# expect: -0.4
+-2 ^ 2 / 10
+
+# --- ^ groups to the right: 2^3^2 is 2^9
+# expect: 0.5
+2 ^ 3 ^ 2 / 1024
+
+# --- a negative power, and one between the whole numbers
+# expect: 0.5, 1.4142135623730951
+[2 ^ -1, 2 ^ 0.5]
+
+# --- ^ binds tighter than * and /
+# expect: 0.18
+2 * 3 ^ 2 / 100
+
+# --- ^ on a pair takes each side
+# expect: 0.25, 0.04
+[0.5, 0.2] ^ 2
+
+# --- x^2 and x^3 are x * x and x * x * x, to the bit
+# expect until 4800: 0, 0
+let x = phasor(3) * 1.7 - 0.6
+[x ^ 2 - x * x, x ^ 3 - x * x * x]
+
 # --- number exponents
 # expect: 1105.25
 1e3 + 2.5e-1 + 1E2 + .5e1
