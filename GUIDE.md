@@ -273,6 +273,15 @@ AITHER_RATE=1152000 ./aither patches/mandelbrot.aither | AITHER_RATE=1152000 too
 TV.md has the details: the pixel helpers, what to draw, sizes and
 rates.
 
+### Playing a patch from a script
+
+A patch played from keys or knobs is silent offline, unless the run is
+given its moves: `./aither keys.aither 10 --play moves.txt > take.raw`,
+with lines like `0.5 note 60 100`, `1.5 note 60 0` and `2.0 cc 21 64`
+(SPEC.md, "CLI"). Each move lands on its own sample, so a scripted run
+is a played one, the same every time: a way to test and measure an
+instrument without hands.
+
 ### Knobs from the uConsole's gamepad
 
 `tools/pad` (built with `make tools/pad`) turns the gamepad into eight

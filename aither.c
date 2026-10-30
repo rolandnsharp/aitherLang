@@ -262,6 +262,7 @@ static void usage(void) {
   puts("  aither | aplay -f FLOAT_LE -c 2 -r 48000      play; send patches to it");
   puts("  aither set.aither | tools/play                 same, with a first voice loaded");
   puts("  aither set.aither 30 > take.raw                offline: 30 s from t=0, then exit");
+  puts("  aither set.aither 30 --play moves.txt > take.raw   offline, its keys and knobs played from a script");
   puts("  AITHER_RATE=192000 aither fm.aither | sdr-tx   the rate is yours; the reader agrees");
   puts("  arecord -f FLOAT_LE -c 2 -r 48000 | aither fx.aither | tools/play");
   puts("                                                 input() reads stdin when it is a pipe");
@@ -310,11 +311,24 @@ int main(int argc, char** argv) {
     char** files = calloc(n + 1, sizeof *files);
     int nf = 0;
     double seconds = 0.0;
+    const char* script = NULL;
     for (int i = 0; i < n; i++) {
       if (ends_with(a[i], ".aither")) files[nf++] = a[i];
       else if (parse_float(a[i], &x)) seconds = x;
+      else if (strcmp(a[i], "--play") == 0 && i + 1 < n) script = a[++i];
       else {
         usage();
+        return 1;
+      }
+    }
+    if (script) {
+      if (seconds <= 0.0) {
+        fprintf(stderr, "aither: --play is for an offline run: give a duration (aither patch.aither 10 --play moves.txt)\n");
+        return 1;
+      }
+      char* err = engine_play_script(script);
+      if (err) {
+        fprintf(stderr, "aither: %s\n", err);
         return 1;
       }
     }

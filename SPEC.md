@@ -1468,6 +1468,30 @@ block of output, and holds nothing back, so a program on both ends
 output) gets a fixed loop delay. A block is `AITHER_BUFFER` frames
 (512).
 
+An offline run takes its keys and knobs from a script with `--play`:
+
+```
+./aither cello.aither 10 --play moves.txt > take.raw
+```
+
+Each line of the script is one move at a time in seconds, as MIDI
+plays it, 0..127:
+
+```
+0.0  note 60 100      # key 60 down at velocity 100
+1.5  note 60 0        # velocity 0: let go
+2.0  cc 21 64         # knob 21 to the middle
+```
+
+`#` starts a comment; the lines may come in any order. Each move lands
+on its own sample (the block is cut short there) through the writers the
+live MIDI thread calls, so `midi_freq`, `midi_gate`, `midi_trig`,
+`midi_cc` and the polyphonic voices read a scripted run exactly as they
+read a played one. It is how a patch played from the keyboard or the
+gamepad is tested, measured and rendered without hands. Offline only,
+and the run starts with every key up and every knob at 0, as a fresh
+engine does.
+
 ### Voice-level
 
 | Command                          | Description                                |

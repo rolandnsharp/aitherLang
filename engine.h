@@ -66,6 +66,9 @@ typedef struct {
 void  engine_init(const char* stdlib_src);
 /* Run the engine (aither with no command): never returns. */
 void  engine_run(char** files, int nfiles, double seconds);
+/* A script of MIDI moves for an offline run, played at its samples:
+ * NULL, or the error (malloc'd). Before engine_run. */
+char* engine_play_script(const char* path);
 /* One command line, its reply (malloc'd, without the newline). */
 char* engine_command(const char* line);
 

@@ -1456,6 +1456,55 @@ char* engine_command(const char* line) {
  * reads ahead and holds writes back, and a program on both ends of the
  * engine (tools/card) needs one block out for each block in. */
 
+/* An offline run's script of MIDI moves (--play): each at its sample,
+ * through the writers the live MIDI thread calls. */
+typedef struct { double at; int kind, a, b; } Move;   /* kind: 0 note, 1 cc */
+static Move* moves;
+static long n_moves, next_move;
+
+static void play_moves_due(long long frame) {
+  while (next_move < n_moves && (long long)llround(moves[next_move].at * (double)sample_rate) <= frame) {
+    Move* m = &moves[next_move++];
+    if (m->kind == 1) midi_cc(m->a, m->b);
+    else if (m->b > 0) midi_note_on(m->a, m->b);
+    else midi_note_off(m->a);
+  }
+}
+
+static int cmp_moves(const void* x, const void* y) {
+  double a = ((const Move*)x)->at, b = ((const Move*)y)->at;
+  return a < b ? -1 : a > b;
+}
+
+char* engine_play_script(const char* path) {
+  FILE* f = fopen(path, "r");
+  if (!f) return fmt("--play: can't read %s", path);
+  char line[512];
+  long cap = 0, n = 0, ln = 0;
+  while (fgets(line, sizeof line, f)) {
+    ln++;
+    char* hash = strchr(line, '#');
+    if (hash) *hash = 0;
+    double at, a, b;
+    char kind[16];
+    int got = sscanf(line, "%lf %15s %lf %lf", &at, kind, &a, &b);
+    if (got <= 0) continue;                         /* blank or a comment */
+    int k = strcmp(kind, "note") == 0 ? 0 : strcmp(kind, "cc") == 0 ? 1 : -1;
+    if (got != 4 || k < 0 || at < 0.0 || a < 0 || a > 127 || b < 0 || b > 127) {
+      fclose(f);
+      return fmt("--play: %s line %ld: want `seconds note key velocity` or "
+                           "`seconds cc number value`, 0..127 (velocity 0 lets go)", path, ln);
+    }
+    if (n == cap) moves = realloc(moves, (cap = cap ? 2 * cap : 64) * sizeof *moves);
+    moves[n++] = (Move){at, k, (int)lround(a), (int)lround(b)};
+  }
+  fclose(f);
+  qsort(moves, n, sizeof *moves, cmp_moves);         /* stable enough: same-time moves keep no order */
+  n_moves = n;
+  next_move = 0;
+  return NULL;
+}
+
 static long long pipe_frames;            /* frames written so far */
 static long long pipe_limit;             /* stop after this many (0: until killed) */
 
@@ -1477,6 +1526,12 @@ static void pump_pipe(void) {
   while (running && (pipe_limit == 0 || pipe_frames < pipe_limit)) {
     int want = pipe_limit > 0 && pipe_limit - pipe_frames < frames ? (int)(pipe_limit - pipe_frames)
                                                                    : frames;
+    /* A scripted move lands on its sample: the block stops short of it. */
+    play_moves_due(pipe_frames);
+    if (next_move < n_moves) {
+      long long due = llround(moves[next_move].at * (double)sample_rate);
+      if (due > pipe_frames && due - pipe_frames < want) want = (int)(due - pipe_frames);
+    }
     long bytes = (long)want * 2 * sizeof(float);
     if (input_open) {
       /* A pipe delivers in pieces; silence once the source has ended. */
