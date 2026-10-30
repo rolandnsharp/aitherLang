@@ -27,8 +27,8 @@ int main(int argc, char **argv) {
     fft(re, im, N); for (int i = 0; i < N / 2; i++) P[i] += re[i] * re[i] + im[i] * im[i];
   }
   if (!frames) return 1;
-  double df = R / N; int best = 0;
-  for (int i = (int)(40 / df); i < (int)(16000 / df); i++) if (P[i] > P[best]) best = i;
+  double df = R / N; int best = (int)(40 / df);   /* the strongest peak from 40 Hz up, never DC */
+  for (int i = best; i < (int)(16000 / df); i++) if (P[i] > P[best]) best = i;
   double pk = best * df;
   if (best > 0) { double a = log(P[best-1] + 1e-300), b = log(P[best] + 1e-300), c = log(P[best+1] + 1e-300); pk = (best + 0.5 * (a - c) / (a - 2 * b + c)) * df; }
   printf("%.2f %.3f", 10 * log10(e / (n - skip) + 1e-30), pk);

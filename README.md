@@ -294,17 +294,15 @@ choir |> reverb(3.5, 0.3)
 
 ```
 play tuning_fork:
-  $x = 0.0
-  $dx = 0.0
-  let w2 = (TAU * 440) * (TAU * 440)
-  $dx = $dx + (-2 * $dx - w2 * $x + impulse(2) * w2) * dt
-  $x = $x + $dx * dt
-  $x * 0.3
+  dho(impulse(2) / dt * 2000, 440, 0.0015)[0] * 0.3
 ```
 
-Same equation as a real tuning fork. Strike (impulse), ring at
-440 Hz, decay naturally. No envelope needed — the physics has decay
-baked in.
+Same equation as a real tuning fork, x'' = F − 2·damp·ω·x' − ω²x.
+Strike (a unit push, `impulse / dt`), ring at 440 Hz, decay naturally.
+No envelope needed — the physics has decay baked in. `dho` turns the
+spring exactly each sample, so it rings at its pitch at any frequency;
+the same equation stepped by hand (`$v = $v + … * dt; $x = $x + $v *
+dt`) runs sharp, 13 cents at 3 kHz.
 
 ### FM feedback (one sample of memory)
 

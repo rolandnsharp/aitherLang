@@ -356,22 +356,6 @@ def bright_decay(n, pf):  1.0 / pow(n, 0.3)
 # parameters from `midi_cc` for smooth changes; large code edits to
 # a ringing instrument may pop.
 
-# Tuning fork — one damped harmonic oscillator, the canonical
-# physical primitive. Why include it: simplest physics example,
-# perfect teaching reference. Single mode, fixed damping; you can
-# hear the equation directly. The `$x; $dx` integration here is what
-# `resonator(input, freq, decay)` does for each mode of the modal banks
-# below — same math, fewer keystrokes.
-def tuning_fork(strike, freq):
-  let omega = TAU * freq
-  let omega2 = omega * omega
-  let gamma = 4.0
-  $x = 0.0
-  $dx = 0.0
-  $dx = $dx + (-2 * gamma * $dx - omega2 * $x + strike * omega2) * dt
-  $x = $x + $dx * dt
-  $x
-
 # Plucked string — Karplus-Strong. Why physics over additive: real
 # strings lose energy to the body and to internal damping, with
 # high frequencies decaying faster than low. This gives the
@@ -394,24 +378,14 @@ def pluck_string(strike, freq, brightness):
 # the shared bow signal. The stick-slip "scratch" of the rosin and
 # the way tone blooms with bow pressure are excitation-driven —
 # additive would need explicit time-varying spectrum design that's
-# basically impossible to get right. Each iteration integrates the
-# same damped HO equations as `tuning_fork` for one mode. Damping
-# scales with mode frequency (light, ω·γ ≈ 0.0003·modeF) so all
-# modes ring well past the bow's transients. With $-state allowed
-# in lambda bodies the integrator can live inline rather than
-# delegating to `dho`, so the equation reads at the call site.
+# basically impossible to get right. Each mode is a `resonator`, the
+# spring turned exactly, so the partials stay on their pitches at any
+# rate. Damping scales with mode frequency (0.0006 · modeF a second)
+# so all modes ring well past the bow's transients.
 def bowed_string(bow, freq):
-  let damping = 0.0003
   sum(8, n =>
     let modeF = freq * n
-    let omega = TAU * modeF
-    let omega2 = omega * omega
-    let gamma = damping * modeF
-    $x = 0.0
-    $dx = 0.0
-    $dx = $dx + (-2 * gamma * $dx - omega2 * $x + bow * omega2) * dt
-    $x = $x + $dx * dt
-    $x / pow(n, 0.5))
+    resonator(bow, modeF, 0.0006 * modeF) / pow(n, 0.5))
 
 # Struck bar — modal bank with bar_partials ratios and
 # mode-dependent damping. Why physics over additive: a struck metal
@@ -420,20 +394,14 @@ def bowed_string(bow, freq):
 # additive version like `inharmonic(freq, bar_partials, ...) *
 # pluck(strike, decay)` decays all modes at the same rate and
 # never gives the natural shift from bright to dark. Damping has
-# two terms: 0.0008·modeF (frequency-proportional, physical bar
-# damping) plus n·0.5 (mode-index-proportional, kills high modes
-# faster) — that's the bright→dark evolution.
+# two terms: 0.0016·modeF a second (frequency-proportional, physical
+# bar damping) plus n (mode-index-proportional, kills high modes
+# faster) — that's the bright→dark evolution. Each mode is a
+# `resonator`, exact at any pitch.
 def struck_bar(strike, freq):
   sum(5, n =>
     let modeF = freq * bar_partials(n)
-    let omega = TAU * modeF
-    let omega2 = omega * omega
-    let gamma = 0.0008 * modeF + n * 0.5
-    $x = 0.0
-    $dx = 0.0
-    $dx = $dx + (-2 * gamma * $dx - omega2 * $x + strike * omega2) * dt
-    $x = $x + $dx * dt
-    $x / pow(n, 0.5))
+    resonator(strike, modeF, 0.0016 * modeF + n) / pow(n, 0.5))
 
 # ---------------------------------------------------------------- polyphony
 # A MIDI keyboard plays polyphonically. `voice_fn` describes what one

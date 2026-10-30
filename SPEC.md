@@ -1257,12 +1257,11 @@ See GUIDE.md "Spectral synthesis" for worked examples.
 
 Excitation-response physics for sounds whose identity is in HOW
 they respond to being struck, plucked, or bowed. Read each def's
-body in `stdlib.aither` to see the pattern; `tuning_fork` is the
-canonical inline-integration reference.
+body in `stdlib.aither` to see the pattern; each mode is a
+`resonator`, so the partials stay on their pitches at any rate.
 
 | Function                                    | Description                                    |
 |---------------------------------------------|------------------------------------------------|
-| `tuning_fork(strike, freq)`                 | single damped HO; teaching reference           |
 | `pluck_string(strike, freq, brightness)`    | Karplus-Strong: delay + LP feedback            |
 | `bowed_string(bow, freq)`                   | 8-mode bank, continuous excitation             |
 | `struck_bar(strike, freq)`                  | 5-mode bank with mode-dependent damping        |
@@ -1631,8 +1630,7 @@ without engine connection.
 
 Oscillator wrappers, spectral synthesis (`additive`,
 `inharmonic`, plus the shape/ratio/amp library), physical
-instruments (`tuning_fork`, `pluck_string`, `bowed_string`,
-`struck_bar`), character effects, envelopes, stereo helpers,
+instruments (`pluck_string`, `bowed_string`, `struck_bar`), character effects, envelopes, stereo helpers,
 prev. Pure aither code, baked into the binary as a const string.
 
 ### Totals

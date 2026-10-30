@@ -2,18 +2,16 @@
 #            → self-firing pulse (energy-dependent). All feedback lives
 #            INSIDE individual plays; cross-play refs are forward-only.
 
-# Karplus-Strong string. freq in Hz, damp ~0.99 (pluck decay), excite is input.
-# One call-site = one buffer = one independent string.
+# Karplus-Strong string. freq in Hz, damp ~0.99 (pluck decay a pass),
+# excite is input. One call-site = one loop = one independent string. The
+# loop is in seconds: a delay of one period, less the sample the state
+# holds, and a one-pole at 12 kHz for the darkening a pass (about what the
+# classic two-sample average does at 48 kHz), so the string is the same at
+# any rate.
 def ks(freq, damp, excite):
-  $buf    = array(4800, 0.0)
-  $cursor = 0.0
-  let size   = len($buf)
-  let period = sr / freq
-  let rd1    = int($cursor - period + size) mod size
-  let rd2    = (rd1 - 1 + size) mod size
-  let out    = ($buf[rd1] + $buf[rd2]) * 0.5 * damp
-  $buf[int($cursor)] = out + excite
-  $cursor = ($cursor + 1) mod size
+  $loop = 0.0
+  let out = lp1(delay($loop, 1 / freq - dt, 0.05), 12000) * damp
+  $loop = out + excite
   out
 
 let pos = sweep
@@ -53,9 +51,12 @@ play chaos:
   let dx = 10.0 * ($y - $x)
   let dy = $x * (rho - $z) - $y
   let dz = $x * $y - (8.0 / 3.0) * $z
-  $x = $x + dx * ddt
-  $y = $y + dy * ddt
-  $z = $z + dz * ddt
+  let mx = $x + dx * ddt / 2                # the midpoint step, as in chaos.aither
+  let my = $y + dy * ddt / 2
+  let mz = $z + dz * ddt / 2
+  $x = $x + 10.0 * (my - mx) * ddt
+  $y = $y + (mx * (rho - mz) - my) * ddt
+  $z = $z + (mx * my - (8.0 / 3.0) * mz) * ddt
   let L = $x / 25
   let R = ($z - 25) / 20
   [L * 0.06, R * 0.06]
@@ -64,7 +65,7 @@ play pulse:
   # integrate-and-fire: pressure builds from string energy, fires, resets.
   # creates an emergent rhythm whose rate depends on string activity.
   $accum = 0.0
-  let rise = 0.0005 + stringE * 0.003
+  let rise = (24 + stringE * 144) * dt     # pressure a second, so it fires as often at any rate
   $accum = $accum + rise
   let fire  = if $accum > 0.7 then 1 else 0
   $accum = if $accum > 0.7 then 0 else $accum

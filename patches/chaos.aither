@@ -19,12 +19,20 @@ $lx = 0.1
 $ly = 0.0
 $lz = 0.0
 
+# The midpoint step: the rates here, half a step along them, the rates
+# there, and the whole step along those. With time sped up 55 times, a
+# step that takes only the rates here (Euler) is 0.1 to 0.4 off the true
+# path 10 to 30 ms in (x spans ±20); this one is 1e-4 to 5e-4 off, and
+# its error quarters each time the rate doubles (notes/rates-2026-10-30.md).
 let dx = sigma * ($ly - $lx)
 let dy = $lx * (rho - $lz) - $ly
 let dz = $lx * $ly - beta * $lz
-$lx = $lx + dx * ddt
-$ly = $ly + dy * ddt
-$lz = $lz + dz * ddt
+let mx = $lx + dx * ddt / 2
+let my = $ly + dy * ddt / 2
+let mz = $lz + dz * ddt / 2
+$lx = $lx + sigma * (my - mx) * ddt
+$ly = $ly + (mx * (rho - mz) - my) * ddt
+$lz = $lz + (mx * my - beta * mz) * ddt
 
 # map to audio. x in ±20 → L, z centred around 25 ± 15 → R.
 let xNorm = $lx / 22.0

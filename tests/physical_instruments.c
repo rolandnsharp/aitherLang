@@ -1,5 +1,5 @@
 /* Physical-instrument library: pluck_string, bowed_string, struck_bar,
- * tuning_fork. Each pins a property that justifies the physics
+ * and resonator, the single mode the banks are made of. Each pins a property that justifies the physics
  * paradigm: additive can't fake these without elaborate envelope
  * tricks that miss the character.
  *
@@ -62,7 +62,7 @@ TEST(physical_instruments) {
    * of input it's documented to accept. */
   {
     const char* srcs[] = {
-      "tuning_fork(impulse(2) * 50, 220) * 0.05",
+      "resonator(impulse(2) * 50, 220, 8) * 0.05",
       "pluck_string(noise() * impulse(2) * 0.5, 220, 0.7)",
       "bowed_string(noise() * 0.3, 220) * 0.1",
       "struck_bar(impulse(2) * 30, 220) * 0.02",
@@ -138,16 +138,16 @@ TEST(physical_instruments) {
     free(buf);
   }
 
-  /* 5. tuning_fork's pitch is exact. Single-mode HO has no detune from
+  /* 5. resonator's pitch is exact. A single mode has no detune from
    * filter delays etc., so it is easier to pin tightly. */
   {
     const double freq = 220.0;
     long n = (long)(0.4 * SR);
-    double* buf = render_mono("tuning_fork(if t < dt then 50 else 0, 220.0) * 0.1", n);
+    double* buf = render_mono("resonator(if t < dt then 50 else 0, 220.0, 8) * 0.1", n);
     int ideal = (int)(SR / freq);
     double corr;
     int lag = best_lag(buf, n, (long)(0.05 * SR), ideal, 10, &corr);   /* past the initial jolt */
-    CHECK(abs(lag - ideal) <= 3, "tuning_fork at %g Hz: autocorr peak at lag %d, expected %d", freq,
+    CHECK(abs(lag - ideal) <= 3, "resonator at %g Hz: autocorr peak at lag %d, expected %d", freq,
           lag, ideal);
     free(buf);
   }

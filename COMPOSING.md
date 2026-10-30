@@ -1131,8 +1131,8 @@ fits the sound you're after; the engine doesn't care.
 |-------------------------------------------------------------|----------------------------------------|
 | A musical sound from its spectrum (pads, leads, vocal-like) | `additive(f, shape, N)`                |
 | Bells, plates, stiff strings — non-integer partials         | `inharmonic(f, ratio, amp, N)`         |
-| Plucked / bowed / struck physical instruments               | `pluck_string`, `bowed_string`, `struck_bar`, `tuning_fork` (stdlib — **WIP, sounds naive vs additive**) |
-| A vibrating physical object — transients, decay built-in    | `$x; $dx; ẍ + 2γẋ + ω²x = F(t)` (raw physics) |
+| Plucked / bowed / struck physical instruments               | `pluck_string`, `bowed_string`, `struck_bar` (stdlib — **WIP, sounds naive vs additive**) |
+| A vibrating physical object — transients, decay built-in    | `dho(force, freq, damp)`: ẍ + 2·damp·ωẋ + ω²x = F(t), turned exactly |
 | Sidebanded / FM grit — aliasing as character                | inline `sin(carrier + sin(modf) * depth)` |
 | Chiptune / lo-fi / digital-sounding                         | `osc(saw, f)`, `osc(sqr, f)`           |
 
@@ -1154,8 +1154,6 @@ recognizable strike), not yet "good enough to want to play."
 For sounds where
 excitation-response physics is the discriminating character:
 
-- `tuning_fork(strike, freq)` — single damped HO, the canonical
-  inline-physics example. Read its body to learn the pattern.
 - `pluck_string(strike, freq, brightness)` — Karplus-Strong: a
   delay-line + LP-feedback loop. The LP runs every iteration so
   the sound darkens as it rings out.
@@ -1168,14 +1166,13 @@ excitation-response physics is the discriminating character:
 
 Additive does NOT cover these well. A plucked string with a
 bolted-on envelope sounds synthetic; the same sound via
-Karplus-Strong is unmistakable. The `tuning_fork` body shows
-the integration literally inline (`$x = 0; $dx = 0; $dx = $dx +
-… * dt; $x = $x + $dx * dt`). The modal banks
-(`bowed_string`, `struck_bar`) iterate the same equation
-per-mode by writing the integration *inside* `sum(K, n => …)`
-— each unrolled iteration claims its own per-mode `$x` /
-`$dx` slots. Read `tuning_fork` once and the modal banks
-read like the same code N times over.
+Karplus-Strong is unmistakable. The modal banks (`bowed_string`,
+`struck_bar`) are a `resonator` per mode inside `sum(K, n => …)`;
+each unrolled iteration claims its own state, so each mode rings
+by itself. A resonance written by hand as `$dx = $dx + … * dt;
+$x = $x + $dx * dt` runs sharp at high pitch (13 cents at 3 kHz,
+57 at 6 kHz, at 44.1 kHz): `dho` and `resonator` turn the spring
+exactly instead.
 
 ```
 play strings:
@@ -1778,8 +1775,8 @@ Shape fns: `saw_shape`, `sqr_shape`, `tri_shape`, `warm_shape`,
 Ratio fns: `stiff_string`, `stiff_cello`, `bar_partials`,
 `plate_partials`, `phi_partials`.
 Amp fns: `soft_decay`, `bell_decay`, `bright_decay`.
-Physical instruments: `tuning_fork`, `pluck_string`,
-`bowed_string`, `struck_bar`.
+Physical instruments: `pluck_string`, `bowed_string`,
+`struck_bar`.
 
 `prev(x)` returns the previous sample's value of any expression.
 Useful for forward cross-play feedback:
