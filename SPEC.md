@@ -111,7 +111,8 @@ Arithmetic is polymorphic for length-2 arrays (stereo pairs):
 Same for `-`, `*`, `/`, `^`.
 
 `a mod b` is floored: it takes the sign of `b`, so `-1 mod 4` is 3,
-and `mod 0` is 0. `%` is not an operator; written, it is an error that
+and `mod 0` is 0. So `x mod 1` is the fractional part, `x - floor(x)`,
+from 0 up to 1 for any sign: a phase, a position in a loop. `%` is not an operator; written, it is an error that
 says to write `mod`.
 
 True is non-zero. False is zero. Conditional results are `1`
@@ -197,9 +198,16 @@ Functions have their own local scope: a def sees the
 file's constants, never its signals, nor the names of
 whoever calls it. A constant is a file-level `let` known
 when the patch compiles: a number, arithmetic on numbers
-(`let root = 293.66 * 2`), or a table of literal numbers,
-like `TAU`. File-level `$state` slots, other `def`s and
-globals are visible too. A file-level let that is a signal
+(`let root = 293.66 * 2`), or a table of literal numbers
+(`let ps = [2, 3, 2, 3]`), as `TAU` and `PI` are. File-level
+`$state` slots, other `def`s and globals are visible too:
+
+```
+let ps = [2, 3, 2, 3, 3, 2]              # a table of literal numbers: seen
+let ph = TAU * phasor(f)                 # a signal: passed in
+def shadow(k, ph): [cos(ps[k] * ph), sin(ps[k] * ph)]
+```
+ A file-level let that is a signal
 (a knob, a clock, anything that changes as it runs) used in
 a def is an error that says to pass it in; a name neither
 the def nor the file has is an unknown identifier, whatever

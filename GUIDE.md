@@ -147,6 +147,25 @@ harp
 Each call to `pluck_voice` gets its own state. Two plucks,
 two independent resonators.
 
+A def sees the file's **constants**: numbers, arithmetic on numbers, and
+tables of literal numbers. It doesn't see the file's **signals**, the
+lets that change as the patch runs (a clock, a knob, an envelope, an
+array of this sample's values): those it is given, as arguments, so a
+def means the same wherever it is called.
+
+```
+let roots = [220, 277.18, 329.63]        # a constant table: every def sees it
+let depth = 0.01                         # a constant: seen
+let wobble = sin(TAU * phasor(0.2))      # a signal: pass it in
+
+def voice(i, wobble): osc(sin, roots[i] * (1 + depth * wobble))
+
+voice(0, wobble) + voice(2, wobble)
+```
+
+Use a signal inside a def without passing it and the compiler says
+which one to pass.
+
 ### Libraries
 
 Once a def is worth keeping, move it to a file and import it.

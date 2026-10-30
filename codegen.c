@@ -2205,8 +2205,9 @@ static V emit_ident(Ctx* c, Scope* sc, Node* n) {
    * compiles), never its signals: those it is given. */
   if (in_def(sc) && !builtin_value(s) && !hfind(&c->top_arrays, s) && !(c->top && lfind(c->top->numlits, s)) &&
       (has(&c->top_lets, s) || has(&c->stereo_lets, s) || has(&c->play_set, s) || hfind(&c->top_larrays, s)))
-    fail(c, "%s sees its arguments and the file's constants, and '%s' is a signal: pass it in %s",
-         c->def_stack.n ? c->def_stack.v[c->def_stack.n - 1] : "a def", s, err_loc(c, n));
+    fail(c, "%s sees its arguments and the file's constants, and '%s' is %s: pass it in %s",
+         c->def_stack.n ? c->def_stack.v[c->def_stack.n - 1] : "a def", s,
+         hfind(&c->top_larrays, s) ? "an array of this sample's values" : "a signal", err_loc(c, n));
   Ent* table = lookup_array(c, sc, s);
   if (has(&c->stereo_lets, s)) return vpair(F(c, "l_%s_l", s), F(c, "l_%s_r", s));
   if (table) fail(c, "%s is a table of %ld numbers, but one number is needed here — index it (%s[i]) "
