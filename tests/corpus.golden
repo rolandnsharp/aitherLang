@@ -91,7 +91,7 @@ patches/cathedral.aither  049F7B8F69FCB952  -16.8  -6.3
 patches/cathedral_set.aither  1B736B984FBB4021  -12.1  2.4
 patches/cello.aither  5FE65DE9DD863B21  -36.4  -22.5
 patches/cello_max.aither  05CB0A393A70CCC9  -20.1  -5.0
-patches/chaos.aither  C5687E4BD2EC2BA7  -29.7  -12.7
+patches/chaos.aither  6FB215BB17ECDD38  -30.2  -12.7
 patches/chimera.aither  2C9AD620BC407401  -30.1  -17.0
 patches/chord.aither  FE05C0B6E62C8101  -18.0  -4.2
 patches/complex_pad.aither  8D8F93917E83320C  -20.9  -9.8
@@ -99,7 +99,7 @@ patches/contour.aither  007E2027D5D0CDC2  -19.1  -11.4
 patches/crystal.aither  425938CAE791C1C9  -34.7  -14.2
 patches/dho_metamorphosis.aither  B97E86910307F419  -10.5  -4.2
 patches/dho_walk.aither  8A161092F34C3035  -37.5  -12.4
-patches/didge_minor.aither  874C0C93D285CC31  -20.8  -6.5
+patches/didge_minor.aither  A95A4C6CF5F47588  -20.5  -6.1
 patches/didge_scope.aither  4EE4515A94CBC175  -20.2  -5.7
 patches/didge_sticks.aither  D6CBA500DA382F82  -22.7  -8.8
 patches/didge_vowels.aither  1805DBCC47B0007B  -39.5  -16.2
@@ -111,7 +111,7 @@ patches/doof_set.aither  285E9A1BF9CA183D  -19.6  -3.3
 patches/duck.aither  967CB42097F8D665  -24.7  -9.9
 patches/dusk.aither  F09A2ADAB2114CDD  -27.4  -13.6
 patches/ecology.aither  F06A044C915829A1  -27.9  -10.9
-patches/emergent.aither  7040BF30EE462C31  -22.2  -11.5
+patches/emergent.aither  66CDE40BED97C742  -22.3  -11.7
 patches/field_coupled.aither  7DAB50363AFF8573  -8.9  -2.9
 patches/field_ring.aither  0B7DD5997969D4BE  -6.1  -3.1
 patches/field_summer.aither  920A03654E076065  -0.3  -0.2
