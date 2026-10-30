@@ -66,8 +66,15 @@ let dtau = TAU / 1.2 * f * dt                  # a shake is 2π / 1.2 of τ
 $x = 1.0
 $v = 0.0
 let shake = cos(TAU * phasor(f))
-let pull = $g * shake - 0.3 * $v + $x - $x * $x * $x
-$v = $v + pull * dtau + (if midi_trig(38) > 0 then 1.2 else 0)
+
+# X: a kick, a push spread over 8 ms (a raised cosine), so the mass
+# speeds up without a jump: a step in its velocity would be a click.
+$since = 1.0
+$since = if midi_trig(38) > 0 then 0 else $since + dt
+let kick = if $since < 0.008 then 0.26 * (1 - cos(TAU * $since / 0.008)) else 0
+
+let pull = $g * shake - 0.3 * $v + $x - $x * $x * $x + kick
+$v = $v + pull * dtau
 $x = $x + $v * dtau
 
 [hp1($x, 15), hp1($v, 15) / 1.2] * 0.55 |> tanh
