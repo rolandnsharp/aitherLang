@@ -179,14 +179,14 @@ double n_midi_voice_key(int n) {
 /* An edge per voice: its pool slot holds the last counter it saw for
  * note n, and the sample the counter moves on is 1. Every reader in the
  * same sample sees the edge. */
-double n_midi_trig(void* state, int n) {
+double n_midi_trig(void* state, long at, int n) {
   DspState* s = state;
   if (n < 0 || n >= 128) return 0.0;
-  if (s->idx + 1 > s->pool_slots - POOL_OVERFLOW_SLOTS) {
+  if (at + 1 > s->pool_slots - POOL_OVERFLOW_SLOTS) {
     s->overflow = 1;
     return 0.0;
   }
-  long i = s->idx++;
+  long i = at;
   double cur = (double)st.trigs[n];
   double prev = s->pool[i];
   s->pool[i] = cur;

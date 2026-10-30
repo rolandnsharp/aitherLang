@@ -39,6 +39,6 @@ double n_midi_voice_freq(int n);
 double n_midi_voice_gate(int n);
 double n_midi_voice_vel(int n);
 double n_midi_voice_key(int n);
-double n_midi_trig(void* state, int n);
+double n_midi_trig(void* state, long at, int n);
 
 #endif

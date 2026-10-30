@@ -23,36 +23,36 @@ typedef struct DspState {
 } DspState;
 
 /* What a patch calls by name (the compiler finds natives here). */
-double n_lp1(DspState* s, double sig, double cut);
-double n_hp1(DspState* s, double sig, double cut);
-double n_lpf(DspState* s, double sig, double cut, double res);
-double n_hpf(DspState* s, double sig, double cut, double res);
-double n_bpf(DspState* s, double sig, double cut, double res);
-double n_notch(DspState* s, double sig, double cut, double res);
-double n_delay(DspState* s, double sig, double time, double max_time);
-double n_fbdelay(DspState* s, double sig, double time, double max_time, double fb);
-double n_tape(DspState* s, double sig, double on, double w, double r, double max_time, double keep);
-double n_reverb(DspState* s, double sig, double rt60, double wet);
-double n_impulse(DspState* s, double freq);
-double n_discharge(DspState* s, double sig, double rate);
-double n_wave(DspState* s, double freq, double* values, int n);
+double n_lp1(DspState* s, long site, double sig, double cut);
+double n_hp1(DspState* s, long site, double sig, double cut);
+double n_lpf(DspState* s, long site, double sig, double cut, double res);
+double n_hpf(DspState* s, long site, double sig, double cut, double res);
+double n_bpf(DspState* s, long site, double sig, double cut, double res);
+double n_notch(DspState* s, long site, double sig, double cut, double res);
+double n_delay(DspState* s, long site, double sig, double time, double max_time);
+double n_fbdelay(DspState* s, long site, double sig, double time, double max_time, double fb);
+double n_tape(DspState* s, long site, double sig, double on, double w, double r, double max_time, double keep);
+double n_reverb(DspState* s, long site, double sig, double rt60, double wet);
+double n_impulse(DspState* s, long site, double freq);
+double n_discharge(DspState* s, long site, double sig, double rate);
+double n_wave(DspState* s, long site, double freq, double* values, int n);
 
 /* What codegen calls itself: hoisted coefficients and their steps, the
  * shapes, the Hilbert pair and the input. */
 double n_lp1_coef(double cutoff, double sr);
 void n_turn(double* p, double cs, double sn);
 void n_turn_clock(double* p, double cs, double sn);
-double n_lp1_c(DspState* s, double sig, double a);
-double n_hp1_c(DspState* s, double sig, double a);
+double n_lp1_c(DspState* s, long site, double sig, double a);
+double n_hp1_c(DspState* s, long site, double sig, double a);
 void n_svf_coef(double cutoff, double res, double sr, double* o);
-double n_lpf_c(DspState* s, double sig, const double* c);
-double n_hpf_c(DspState* s, double sig, const double* c);
-double n_bpf_c(DspState* s, double sig, const double* c);
-double n_notch_c(DspState* s, double sig, const double* c);
+double n_lpf_c(DspState* s, long site, double sig, const double* c);
+double n_hpf_c(DspState* s, long site, double sig, const double* c);
+double n_bpf_c(DspState* s, long site, double sig, const double* c);
+double n_notch_c(DspState* s, long site, double sig, const double* c);
 void n_reverb_coef(double rt60, double sr, double* o);
-double n_reverb_c(DspState* s, double sig, double wet, const double* g);
-double n_hilbert_a(DspState* s, double sig);
-double n_hilbert_b(DspState* s, double sig);
+double n_reverb_c(DspState* s, long site, double sig, double wet, const double* g);
+double n_hilbert_a(DspState* s, long site, double sig);
+double n_hilbert_b(DspState* s, long site, double sig);
 double shape_saw(double x);
 double shape_tri(double x);
 double shape_sqr(double x);

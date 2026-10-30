@@ -1183,11 +1183,12 @@ static V emit_voice_loop(Ctx* c, Scope* sc, Node* call, Node* body, const char* 
   return t.pair ? vpair(al_, ar_) : mono(al_);
 }
 
-/* A stateful native at its call site's region: point s->idx there, then
- * call. Its result in a temporary. */
+/* A stateful native at its call site's region: its offset passed as the
+ * call's second argument (no cursor shared between parts on different
+ * cores). Its result in a temporary. */
 static const char* native_call(Ctx* c, Buf* pre, const char* off, const char* call) {
   const char* t = fresh(c, "nv");
-  badd(c, pre, "  s->idx = %s; double %s = %s;\n", off, t, call);
+  badd(c, pre, "  double %s = %s;\n", t, replace_all(c, call, "(DspState*)s", F(c, "(DspState*)s, (long)(%s)", off)));
   return t;
 }
 
@@ -2814,8 +2815,8 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
       const char* off_b = register_region(c, "hilbert_b", 16, NULL);
       const char* re = fresh(c, "an_re");
       const char* im = fresh(c, "an_im");
-      badd(c, pre, "  s->idx = %s; double %s = n_hilbert_a((DspState*)s, %s);\n", off_a, re, a[0]);
-      badd(c, pre, "  s->idx = %s; double %s = -n_hilbert_b((DspState*)s, %s);\n", off_b, im, a[0]);
+      badd(c, pre, "  double %s = n_hilbert_a((DspState*)s, (long)(%s), %s);\n", re, off_a, a[0]);
+      badd(c, pre, "  double %s = -n_hilbert_b((DspState*)s, (long)(%s), %s);\n", im, off_b, a[0]);
       return vpair(re, im);
     }
     pair_operands(c, sc, n, pre, 0, "no arguments");     /* input */
@@ -3074,7 +3075,6 @@ static const char* emit_program(Ctx* c, Node* program) {
 
   Buf body = {0};
   bcat(c, &body, "static void tick1(VoiceState* s, double* outL, double* outR) {\n");
-  bcat(c, &body, "  s->idx = 0;\n");
   bcat(c, &body, "  double prof_last = 0.0;\n");
   bcat(c, &body, "  if (s->profiling) { prof_last = n_now(); s->prof_ticks++; }\n");
   Strs prof_names = {0};
@@ -3230,7 +3230,7 @@ static const char* emit_program(Ctx* c, Node* program) {
   for (int i = 0; dsp_natives[i].name; i++) {
     const NativeSpec* sp = &dsp_natives[i];
     if (eq(sp->name, "wave")) continue;
-    badd(c, &pre, "extern double n_%s(DspState*", sp->name);
+    badd(c, &pre, "extern double n_%s(DspState*,long", sp->name);
     for (int k = 0; k < native_arity(sp); k++) bcat(c, &pre, ",double");
     bcat(c, &pre, ");\n");
   }
@@ -3255,18 +3255,18 @@ static const char* emit_program(Ctx* c, Node* program) {
     "}\n"
     "static inline void n_turn_clock(double* p, double cs, double sn) { turn_step(p, cs, sn); p[2] = p[2] - 1.0; }\n"
     "#endif\n"
-    "extern double n_lp1_c(DspState*,double,double);\n"
-    "extern double n_hp1_c(DspState*,double,double);\n"
+    "extern double n_lp1_c(DspState*,long,double,double);\n"
+    "extern double n_hp1_c(DspState*,long,double,double);\n"
     "extern void n_svf_coef(double,double,double,double*);\n"
-    "extern double n_lpf_c(DspState*,double,const double*);\n"
-    "extern double n_hpf_c(DspState*,double,const double*);\n"
-    "extern double n_bpf_c(DspState*,double,const double*);\n"
-    "extern double n_notch_c(DspState*,double,const double*);\n"
+    "extern double n_lpf_c(DspState*,long,double,const double*);\n"
+    "extern double n_hpf_c(DspState*,long,double,const double*);\n"
+    "extern double n_bpf_c(DspState*,long,double,const double*);\n"
+    "extern double n_notch_c(DspState*,long,double,const double*);\n"
     "extern void n_reverb_coef(double,double,double*);\n"
-    "extern double n_reverb_c(DspState*,double,double,const double*);\n"
-    "extern double n_wave(DspState*,double,double*,int);\n"
-    "extern double n_hilbert_a(DspState*,double);\n"
-    "extern double n_hilbert_b(DspState*,double);\n"
+    "extern double n_reverb_c(DspState*,long,double,double,const double*);\n"
+    "extern double n_wave(DspState*,long,double,double*,int);\n"
+    "extern double n_hilbert_a(DspState*,long,double);\n"
+    "extern double n_hilbert_b(DspState*,long,double);\n"
     "extern double shape_saw(double);\n"
     "extern double shape_tri(double);\n"
     "extern double shape_sqr(double);\n"
@@ -3274,7 +3274,7 @@ static const char* emit_program(Ctx* c, Node* program) {
     "extern double n_midi_note(int);\n"
     "extern double n_midi_freq(void);\n"
     "extern double n_midi_gate(void);\n"
-    "extern double n_midi_trig(DspState*,int);\n"
+    "extern double n_midi_trig(DspState*,long,int);\n"
     "extern double n_midi_voice_freq(int);\n"
     "extern double n_midi_voice_gate(int);\n"
     "extern double n_midi_voice_vel(int);\n"

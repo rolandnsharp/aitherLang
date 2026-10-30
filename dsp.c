@@ -28,17 +28,17 @@ static inline double floor_mod(double x, double y) {
   return r;
 }
 
-/* Claim n slots: the next ones, or the shared fallback region at the
+/* Claim n slots at `site`, the call site's region (its offset, passed by the
+ * generated code, so no cursor is shared between parts running on
+ * different cores), or the shared fallback region at the
  * pool's tail when the patch asks for more than it has (garbage state,
  * not a crash). */
-static inline long claim(DspState* s, long n) {
-  if (s->idx + n > s->pool_slots - POOL_OVERFLOW_SLOTS) {
+static inline long claim(DspState* s, long site, long n) {
+  if (site + n > s->pool_slots - POOL_OVERFLOW_SLOTS) {
     s->overflow = 1;
     return s->pool_slots - POOL_OVERFLOW_SLOTS;
   }
-  long r = s->idx;
-  s->idx += n;
-  return r;
+  return site;
 }
 
 /* ---------------------------------------------------------------- shapes */
@@ -49,9 +49,9 @@ double shape_sqr(double x) { return fmod(x / TAU_, 1.0) < 0.5 ? 1.0 : -1.0; }
 
 /* ----------------------------------------------------------- oscillators */
 
-double n_wave(DspState* s, double freq, double* values, int n) {
+double n_wave(DspState* s, long site, double freq, double* values, int n) {
   if (n <= 0) return 0.0;
-  long i = claim(s, 1);
+  long i = claim(s, site, 1);
   s->pool[i] = fmod(s->pool[i] + freq / s->sr, 1.0);
   if (s->pool[i] < 0.0) s->pool[i] += 1.0;
   long idx = (long)(s->pool[i] * (double)n) % (long)n;
@@ -75,14 +75,14 @@ static inline double one_pole_coef(double cutoff, double sr) {
 
 double n_lp1_coef(double cutoff, double sr) { return one_pole_coef(cutoff, sr); }
 
-double n_lp1_c(DspState* s, double sig, double a) {
-  long i = claim(s, 1);
+double n_lp1_c(DspState* s, long site, double sig, double a) {
+  long i = claim(s, site, 1);
   s->pool[i] += a * (sig - s->pool[i]);
   return s->pool[i];
 }
 
-double n_hp1_c(DspState* s, double sig, double a) {
-  long i = claim(s, 1);
+double n_hp1_c(DspState* s, long site, double sig, double a) {
+  long i = claim(s, site, 1);
   s->pool[i] += a * (sig - s->pool[i]);
   return sig - s->pool[i];
 }
@@ -111,8 +111,8 @@ void n_turn_clock(double* p, double cs, double sn) {
   p[2] = p[2] - 1.0;
 }
 
-double n_lp1(DspState* s, double sig, double cut) { return n_lp1_c(s, sig, one_pole_coef(cut, s->sr)); }
-double n_hp1(DspState* s, double sig, double cut) { return n_hp1_c(s, sig, one_pole_coef(cut, s->sr)); }
+double n_lp1(DspState* s, long site, double sig, double cut) { return n_lp1_c(s, site, sig, one_pole_coef(cut, s->sr)); }
+double n_hp1(DspState* s, long site, double sig, double cut) { return n_hp1_c(s, site, sig, one_pole_coef(cut, s->sr)); }
 
 /* ---------------------------------------------- SVF (Cytomic trapezoidal) */
 
@@ -134,8 +134,8 @@ static inline void svf_coef(double cutoff_arg, double res, double sr, double* o)
 
 void n_svf_coef(double cutoff, double res, double sr, double* o) { svf_coef(cutoff, res, sr, o); }
 
-static inline double svf_c(DspState* s, double sig, const double* c, int mode) {
-  long i = claim(s, 2);
+static inline double svf_c(DspState* s, long site, double sig, const double* c, int mode) {
+  long i = claim(s, site, 2);
   double v3 = sig - s->pool[i + 1];
   double v1 = c[1] * s->pool[i] + c[2] * v3;
   double v2 = s->pool[i + 1] + c[2] * s->pool[i] + c[3] * v3;
@@ -149,21 +149,21 @@ static inline double svf_c(DspState* s, double sig, const double* c, int mode) {
   }
 }
 
-static inline double svf(DspState* s, double sig, double cut, double res, int mode) {
+static inline double svf(DspState* s, long site, double sig, double cut, double res, int mode) {
   double c[4];
   svf_coef(cut, res, s->sr, c);
-  return svf_c(s, sig, c, mode);
+  return svf_c(s, site, sig, c, mode);
 }
 
-double n_lpf(DspState* s, double sig, double cut, double res) { return svf(s, sig, cut, res, LOW); }
-double n_hpf(DspState* s, double sig, double cut, double res) { return svf(s, sig, cut, res, HIGH); }
-double n_bpf(DspState* s, double sig, double cut, double res) { return svf(s, sig, cut, res, BAND); }
-double n_notch(DspState* s, double sig, double cut, double res) { return svf(s, sig, cut, res, NOTCH); }
+double n_lpf(DspState* s, long site, double sig, double cut, double res) { return svf(s, site, sig, cut, res, LOW); }
+double n_hpf(DspState* s, long site, double sig, double cut, double res) { return svf(s, site, sig, cut, res, HIGH); }
+double n_bpf(DspState* s, long site, double sig, double cut, double res) { return svf(s, site, sig, cut, res, BAND); }
+double n_notch(DspState* s, long site, double sig, double cut, double res) { return svf(s, site, sig, cut, res, NOTCH); }
 
-double n_lpf_c(DspState* s, double sig, const double* c) { return svf_c(s, sig, c, LOW); }
-double n_hpf_c(DspState* s, double sig, const double* c) { return svf_c(s, sig, c, HIGH); }
-double n_bpf_c(DspState* s, double sig, const double* c) { return svf_c(s, sig, c, BAND); }
-double n_notch_c(DspState* s, double sig, const double* c) { return svf_c(s, sig, c, NOTCH); }
+double n_lpf_c(DspState* s, long site, double sig, const double* c) { return svf_c(s, site, sig, c, LOW); }
+double n_hpf_c(DspState* s, long site, double sig, const double* c) { return svf_c(s, site, sig, c, HIGH); }
+double n_bpf_c(DspState* s, long site, double sig, const double* c) { return svf_c(s, site, sig, c, BAND); }
+double n_notch_c(DspState* s, long site, double sig, const double* c) { return svf_c(s, site, sig, c, NOTCH); }
 
 /* ------------------------------------------------------------------ delays
  * The buffer lives in the pool: [cursor, sample0, sample1, ...]. `time`
@@ -184,9 +184,9 @@ static inline double tap_interp(DspState* s, long base, long len, long cursor, d
   return s->pool[base + 1 + i0] * (1.0 - frac) + s->pool[base + 1 + i1] * frac;
 }
 
-double n_delay(DspState* s, double sig, double time, double max_time) {
+double n_delay(DspState* s, long site, double sig, double time, double max_time) {
   long len = maxl(1, (long)(max_time * s->sr));
-  long base = claim(s, 1 + len);
+  long base = claim(s, site, 1 + len);
   long cursor = (long)s->pool[base] % len;
   s->pool[base + 1 + cursor] = sig;
   double d = clamp_(time * s->sr, 0.0, (double)(len - 1));
@@ -195,9 +195,9 @@ double n_delay(DspState* s, double sig, double time, double max_time) {
   return out;
 }
 
-double n_fbdelay(DspState* s, double sig, double time, double max_time, double fb) {
+double n_fbdelay(DspState* s, long site, double sig, double time, double max_time, double fb) {
   long len = maxl(1, (long)(max_time * s->sr));
-  long base = claim(s, 1 + len);
+  long base = claim(s, site, 1 + len);
   long cursor = (long)s->pool[base] % len;
   double d = clamp_(time * s->sr, min_(1.0, (double)(len - 1)), (double)(len - 1));
   double out = tap_interp(s, base, len, cursor, d);
@@ -217,9 +217,9 @@ double n_fbdelay(DspState* s, double sig, double time, double max_time, double f
  * there times `keep` (the erase head). `delay` is a tape whose write head
  * stays at now. */
 
-double n_tape(DspState* s, double sig, double on, double w, double r, double max_time, double keep) {
+double n_tape(DspState* s, long site, double sig, double on, double w, double r, double max_time, double keep) {
   long n = maxl(1, (long)(max_time * s->sr));
-  long base = claim(s, n);
+  long base = claim(s, site, n);
   double at = floor_mod(r * s->sr, (double)n);
   /* A head on a sample reads that sample: `t * sr` lands a hair either
    * side of a whole number, and a loop (r = w) must not hear a millionth
@@ -266,9 +266,9 @@ void n_reverb_coef(double rt60, double sr, double* o) {
   o[4] = pow(0.3, 44100.0 / sr);
 }
 
-double n_reverb_c(DspState* s, double sig, double wet, const double* gains) {
+double n_reverb_c(DspState* s, long site, double sig, double wet, const double* gains) {
   const double ap_fb = 0.5, damp = gains[4];
-  long off = claim(s, dsp_reverb_slots(s->sr));
+  long off = claim(s, site, dsp_reverb_slots(s->sr));
   double comb_sum = 0.0;
   for (int ci = 0; ci < 4; ci++) {
     long len = reverb_len(comb_secs[ci], s->sr);
@@ -296,16 +296,16 @@ double n_reverb_c(DspState* s, double sig, double wet, const double* gains) {
   return sig * (1.0 - wet) + ap * wet;
 }
 
-double n_reverb(DspState* s, double sig, double rt60, double wet) {
+double n_reverb(DspState* s, long site, double sig, double rt60, double wet) {
   double g[5];
   n_reverb_coef(rt60, s->sr, g);
-  return n_reverb_c(s, sig, wet, g);
+  return n_reverb_c(s, site, sig, wet, g);
 }
 
 /* ----------------------------------------------------------------- physics */
 
-double n_impulse(DspState* s, double freq) {
-  long i = claim(s, 1);
+double n_impulse(DspState* s, long site, double freq) {
+  long i = claim(s, site, 1);
   double prev = s->pool[i];
   s->pool[i] = fmod(s->pool[i] + freq / s->sr, 1.0);
   if (s->pool[i] < 0.0) s->pool[i] += 1.0;
@@ -314,8 +314,8 @@ double n_impulse(DspState* s, double freq) {
 
 /* A driven damped oscillator ringing at `freq` Hz; `decay` is its damping
  * rate (larger dies faster). */
-double n_discharge(DspState* s, double sig, double rate) {
-  long i = claim(s, 1);
+double n_discharge(DspState* s, long site, double sig, double rate) {
+  long i = claim(s, site, 1);
   s->pool[i] = max_(sig, s->pool[i] * (1.0 - rate / s->sr));
   return s->pool[i];
 }
@@ -345,8 +345,8 @@ static inline double hilbert(DspState* s, long base, double sig, const double* c
   return x;
 }
 
-double n_hilbert_a(DspState* s, double sig) { return hilbert(s, claim(s, 16), sig, hilbert_a); }
-double n_hilbert_b(DspState* s, double sig) { return hilbert(s, claim(s, 16), sig, hilbert_b); }
+double n_hilbert_a(DspState* s, long site, double sig) { return hilbert(s, claim(s, site, 16), sig, hilbert_a); }
+double n_hilbert_b(DspState* s, long site, double sig) { return hilbert(s, claim(s, site, 16), sig, hilbert_b); }
 
 /* ------------------------------------------------------------------- input */
 
