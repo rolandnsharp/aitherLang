@@ -5,6 +5,18 @@ language: for that, see the [README](../README.md), [SPEC](../SPEC.md)
 and [GUIDE](../GUIDE.md). Several of these record ideas that were
 tried and dropped; each doc says so near the top where that's the case.
 
+**Start here**
+- [handover-2026-10-30.md](handover-2026-10-30.md) — for a fresh
+  session: what was decided on fields, spatial audio, stepping, rates,
+  arrays and radio, what is open, and how Roland likes to work.
+- Notes behind it: [fields-2026-10-29.md](fields-2026-10-29.md),
+  [stepping-2026-10-29.md](stepping-2026-10-29.md),
+  [spatial-2026-10-29.md](spatial-2026-10-29.md),
+  [rates-2026-10-30.md](rates-2026-10-30.md),
+  [arrays-2026-10-30.md](arrays-2026-10-30.md),
+  [radio-2026-10-30.md](radio-2026-10-30.md),
+  [pluck-2026-10-30.md](pluck-2026-10-30.md).
+
 **Directions to chase**
 - [listening-2026-10-28.md](listening-2026-10-28.md) — patches that
   start from `input()`: a vocoder, sympathetic strings, pitch following,

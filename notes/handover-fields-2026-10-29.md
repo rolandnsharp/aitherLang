@@ -1,3 +1,5 @@
+**Superseded 2026-10-30 by [handover-2026-10-30.md](handover-2026-10-30.md).** Start there.
+
 # Handover: fields, space and spatial audio
 
 For a fresh session. Written 2026-10-29 at the end of a long one. Read
