@@ -23,6 +23,9 @@ tools/play: tools/play.c realtime.c
 tools/card: tools/card.c realtime.c
 	cc -O2 -Wall tools/card.c realtime.c -o $@.tmp -lasound && mv -f $@.tmp $@
 
+tools/rate: tools/rate.c
+	cc -O2 -Wall tools/rate.c -o $@.tmp -lm && mv -f $@.tmp $@
+
 tools/pad: tools/pad.c
 	cc -O2 tools/pad.c -o $@.tmp -lasound && mv -f $@.tmp $@
 
@@ -68,6 +71,6 @@ exact: tests/exact
 	tests/exact
 
 clean:
-	rm -rf aither *.tmp tools/*.tmp tests/*.tmp nimcache/ tests/run tests/corpus tests/exact tests/temporal_audit tests/bench tools/play tools/card tools/pad tools/scope tools/tv
+	rm -rf aither *.tmp tools/*.tmp tests/*.tmp nimcache/ tests/run tests/corpus tests/exact tests/temporal_audit tests/bench tools/play tools/card tools/pad tools/scope tools/tv tools/rate
 
 .PHONY: all clean test corpus corpus-update exact bench

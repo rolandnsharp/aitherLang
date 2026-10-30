@@ -5,6 +5,7 @@ tools/card
 tools/pad
 tools/scope
 tools/tv
+tools/rate
 *.so
 .DS_Store
 .claude/
