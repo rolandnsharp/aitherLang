@@ -1,6 +1,6 @@
 # Multicore: a voice's parts on several cores
 
-**Status:** design, for review. Nothing built yet.
+**Status (2026-10-30):** step 1 built (04f52cc); step 2 refreshed for the C compiler below ("Step 2 in today's C"), not built.
 
 ## Why
 
@@ -150,3 +150,53 @@ report says which line did it, so a part can be restructured if wanted.
 - **Step 0 is opt-in profiling,** `aither profile <voice> [seconds]`:
   timing every unit every sample costs a few percent, so it's on only
   while asked for.
+
+## Done, and step 2 in today's C (2026-10-30)
+
+**Why now.** Measured on battery (four A53s at 1.0 GHz), with `-O2` and
+a 20 s gap between renders: `chimera` needs 3.29 cores, `bush_doof_e`
+2.94, `tesla_jam` 2.66, `acid_complex` 1.92, `lattice` 1.48, `qigong_kit`
+1.12. `aither profile` splits them well: `bush_doof_e` over about 260
+units, the largest (the final line) 8.8% of the voice; `tesla_jam`'s
+largest part `pad`, 25%. (The profile's total, "72.8% of one core", is a
+share of a free-running engine's time, not a cost a second of sound.)
+
+**Step 1, done.** Natives take their region's offset as an argument
+(`site`); `s->idx` is no longer shared scratch. Corpus and `make exact`
+bit-identical.
+
+**Step 2 against codegen.c as it is now.** `tick1` is the whole program
+for one sample: top-level `let`s are C locals (`l_x`, `l_x_l/_r`), a
+play writes `p_x_l/_r`, file-level `$state` is `s->v_x` in the pool,
+and `tick_block` calls `tick1` a sample at a time, then meters each part.
+The design holds; four things are decided by the C:
+
+1. **`t`, `sweep` and the input as buffers.** Generated code reads
+   `s->t`; tasks running on other cores can't share that field. The
+   block's clock is computed once, as now (the same additions, so the
+   same bits), into a buffer each task reads by sample.
+2. **File-level `$state` read across units, through a buffer.**
+   `bush_doof_e`'s conductor (`$bpos` and the scenes) is written by one
+   unit and read by many later parts. Merging every unit that touches it
+   would leave one task. Instead the writer stores the value as it
+   stands after its unit, a sample at a time, and later readers read
+   that: what they read today, in source order. A unit that reads it
+   before the writer (earlier in the file) is feedback and merges; two
+   units that both write it merge.
+3. **Def bodies count.** A def may read and write file `$state`, so a
+   unit's reads and writes include those of every def it calls, through
+   any depth.
+4. **Meters and guards after the tasks.** Each part's output goes to a
+   block buffer; the per-sample fades, meters and NaN guard run over the
+   buffers once the tasks are done, in the order they run now.
+
+Profiling (`aither profile`) times statements with shared counters; it
+runs the tasks one after another, so it stays exact.
+
+The check, as before: corpus and `make exact` bit-identical with the
+tasks run on one core in order.
+
+**`chimera`**, one play, gains nothing from units. Its parallelism is
+its voices: with `poly`'s loop (notes/loops-2026-10-30.md) the voices are
+already one body over a slot index, so splitting the loop's range across
+cores is the voice-level version of the same idea, after step 3.
