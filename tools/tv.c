@@ -95,89 +95,6 @@ static const char *FoldFS =
     "  o = vec4(colour(texture(uPic, vec2(uv.x, fract(uScroll + down))).rg * uGain), 1.0);\n"
     "}\n";
 
-/* --fold: the row starting at sample `start`, P samples long (P kept
-   fractional, so a note doesn't drift from rounding); each column the
-   loudest pair of its share, as a waveform overview keeps its peaks (a
-   mean would cancel a tone folded at a slow beat). 0 until those
-   samples have come. */
-static int fold_row(double start, double P, int W, float *span, float *row) {
-    uint64_t a = (uint64_t)floor(start), b = (uint64_t)floor(start + P) + 1;
-    size_t n = (size_t)(b - a);
-    if (stream_range(span, a, b) != n) return 0;
-    for (int c = 0; c < W; c++) {
-        int i0 = (int)(start - a + c * P / W), i1 = (int)ceil(start - a + (c + 1) * P / W);
-        if (i1 > (int)n) i1 = (int)n;
-        if (i1 <= i0) i1 = i0 + 1;
-        int at = i0;
-        float most = -1;
-        for (int i = i0; i < i1; i++) {
-            float m = span[2 * i] * span[2 * i] + span[2 * i + 1] * span[2 * i + 1];
-            if (m > most) { most = m; at = i; }
-        }
-        row[2 * c] = span[2 * at];
-        row[2 * c + 1] = span[2 * at + 1];
-    }
-    return 1;
-}
-
-/* --fold auto, finding the pitch: the period of the YIN method (de
-   Cheveigné and Kawahara, JASA 2002) on the pairs before `end`: the
-   difference |z[n] - z[n + τ]|² summed, normalised by its running mean,
-   and the first dip under 0.2, its depth interpolated. 0 if nothing in
-   40 Hz .. 2 kHz repeats. d keeps the normalised differences. */
-#define YIN_N 1024
-static double yin_period(uint64_t end, double rate, float *buf, double *d) {
-    int lo = (int)(rate / 2000), hi = (int)(rate / 40);
-    uint64_t n = YIN_N + hi + 1;
-    if (end < n || stream_range(buf, end - n, end) != n) return 0;
-    double run = 0;
-    d[0] = 1;
-    for (int t = 1; t <= hi; t++) {
-        double s = 0;
-        for (int i = 0; i < YIN_N; i++) {
-            double x = buf[2 * i] - buf[2 * (i + t)], y = buf[2 * i + 1] - buf[2 * (i + t) + 1];
-            s += x * x + y * y;
-        }
-        run += s;
-        d[t] = run > 0 ? s * t / run : 1;
-    }
-    int best = 0;
-    for (int t = lo; t < hi; t++) {
-        if (d[t] < 0.2) {
-            while (t + 1 < hi && d[t + 1] < d[t]) t++;
-            best = t;
-            break;
-        }
-    }
-    if (!best) return 0;
-    double a = d[best - 1], b = d[best], c = d[best + 1], den = a - 2 * b + c;
-    return best + (den > 0 ? 0.5 * (a - c) / den : 0);
-}
-
-/* --fold auto, holding it: how many columns the new row's pattern has slid
-   from the row before (positive: right, the fold too short), or NAN when
-   the two rows don't look alike enough to say. */
-static double row_slide(const float *a, const float *b, int W) {
-    int S = W / 16;
-    double e[2 * 64 + 1], power = 0;
-    if (S > 64) S = 64;
-    for (int c = 0; c < W; c++) power += a[2 * c] * a[2 * c] + a[2 * c + 1] * a[2 * c + 1] + b[2 * c] * b[2 * c] + b[2 * c + 1] * b[2 * c + 1];
-    if (power <= 0) return NAN;
-    int best = 0;
-    for (int s = -S; s <= S; s++) {
-        double sum = 0;
-        for (int c = S; c < W - S; c++) {
-            double x = b[2 * c] - a[2 * (c - s)], y = b[2 * c + 1] - a[2 * (c - s) + 1];
-            sum += x * x + y * y;
-        }
-        e[s + S] = sum;
-        if (sum < e[best + S]) best = s;
-    }
-    if (e[best + S] > 0.3 * power * (W - 2 * S) / W || best == -S || best == S) return NAN;
-    double l = e[best + S - 1], m = e[best + S], r = e[best + S + 1], den = l - 2 * m + r;
-    return best + (den > 0 ? 0.5 * (l - r) / den : 0);
-}
-
 /* --spectrum: an FFT of the pairs as complex numbers, n a power of 2. */
 static void fft(double *re, double *im, int n) {
     for (int i = 1, j = 0; i < n; i++) {
@@ -254,15 +171,16 @@ static int spectrum_row(uint64_t end, double rate, double F, int W, float *span,
    period in samples, 0 for auto; for --spectrum (F > 0) it is the time
    between rows. */
 static int scroll(Display *d, int W, int H, double P, double F, int average, double gain, int smooth, int dest) {
-    int spectrum = F > 0, lock = !spectrum && P == 0;
+    int spectrum = F > 0;
     double rate = stream.rate;
-    if (lock) P = rate / 110;                 /* till it hears a pitch */
     if (rate / 40 + 2 > RING / 4 || P > RING / 4) {
         fputs("tv: a fold that long is more than the stream keeps\n", stderr);
         display_close(d);
         return 2;
     }
     if (spectrum) average = 0;
+    Folder fo = {0};
+    if (!spectrum) folder_init(&fo, W, P, "tv");
     GLuint prog = gl_program(GL_FULLSCREEN_VS, FoldFS);
     glUseProgram(prog);
     glUniform1i(glGetUniformLocation(prog, "uPic"), 0);
@@ -273,12 +191,10 @@ static int scroll(Display *d, int W, int H, double P, double F, int average, dou
     GLuint empty;
     glGenVertexArrays(1, &empty);
     if (smooth && !gl_has("GL_OES_texture_float_linear")) smooth = 0;
-    size_t most = (size_t)(rate / 40) + YIN_N + SPEC_N + 4;   /* the longest span read */
     float *zero = calloc((size_t)W * H * 2, sizeof(float));
-    float *rows[2] = { calloc((size_t)W * 2, sizeof(float)), calloc((size_t)W * 2, sizeof(float)) };
+    float *srow = calloc((size_t)W * 2, sizeof(float));
     float *avg = calloc((size_t)W * 2, sizeof(float));
-    float *span = calloc(most * 2, sizeof(float));
-    double *dif = calloc(most, sizeof(double));
+    float *span = calloc(SPEC_N * 2, sizeof(float));
     double *re = calloc(SPEC_N, sizeof(double)), *im = calloc(SPEC_N, sizeof(double));
     GLuint tex[2];
     glGenTextures(2, tex);
@@ -296,12 +212,8 @@ static int scroll(Display *d, int W, int H, double P, double F, int average, dou
         fprintf(stderr, "tv: %dx%d rgb24 frames to a file, %d a second\n"
                 "  ffmpeg -f rawvideo -pix_fmt rgb24 -s %dx%d -r %d -i FILE out.mp4\n",
                 W, H, HEADLESS_FPS, W, H, HEADLESS_FPS);
-    int64_t r = 0;                            /* the next row, counted from the start */
-    double start = 0;                         /* and the sample it starts at */
-    double heard = 0;                         /* the pitch last heard, in samples, and */
-    int again = 0;                            /* how many times running it was heard away from the fold */
-    double ref = P;                           /* the period found: the hold keeps near it */
-    uint64_t nextLook = 0;
+    int64_t r = 0;                            /* --spectrum: the next row, and */
+    double start = 0;                         /* the sample it starts at */
     uint64_t k = 0;                           /* --frames: the picture */
     double prev = now_s();
     for (;;) {
@@ -319,56 +231,34 @@ static int scroll(Display *d, int W, int H, double P, double F, int average, dou
             if (display_poll(d) || (stream.eof && now >= stream.head)) break;
         }
 
-        /* Fell more than a screen behind: skip to the last screenful. */
-        if (now > start + (H + 1) * P) {
+        /* Every row complete by now, at most a screenful of them. */
+        if (spectrum && now > start + (H + 1) * P) {
             double skip = floor((now - start) / P) - H;
             start += skip * P;
             r += (int64_t)skip;
         }
-        /* Every row complete by now. */
+        if (!spectrum) folder_skip(&fo, now, H);
         glBindTexture(GL_TEXTURE_2D, tex[0]);
         int added = 0;
-        while (start + P + 1 <= now) {
-            if (lock && start >= nextLook) {
-                /* The pitch, ten times a second. The fold holds while the sound
-                   still repeats at it (a harmonic of it alone does); when it
-                   doesn't, the new pitch is jumped to once heard twice. */
-                double p = yin_period((uint64_t)start, rate, span, dif);
-                nextLook = (uint64_t)start + (uint64_t)(rate / 10);
-                int ti = (int)ref;
-                double stays = p > 0 && ti + 1 < (int)(rate / 40) ? dif[ti] + (dif[ti + 1] - dif[ti]) * (ref - ti) : 1;
-                if (p > 0 && fabs(p / ref - 1) > 0.03 && stays > 0.35) {
-                    again = heard > 0 && fabs(p / heard - 1) < 0.03 ? again + 1 : 1;
-                    heard = p;
-                    if (again >= 2 || ref == rate / 110) {
-                        P = ref = p;
-                        again = 0;
-                        fprintf(stderr, "tv: folding at %.2f Hz\n", rate / P);
-                    }
-                } else again = 0;
-            }
-            float *row = rows[r & 1];
-            if (spectrum ? !spectrum_row((uint64_t)(start + P), rate, F, W, span, re, im, row)
-                         : !fold_row(start, P, W, span, row)) break;
-            if (lock && r > 0) {
-                /* The hold: nudge the fold so the pattern stops sliding, and
-                   keep within 3% of the pitch found. */
-                double s = row_slide(rows[(r - 1) & 1], row, W);
-                if (s == s) {
-                    P += 0.25 * s * P / W;
-                    if (P > ref * 1.03) P = ref * 1.03;
-                    if (P < ref / 1.03) P = ref / 1.03;
-                }
+        for (;;) {
+            float *row;
+            int64_t at;
+            if (spectrum) {
+                if (start + P + 1 > now || !spectrum_row((uint64_t)(start + P), rate, F, W, span, re, im, srow)) break;
+                row = srow;
+                at = r++;
+                start += P;
+            } else {
+                if (!(row = folder_next(&fo, now))) break;
+                at = fo.r - 1;
             }
             if (average) {
                 /* The last second's periods, averaged as they come. */
-                float a = (float)(1 - exp(-P / rate));
+                float a = (float)(1 - exp(-fo.P / rate));
                 for (int c = 0; c < 2 * W; c++) avg[c] += (row[c] - avg[c]) * a;
                 added = 1;
             }
-            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, (int)(r % H), W, 1, GL_RG, GL_FLOAT, row);
-            start += P;
-            r++;
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, (int)(at % H), W, 1, GL_RG, GL_FLOAT, row);
         }
         if (added) {
             glBindTexture(GL_TEXTURE_2D, tex[1]);
@@ -377,7 +267,7 @@ static int scroll(Display *d, int W, int H, double P, double F, int average, dou
 
         /* The bottom edge is part way through the newest complete row, a
            row behind the sample being heard, so the scroll is smooth. */
-        double pos = r + (now - start) / P;
+        double pos = spectrum ? r + (now - start) / P : folder_pos(&fo, now);
         double top = fmod(pos - 1 - H, H) / H;
         if (top < 0) top += 1;
         if (frames) display_target(d, W, H);

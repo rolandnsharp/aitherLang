@@ -136,6 +136,37 @@ See [TV.md](TV.md) and
 [notes/displays-2026-10-16.md](notes/displays-2026-10-16.md). `play`
 passing its input on isn't built yet.
 
+## Ridges
+
+`--ridge` draws the stream another way: folded at a period, each period
+a ridge, stacked up the screen with the newest in front and the ones
+behind hidden wherever a nearer one stands in front of them. It is
+Harold Craft's 1970 plot of successive pulses of the first pulsar, CP
+1919 (the one on the cover of *Unknown Pleasures*), drawn with the
+beam.
+
+```
+./aither patches/aeolian.aither | tools/scope --ridge auto --gain 4 | tools/play hw:rockchipes8388c 20
+./aither patches/sync.aither | tools/scope --ridge auto --gain 2 | tools/play hw:rockchipes8388c 20
+```
+
+- **`--ridge F`** folds at F Hz, or a beat (`108bpm`), or `auto`: the
+  pitch, found and held as `tv --fold auto` holds it (TV.md, Readouts;
+  the two share the folding). A ridge is one period, 192 points across,
+  its height x; one is kept every 24th of a second, 48 of them, so the
+  screen is two seconds deep and slides back smoothly.
+- **What it shows:** whatever repeats stands as a range of hills that
+  holds its shape; a change of harmonic is a new range rising in front;
+  a crowd out of step averages to flat ground, and falling into step
+  raises one repeating hill; a period doubling, ridges alternating in
+  height.
+- **`--gain G`** makes the ridges G times taller (x of ±1 is 0.3 of the
+  screen at 1). Taller ridges hide more of the ones behind.
+- The glow is short (`--decay 0.2` unless given), since the ridges move:
+  a long one smears each into the next.
+- Ridges fill the screen, wide, where the beam's picture is square; in
+  `--frames` the height is 9/16 of `--size`.
+
 ## Practicalities
 
 - A session is heard and seen at once: `scope` passes the stream on to

@@ -182,6 +182,167 @@ static uint64_t stream_now(double dt) {
     return (uint64_t)clock;
 }
 
+/* ------------------------------------------------------------- folding */
+
+/* A stream folded at a period: each row one period, P samples (kept
+   fractional, so a note doesn't drift from rounding), W columns, each
+   the loudest pair of its share, as a waveform overview keeps its peaks
+   (a mean would cancel a tone folded at a slow beat). tv --fold and
+   scope --ridge both read these. */
+static int fold_row(double start, double P, int W, float *span, float *row) {
+    uint64_t a = (uint64_t)floor(start), b = (uint64_t)floor(start + P) + 1;
+    size_t n = (size_t)(b - a);
+    if (stream_range(span, a, b) != n) return 0;
+    for (int c = 0; c < W; c++) {
+        int i0 = (int)(start - a + c * P / W), i1 = (int)ceil(start - a + (c + 1) * P / W);
+        if (i1 > (int)n) i1 = (int)n;
+        if (i1 <= i0) i1 = i0 + 1;
+        int at = i0;
+        float most = -1;
+        for (int i = i0; i < i1; i++) {
+            float m = span[2 * i] * span[2 * i] + span[2 * i + 1] * span[2 * i + 1];
+            if (m > most) { most = m; at = i; }
+        }
+        row[2 * c] = span[2 * at];
+        row[2 * c + 1] = span[2 * at + 1];
+    }
+    return 1;
+}
+
+/* Finding the pitch: the period of the YIN method (de Cheveigné and
+   Kawahara, JASA 2002) on the pairs before `end`: the difference
+   |z[n] - z[n + τ]|² summed, normalised by its running mean, and the
+   first dip under 0.2, its depth interpolated. 0 if nothing in 40 Hz ..
+   2 kHz repeats. d keeps the normalised differences. */
+#define YIN_N 1024
+static double yin_period(uint64_t end, double rate, float *buf, double *d) {
+    int lo = (int)(rate / 2000), hi = (int)(rate / 40);
+    uint64_t n = YIN_N + hi + 1;
+    if (end < n || stream_range(buf, end - n, end) != n) return 0;
+    double run = 0;
+    d[0] = 1;
+    for (int t = 1; t <= hi; t++) {
+        double s = 0;
+        for (int i = 0; i < YIN_N; i++) {
+            double x = buf[2 * i] - buf[2 * (i + t)], y = buf[2 * i + 1] - buf[2 * (i + t) + 1];
+            s += x * x + y * y;
+        }
+        run += s;
+        d[t] = run > 0 ? s * t / run : 1;
+    }
+    int best = 0;
+    for (int t = lo; t < hi; t++) {
+        if (d[t] < 0.2) {
+            while (t + 1 < hi && d[t + 1] < d[t]) t++;
+            best = t;
+            break;
+        }
+    }
+    if (!best) return 0;
+    double a = d[best - 1], b = d[best], c = d[best + 1], den = a - 2 * b + c;
+    return best + (den > 0 ? 0.5 * (a - c) / den : 0);
+}
+
+/* Holding it: how many columns the new row's pattern has slid from the
+   row before (positive: right, the fold too short), or NAN when the two
+   rows don't look alike enough to say. */
+static double row_slide(const float *a, const float *b, int W) {
+    int S = W / 16;
+    double e[2 * 64 + 1], power = 0;
+    if (S > 64) S = 64;
+    for (int c = 0; c < W; c++) power += a[2 * c] * a[2 * c] + a[2 * c + 1] * a[2 * c + 1] + b[2 * c] * b[2 * c] + b[2 * c + 1] * b[2 * c + 1];
+    if (power <= 0) return NAN;
+    int best = 0;
+    for (int s = -S; s <= S; s++) {
+        double sum = 0;
+        for (int c = S; c < W - S; c++) {
+            double x = b[2 * c] - a[2 * (c - s)], y = b[2 * c + 1] - a[2 * (c - s) + 1];
+            sum += x * x + y * y;
+        }
+        e[s + S] = sum;
+        if (sum < e[best + S]) best = s;
+    }
+    if (e[best + S] > 0.3 * power * (W - 2 * S) / W || best == -S || best == S) return NAN;
+    double l = e[best + S - 1], m = e[best + S], r = e[best + S + 1], den = l - 2 * m + r;
+    return best + (den > 0 ? 0.5 * (l - r) / den : 0);
+}
+
+/* The folder: rows one period each, in order. With P 0 (auto) it finds
+   the pitch ten times a second and holds the fold while the sound still
+   repeats at it (a harmonic of it alone does); when it doesn't, it jumps
+   to the new pitch once heard twice. Between, each row is compared with
+   the one before and the period nudged until the pattern stops sliding,
+   within 3% of the pitch found: a phase-locked loop on the rows. */
+typedef struct {
+    double rate, P, ref, start, heard;
+    int W, lock, again;
+    int64_t r;                                /* the next row, counted from the start */
+    uint64_t nextLook;
+    float *span, *rows[2];
+    double *dif;
+    const char *who;                          /* who says so, when it jumps */
+} Folder;
+
+static void folder_init(Folder *f, int W, double P, const char *who) {
+    f->rate = stream.rate;
+    f->W = W;
+    f->lock = P == 0;
+    f->P = f->ref = f->lock ? f->rate / 110 : P;   /* auto: 110 Hz till it hears a pitch */
+    size_t most = (size_t)fmax(f->P, f->rate / 40 + YIN_N) + 4;
+    f->span = calloc(most * 2, sizeof(float));
+    f->dif = calloc(most, sizeof(double));
+    f->rows[0] = calloc((size_t)W * 2, sizeof(float));
+    f->rows[1] = calloc((size_t)W * 2, sizeof(float));
+    f->who = who;
+}
+
+/* Fell more than `keep` rows behind: skip to the last `keep`. */
+static void folder_skip(Folder *f, uint64_t now, int keep) {
+    if (now > f->start + (keep + 1) * f->P) {
+        double skip = floor((now - f->start) / f->P) - keep;
+        f->start += skip * f->P;
+        f->r += (int64_t)skip;
+    }
+}
+
+/* The next row complete by `now`, or NULL. Row f->r - 1 is the one returned. */
+static float *folder_next(Folder *f, uint64_t now) {
+    if (f->start + f->P + 1 > now) return NULL;
+    if (f->lock && f->start >= f->nextLook) {
+        double p = yin_period((uint64_t)f->start, f->rate, f->span, f->dif);
+        f->nextLook = (uint64_t)f->start + (uint64_t)(f->rate / 10);
+        int ti = (int)f->ref;
+        double stays = p > 0 && ti + 1 < (int)(f->rate / 40) ? f->dif[ti] + (f->dif[ti + 1] - f->dif[ti]) * (f->ref - ti) : 1;
+        if (p > 0 && fabs(p / f->ref - 1) > 0.03 && stays > 0.35) {
+            f->again = f->heard > 0 && fabs(p / f->heard - 1) < 0.03 ? f->again + 1 : 1;
+            f->heard = p;
+            if (f->again >= 2 || f->ref == f->rate / 110) {
+                f->P = f->ref = p;
+                f->again = 0;
+                fprintf(stderr, "%s: folding at %.2f Hz\n", f->who, f->rate / f->P);
+            }
+        } else f->again = 0;
+    }
+    float *row = f->rows[f->r & 1];
+    if (!fold_row(f->start, f->P, f->W, f->span, row)) return NULL;
+    if (f->lock && f->r > 0) {
+        double s = row_slide(f->rows[(f->r - 1) & 1], row, f->W);
+        if (s == s) {
+            f->P += 0.25 * s * f->P / f->W;
+            if (f->P > f->ref * 1.03) f->P = f->ref * 1.03;
+            if (f->P < f->ref / 1.03) f->P = f->ref / 1.03;
+        }
+    }
+    f->start += f->P;
+    f->r++;
+    return row;
+}
+
+/* Where the fold is at `now`, in rows: whole rows done and the part of the next. */
+static inline double folder_pos(const Folder *f, uint64_t now) {
+    return f->r + (now - f->start) / f->P;
+}
+
 /* ------------------------------------------------------------ the screen */
 
 enum { DEST_WINDOW, DEST_TERM, DEST_FRAMES };

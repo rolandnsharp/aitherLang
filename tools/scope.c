@@ -13,7 +13,14 @@
    screen (--window for a window); f toggles, q or Escape closes it at once.
 
      --palette green|amber|cyan|blue|white|red   the phosphor (green, P31)
-     --decay F    what is left of a trace after 1/60 s, 0..1 (0.85)
+     --decay F    what is left of a trace after 1/60 s, 0..1 (0.85; 0.2 for --ridge)
+     --ridge F    a ridge plot instead: the stream folded at a period of F
+                  Hz (108bpm, or auto: locked to the pitch, as tv --fold),
+                  each period a ridge, the newest in front, drawn in
+                  perspective with the ones behind hidden where the nearer
+                  stand in front of them: Craft's 1970 plot of successive
+                  pulses of the pulsar CP 1919. A ridge's height is x.
+     --gain G     ridges G times taller (1)
 
    Drawn on the GPU (OpenGL ES 3); without one, Mesa draws the same thing
    on the CPU. The rate, for the beam's energy and to pace a source that
@@ -44,7 +51,7 @@ static const char *BeamVS =
     "layout(location = 0) in vec2 corner;\n"
     "layout(location = 1) in vec2 a;\n"
     "layout(location = 2) in vec2 b;\n"
-    "uniform float uSize;\n"
+    "uniform vec2 uSize;\n"
     "uniform float uSigma;\n"
     "out vec2 vA;\n"
     "out vec2 vB;\n"
@@ -155,9 +162,62 @@ static const char *CompFS =
     "  o = vec4(col + uPhos * 0.012, 1.0);\n"
     "}\n";
 
+/* --ridge: RIDGES periods, RIDGE_W points each, one a 24th of a second,
+   the newest in front. Depth d is how many 24ths of a second ago a ridge
+   ended, so they recede smoothly whatever the period. Stacked up the
+   screen evenly as Craft's are, a little narrower further back, and
+   drawn front to back against a
+   floating horizon: the highest any nearer ridge has reached at each
+   place across the screen. A point under it is hidden, and the beam
+   blanks there (a point off the square). */
+#define RIDGES  48
+#define RIDGE_W 192
+#define HBINS   720
+typedef struct { float z[RIDGE_W * 2]; uint64_t end; int used; } Ridge;
+
+static size_t ridge_points(const Ridge *rg, int newest, uint64_t now, double rate, double gain, float *pts) {
+    static float horizon[HBINS];
+    for (int b = 0; b < HBINS; b++) horizon[b] = -2;
+    size_t m = 0;
+    pts[m * 2] = 2; pts[m * 2 + 1] = 2; m++;
+    for (int k = 0; k < RIDGES; k++) {
+        const Ridge *r = &rg[(newest - k + RIDGES) % RIDGES];
+        if (!r->used) continue;
+        double d = (double)(now - r->end) * 24 / rate;
+        if (d > RIDGES) continue;
+        double z = 1 + d * 0.012, base = -0.85 + 1.5 * d / RIDGES;
+        float ys[RIDGE_W], xs[RIDGE_W];
+        for (int c = 0; c < RIDGE_W; c++) {
+            double X = (2.0 * c / (RIDGE_W - 1) - 1) * 0.9;
+            xs[c] = (float)(X / z);
+            ys[c] = (float)(base + 0.3 * gain * r->z[2 * c] / z);
+        }
+        for (int c = 0; c < RIDGE_W; c++) {
+            int b = (int)((xs[c] * 0.5f + 0.5f) * (HBINS - 1));
+            int seen = b >= 0 && b < HBINS && ys[c] > horizon[b];
+            pts[m * 2] = seen ? xs[c] : 2;
+            pts[m * 2 + 1] = seen ? ys[c] : 2;
+            m++;
+        }
+        pts[m * 2] = 2; pts[m * 2 + 1] = 2; m++;
+        /* This ridge now hides what is behind it. */
+        for (int c = 0; c + 1 < RIDGE_W; c++) {
+            int b0 = (int)((xs[c] * 0.5f + 0.5f) * (HBINS - 1)), b1 = (int)((xs[c + 1] * 0.5f + 0.5f) * (HBINS - 1));
+            for (int b = b0; b <= b1; b++) {
+                if (b < 0 || b >= HBINS) continue;
+                float t = b1 > b0 ? (float)(b - b0) / (b1 - b0) : 0;
+                float y = ys[c] + (ys[c + 1] - ys[c]) * t;
+                if (y > horizon[b]) horizon[b] = y;
+            }
+        }
+    }
+    return m;
+}
+
 static void usage(void) {
     fputs("usage: aither patch.aither | scope [--palette green|amber|cyan|blue|white|red]\n"
-          "                                   [--decay 0.85] [--window | --term | --frames FILE [--size 720]]\n"
+          "                                   [--decay 0.85] [--ridge HZ|BPMbpm|auto [--gain G]]\n"
+          "                                   [--window | --term | --frames FILE [--size 720]]\n"
           "  float pairs in on stdin, the same out on stdout; full screen unless --window;\n"
           "  f toggles full screen, q or Escape quits\n",
           stderr);
@@ -165,11 +225,20 @@ static void usage(void) {
 
 int main(int argc, char **argv) {
     const char *pal = "green", *path = NULL;
-    double decay = 0.85;
+    double decay = -1, ridgeHz = 0, gain = 1;
     int dest = -1, size = 720, windowed = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--palette") && i + 1 < argc) pal = argv[++i];
         else if (!strcmp(argv[i], "--decay") && i + 1 < argc) decay = atof(argv[++i]);
+        else if (!strcmp(argv[i], "--ridge") && i + 1 < argc) {
+            char *end;
+            if (!strcmp(argv[++i], "auto")) ridgeHz = -1;
+            else {
+                ridgeHz = strtod(argv[i], &end);
+                if (!strcmp(end, "bpm")) ridgeHz /= 60;
+                else if (*end || !(ridgeHz > 0)) { usage(); return 2; }
+            }
+        } else if (!strcmp(argv[i], "--gain") && i + 1 < argc) gain = atof(argv[++i]);
         else if (!strcmp(argv[i], "--window")) windowed = 1;
         else if (!strcmp(argv[i], "--term")) dest = DEST_TERM;
         else if (!strcmp(argv[i], "--frames") && i + 1 < argc) { dest = DEST_FRAMES; path = argv[++i]; }
@@ -179,6 +248,7 @@ int main(int argc, char **argv) {
     const float *phos = NULL;
     for (size_t i = 0; i < sizeof Palettes / sizeof *Palettes; i++)
         if (!strcmp(pal, Palettes[i].name)) phos = Palettes[i].rgb;
+    if (decay < 0) decay = ridgeHz != 0 ? 0.2 : 0.85;   /* ridges move: a long glow would smear them */
     if (!phos || decay < 0 || decay > 1 || size < 16) { usage(); return 2; }
     if (isatty(0)) {
         fputs("scope: stdin is a terminal. Pipe pairs into me:\n"
@@ -191,10 +261,12 @@ int main(int argc, char **argv) {
     Display d = {0};
     d.windowed = windowed;
     if (display_open(&d, "scope", dest, path, size) < 0) return 1;
-    if (dest == DEST_FRAMES)
+    if (dest == DEST_FRAMES) {
+        int fh = ridgeHz != 0 ? size * 9 / 16 : size;
         fprintf(stderr, "scope: %dx%d rgb24 frames at %d fps to %s\n"
                 "  ffmpeg -f rawvideo -pix_fmt rgb24 -s %dx%d -r %d -i %s out.mp4\n",
-                size, size, HEADLESS_FPS, path, size, size, HEADLESS_FPS, path);
+                size, fh, HEADLESS_FPS, path, size, fh, HEADLESS_FPS, path);
+    }
 
     GLuint beam = gl_program(BeamVS, BeamFS), fade = gl_program(GL_FULLSCREEN_VS, FadeFS),
            down = gl_program(GL_FULLSCREEN_VS, DownFS), blur = gl_program(GL_FULLSCREEN_VS, BlurFS),
@@ -234,9 +306,13 @@ int main(int argc, char **argv) {
     glVertexAttribDivisor(2, 1);
 
     float *pts = malloc((size_t)(MAXPTS + 1) * 2 * sizeof(float));
+    Folder fo = {0};
+    Ridge *ridges = calloc(RIDGES, sizeof(Ridge));
+    int newest = 0;
+    if (ridgeHz != 0) folder_init(&fo, RIDGE_W, ridgeHz > 0 ? stream.rate / ridgeHz : 0, "scope");
     float last[2] = {2, 2};                   /* off the square: the first segment is blank */
     uint64_t shown = 0;                       /* samples drawn so far */
-    int S = 0, B = 0;
+    int Sw = 0, Sh = 0, Bw = 0, Bh = 0;
     GLuint accT = 0, accF = 0, bT[2] = {0, 0}, bF[2] = {0, 0};
     double prev = now_s();
 
@@ -248,45 +324,69 @@ int main(int argc, char **argv) {
 
         /* The phosphor is a float buffer the size of the picture, so the
            faintest trail fades all the way out; the bloom works at a
-           quarter of the size. */
+           quarter of the size. The beam's picture is square; ridges fill
+           the screen (in frames, 16:9). */
         int w, h;
         display_size(&d, &w, &h);
+        if (ridgeHz != 0 && dest == DEST_FRAMES) h = w * 9 / 16;
         int s = w < h ? w : h;
         if (s < 16) s = 16;
-        if (s != S) {
+        int sw = ridgeHz != 0 ? (w < 16 ? 16 : w) : s, sh = ridgeHz != 0 ? (h < 16 ? 16 : h) : s;
+        if (sw != Sw || sh != Sh) {
             if (accF) {
                 glDeleteFramebuffers(1, &accF);
                 glDeleteTextures(1, &accT);
                 glDeleteFramebuffers(2, bF);
                 glDeleteTextures(2, bT);
             }
-            S = s;
-            B = S / 4 > 1 ? S / 4 : 1;
-            accF = gl_target(&accT, S, S, GL_R32F, GL_RED, GL_FLOAT, GL_NEAREST);
-            for (int i = 0; i < 2; i++) bF[i] = gl_target(&bT[i], B, B, GL_R16F, GL_RED, GL_HALF_FLOAT, GL_LINEAR);
+            Sw = sw;
+            Sh = sh;
+            Bw = Sw / 4 > 1 ? Sw / 4 : 1;
+            Bh = Sh / 4 > 1 ? Sh / 4 : 1;
+            accF = gl_target(&accT, Sw, Sh, GL_R32F, GL_RED, GL_FLOAT, GL_NEAREST);
+            for (int i = 0; i < 2; i++) bF[i] = gl_target(&bT[i], Bw, Bh, GL_R16F, GL_RED, GL_HALF_FLOAT, GL_LINEAR);
         }
 
         /* The samples up to the one being heard now, after the last one drawn. */
         uint64_t now = stream_now(dt);
         size_t n = 0;
-        if (now > shown) {
+        if (ridgeHz != 0) {
+            /* Every period done by now; one a 24th of a second is kept. */
+            int stride = (int)fmax(1, lround(stream.rate / fo.P / 24));
+            folder_skip(&fo, now, stride * RIDGES);
+            float *row;
+            while ((row = folder_next(&fo, now))) {
+                if ((fo.r - 1) % stride) continue;
+                newest = (newest + 1) % RIDGES;
+                memcpy(ridges[newest].z, row, sizeof ridges[newest].z);
+                ridges[newest].end = (uint64_t)fo.start;
+                ridges[newest].used = 1;
+            }
+            size_t m = ridge_points(ridges, newest, now, stream.rate, gain, pts);
+            n = m - 1;
+            shown = now;
+            glBindBuffer(GL_ARRAY_BUFFER, ptBuf);
+            glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(m * 2 * sizeof(float)), pts, GL_STREAM_DRAW);
+        } else if (now > shown) {
             if (now - shown > MAXPTS) { shown = now - MAXPTS; last[0] = last[1] = 2; }
             n = stream_range(pts + 2, shown, now);
             if (n < now - shown) last[0] = last[1] = 2;   /* lost some: start from a blank */
             shown = now;
         }
-        pts[0] = last[0];
-        pts[1] = last[1];
-        if (n) {
-            last[0] = pts[2 * n];
-            last[1] = pts[2 * n + 1];
-            glBindBuffer(GL_ARRAY_BUFFER, ptBuf);
-            glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)((n + 1) * 2 * sizeof(float)), pts, GL_STREAM_DRAW);
+        if (ridgeHz == 0) {
+            pts[0] = last[0];
+            pts[1] = last[1];
+            if (n) {
+                last[0] = pts[2 * n];
+                last[1] = pts[2 * n + 1];
+                glBindBuffer(GL_ARRAY_BUFFER, ptBuf);
+                glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)((n + 1) * 2 * sizeof(float)), pts, GL_STREAM_DRAW);
+            }
         }
 
         /* 1. The phosphor fades, by the time that has passed. */
         glBindFramebuffer(GL_FRAMEBUFFER, accF);
-        glViewport(0, 0, S, S);
+        glViewport(0, 0, Sw, Sh);
         glEnable(GL_BLEND);
         float f = (float)pow(decay, dt * 60);
         glBlendColor(f, f, f, f);
@@ -300,12 +400,16 @@ int main(int argc, char **argv) {
            size; the energy per sample with the rate, so it looks the same
            at any rate. */
         if (n) {
-            float sigma = fmaxf(0.8f, 1.3f * (float)S / 720.0f);
+            float sigma = fmaxf(0.8f, 1.3f * (float)Sh / 720.0f);
             glBlendFunc(GL_ONE, GL_ONE);
             glUseProgram(beam);
-            glUniform1f(uSize, (float)S);
+            glUniform2f(uSize, (float)Sw, (float)Sh);
             glUniform1f(uSigma, sigma);
-            glUniform1f(uEnergy, (float)(Q0 * (S / 720.0) * (sigma / 1.3) / stream.rate));
+            /* Ridges fade fast and are drawn afresh every frame: four times
+               the energy, about what a steady trace builds up under the
+               default glow. */
+            double boost = ridgeHz != 0 ? 4 : 1;
+            glUniform1f(uEnergy, (float)(boost * Q0 * (Sh / 720.0) * (sigma / 1.3) / stream.rate));
             glBindVertexArray(beamVao);
             glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, (GLsizei)n);
         }
@@ -315,22 +419,22 @@ int main(int argc, char **argv) {
         glBindVertexArray(empty);
         glActiveTexture(GL_TEXTURE0);
         glBindFramebuffer(GL_FRAMEBUFFER, bF[0]);
-        glViewport(0, 0, B, B);
+        glViewport(0, 0, Bw, Bh);
         glUseProgram(down);
         glBindTexture(GL_TEXTURE_2D, accT);
         glDrawArrays(GL_TRIANGLES, 0, 3);
         glUseProgram(blur);
         glBindFramebuffer(GL_FRAMEBUFFER, bF[1]);
         glBindTexture(GL_TEXTURE_2D, bT[0]);
-        glUniform2f(uStep, 1.0f / (float)B, 0);
+        glUniform2f(uStep, 1.0f / (float)Bw, 0);
         glDrawArrays(GL_TRIANGLES, 0, 3);
         glBindFramebuffer(GL_FRAMEBUFFER, bF[0]);
         glBindTexture(GL_TEXTURE_2D, bT[1]);
-        glUniform2f(uStep, 0, 1.0f / (float)B);
+        glUniform2f(uStep, 0, 1.0f / (float)Bh);
         glDrawArrays(GL_TRIANGLES, 0, 3);
 
         /* 4. The picture, in the phosphor's colour, wherever it goes. */
-        display_target(&d, S, S);
+        display_target(&d, Sw, Sh);
         glUseProgram(comp);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, accT);
