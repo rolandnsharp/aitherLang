@@ -136,6 +136,8 @@ patches/orrery.aither  0FCA496BB8CF9BB8  -18.2  -5.9
 patches/pad_didge.aither  E38264475749EFAD  -20.6  -12.9
 patches/phasor_ring.aither  FC50B9AE5644F592  -12.2  -3.9
 patches/phi_bush.aither  66666817A3F8BC2A  -24.6  -4.4
+patches/pluck_modes.aither  710E79D2B0737D25  -13.0  -2.8
+patches/pluck_places.aither  1BEABF6EB432206D  -12.9  -2.9
 patches/primes.aither  06765B93E06F7E95  -14.4  -1.2
 patches/qigong_drift.aither  3DDAD1BE60561F82  -28.4  -18.3
 patches/qigong_kit.aither  627D0B07EB739999  -24.7  -11.9
