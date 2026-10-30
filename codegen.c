@@ -86,6 +86,7 @@ struct Ctx {
   const char* scope;
   Map scope_counter;
   Strs def_stack;
+  Scope* hoisted;      /* hoisted invariants' names, for spelled expressions */
   Map pair_vars;
   Node** var_decls; int nvar_decls, cap_var_decls;
   Map pair_param_cache;     /* p = int* flags, n = count */
@@ -917,8 +918,15 @@ static void note_invariant(Ctx* c, Scope* target, const char* name, Node* expr, 
   }
 }
 
+static const char* hoist(Ctx* c, const char* cexpr);
+static const char* emit_spelled(Ctx* c, Node* sp, Node* at);
+
 /* A copy of `n` with every name spelled out: a compile-time number as
- * that number, an invariant name as its expression. */
+ * that number, an invariant name as its expression. An invariant name
+ * whose expression is more than a number is hoisted once on its own and
+ * spelled as that, so a value many hoisted expressions share (a knob's
+ * morph, a voice's frequency) is computed once a block and written
+ * once, not again inside each: the same arithmetic, so the same bits. */
 static Node* spell(Ctx* c, Scope* sc, Node* n) {
   if (!n) return NULL;
   double cv;
@@ -927,7 +935,18 @@ static Node* spell(Ctx* c, Scope* sc, Node* n) {
     double v;
     if (lookup_num_lit(sc, n->str, &v)) return mknum(c, v, n->line, n->source);
     Ent* inv = lookup_inv(sc, n->str);
-    if (inv) return spell(c, inv->sc, inv->node);
+    if (inv) {
+      Node* body = spell(c, inv->sc, inv->node);
+      if (body->kind == nkNum || body->kind == nkIdent) return body;
+      const char* cx = emit_spelled(c, body, n);
+      if (!cx) return body;                       /* a pair: spelled out, as before */
+      const char* h = hoist(c, cx);
+      Node* id = mknode(c, nkIdent, n->line, n->source);
+      id->str = F(c, "@%s", h);                   /* not a name a patch can write */
+      if (!c->hoisted) c->hoisted = push(c, NULL);
+      lput(c, &c->hoisted->names, id->str)->a = h;
+      return id;
+    }
   }
   Node* d = sc ? pure_def(c, sc, n) : NULL;       /* a pure def's call: its expression, spelled out */
   if (d) {
@@ -954,12 +973,21 @@ static Node* spell(Ctx* c, Scope* sc, Node* n) {
  * pure maths, so one expression and no statements. */
 static const char* emit_invariant(Ctx* c, Scope* sc, Node* n) {
   Node* sp = spell(c, sc, n);
+  const char* r = emit_spelled(c, sp, n);
+  if (!r) fail(c, "internal: an invariant expression needed statements %s", err_loc(c, n));
+  return r;
+}
+
+/* A spelled expression as one C expression, or NULL for a pair or one
+ * that needs statements. */
+static const char* emit_spelled(Ctx* c, Node* sp, Node* at) {
+  (void)at;
   int was = c->in_hoist;
   c->in_hoist = 1;
   Buf p = {0};
-  V v = emit(c, push(c, NULL), sp, &p);
+  V v = emit(c, push(c, c->hoisted), sp, &p);
   c->in_hoist = was;
-  if (p.n || v.pair) fail(c, "internal: an invariant expression needed statements %s", err_loc(c, n));
+  if (p.n || v.pair) return NULL;
   return v.l;
 }
 
