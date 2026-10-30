@@ -1245,6 +1245,33 @@ static int array_make_size(Ctx* c, Scope* sc, Node* call) {
 
 /* `$f = array(N, init)`: a state array, a flag then the elements;
  * `every = M` steps it, a second generation landing every M samples. */
+/* `array(n, i => rule)`: element k of an array made by its rule, the
+ * index bound as `each` binds it (a compile-time number). */
+static int is_rule(Node* init) { return init && init->kind == nkLambda; }
+
+static V emit_rule_element(Ctx* c, Scope* sc, Node* rule, long k, Buf* pre) {
+  if (rule->nparams != 1)
+    fail(c, "array(n, i => ...): the rule takes one parameter, the index %s", err_loc(c, rule));
+  Scope* iter = push(c, sc);
+  lput(c, &iter->names, rule->params[0])->a = num_lit(c, (double)k);
+  lput(c, &iter->numlits, rule->params[0])->v = (double)k;
+  Node* b = rule->kids[0];
+  if (b->kind != nkBlock) return emit(c, iter, b, pre);
+  for (int i = 0; i < b->nkids - 1; i++) emit_local_stmt(c, iter, b->kids[i], pre);
+  return emit(c, iter, b->kids[b->nkids - 1], pre);
+}
+
+/* Every element of a rule, its code into `pre`; whether any is a pair. */
+static V* emit_rule(Ctx* c, Scope* sc, Node* rule, int n, Buf* pre, int* pairs) {
+  V* vs = al(c, (n + 1) * sizeof(V));
+  *pairs = 0;
+  for (int k = 0; k < n; k++) {
+    vs[k] = emit_rule_element(c, sc, rule, k, pre);
+    if (vs[k].pair) *pairs = 1;
+  }
+  return vs;
+}
+
 static void declare_state_array(Ctx* c, Scope* sc, Node* st, Buf* pre, int top_level) {
   Node* call = st->kids[0];
   ArrayArgs args = array_args(call);
@@ -1262,7 +1289,14 @@ static void declare_state_array(Ctx* c, Scope* sc, Node* st, Buf* pre, int top_l
   /* The initial value decides each element's shape: a pair makes an
    * array of pairs (two slots an element), as `$z = [0, 0]` makes pair
    * state. */
-  V iv = args.npos == 2 ? emit(c, sc, args.pos[1], &init_pre) : mono("0.0");
+  /* A rule is evaluated on the sample the array is born, as a constant
+   * init is: a field's starting shape. */
+  Node* rule = args.npos == 2 && is_rule(args.pos[1]) ? args.pos[1] : NULL;
+  V* rv = NULL;
+  int rule_pairs = 0;
+  if (rule) rv = emit_rule(c, sc, rule, n, &init_pre, &rule_pairs);
+  V iv = rule ? (rule_pairs ? vpair("0.0", "0.0") : mono("0.0"))
+              : args.npos == 2 ? emit(c, sc, args.pos[1], &init_pre) : mono("0.0");
   int w = iv.pair ? 2 : 1;
   const char* off = register_region(c, iv.pair ? "sarr2" : "sarr", 1 + gens * n * w, st->str);
   long wo = every > 0 ? (long)n * w : 0;
@@ -1278,7 +1312,17 @@ static void declare_state_array(Ctx* c, Scope* sc, Node* st, Buf* pre, int top_l
     e->a = b; e->n = n; e->wo = wo; e->pairs = iv.pair;
     base = b;
   }
-  if (iv.pair)
+  if (rule) {
+    Buf fill = {0};
+    for (int g = 0; g < gens; g++)
+      for (int k = 0; k < n; k++) {
+        long at = (long)(g * n + k) * w;
+        if (w == 2) badd(c, &fill, "    s->pool[%s + 1 + %ld] = (%s); s->pool[%s + 2 + %ld] = (%s);\n",
+                         base, at, rv[k].l, base, at, rv[k].pair ? rv[k].r : rv[k].l);
+        else badd(c, &fill, "    s->pool[%s + 1 + %ld] = (%s);\n", base, at, rv[k].l);
+      }
+    badd(c, pre, "  if (s->pool[%s] == 0.0) {\n%s%s    s->pool[%s] = 1.0;\n  }\n", base, bstr(&init_pre), bstr(&fill), base);
+  } else if (iv.pair)
     badd(c, pre, "  if (s->pool[%s] == 0.0) {\n%s    double _v = (%s), _w = (%s);\n"
          "    for (long _k = 0; _k < %d; ++_k) { s->pool[%s + 1 + 2 * _k] = _v; s->pool[%s + 2 + 2 * _k] = _w; }\n"
          "    s->pool[%s] = 1.0;\n  }\n", base, bstr(&init_pre), iv.l, iv.r, gens * n, base, base, base);
@@ -1309,6 +1353,18 @@ static void declare_local_array(Ctx* c, Scope* sc, const char* name, Node* rhs, 
       fail(c, "every steps a state array, which keeps its values: $%s = array(...), not let %s",
            name, err_loc(c, rhs));
     int n = array_make_size(c, sc, rhs);
+    if (args.npos == 2 && is_rule(args.pos[1])) {
+      int pairs;
+      V* rv = emit_rule(c, sc, args.pos[1], n, pre, &pairs);
+      badd(c, pre, "  double %s[%d];\n", sym, pairs ? 2 * n : n);
+      for (int k = 0; k < n; k++) {
+        if (pairs) badd(c, pre, "  %s[%d] = (%s); %s[%d] = (%s);\n", sym, 2 * k, rv[k].l, sym, 2 * k + 1, rv[k].pair ? rv[k].r : rv[k].l);
+        else badd(c, pre, "  %s[%d] = (%s);\n", sym, k, rv[k].l);
+      }
+      Ent* e = top_level ? hput(c, &c->top_larrays, name) : lput(c, &sc->larrays, name);
+      e->a = sym; e->n = n; e->pairs = pairs; e->edged = 1;
+      return;
+    }
     V iv = args.npos == 2 ? emit(c, sc, args.pos[1], pre) : mono("0.0");
     if (iv.pair)
       badd(c, pre, "  double %s[%d];\n  { double _v = (%s), _w = (%s); for (long _k = 0; _k < %d; ++_k) { %s[2 * _k] = _v; %s[2 * _k + 1] = _w; } }\n",

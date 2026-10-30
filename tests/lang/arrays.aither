@@ -289,3 +289,33 @@ mid($z)
 # expect: 0.6, 0.6
 def pull(me, left, right): (left + right - me * 2) * 0.5 + me
 pull([0.5, 0.5], [0.6, 0.6], [0.7, 0.7]) - [0.05, 0.05]
+
+# --- an array made by its rule: element i is the rule at i
+# expect: 0.6
+let h = array(4, j => j * 0.1)
+h[0] + h[1] + h[2] + h[3]
+
+# --- a rule with lets, its index known when the patch compiles
+# expect: -0.75
+let a = [0.1, 0.3, 0.5]
+let r = array(3, j =>
+  let lo = a[j - 1]
+  if j == 0 then 0 else (lo - a[j]) / (lo + a[j]))
+r[0] + r[1] + r[2]
+
+# --- a rule of pairs makes an array of pairs
+# expect: 0, 0.5
+let z = array(3, k => rotate([1, 0], k * PI / 2))
+z[1] * 0.5
+
+# --- a state array's rule is its starting shape: taken once, then the array keeps its own values
+# expect: 0.0101
+# expect at 4: 0.0105
+$u = array(3, i => 0.01 * i * i)
+$u[1] = $u[1] + 0.0001
+$u[1]
+
+# --- a rule takes one parameter, the index
+# error: the rule takes one parameter
+let h = array(3, (i, j) => i)
+h[0]

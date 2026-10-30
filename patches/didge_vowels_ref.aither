@@ -193,8 +193,7 @@ def didge_flare(mouth, voiceP, lipF, f0, ft1, ft2, zt, wide, turb, tight):
   let a = clamp($lx - 0.4, 0.25 * (1 - tight), 1.0)   # tight shuts; looser, a leak stays open
   let br = lp1(lp1(noise(), 459.16), 459.16)
   $u  = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp)) * (1 + br * turb * (3 - 2 * tight))   # a leak hisses
-  let s = array(8)                                  # each section's area
-  each(8, j => s[j] = pow(1 + (wide - 1) * pow((j + 0.5) / 8, 3), 2))
+  let s = array(8, j => pow(1 + (wide - 1) * pow((j + 0.5) / 8, 3), 2))   # each section's area
   let x = wide - 1.5
   let hop = (1.1959 + 0.2639 * x - 0.0518 * x * x) / (4 * f0 * 8) - dt   # one section's travel
   $f = array(8)                                     # waves leaving each section's near end

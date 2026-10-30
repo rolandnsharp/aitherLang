@@ -124,10 +124,9 @@ each(arrivals, k =>
 
 let yaw = -TAU * midi_cc(21)          # the head turned anticlockwise by yaw: d-pad right turns it right
 
-let a = array(n, [0, 0])
-each(n, m =>
-  a[m] = sum(arrivals, k => heard_s[k - 1] * wound(bearing[k - 1], m))
-  a[m] = rotate(a[m], -m * yaw))      # the head turns one way, the field the other
+# The field: every arrival put into each mode, then turned against the
+# head (the head turns one way, the field the other).
+let a = array(n, m => rotate(sum(arrivals, k => heard_s[k - 1] * wound(bearing[k - 1], m)), -m * yaw))
 
 # The late room: what is left after the walls, a reverb fed from the
 # field's left and right halves, so the two ears' tails differ.

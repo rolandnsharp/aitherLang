@@ -527,6 +527,24 @@ Indexes are truncated to `int`. The edge is how the array was made:
   does. Beyond the end of a tube there is nothing, whether the tube
   keeps its values or not.
 
+The initial value may be a rule, a function of the index: `array(n, i
+=> …)` is the array whose element `i` is the rule at `i`, for `i` from
+0. A number or a pair as `init` is the rule that ignores its index.
+
+```
+let h = array(24, j => max(0, 1 - abs(j - centre)))           # a bump around centre
+let r = array(len(a), j => if j == 0 then 0 else (a[j - 1] - a[j]) / (a[j - 1] + a[j]))
+let z = array(8, k => rotate([1, 0], k * TAU / 8))           # eight directions: pairs
+```
+
+The index is bound as `each` binds it, a number known when the patch
+compiles, so `if j == 0` and `a[j - 1]` cost nothing at run time; the
+rule is unrolled once an element. It takes one parameter. Its body may
+be `let`s ended by an expression. The elements are what it returns:
+numbers, or pairs if any element is one (a number then fills both
+sides). A rule is for one array made by one formula; `each` is for a
+step that writes several arrays from shared work.
+
 A constant table (all literals) is hoisted and read-only; storing into
 one is a compile error.
 
@@ -543,6 +561,15 @@ $f = array(24)                    # forward waves, one per section
 $f[i]                             # read; past either end reads 0
 $f[i] = x                         # store
 len($f)                           # 24
+```
+
+A rule as `init` is the field's starting shape, u(x, 0) = f(x). It is
+evaluated on the sample the array is born (its first load, or when it
+is declared anew), with the values of that sample, and then the array
+keeps its own values, as with a constant `init`:
+
+```
+$u = array(64, i => sin(PI * i / 63) ^ 2)     # a string drawn into a bump before it's let go
 ```
 
 An element past either end reads 0 and a store there is dropped:
