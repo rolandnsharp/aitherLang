@@ -1,0 +1,41 @@
+# pluck_places: a string pulled into a triangle and let go, held as its
+# places. The same string as modes is pluck_modes.aither; the two are
+# compared in notes/pluck-2026-10-30.md.
+#
+# N points along the string, its ends fixed. The starting shape is the
+# triangle itself, drawn by the state array's rule, and let go from rest
+# (the step before is the same shape). Each sample every place moves by
+# the wave equation with a little damping, u'' = c² u_xx - 2 u' / τ,
+# stepped by leapfrog: u_next (1 + s) = 2u - (1 - s) u_before + r² (left
+# - 2u + right), r being how many places a wave crosses in a sample and s
+# = dt / τ. (Damping by multiplying the whole step instead puts the pitch
+# out, by more as the rate rises: 6.5 cents sharp at 44.1 kHz, 26 at
+# 176.4. The note has it.) A finger is one line at one place: hold A to press the string
+# at its middle and it sounds an octave up.
+#
+#   ./aither patches/pluck_places.aither | tools/play hw:rockchipes8388c 20
+
+let f0 = 220                     # Hz
+let N = 64                       # places along the string
+let at = 0.2                     # where it's pulled, along the string
+let pick = 0.08                  # where it's heard, near the bridge
+
+# The string drawn into a triangle peaked at `at`, height 1, ends at 0.
+def drawn(i):
+  let x = i / (N - 1)
+  if x < at then x / at else (1 - x) / (1 - at)
+
+let r = 2 * (N - 1) * f0 * dt    # places a wave crosses a sample: the pitch (and at most 1)
+let s = dt / 3                   # damping a sample: every mode dies in 3 s alike
+let pluck = impulse(0.5)         # pulled and let go again every 2 s
+let finger = midi_note(36) > 0   # A on the gamepad: a finger at the middle
+
+$u = array(N, i => drawn(i))     # now
+$b = array(N, i => drawn(i))     # a sample before: let go from rest
+each(N, i =>
+  let next = (2 * $u[i] - (1 - s) * $b[i] + r * r * ($u[i - 1] - 2 * $u[i] + $u[i + 1])) / (1 + s)
+  let held = i == 0 or i == N - 1 or (finger and i == int(N / 2))
+  $u[i] = if pluck > 0 then drawn(i) else if held then 0 else next
+  $b[i] = if pluck > 0 then drawn(i) else $u[i])
+
+$u[int(pick * (N - 1))] * 1.5

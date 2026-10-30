@@ -1,0 +1,37 @@
+# pluck_modes: a string pulled into a triangle and let go, held as its
+# modes. The same string as places is pluck_places.aither; the two are
+# compared in notes/pluck-2026-10-30.md.
+#
+# A string fixed at both ends is a sum of standing waves, mode n winding
+# n half-turns along it. Pulled aside at one point and let go from rest,
+# its shape is a triangle, and the triangle's share in mode n is known in
+# closed form. That share is each mode's starting amplitude: the state
+# array's rule. From then on a mode only spins, at its own frequency
+# (with a little stiffness, so the partials stretch), and dies at its
+# own rate (high modes sooner). The pickup near the bridge hears each
+# mode by its shape there.
+#
+#   ./aither patches/pluck_modes.aither | tools/play hw:rockchipes8388c 20
+
+let f0 = 220                     # Hz
+let N = 24                       # modes kept
+let at = 0.2                     # where it's pulled, along the string
+let pick = 0.08                  # where it's heard, near the bridge
+let stiff = 0.0002               # how much the partials stretch
+
+# The triangle's share in mode n (n from 1): peaked at `at`, height 1.
+def share(n): 2 * sin(n * PI * at) / (n * n * PI * PI * at * (1 - at))
+
+# Mode n's turn in one sample: its frequency, stretched by stiffness, and
+# its decay, 3 s for the fundamental and sooner as the mode rises.
+def step(n):
+  let f = n * f0 * sqrt(1 + stiff * n * n)
+  let life = 3 / (1 + 0.02 * n * n)
+  exp(-dt / life) * [cos(TAU * f * dt), sin(TAU * f * dt)]
+
+let pluck = impulse(0.5)         # pulled and let go again every 2 s
+
+$z = array(N, k => [share(k + 1), 0])          # the shape at the start: each mode's share, at rest
+each(N, k => $z[k] = if pluck > 0 then [share(k + 1), 0] else turn($z[k], step(k + 1)))
+
+sum(N, n => sin(n * PI * pick) * $z[n - 1][0]) * 1.5
