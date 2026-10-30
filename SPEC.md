@@ -1584,6 +1584,14 @@ the storage of every state slot after it.
 
 `sum(N, lambda)` is a special form: walks the lambda body N
 times with `n` substituted, emitting N parallel C expressions.
+A sum whose index only picks a MIDI voice slot (`poly`'s, so
+`midi_keyboard`'s) is emitted once instead, as a C loop over the
+voices: each voice's state at its own place in the pool, laid out
+as the unrolled copies are, its per-block values in arrays a voice,
+the voices added in the same order, so the bits are the unrolled
+sum's (`AITHER_LOOP=0` unrolls it). Nothing in the language
+changes; the C of a keyboard patch is several times smaller, so its
+`cc -O2` build lands sooner (notes/loops-2026-10-30.md).
 Numeric literals propagate through `let` and `def` parameters
 so `additive(f, shape, 16)` resolves `max_n = 16` at compile
 time.

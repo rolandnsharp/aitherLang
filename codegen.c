@@ -87,6 +87,7 @@ struct Ctx {
   Map scope_counter;
   Strs def_stack;
   Scope* hoisted;      /* hoisted invariants' names, for spelled expressions */
+  int loop_nv;         /* inside a looped sum (poly's voices): its count; else 0 */
   Map pair_vars;
   Node** var_decls; int nvar_decls, cap_var_decls;
   Map pair_param_cache;     /* p = int* flags, n = count */
@@ -995,6 +996,16 @@ static const char* emit_spelled(Ctx* c, Node* sp, Node* at) {
 static const char* hoist(Ctx* c, const char* cexpr) {
   Ent* e = hfind(&c->hoist_seen, cexpr);
   if (e) return e->a;
+  if (c->loop_nv && strstr(cexpr, "aither_vk")) {
+    /* It depends on the voice: one a voice, filled once a block. */
+    const char* arr = F(c, "h_%d", c->hoist_decls.n);
+    spush(c, &c->hoist_decls, F(c, "static double %s[%d];\n", arr, c->loop_nv));
+    spush(c, &c->hoist_inits, F(c, "  for (long aither_vk = 0; aither_vk < %d; aither_vk++) %s[aither_vk] = (%s);\n",
+                                c->loop_nv, arr, cexpr));
+    const char* at = F(c, "%s[aither_vk]", arr);
+    hput(c, &c->hoist_seen, cexpr)->a = at;
+    return at;
+  }
   const char* name = F(c, "h_%d", c->hoist_decls.n);
   spush(c, &c->hoist_decls, F(c, "static double %s;\n", name));
   spush(c, &c->hoist_inits, F(c, "  %s = (%s);\n", name, cexpr));
@@ -1019,11 +1030,157 @@ static const char* replace_all(Ctx* c, const char* s, const char* what, const ch
 static const char* hoist_arr(Ctx* c, int n, const char* init_call) {
   Ent* e = hfind(&c->hoist_seen, init_call);
   if (e) return e->a;
+  if (c->loop_nv && strstr(init_call, "aither_vk")) {
+    const char* arr = F(c, "h_%d", c->hoist_decls.n);
+    spush(c, &c->hoist_decls, F(c, "static double %s[%d][%d];\n", arr, c->loop_nv, n));
+    const char* at = F(c, "%s[aither_vk]", arr);
+    spush(c, &c->hoist_inits, F(c, "  for (long aither_vk = 0; aither_vk < %d; aither_vk++) %s;\n",
+                                c->loop_nv, replace_all(c, init_call, "$H", at)));
+    hput(c, &c->hoist_seen, init_call)->a = at;
+    return at;
+  }
   const char* name = F(c, "h_%d", c->hoist_decls.n);
   spush(c, &c->hoist_decls, F(c, "static double %s[%d];\n", name, n));
   spush(c, &c->hoist_inits, F(c, "  %s;\n", replace_all(c, init_call, "$H", name)));
   hput(c, &c->hoist_seen, init_call)->a = name;
   return name;
+}
+
+/* ------------------------------------------------- poly's voices as a loop
+ * A sum whose index only picks a MIDI voice slot (poly's) is written as
+ * one C loop over the voices, not eight copies (notes/loops-2026-10-30.md).
+ * The language doesn't change; the C is smaller, so cc -O2 lands sooner.
+ * Each voice keeps its own state: voice 1's regions are claimed as the
+ * body is emitted, then each later voice's copies in the same order the
+ * unrolled sum claimed them, so the layout, a reload's matching and the
+ * noise seeds are the unrolled ones; voice k's offset is voice 1's plus k
+ * times its type's span. What depends on the voice and is hoisted (a
+ * partial's turn) is an array filled once a block. The voices add in the
+ * same order, voice 1 first, so the bits are the unrolled sum's. A clock
+ * turner's per-block check is one a voice too. AITHER_LOOP=0 unrolls every
+ * sum. */
+
+static int loops_off(void) {
+  static int off = -1;
+  if (off < 0) { const char* e = getenv("AITHER_LOOP"); off = e && eq(e, "0"); }
+  return off;
+}
+
+static const char* const VOICE_SLOT[] = {"midi_voice_freq", "midi_voice_gate", "midi_voice_vel",
+                                         "midi_voice_key", NULL};
+
+/* Is `name` read only as the slot of a voice call (midi_voice_freq(name))? */
+static int only_voice_slot(Node* n, Node* parent, const char* name) {
+  if (!n) return 1;
+  if (n->kind == nkIdent && eq(n->str, name))
+    return parent && parent->kind == nkCall && parent->nkids == 1 && in(parent->str, VOICE_SLOT);
+  if ((n->kind == nkLet || n->kind == nkVar) && n->str && eq(n->str, name)) return 0;
+  if (n->kind == nkLambda)
+    for (int i = 0; i < n->nparams; i++) if (eq(n->params[i], name)) return 0;
+  for (int i = 0; i < n->nkids; i++) if (!only_voice_slot(n->kids[i], n, name)) return 0;
+  return 1;
+}
+
+static int can_loop(Ctx* c, Node* body, const char* param, long N) {
+  return N >= 2 && !c->loop_nv && !loops_off() && mentions(body, param) && only_voice_slot(body, NULL, param);
+}
+
+/* Claim a copy of `src` as the next voice's, as register_region would
+ * have for the unrolled copy. */
+static int copy_region(Ctx* c, int src_rid) {
+  Region src = c->regions[src_rid];
+  Ent* tc = hfind(&c->type_counter, src.type_name);
+  Ent* ts = hfind(&c->type_cum_size, src.type_name);
+  long per_type_idx = tc->n, intra = ts->n;
+  tc->n = per_type_idx + 1;
+  ts->n = intra + src.size;
+  Ent* sk = hput(c, &c->scope_counter, F(c, "%s | %s | %s", src.scope, src.type_name, src.owner));
+  long scope_idx = sk->n;
+  sk->n = scope_idx + 1;
+  if (c->nregions == c->cap_regions) {
+    int cap = c->cap_regions ? c->cap_regions * 2 : 64;
+    Region* r = al(c, cap * sizeof(Region));
+    if (c->nregions) memcpy(r, c->regions, c->nregions * sizeof(Region));
+    c->regions = r; c->cap_regions = cap;
+  }
+  c->regions[c->nregions++] = (Region){src.type_name, (int)per_type_idx, src.scope, (int)scope_idx,
+                                       src.owner, intra, src.size};
+  return c->nregions - 1;
+}
+
+static unsigned noise_seed(Ctx* c, int rid) {
+  Region* r = &c->regions[rid];
+  unsigned seed = 2166136261u;
+  const char* id = F(c, "%s|%s|%d", r->scope, r->owner, r->scope_idx);
+  for (const char* p = id; *p; p++) seed = (seed ^ (unsigned char)*p) * 16777619u;
+  return seed ? seed : 2463534242u;
+}
+
+static V emit_block(Ctx* c, Scope* sc, Node* b, Buf* pre);
+
+static V emit_voice_loop(Ctx* c, Scope* sc, Node* call, Node* body, const char* param, long N, Buf* pre) {
+  int r0 = c->nregions;
+  const char* idx = "((double)(aither_vk + 1))";
+  if (!c->hoisted) c->hoisted = push(c, NULL);
+  lput(c, &c->hoisted->names, "@vk")->a = idx;
+  Scope* iter = push(c, sc);
+  lput(c, &iter->names, param)->a = idx;            /* the slot, at run time */
+  Node* vk = mknode(c, nkIdent, call->line, call->source);
+  vk->str = "@vk";
+  Ent* inv = lput(c, &iter->invs, param);          /* and steady over a block, as a voice's note is */
+  inv->node = vk;
+  inv->sc = iter;
+  c->loop_nv = (int)N;
+  int h0 = c->hoist_inits.n;           /* per-block code the body adds (a clock turner's) */
+  Buf own = {0};
+  V t = body->kind == nkBlock ? emit_block(c, iter, body, &own) : emit(c, iter, body, &own);
+  c->loop_nv = 0;
+  int r1 = c->nregions, nr = r1 - r0;
+  /* Each type's span in one voice: voice k's region is voice 1's plus k spans. */
+  const char** types = al(c, (nr + 1) * sizeof(char*));
+  long* span = al(c, (nr + 1) * sizeof(long));
+  int nt = 0;
+  for (int r = r0; r < r1; r++) {
+    int k = 0;
+    while (k < nt && !eq(types[k], c->regions[r].type_name)) k++;
+    if (k == nt) { types[nt] = c->regions[r].type_name; span[nt++] = 0; }
+    span[k] += c->regions[r].size;
+  }
+  int* copies = al(c, ((long)N * nr + 1) * sizeof(int));     /* copies[v * nr + i]: voice v's region i */
+  for (int i = 0; i < nr; i++) copies[i] = r0 + i;
+  for (long v = 1; v < N; v++)
+    for (int i = 0; i < nr; i++) copies[v * nr + i] = copy_region(c, r0 + i);
+  const char* code = bstr(&own);
+  const char* tl = t.l;
+  const char* tr = t.r;
+  for (int i = 0; i < nr; i++) {
+    int r = r0 + i, k = 0;
+    while (!eq(types[k], c->regions[r].type_name)) k++;
+    const char* ph = offset_placeholder(c, r);
+    const char* at = F(c, "(%s + aither_vk * %ldL)", ph, span[k]);
+    code = replace_all(c, code, ph, at);
+    tl = replace_all(c, tl, ph, at);
+    tr = replace_all(c, tr, ph, at);
+    for (int h = h0; h < c->hoist_inits.n; h++)
+      if (strstr(c->hoist_inits.v[h], ph)) c->hoist_inits.v[h] = replace_all(c, c->hoist_inits.v[h], ph, at);
+    if (eq(c->regions[r].type_name, "noise")) {
+      Buf seeds = {0};
+      for (long v = 0; v < N; v++) badd(c, &seeds, "%s%uu", v ? ", " : "", noise_seed(c, copies[v * nr + i]));
+      const char* arr = F(c, "nzs_%d", r);
+      spush(c, &c->hoist_decls, F(c, "static const unsigned int %s[%ld] = {%s};\n", arr, N, bstr(&seeds)));
+      code = replace_all(c, code, F(c, "__SEED_%06d__", r), F(c, "%s[aither_vk]", arr));
+    }
+  }
+  const char* al_ = fresh(c, "voices_l");
+  const char* ar_ = fresh(c, "voices_r");
+  badd(c, pre, "  double %s = 0.0, %s = 0.0;\n  for (long aither_vk = 0; aither_vk < %ld; aither_vk++) {\n%s",
+       al_, ar_, N, code);
+  if (t.pair)
+    badd(c, pre, "  if (aither_vk == 0) { %s = (%s); %s = (%s); } else { %s += (%s); %s += (%s); }\n  }\n",
+         al_, tl, ar_, tr, al_, tl, ar_, tr);
+  else
+    badd(c, pre, "  if (aither_vk == 0) %s = (%s); else %s += (%s);\n  }\n", al_, tl, al_, tl);
+  return t.pair ? vpair(al_, ar_) : mono(al_);
 }
 
 /* A stateful native at its call site's region: point s->idx there, then
@@ -1629,9 +1786,19 @@ static void emit_clock_turner(Ctx* c, Scope* sc, Node* arg, const char* rate, Bu
   const char* off = register_region(c, "clock_turner", 3, NULL);
   const char* was_k = fresh(c, "ck_was_k");
   const char* was_k0 = fresh(c, "ck_was_k0");
-  spush(c, &c->hoist_decls, F(c, "static double %s, %s;\n", was_k, was_k0));
-  spush(c, &c->hoist_inits, F(c, "  if (!(%s == %s && %s == %s)) s->pool[%s + 2] = 0.0;\n  %s = %s; %s = %s;\n",
-                              k, was_k, k0, was_k0, off, was_k, k, was_k0, k0));
+  if (c->loop_nv) {
+    /* In a loop of voices, each voice's: its offset gets the voice's
+     * stride when the loop is done (emit_voice_loop). */
+    spush(c, &c->hoist_decls, F(c, "static double %s[%d], %s[%d];\n", was_k, c->loop_nv, was_k0, c->loop_nv));
+    spush(c, &c->hoist_inits, F(c, "  for (long aither_vk = 0; aither_vk < %d; aither_vk++) {\n"
+                                "  if (!(%s == %s[aither_vk] && %s == %s[aither_vk])) s->pool[%s + 2] = 0.0;\n"
+                                "  %s[aither_vk] = %s; %s[aither_vk] = %s;\n  }\n",
+                                c->loop_nv, k, was_k, k0, was_k0, off, was_k, k, was_k0, k0));
+  } else
+    spush(c, &c->hoist_decls, F(c, "static double %s, %s;\n", was_k, was_k0));
+  if (!c->loop_nv)
+    spush(c, &c->hoist_inits, F(c, "  if (!(%s == %s && %s == %s)) s->pool[%s + 2] = 0.0;\n  %s = %s; %s = %s;\n",
+                                k, was_k, k0, was_k0, off, was_k, k, was_k0, k0));
   const char* o = fresh(c, "ck");
   const char* r = fresh(c, "ck_cos");
   const char* i = fresh(c, "ck_sin");
@@ -2074,9 +2241,12 @@ static const char* emit_noise(Ctx* c, Buf* pre) {
   for (const char* p = id; *p; p++) seed = (seed ^ (unsigned char)*p) * 16777619u;
   if (seed == 0) seed = 2463534242u;
   const char* t = fresh(c, "nzv");
-  badd(c, pre, "  double %s; { long %s = %s; unsigned int r = (unsigned int)s->pool[%s]; if (r == 0) r = %uu; "
+  /* In a loop of voices each voice's seed is its own, as unrolled: an
+   * array filled in once the voices' regions are known. */
+  const char* sd = c->loop_nv ? F(c, "__SEED_%06d__", c->nregions - 1) : F(c, "%uu", seed);
+  badd(c, pre, "  double %s; { long %s = %s; unsigned int r = (unsigned int)s->pool[%s]; if (r == 0) r = %s; "
        "r ^= r << 13; r ^= r >> 17; r ^= r << 5; s->pool[%s] = (double)r; "
-       "%s = ((double)r / 4294967295.0) * 2.0 - 1.0; }\n", t, slot, off, slot, seed, slot, t);
+       "%s = ((double)r / 4294967295.0) * 2.0 - 1.0; }\n", t, slot, off, slot, sd, slot, t);
   const char* per_hz = c->hoist_on && !c->in_hoist ? hoist(c, "sqrt(s->sr / 48000.0)") : "sqrt(s->sr / 48000.0)";
   return F(c, "(%s * %s)", t, per_hz);
 }
@@ -2547,6 +2717,7 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
     if (N == 0) return mono("0.0");
     const char* param = lamarg->params[0];
     Node* body = lamarg->kids[0];
+    if (can_loop(c, body, param, N)) return emit_voice_loop(c, sc, n, body, param, N, pre);
     V* terms = al(c, N * sizeof(V));
     int pair = 0;
     for (long k = 1; k <= N; k++) {
