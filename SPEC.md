@@ -1492,6 +1492,14 @@ gamepad is tested, measured and rendered without hands. Offline only,
 and the run starts with every key up and every knob at 0, as a fresh
 engine does.
 
+A script is a record of playing, never a place to compose: a time, a
+kind and two numbers a line, with no loops, variables, repeats or
+includes, and it stays that way (PHILOSOPHY refuses a pattern DSL).
+Sequencing written as music belongs in the patch, as signals (`wave`,
+tables, `sweep`, `tape`); sequencing from another program (a DAW, a
+tracker, a script) reaches aither as MIDI, live, or as a script it
+wrote, offline. Being plain is what lets any tool write one.
+
 ### Voice-level
 
 | Command                          | Description                                |
