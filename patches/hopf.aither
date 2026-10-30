@@ -1,0 +1,103 @@
+# hopf: linked rings in four dimensions, drawn by the beam and heard as
+# an interval.
+#
+# Two pairs are a point in four dimensions, and the points with
+# |z1|² + |z2|² = 1 are the 3-sphere. Turn both pairs by the same spin
+# and every point on it runs round a circle; no two of those circles
+# meet, and every one is linked through every other. That is the Hopf
+# fibration (Hopf, Mathematische Annalen 1931; drawn the same way, by
+# stereographic projection, and made in liquid crystal by Chen et al.,
+# PRL 2013, https://doi.org/10.1103/physrevlett.110.237801), and seen
+# in our space, by stereographic projection from the
+# 3-sphere's north pole (dividing by how far a point is from it), its
+# circles are rings on a torus, each through the hole of the next.
+#
+# Here the beam runs on that torus:
+#   z1 = spin(f) / √2,   z2 = spin(f · p / q) / √2
+# two notes an interval p/q apart. Every lap of the first note the
+# second has gone p/q of a lap, so the beam comes round on a different
+# ring, and only after q laps on the one it started on: an interval
+# with q in its ratio draws q linked rings. A fifth, 3/2, is two; a
+# major third, 5/4, four; a whole tone, 9/8, eight. The projection
+# bends what you hear as it bends what you see: the nearer the beam to
+# the pole, the bigger it is drawn, and the harmonics that adds are
+# the rings' shape.
+#
+# Rotating the 3-sphere turns the rings through each other: a rotation
+# that mixes a side of z1 with a side of z2 has no picture in our
+# space, and as it carries a ring through the pole, the ring opens out
+# through infinity into a line and closes again on the other side.
+# Turning z1 and z2 together by a spin slides every point along its
+# own ring, and adds the spin's speed to both notes (PHASORS.md). Hz
+# added are not ratios kept: the interval goes out of tune, the beam
+# no longer comes back to the ring it started on, and lap after lap it
+# paints the whole torus the rings lie on. Let go and they close again.
+#
+#   make tools/pad tools/scope
+#   tools/pad &                                         # the gamepad: start it first
+#   ./aither patches/hopf.aither | tools/scope | tools/play hw:rockchipes8388c 20
+#
+# The buttons, no d-pad (tools/pad sends each as a note). Held, a button
+# turns the rings faster and faster; let go and they slow to a stop
+# where they are.
+#   A   turn through the fourth dimension, one way (x1 with x2)
+#   B   the other way (y1 with y2, through the pole)
+#   X   slide along the rings: the notes rise out of tune with each
+#       other and the rings come undone into the torus they lie on;
+#       let go and they close again
+#   Y   the next interval, morphing over a second: fifth (2 rings),
+#       fourth (3), major third (4), minor third (5), septimal minor
+#       third (6), whole tone (8), then round again
+
+let f = 110                                      # the first note, A2
+
+let ps = [3, 4, 5, 6, 7, 9]
+let qs = [2, 3, 4, 5, 6, 8]
+
+# Y: the next interval, morphing from the one before.
+$from = 0
+$to = 0
+$mix = 1.0
+$from = if midi_trig(39) > 0 then $to else $from
+$to = if midi_trig(39) > 0 then ($to + 1) mod 6 else $to
+$mix = if midi_trig(39) > 0 then 0 else min($mix + dt, 1)
+let m = $mix * $mix * (3 - 2 * $mix)
+
+# One clock for every interval: it runs 120 laps of f before it wraps,
+# and 120 is a whole number of laps of every q, so every curve closes.
+let ph = TAU * 120 * phasor(f / 120)
+def second(k, ph): [cos(ph * ps[k] / qs[k]), sin(ph * ps[k] / qs[k])]
+
+# How fast each turn goes, radians a second: a held button speeds it
+# up, and let go it slows to a stop. Unheld, the rings drift.
+def speed(held, top, drift, settle):
+  $w = 0.0
+  $w = $w + dt * (if held > 0 then (top - $w) * 1.5 else (drift - $w) * settle)
+  $w
+
+$a = 0.0
+$b = 0.0
+$slide = 0.0
+$a = $a + speed(midi_note(36), 1.5, 0.04, 0.7) * dt
+$b = $b + speed(midi_note(37), 1.5, 0.06, 0.7) * dt
+$slide = $slide + speed(midi_note(38), TAU * 15, 0, 3) * dt   # up to 15 Hz
+
+# The point on the 3-sphere, slid along its ring.
+let z1 = rotate([cos(ph), sin(ph)], $slide)
+let w2 = second($from, ph) * (1 - m) + second($to, ph) * m
+let z2 = rotate(w2 / amplitude(w2), $slide)          # back onto the sphere mid-morph
+let [x1, y1] = z1 * 0.7071
+let [x2, y2] = z2 * 0.7071
+
+# Turned through the fourth dimension.
+let [xa, xb] = rotate([x1, x2], $a)
+let [ya, yb] = rotate([y1, y2], $b)
+
+# Stereographic projection from the pole (0, 0, 0, 1) into our space,
+# then seen from a little above, and the far-flung parts drawn in so
+# the beam stays on the screen.
+let s = 1 / max(1 - yb, 0.01)
+let [Y, Z] = rotate([ya * s, xb * s], 0.9)
+let p = [xa * s, Y]
+let r = amplitude(p)
+p * tanh(0.45 * r) / max(r, 0.0001) * 0.95

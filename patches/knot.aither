@@ -43,8 +43,8 @@ let ps = [2, 3, 2, 3, 3, 2]
 let qs = [3, 2, 5, 4, 5, 7]
 let ss = [3, 4, 5, 4, 5, 7]
 
-def shadow(k, ph, ps, qs): (1.6 + cos(qs[k] * ph)) * [cos(ps[k] * ph), sin(ps[k] * ph)]
-def height(k, ph, ss): sin(ss[k] * ph)
+def shadow(k, ph): (1.6 + cos(qs[k] * ph)) * [cos(ps[k] * ph), sin(ps[k] * ph)]
+def height(k, ph): sin(ss[k] * ph)
 
 # Y: the next knot, morphing from the one before.
 $from = 0
@@ -56,8 +56,8 @@ $mix = if midi_trig(39) > 0 then 0 else min($mix + dt, 1)
 let m = $mix * $mix * (3 - 2 * $mix)            # eased
 
 let ph = TAU * phasor(f)
-let xy = shadow($from, ph, ps, qs) * (1 - m) + shadow($to, ph, ps, qs) * m
-let z  = height($from, ph, ss) * (1 - m) + height($to, ph, ss) * m
+let xy = shadow($from, ph) * (1 - m) + shadow($to, ph) * m
+let z  = height($from, ph) * (1 - m) + height($to, ph) * m
 
 # How fast each turn goes, radians a second: a held button speeds it
 # up, and let go it slows to a stop. Unheld, the knot drifts.
