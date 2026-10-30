@@ -1,0 +1,73 @@
+# duffing: the road to chaos, heard and seen. A mass between two wells,
+# shaken by a 220 Hz tone, and how hard it is shaken decides everything.
+#
+# The mass sits in a double-well spring: pushed one way it falls into
+# the left well, the other way the right. Shaken gently it rocks in one
+# well, once a shake: a note at 220 Hz. Shake it harder and the rocking
+# goes over the top of a step: it rocks one way on one shake and a
+# little differently on the next, repeating every two shakes, and a note
+# an octave down, 110 Hz, comes in. Harder, every four (55 Hz). Then
+# every eight, sixteen, faster and faster, until it never repeats: it
+# tumbles from well to well and the note is a roar. Each step comes
+# sooner than the last, by the same ratio, 4.669..., whatever is being
+# shaken: Feigenbaum's constant (Feigenbaum, J. Stat. Phys. 1978), seen
+# in dripping taps, heart cells and lasers. And inside the chaos there
+# are calm windows: shaken still harder, it falls back into a rhythm of
+# five shakes (44 Hz under the 220), then chaos again, then three, a
+# twelfth below.
+#
+#   x'' + 0.3 x' - x + x³ = γ cos(1.2 τ)      Duffing's oscillator (1918),
+#                                              in the form of Guckenheimer
+#                                              and Holmes' book (1983)
+#
+# The pair is the mass's state: where it is, and how fast it's moving.
+# On the scope that is its phase portrait, a loop once a shake, two
+# loops, four, then a tangle. The left channel is where it is, the right
+# how fast, so you hear the state you see (each with its slow drift
+# taken off, so a mass sitting in one well isn't a push on the speaker).
+#
+# On tv, fold it at the shake, so each row is one shake and the sound
+# draws itself a row a shake, 220 rows a second:
+#
+#   make tools/pad tools/scope tools/tv
+#   tools/pad &                                         # the gamepad: start it first
+#   ./aither patches/duffing.aither | tools/tv --fold 220 --gain 2 | tools/play hw:rockchipes8388c 20
+#
+# Rocking once a shake, every row is the same: still columns. Every two
+# shakes, every other row differs: fine stripes. Every four, stripes
+# four rows deep. In chaos no row is like any other, and the stripes go
+# ragged. A period-five window is a pattern five rows deep, repeating
+# exactly, between two raggednesses. The hue is where round its
+# loop the mass is. Try tv --recur 0.05 as well: each period draws its
+# own lattice, and chaos a broken weave.
+#
+# The buttons, no d-pad (tools/pad sends each as a note):
+#   A   hold: shake harder, slowly, through the steps
+#   B   hold: shake more gently
+#   X   kick the mass: in a window or a single well it may land in
+#       another rhythm, or the other well, and stay
+#   Y   the next station, gliding there: once a shake, twice, four
+#       times, chaos, the five window, chaos, the three window, then
+#       round again
+
+let f = 220                                  # the shake
+let gammas = [0.22, 0.275, 0.289, 0.32, 0.365, 0.45, 0.52]
+
+# How hard it's shaken: Y picks a station, A and B move off it.
+$station = 0
+$station = if midi_trig(39) > 0 then ($station + 1) mod 7 else $station
+$aim = 0.22
+$aim = if midi_trig(39) > 0 then gammas[$station] else clamp($aim + dt * 0.02 * (midi_note(36) - midi_note(37)), 0.15, 0.6)
+$g = 0.22
+$g = $g + ($aim - $g) * dt * 3
+
+# The mass, in the oscillator's own time: 1.2 radians of it a shake.
+let dtau = TAU / 1.2 * f * dt                  # a shake is 2π / 1.2 of τ
+$x = 1.0
+$v = 0.0
+let shake = cos(TAU * phasor(f))
+let pull = $g * shake - 0.3 * $v + $x - $x * $x * $x
+$v = $v + pull * dtau + (if midi_trig(38) > 0 then 1.2 else 0)
+$x = $x + $v * dtau
+
+[hp1($x, 15), hp1($v, 15) / 1.2] * 0.55 |> tanh

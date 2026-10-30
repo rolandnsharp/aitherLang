@@ -126,10 +126,80 @@ takes a square root every step.
 - A picture costs CPU like sound, on the same core: a frame is w·h
   samples of the patch.
 
+## Readouts: any patch, read
+
+The raster above is a picture a patch draws for tv. The readouts are
+the other way round: tv reads any stream, a patch made for nothing but
+sound, and lays it out so something about it can be seen that the
+scope can't show. The scope shows the signal against itself (x against
+y); the readouts show it against time, folded, against frequency, and
+against itself at other times. Each keeps the stream's own timing:
+they scroll smoothly at whatever rate the rows come, and never wait for
+a frame of w·h samples. One at a time; `--size` is then columns × rows
+(256×192, or 256×256 for `--recur`), and `--gain` brightens a quiet
+stream.
+
+```
+./aither patches/duffing.aither | tools/tv --fold 220 --gain 2 | tools/play hw:rockchipes8388c 20
+./aither patches/aeolian.aither | tools/tv --fold auto --gain 3 | tools/play hw:rockchipes8388c 20
+```
+
+- **`--fold F`**: each row is one period of F Hz (or of a beat:
+  `--fold 108bpm`), the newest at the bottom, scrolling up. A note in
+  tune with F stands still in columns; one a little off leans, and how
+  far it leans is how far off it is; beating drifts down the rows; a
+  beat's hits line up. The period is kept fractional, so a note doesn't
+  drift from rounding. This is a strobe tuner's picture, and the
+  phase-against-time plot astronomers fold a pulsar's signal into.
+- **`--fold auto`** finds the pitch and holds the fold on it. Ten times
+  a second it finds the period by the YIN method (de Cheveigné and
+  Kawahara, JASA 2002), and while the sound still repeats at the fold,
+  as a harmonic of it alone does, the fold holds; when it doesn't, tv
+  folds at the new period once it has heard it twice, and says so on
+  stderr. Between, each row is compared with the one before: if the
+  pattern slid sideways, the period is nudged until it stops, a
+  phase-locked loop on the picture itself, keeping within 3% of the
+  pitch found. A pitch alone is too coarse to hold columns still for a
+  screenful of rows (one part in fifty thousand); the loop isn't.
+- **`--average`**, with `--fold`: the bottom third is the mean of the
+  last second's periods, drawn as a curve (each column filled up to its
+  magnitude, in its phase's hue). What repeats at the fold builds up and
+  what doesn't cancels: a waveform out of noise, as epoch folding finds
+  a pulse, or averaging an EEG finds an evoked response.
+- **`--spectrum F`**: each row is a spectrum, −F to +F Hz, 100 rows a
+  second (a 4096-point FFT, Hann-windowed). A pair has two sides: a
+  spin turning forwards is on the right, one turning backwards on the
+  left, so `conj` is a mirror and a real signal is symmetric. Brightness
+  is level, 70 dB of it, full at a spin of amplitude 1. Hue is the
+  pitch class of the frequency each bin truly holds, measured from how
+  far its phase turned since the row before (the phase vocoder's
+  instantaneous frequency): C red, round the wheel a semitone at a
+  time, every octave the same colour, and a tone's neighbouring bins
+  the same colour as it. Its phase, as hue, would turn at the bin's
+  distance from the tone, and a steady tone would come out a rainbow.
+- **`--recur S`**: a recurrence plot (Eckmann, Kamphorst and Ruelle,
+  Europhysics Letters 1987) of the last S seconds, redrawn every
+  picture. Pixel (i, j) is bright when the signal at moment i (across)
+  is near where it was at moment j (up); a moment is its pair and the
+  pair just before, so passing a value going the other way isn't
+  coming back. Near is against the window's own spread. The diagonal is
+  each moment with itself. A period draws lines parallel to it, a
+  period apart; quasi-periodic motion breaks them into dashes; chaos
+  into short scattered strokes; noise into dots; and a change of
+  behaviour shows as a block. Hue is the pair's phase there: where
+  round its cycle the signal came back. S should hold a few periods of
+  what's to be seen: 0.05 for a note at 110 Hz.
+
+`patches/duffing.aither` is made to be read by them: a driven
+double-well oscillator on the road to chaos, folded at its drive. Each
+period doubling shows as rows that repeat every two, then four; chaos
+as rows all different; its periodic windows as patterns five and three
+rows deep.
+
 ## What tv cannot do
 
 Thin lines and curves: a raster shows a curve only where its pixels
 sample it, and at these sizes that is coarse. Draw those with `scope`
-([SCOPE.md](SCOPE.md)). `tv` has no effects, modes or presets and no
-memory of its own: trails, feedback and persistence are state arrays
-in the patch.
+([SCOPE.md](SCOPE.md)). In the raster `tv` has no effects or presets
+and no memory of its own: trails, feedback and persistence are state
+arrays in the patch. The readouts keep only what they show.

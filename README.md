@@ -153,8 +153,8 @@ AITHER_RATE=1152000 aither patches/mandelbrot.aither | AITHER_RATE=1152000 tools
 aither music.aither | tools/play hw:rockchipes8388c 20 | AITHER_SOCK=/tmp/b.sock aither picture.aither | tools/tv --size 48x27
                                               a picture that listens: play hands the music on after the speaker has it,
                                               and the second engine's input() hears it (its own socket; demos/plate)
-aither patches/cohere.aither | tools/tv --fold auto --average | tools/play hw:rockchipes8388c 20
-                                              any patch, read: folded at its pitch (or --spectrum, --recur; TV.md)
+aither patches/duffing.aither | tools/tv --fold 220 --gain 2 | tools/play hw:rockchipes8388c 20
+                                              any patch, read: folded at a period (or --fold auto, --spectrum, --recur; TV.md)
 aither set.aither 30 > take.raw               offline: 30 s from t=0, then exit (sox makes the WAV)
 AITHER_RATE=192000 aither fm.aither | sdr-tx  the rate is yours; the reader agrees
 aither rx.aither | tools/rate 2400000 44100 | tools/play hw:…   a radio's rate to the speaker's (make tools/rate)
