@@ -3057,6 +3057,155 @@ static void mention(Ctx* c, Node* n, Map* plays, Map* reached) {
   for (int i = 0; i < n->nkids; i++) mention(c, n->kids[i], plays, reached);
 }
 
+/* ---- tasks: which units (a profile slot each) can run apart ----
+ *
+ * A unit reads and writes the file's shared names: its `$state`, its
+ * top-level lets, its plays. A unit needs every other unit that writes
+ * a name it reads (one written later in the file is read a sample late,
+ * still a need: the writer runs its block first). Units that need each
+ * other, and units that write one name, are one task. Def bodies count,
+ * through any depth. Nothing here changes the code: it tells `aither
+ * profile` how the voice would split. */
+
+typedef struct { Map reads, writes; } Use;
+
+static int shared_name(Ctx* c, const char* s) {
+  return has(&c->file_vars, s) || has(&c->top_lets, s) || has(&c->play_set, s);
+}
+
+static void uses(Ctx* c, Node* n, Map* bound, Use* u, Map* defs_seen, int in_def);
+
+static void def_uses(Ctx* c, const char* name, Use* u, Map* defs_seen) {
+  Node* d = user_def(c, name);
+  if (!d || has(defs_seen, name)) return;
+  incl(c, defs_seen, name);
+  Map bound = {{0}, 0};
+  for (int i = 0; i < d->nparams; i++) incl(c, &bound, d->params[i]);
+  for (int i = 0; i < d->nkids; i++) uses(c, d->kids[i], &bound, u, defs_seen, 1);
+}
+
+static void uses(Ctx* c, Node* n, Map* bound, Use* u, Map* defs_seen, int in_def) {
+  if (!n) return;
+  switch (n->kind) {
+  case nkIdent:
+    if (!has(bound, n->str) && shared_name(c, n->str)) incl(c, &u->reads, n->str);
+    break;
+  case nkLambda:
+    for (int i = 0; i < n->nparams; i++) incl(c, bound, n->params[i]);
+    break;
+  case nkCall:
+    def_uses(c, n->str, u, defs_seen);
+    break;
+  case nkLet:
+    incl(c, bound, n->str);
+    break;
+  case nkVar:
+    if (in_def) incl(c, bound, n->str);
+    else incl(c, &u->writes, n->str);
+    break;
+  case nkAssign: case nkIdxAssign:
+    if (!has(bound, n->str) && shared_name(c, n->str)) {
+      incl(c, &u->writes, n->str);
+      if (n->kind == nkIdxAssign) incl(c, &u->reads, n->str);
+    }
+    break;
+  default: break;
+  }
+  for (int i = 0; i < n->nkids; i++) uses(c, n->kids[i], bound, u, defs_seen, in_def);
+}
+
+static int task_root(int* up, int i) {
+  while (up[i] != i) i = up[i] = up[up[i]];
+  return i;
+}
+
+static void task_join(int* up, int a, int b) {
+  a = task_root(up, a); b = task_root(up, b);
+  if (a != b) up[a > b ? a : b] = a < b ? a : b;
+}
+
+/* The tables `aither profile` reads: each slot's task, and which task
+ * needs which, as pairs. */
+static void emit_tasks(Ctx* c, Node** units, int n, Buf* out) {
+  Use* use = al(c, (n ? n : 1) * sizeof(Use));
+  for (int i = 0; i < n; i++) {
+    Node* s = units[i];
+    Map bound = {{0}, 0}, defs_seen = {{0}, 0};
+    if (s->kind == nkLet) {
+      incl(c, &use[i].writes, s->str);
+      uses(c, s->kids[0], &bound, &use[i], &defs_seen, 0);
+    } else if (s->kind == nkPlay) {
+      incl(c, &use[i].writes, s->str);
+      uses(c, s->kids[0], &bound, &use[i], &defs_seen, 0);
+    } else {
+      uses(c, s, &bound, &use[i], &defs_seen, 0);
+    }
+  }
+  /* Writers of each name; two or more are one task. */
+  int* up = al(c, (n ? n : 1) * sizeof(int));
+  for (int i = 0; i < n; i++) up[i] = i;
+  Map first = {{0}, 0};
+  for (int i = 0; i < n; i++)
+    for (int b = 0; b < NBUCKETS; b++)
+      for (Ent* e = use[i].writes.b[b]; e; e = e->next) {
+        Ent* f = hfind(&first, e->key);
+        if (f) task_join(up, (int)f->n, i);
+        else hput(c, &first, e->key)->n = i;
+      }
+  /* Needs, then the cycles among them: reachability, n is a few hundred. */
+  int words = (n + 63) / 64;
+  unsigned long long* reach = al(c, (size_t)(n ? n : 1) * words * 8);
+  #define REACH(i, j) (reach[(size_t)(i) * words + (j) / 64] >> ((j) % 64) & 1)
+  for (int i = 0; i < n; i++)
+    for (int b = 0; b < NBUCKETS; b++)
+      for (Ent* e = use[i].reads.b[b]; e; e = e->next) {
+        Ent* f = hfind(&first, e->key);
+        if (!f) continue;
+        int w = task_root(up, (int)f->n);
+        reach[(size_t)i * words + w / 64] |= 1ull << (w % 64);
+      }
+  /* A unit merged into a writer's task needs what the task needs. */
+  for (int i = 0; i < n; i++) {
+    int r = task_root(up, i);
+    if (r != i) for (int k = 0; k < words; k++) reach[(size_t)r * words + k] |= reach[(size_t)i * words + k];
+  }
+  for (int k = 0; k < n; k++)
+    for (int i = 0; i < n; i++)
+      if (REACH(i, k))
+        for (int w = 0; w < words; w++) reach[(size_t)i * words + w] |= reach[(size_t)k * words + w];
+  for (int i = 0; i < n; i++)
+    for (int j = i + 1; j < n; j++)
+      if (REACH(i, j) && REACH(j, i)) task_join(up, i, j);
+  /* Number the tasks in file order. */
+  int* id = al(c, (n ? n : 1) * sizeof(int));
+  int ntasks = 0;
+  for (int i = 0; i < n; i++) id[i] = -1;
+  for (int i = 0; i < n; i++) { int r = task_root(up, i); if (id[r] < 0) id[r] = ntasks++; }
+  bcat(c, out, "const int task_of[] = {");
+  for (int i = 0; i < n; i++) badd(c, out, i ? ", %d" : "%d", id[task_root(up, i)]);
+  if (!n) bcat(c, out, "0");
+  bcat(c, out, "};\n");
+  badd(c, out, "const long task_count = %d;\n", ntasks);
+  /* Direct needs between tasks, once each. */
+  unsigned char* seen = al(c, (size_t)(ntasks ? ntasks : 1) * (ntasks ? ntasks : 1));
+  long nedges = 0;
+  bcat(c, out, "const int task_needs[] = {");
+  for (int i = 0; i < n; i++)
+    for (int b = 0; b < NBUCKETS; b++)
+      for (Ent* e = use[i].reads.b[b]; e; e = e->next) {
+        Ent* f = hfind(&first, e->key);
+        if (!f) continue;
+        int a = id[task_root(up, i)], w = id[task_root(up, (int)f->n)];
+        if (a == w || seen[(size_t)a * ntasks + w]) continue;
+        seen[(size_t)a * ntasks + w] = 1;
+        badd(c, out, nedges++ ? ", %d, %d" : "%d, %d", a, w);
+      }
+  if (!nedges) bcat(c, out, "0");
+  bcat(c, out, "};\n");
+  badd(c, out, "const long task_nneeds = %ld;\n\n", nedges);
+  #undef REACH
+}
+
 static const char* emit_program(Ctx* c, Node* program) {
   for (int i = 0; i < program->nkids; i++)
     if (program->kids[i]->kind == nkPlay) incl(c, &c->play_set, program->kids[i]->str);
@@ -3221,6 +3370,13 @@ static const char* emit_program(Ctx* c, Node* program) {
   if (prof_names.n == 0) bcat(c, &body, "0");
   bcat(c, &body, "};\n");
   badd(c, &body, "const long prof_count = %d;\n\n", prof_names.n);
+  {
+    Node** units = al(c, (program->nkids ? program->nkids : 1) * sizeof(Node*));
+    int nu = 0;
+    for (int i = 0; i < program->nkids && nu < MAX_PROF_SLOTS; i++)
+      if (program->kids[i]->kind != nkDef && program->kids[i]->kind != nkImport) units[nu++] = program->kids[i];
+    emit_tasks(c, units, nu, &body);
+  }
   bcat(c, &body, BLOCK_TEMPLATE);
 
   /* The prelude, now that the state's shape is known. */

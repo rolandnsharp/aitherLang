@@ -181,8 +181,10 @@ The design holds; four things are decided by the C:
    would leave one task. Instead the writer stores the value as it
    stands after its unit, a sample at a time, and later readers read
    that: what they read today, in source order. A unit that reads it
-   before the writer (earlier in the file) is feedback and merges; two
-   units that both write it merge.
+   before the writer (earlier in the file) reads the writer's value a
+   sample late, as today: still only a need, the writer runs its block
+   first. Units merge only when they need each other (a cycle), or both
+   write one name.
 3. **Def bodies count.** A def may read and write file `$state`, so a
    unit's reads and writes include those of every def it calls, through
    any depth.
@@ -200,3 +202,33 @@ tasks run on one core in order.
 its voices: with `poly`'s loop (notes/loops-2026-10-30.md) the voices are
 already one body over a slot index, so splitting the loop's range across
 cores is the voice-level version of the same idea, after step 3.
+
+## The split, measured (2026-10-30)
+
+`aither profile` now reports how a voice would split: codegen works out
+each unit's reads and writes (defs through any depth), merges cycles and
+shared writers, and emits `task_of` / `task_needs`; the profile weights
+the tasks and schedules them a block at a time (handing-over cost not
+in). The uConsole, free-running engine, `-O2` swapped in:
+
+| patch         | tasks / units | largest              | chain | 2 cores | 4 cores | 8 cores |
+|---------------|---------------|----------------------|-------|---------|---------|---------|
+| bush_doof_e   | 250 / 261     | play organ 8.7%      | 19.7% | 1.84x   | 3.12x   | 4.80x   |
+| tesla_jam     | 43 / 43       | play pad 22.1%       | 26.2% | 1.92x   | 3.54x   | 3.82x   |
+| qigong_kit    | 23 / 23       | play harp 34.0%      | 37.3% | 1.74x   | 2.68x   | 2.68x   |
+| cathedral_set | 26 / 26       | play choir 27.8%     | 37.3% | 1.82x   | 2.68x   | 2.68x   |
+| acid_complex  | 35 / 35       | play pads 57.8%      | 61.4% | 1.63x   | 1.63x   | 1.63x   |
+| lattice       | 15 / 15       | play lattice 31.5%   | 75.7% | 1.19x   | 1.32x   | 1.32x   |
+| chimera       | 13 / 13       | let wet 36.2%        | 82.8% | 1.14x   | 1.21x   | 1.21x   |
+
+Merging costs almost nothing: the conductor's state reads are needs, not
+cycles. What caps the rest is one heavy part, of two kinds:
+
+- **A play holding several instruments.** `acid_complex`'s `pads` is six
+  handpans as six lets; `cathedral_set`'s `choir` two additive voices;
+  `qigong_kit`'s `harp` its chord notes. A play's own statements as
+  units (the same rules, one level in) splits them.
+- **A chain: instrument, then the reverb over its mix** (`lattice`,
+  `chimera`'s `wet`). Pipelining (the reverb on the block before) splits
+  it at a block's latency, the sound unchanged but late; and `chimera`'s
+  voices split by the poly loop's range.

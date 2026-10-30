@@ -829,6 +829,88 @@ static void pct(char* out, double x, double whole) {
   snprintf(out, 32, "%.1f", whole > 0 ? 100 * x / whole : 0.0);
 }
 
+/* How long the tasks take on `cores` cores, a block at a time: each
+ * waits for the tasks it needs, and a free core takes the ready task
+ * with the longest road after it. Costs of the handing over aren't in. */
+static double task_span(const double* w, int nt, const int* needs, long nneeds, int cores,
+                        const double* road) {
+  double* done = calloc(nt, sizeof *done);
+  char* ran = calloc(nt, 1);
+  double* free_at = calloc(cores, sizeof *free_at);
+  double span = 0.0;
+  for (int left = nt; left > 0; left--) {
+    int best = -1;
+    double best_start = 0.0;
+    for (int t = 0; t < nt; t++) {
+      if (ran[t]) continue;
+      int ready = 1;
+      double after = 0.0;
+      for (long e = 0; e < nneeds; e++)
+        if (needs[2 * e] == t) {
+          if (!ran[needs[2 * e + 1]]) { ready = 0; break; }
+          after = fmax(after, done[needs[2 * e + 1]]);
+        }
+      if (!ready) continue;
+      if (best < 0 || road[t] > road[best]) { best = t; best_start = after; }
+    }
+    int core = 0;
+    for (int k = 1; k < cores; k++) if (free_at[k] < free_at[core]) core = k;
+    double start = fmax(best_start, free_at[core]);
+    done[best] = start + w[best];
+    free_at[core] = done[best];
+    ran[best] = 1;
+    span = fmax(span, done[best]);
+  }
+  free(done); free(ran); free(free_at);
+  return span;
+}
+
+/* The longest chain of needs from each task on (the task's own time in). */
+static void task_roads(const double* w, int nt, const int* needs, long nneeds, double* road) {
+  for (int t = 0; t < nt; t++) road[t] = w[t];
+  for (int pass = 0; pass < nt; pass++) {
+    int changed = 0;
+    for (long e = 0; e < nneeds; e++) {
+      int a = needs[2 * e], b = needs[2 * e + 1];
+      if (road[a] + w[b] > road[b]) { road[b] = road[a] + w[b]; changed = 1; }
+    }
+    if (!changed) break;
+  }
+}
+
+static void profile_tasks(Buf* o, Voice* v, const ProfRow* rows, int n, double total) {
+  const int* task_of; const int* needs; long nneeds;
+  int nt = voice_tasks(v, &task_of, &needs, &nneeds);
+  if (nt <= 0 || total <= 0) return;
+  double* w = calloc(nt, sizeof *w);
+  double* road = calloc(nt, sizeof *road);
+  const char** first = calloc(nt, sizeof *first);
+  int* units = calloc(nt, sizeof *units);
+  for (int i = 0; i < n; i++) {
+    int t = task_of[rows[i].order];
+    w[t] += rows[i].tm;
+    units[t]++;
+    if (!first[t]) first[t] = rows[i].name;
+  }
+  task_roads(w, nt, needs, nneeds, road);
+  int big = 0;
+  double chain = 0.0;
+  for (int t = 0; t < nt; t++) {
+    if (w[t] > w[big]) big = t;
+    chain = fmax(chain, road[t]);
+  }
+  char a[32], b[32];
+  pct(a, w[big], total);
+  pct(b, chain, total);
+  bprintf(o, "\n  as tasks: %d of %d units; largest %s%% (%s%s), longest chain %s%%\n",
+          nt, n, a, first[big] ? first[big] : "?", units[big] > 1 ? " and others" : "", b);
+  bprintf(o, "  predicted, before handing over:");
+  for (int cores = 2; cores <= 8; cores *= 2)
+    bprintf(o, "  %d cores %.2fx", cores, total / task_span(w, nt, needs, nneeds, cores, road));
+  bprintf(o, "\n");
+  free(w); free(road); free(first); free(units);
+}
+
 static char* profile_voice(const char* name, double seconds) {
   /* `profile`: time the voice's code for `seconds` and report each play
    * and top-level statement's share of one core, heaviest first, the
@@ -870,6 +952,8 @@ static char* profile_voice(const char* name, double seconds) {
     rows[i] = (ProfRow){tm, names[i], i};
     total += tm;
   }
+  Buf tasks = {0};
+  profile_tasks(&tasks, v, rows, n, total);
   unlock();
   qsort(rows, n, sizeof *rows, prof_cmp);
   Buf o = {0};
@@ -892,6 +976,7 @@ static char* profile_voice(const char* name, double seconds) {
     shown += rows[k].tm;
   }
   free(rows);
+  if (tasks.n) { bprintf(&o, "%s", tasks.s); free(tasks.s); }
   while (o.n > 0 && strchr(" \t\v\r\n\f", o.s[o.n - 1])) o.s[--o.n] = 0;
   return bdone(&o);
 }

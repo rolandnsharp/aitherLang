@@ -123,6 +123,7 @@ void      voice_scrub_state(Voice* v, int hard);
 void      voice_tick(Voice* v, double t, double* l, double* r);
 void      voice_tick_block(Voice* v, long n, double* outL, double* outR);
 int       voice_prof_names(Voice* v, const char*** names);
+int       voice_tasks(Voice* v, const int** task_of, const int** needs, long* nneeds);
 double    voice_clock_read_cost(void);
 double    voice_mono_now(void);
 

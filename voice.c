@@ -643,6 +643,19 @@ void voice_tick_block(Voice* v, long n, double* outL, double* outR) {
   v->cur.tick_block(v->cur.state, n, outL, outR);
 }
 
+int voice_tasks(Voice* v, const int** task_of, const int** needs, long* nneeds) {
+  /* How the voice's units would split into tasks: each profile slot's
+   * task, and which task needs which (pairs). 0 when the code has none. */
+  if (!v->cur.lib) return 0;
+  const int* of = tcc_get_symbol(v->cur.lib, "task_of");
+  const long* count = tcc_get_symbol(v->cur.lib, "task_count");
+  const int* nd = tcc_get_symbol(v->cur.lib, "task_needs");
+  const long* nn = tcc_get_symbol(v->cur.lib, "task_nneeds");
+  if (!of || !count || !nd || !nn) return 0;
+  *task_of = of; *needs = nd; *nneeds = *nn;
+  return (int)*count;
+}
+
 int voice_prof_names(Voice* v, const char*** names) {
   /* `aither profile`'s slot names, as the voice's code lists them. */
   if (!v->cur.lib) return 0;
