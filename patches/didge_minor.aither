@@ -54,15 +54,9 @@ def formant(x, f, res):
 def stick(strike, freq, decay, bright):
   sum(3, n =>
     let ratio = bar_partials(n)
-    let omega = TAU * freq * ratio
-    let omega2 = omega * omega
     let gamma = (1 + (n - 1) * 1.5) / decay
     let amp = if n == 1 then 1.0 else bright / (n * n)
-    $x = 0.0
-    $dx = 0.0
-    $dx = $dx + (-2 * gamma * $dx - omega2 * $x + strike * omega2) * dt
-    $x = $x + $dx * dt
-    $x * amp)
+    resonator(strike, freq * ratio, 2 * gamma) * amp)     # x'' = -2 gamma x' - w^2 (x - strike), turned exactly
 
 # One tone field of a handpan: fundamental, octave and twelfth, lightly
 # damped (seconds), with the slow doublet shimmer of a real shell.
@@ -70,15 +64,9 @@ def pan_field(strike, fund):
   sum(3, n =>
     let ratio = if n == 1 then 1.0 else if n == 2 then 1.998 else 3.0
     let drift = 1 + 0.0008 * sin(TAU * t * (0.11 * n) + n)
-    let omega = TAU * fund * ratio * drift
-    let omega2 = omega * omega
     let gamma = (0.35 + (n - 1) * 0.45) * sqrt(fund / 220)
     let amp = if n == 1 then 1.0 else if n == 2 then 0.9 else 0.6
-    $x = 0.0
-    $dx = 0.0
-    $dx = $dx + (-2 * gamma * $dx - omega2 * $x + strike * omega2) * dt
-    $x = $x + $dx * dt
-    $x * amp)
+    resonator(strike, fund * ratio * drift, 2 * gamma) * amp)
 
 let tempo = 132 / 60.0
 
