@@ -274,7 +274,15 @@ numbers at a call are a pair, and a pair indexes like a
 two-entry table (see Stereo below), so a def that indexes its
 parameter takes `[220, 330]` as it takes `[220, 330, 440]`.
 Defs don't return arrays; the pair is the only multi-value
-return.
+return. What a def gives an array is its rule: a def of the index,
+tabulated by `array(n, i => …)` (see "Local arrays"), or, for several
+arrays filled from shared work, the caller's arrays filled in place,
+since a def's writes land in them:
+
+```
+def reflection(a, j): if j == 0 then 0 else (a[j - 1] - a[j]) / (a[j - 1] + a[j])
+let r = array(len(areas), j => reflection(areas, j))
+```
 
 A def uses a parameter as a pair when it indexes it (`p[0]`),
 hands it to a pair operation where that takes a pair (`turn(p, q)`,
