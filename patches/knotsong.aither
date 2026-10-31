@@ -1,0 +1,82 @@
+# knotsong: oscilloscope music. One beam draws a knot and plays a song,
+# and the two are the same signal: what you see is what you hear.
+#
+# The beam runs round a torus knot once per lap, and the laps a second
+# are the bass note: the knot is traced 73 times a second while the
+# chord is D, 98 for G. As in knot, a torus knot (p, q) is a chord, the
+# spins at p, p + q and p - q times the laps a second, and those are
+# harmonics of the bass note, so each knot is a chord in just tuning:
+#   D    (3, 2)   harmonics 1, 3, 5     root, fifth, third: major
+#   D7   (3, 4)   harmonics 1, 3, 7     root, fifth, the natural seventh
+#   G    (2, 3)   harmonics 1, 2, 5     root, octave, third
+#   A7   (2, 5)   harmonics 2, 3, 7     octave, fifth, seventh
+# A new chord is a new knot, morphing in over a quarter of a beat.
+#
+# The melody is one more spin, at a whole number of times the laps (8
+# the octave above the bass's octave above, 10 a third over that, 7 and
+# 14 the natural seventh), locked to the knot's own phase. So a note is
+# a ring of loops round the knot, as many as its harmonic: an 8 draws
+# eight, a 10 ten, and the figure never turns or tears, because every
+# note is an exact harmonic of the lap. Each note is plucked, so the
+# loops bloom and die back into the bare knot.
+#
+# The beat is the knot breathing: it swells on every beat and on the
+# downbeats harder, louder as it grows. A kick is a low spin that drops
+# from 90 Hz to 45, swinging the whole figure round once as it thumps,
+# and a tick on each off-beat fuzzes it for a moment.
+#
+#   make tools/scope
+#   ./aither patches/knotsong.aither | tools/scope | tools/play hw:rockchipes8388c 20
+
+let beat = 0.6                                   # 100 beats a minute
+let roots = [73.42, 73.42, 98.0, 110.0]          # D2, D2, G2, A2: a bar each
+let ps = [3, 3, 2, 2]
+let qs = [2, 4, 3, 5]
+
+# The tune, eight quavers a bar, as harmonics of the bar's root; 0 rests.
+let tune = [8, 0, 10, 12, 10, 8, 6, 0,
+            8, 10, 12, 14, 12, 0, 10, 0,
+            10, 0, 8, 6, 8, 10, 12, 0,
+            10, 9, 8, 7, 6, 0, 8, 0]
+
+let bar = floor(t / (4 * beat)) mod 4
+let was = (bar + 3) mod 4
+let inBar = t mod (4 * beat)
+let step = floor(t / (beat / 2))
+let inStep = t mod (beat / 2)
+let inBeat = t mod beat
+
+# The knot, morphing from the last bar's into this one's.
+let ph = TAU * phasor(roots[bar])
+def shadow(k, ph): (1.6 + cos(qs[k] * ph)) * [cos(ps[k] * ph), sin(ps[k] * ph)]
+def height(k, ph): sin(qs[k] * ph)
+let ease = min(inBar / (beat / 4), 1)
+let m = ease * ease * (3 - 2 * ease)
+let [x0, y0] = shadow(was, ph) * (1 - m) + shadow(bar, ph) * m
+let z0 = height(was, ph) * (1 - m) + height(bar, ph) * m
+
+# Turning slowly in space, and looked at from in front.
+let [y1, z1] = rotate([y0, z0], 0.31 * t)
+let [z2, x2] = rotate([z1, x0], 0.19 * t)
+let near = 3 / (4 - z2)
+let shape = [x2, y1] * near
+
+# The beat: a swell on each, harder on the first of the bar (each
+# rising over 10 ms, and the kick over 3: a step would be a click).
+let downbeat = floor(inBar / beat) == 0
+let swell = 1 + (if downbeat then 0.18 else 0.09) * min(inBeat / 0.01, 1) * exp(-inBeat * 7)
+
+# The melody: a plucked spin at the note's harmonic of the lap.
+let n = tune[bar * 8 + step mod 8]
+let pluck = if n > 0 then min(inStep / 0.004, 1) * exp(-inStep * 14) else 0
+let melody = [cos(n * ph), sin(n * ph)] * 0.25 * pluck
+
+# The kick on beats one and three, a spin falling 90 Hz to 45; a tick on
+# each off-beat.
+let kickOn = floor(inBar / beat) mod 2 == 0
+let kickPh = TAU * (45 * inBeat + 45 / 12 * (1 - exp(-inBeat * 12)))
+let kick = if kickOn then [cos(kickPh), sin(kickPh)] * 0.5 * min(inBeat / 0.003, 1) * exp(-inBeat * 9) else [0, 0]
+let off = t mod (beat / 2)
+let tick = if step mod 2 == 1 then [noise(), noise()] * 0.06 * exp(-off * 120) else [0, 0]
+
+(shape * swell + melody + kick + tick) * 0.33 |> tanh
