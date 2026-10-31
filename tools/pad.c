@@ -15,6 +15,13 @@
    The d-pad is the keyboard's arrow keys, so while a button is held the
    keyboard is grabbed (arrows don't reach the terminal); release and it
    is yours again. Buttons come from the gamepad device.
+
+     tools/pad --notes           every key a note, no knobs: for games
+   With --notes the d-pad is four more notes, up 40, down 41, left 42,
+   right 43, sent as they go down and up whether a button is held or not,
+   so anything can be held with anything (midi_note(42) is left, held).
+   Nothing is grabbed: the arrows reach whatever has the focus too (the
+   scope's window, full screen, ignores them).
    Build: cc -O2 tools/pad.c -o tools/pad -lasound */
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,7 +43,21 @@ static int bank_of(int code) {            /* the gamepad's button codes */
     return -1;
 }
 
+/* A key as a note, as it goes down (on) and up. */
+static void send_note(snd_seq_t *seq, int port, int note, int on) {
+    snd_seq_event_t e;
+    snd_seq_ev_clear(&e);
+    snd_seq_ev_set_source(&e, port);
+    snd_seq_ev_set_subs(&e);
+    snd_seq_ev_set_direct(&e);
+    if (on) snd_seq_ev_set_noteon(&e, 0, note, 100);
+    else snd_seq_ev_set_noteoff(&e, 0, note, 0);
+    snd_seq_event_output_direct(seq, &e);
+}
+
 int main(int argc, char **argv) {
+    int notes = argc > 1 && !strcmp(argv[1], "--notes");
+    if (notes) { argc--; argv++; }
     const char *pad = argc > 1 ? argv[1] : PAD;
     const char *kbd = argc > 2 ? argv[2] : KBD;
     int fp = open(pad, O_RDONLY), fk = open(kbd, O_RDONLY);
@@ -90,23 +111,22 @@ int main(int argc, char **argv) {
             if (read(fp, &ev, sizeof ev) != sizeof ev) break;   /* the gamepad is gone */
             if (ev.type == EV_KEY) {
                 int b = bank_of(ev.code);
-                if (b >= 0 && (ev.value == 0 || ev.value == 1)) {
-                    snd_seq_event_t e;                    /* the button as a note */
-                    snd_seq_ev_clear(&e);
-                    snd_seq_ev_set_source(&e, port);
-                    snd_seq_ev_set_subs(&e);
-                    snd_seq_ev_set_direct(&e);
-                    if (ev.value == 1) snd_seq_ev_set_noteon(&e, 0, 36 + b, 100);
-                    else snd_seq_ev_set_noteoff(&e, 0, 36 + b, 0);
-                    snd_seq_event_output_direct(seq, &e);
-                }
-                if (b >= 0) {
+                if (b >= 0 && (ev.value == 0 || ev.value == 1))
+                    send_note(seq, port, 36 + b, ev.value);   /* the button as a note */
+                if (b >= 0 && !notes) {
                     if (ev.value == 1) { held = b; arrow = 0; ioctl(fk, EVIOCGRAB, 1); }
                     else if (ev.value == 0 && held == b) { held = -1; arrow = 0; ioctl(fk, EVIOCGRAB, 0); }
                 }
             }
         }
         if (pf[1].revents & POLLIN) {
+            if (notes) {                                  /* the d-pad as notes 40..43 */
+                if (read(fk, &ev, sizeof ev) == sizeof ev && ev.type == EV_KEY && (ev.value == 0 || ev.value == 1)) {
+                    int n = ev.code == KEY_UP ? 40 : ev.code == KEY_DOWN ? 41 : ev.code == KEY_LEFT ? 42 : ev.code == KEY_RIGHT ? 43 : 0;
+                    if (n) send_note(seq, port, n, ev.value);
+                }
+                continue;
+            }
             if (read(fk, &ev, sizeof ev) == sizeof ev && ev.type == EV_KEY && held >= 0) {
                 int which = -1, dir = 0;
                 switch (ev.code) {

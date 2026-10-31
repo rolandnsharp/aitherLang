@@ -167,6 +167,29 @@ beam.
 - Ridges fill the screen, wide, where the beam's picture is square; in
   `--frames` the height is 9/16 of `--size`.
 
+## The helix
+
+`--helix` draws the pair as what it is, a complex number, in three
+dimensions: its real part toward you, its imaginary part up, and time
+along an axis across the screen, seen from in front, a little to the
+right and above. The last 8 periods are drawn, ending on a period
+(found and held as for `--ridge`, which `--helix` takes the same F as),
+so a steady sound stands still and one a little off turns slowly.
+
+```
+./aither patches/hopf.aither | tools/scope --helix auto | tools/play hw:rockchipes8388c 20
+./aither patches/sync.aither | tools/scope --helix auto --gain 3 | tools/play hw:rockchipes8388c 20
+```
+
+- A spin is a corkscrew; `conj` turns the other way, the mirror
+  corkscrew; two spins beating, a rope whose radius swells and shrinks;
+  a harmonic, small curls riding on the big one.
+- The shadows: the real part's on the floor and the imaginary part's on
+  the back wall, the cosine and the sine of the textbook picture of a
+  phasor, fainter than the helix, and the axis fainter still.
+- `--gain G` makes it G times wider (a pair of 1 is 0.55 of the axis's
+  length). Like ridges, it fills the screen wide, with a short glow.
+
 ## Practicalities
 
 - A session is heard and seen at once: `scope` passes the stream on to

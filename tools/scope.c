@@ -20,7 +20,14 @@
                   perspective with the ones behind hidden where the nearer
                   stand in front of them: Craft's 1970 plot of successive
                   pulses of the pulsar CP 1919. A ridge's height is x.
-     --gain G     ridges G times taller (1)
+     --helix F    a helix instead: the pair in three dimensions, its real
+                  part toward you and its imaginary part up, time along an
+                  axis across the screen, the last 8 periods of F (as
+                  --ridge, auto too), ending on a period, so a steady sound
+                  stands still. A spin is a corkscrew, conj its mirror. The
+                  real part's shadow on the floor, the imaginary's on the
+                  back wall: the cosine and the sine.
+     --gain G     ridges G times taller, a helix G times wider (1)
 
    Drawn on the GPU (OpenGL ES 3); without one, Mesa draws the same thing
    on the CPU. The rate, for the beam's energy and to pace a source that
@@ -214,9 +221,49 @@ static size_t ridge_points(const Ridge *rg, int newest, uint64_t now, double rat
     return m;
 }
 
+/* --helix: the window's pairs as a curve in space, seen from in front, a
+   little to the right and above. World: time along x (oldest left), the
+   imaginary part up, the real part toward the viewer. The floor and the
+   back wall catch the shadows; drawn with a third as many segments,
+   each carrying a sample's energy over three samples' length, they glow
+   a third as bright, and the axis fainter still. */
+#define HELIX_PERIODS 8
+static void helix_view(double t, double y, double z, double aspect, float *out) {
+    double a = -0.5, b = 0.5, D = 5.5;
+    double X = t * cos(a) + z * sin(a), Z = -t * sin(a) + z * cos(a);
+    double Y = y * cos(b) - Z * sin(b), Z2 = y * sin(b) + Z * cos(b);
+    double k = D / (D - Z2) * 0.8;
+    out[0] = (float)(X * k / aspect);
+    out[1] = (float)(Y * k + 0.12);
+}
+static size_t helix_points(const float *win, size_t N, double aspect, double gain, float *pts) {
+    double L = 2.6 * aspect / 1.78, R = 0.55 * gain, floorY = -1.3 * 0.55, wallZ = -1.3 * 0.55;
+    size_t m = 0, step = N > 6000 ? (N + 5999) / 6000 : 1;
+#define BLANK() (pts[2 * m] = 2, pts[2 * m + 1] = 2, m++)
+    BLANK();
+    for (int set = 0; set < 3; set++) {
+        size_t st = set ? step * 3 : step;
+        for (size_t i = 0; i < N; i += st) {
+            double t = ((double)i / (N - 1) - 0.5) * L, x = win[2 * i] * R, y = win[2 * i + 1] * R;
+            if (set == 0) helix_view(t, y, x, aspect, pts + 2 * m);
+            else if (set == 1) helix_view(t, floorY, x, aspect, pts + 2 * m);
+            else helix_view(t, y, wallZ, aspect, pts + 2 * m);
+            m++;
+        }
+        BLANK();
+    }
+    for (int i = 0; i <= 24; i++) {                 /* the axis: no real part, no imaginary */
+        helix_view(((double)i / 24 - 0.5) * L, 0, 0, aspect, pts + 2 * m);
+        m++;
+    }
+    BLANK();
+#undef BLANK
+    return m;
+}
+
 static void usage(void) {
     fputs("usage: aither patch.aither | scope [--palette green|amber|cyan|blue|white|red]\n"
-          "                                   [--decay 0.85] [--ridge HZ|BPMbpm|auto [--gain G]]\n"
+          "                                   [--decay 0.85] [--ridge|--helix HZ|BPMbpm|auto [--gain G]]\n"
           "                                   [--window | --term | --frames FILE [--size 720]]\n"
           "  float pairs in on stdin, the same out on stdout; full screen unless --window;\n"
           "  f toggles full screen, q or Escape quits\n",
@@ -225,18 +272,20 @@ static void usage(void) {
 
 int main(int argc, char **argv) {
     const char *pal = "green", *path = NULL;
-    double decay = -1, ridgeHz = 0, gain = 1;
+    double decay = -1, foldHz = 0, gain = 1;
+    int helix = 0;
     int dest = -1, size = 720, windowed = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--palette") && i + 1 < argc) pal = argv[++i];
         else if (!strcmp(argv[i], "--decay") && i + 1 < argc) decay = atof(argv[++i]);
-        else if (!strcmp(argv[i], "--ridge") && i + 1 < argc) {
+        else if ((!strcmp(argv[i], "--ridge") || !strcmp(argv[i], "--helix")) && i + 1 < argc) {
             char *end;
-            if (!strcmp(argv[++i], "auto")) ridgeHz = -1;
+            helix = !strcmp(argv[i], "--helix");
+            if (!strcmp(argv[++i], "auto")) foldHz = -1;
             else {
-                ridgeHz = strtod(argv[i], &end);
-                if (!strcmp(end, "bpm")) ridgeHz /= 60;
-                else if (*end || !(ridgeHz > 0)) { usage(); return 2; }
+                foldHz = strtod(argv[i], &end);
+                if (!strcmp(end, "bpm")) foldHz /= 60;
+                else if (*end || !(foldHz > 0)) { usage(); return 2; }
             }
         } else if (!strcmp(argv[i], "--gain") && i + 1 < argc) gain = atof(argv[++i]);
         else if (!strcmp(argv[i], "--window")) windowed = 1;
@@ -248,7 +297,7 @@ int main(int argc, char **argv) {
     const float *phos = NULL;
     for (size_t i = 0; i < sizeof Palettes / sizeof *Palettes; i++)
         if (!strcmp(pal, Palettes[i].name)) phos = Palettes[i].rgb;
-    if (decay < 0) decay = ridgeHz != 0 ? 0.2 : 0.85;   /* ridges move: a long glow would smear them */
+    if (decay < 0) decay = foldHz != 0 ? 0.2 : 0.85;   /* ridges and helices move: a long glow would smear them */
     if (!phos || decay < 0 || decay > 1 || size < 16) { usage(); return 2; }
     if (isatty(0)) {
         fputs("scope: stdin is a terminal. Pipe pairs into me:\n"
@@ -262,7 +311,7 @@ int main(int argc, char **argv) {
     d.windowed = windowed;
     if (display_open(&d, "scope", dest, path, size) < 0) return 1;
     if (dest == DEST_FRAMES) {
-        int fh = ridgeHz != 0 ? size * 9 / 16 : size;
+        int fh = foldHz != 0 ? size * 9 / 16 : size;
         fprintf(stderr, "scope: %dx%d rgb24 frames at %d fps to %s\n"
                 "  ffmpeg -f rawvideo -pix_fmt rgb24 -s %dx%d -r %d -i %s out.mp4\n",
                 size, fh, HEADLESS_FPS, path, size, fh, HEADLESS_FPS, path);
@@ -308,8 +357,9 @@ int main(int argc, char **argv) {
     float *pts = malloc((size_t)(MAXPTS + 1) * 2 * sizeof(float));
     Folder fo = {0};
     Ridge *ridges = calloc(RIDGES, sizeof(Ridge));
+    float *win = malloc((size_t)MAXPTS * 2 * sizeof(float));   /* --helix: the window's pairs */
     int newest = 0;
-    if (ridgeHz != 0) folder_init(&fo, RIDGE_W, ridgeHz > 0 ? stream.rate / ridgeHz : 0, "scope");
+    if (foldHz != 0) folder_init(&fo, RIDGE_W, foldHz > 0 ? stream.rate / foldHz : 0, "scope");
     float last[2] = {2, 2};                   /* off the square: the first segment is blank */
     uint64_t shown = 0;                       /* samples drawn so far */
     int Sw = 0, Sh = 0, Bw = 0, Bh = 0;
@@ -328,10 +378,10 @@ int main(int argc, char **argv) {
            the screen (in frames, 16:9). */
         int w, h;
         display_size(&d, &w, &h);
-        if (ridgeHz != 0 && dest == DEST_FRAMES) h = w * 9 / 16;
+        if (foldHz != 0 && dest == DEST_FRAMES) h = w * 9 / 16;
         int s = w < h ? w : h;
         if (s < 16) s = 16;
-        int sw = ridgeHz != 0 ? (w < 16 ? 16 : w) : s, sh = ridgeHz != 0 ? (h < 16 ? 16 : h) : s;
+        int sw = foldHz != 0 ? (w < 16 ? 16 : w) : s, sh = foldHz != 0 ? (h < 16 ? 16 : h) : s;
         if (sw != Sw || sh != Sh) {
             if (accF) {
                 glDeleteFramebuffers(1, &accF);
@@ -350,7 +400,21 @@ int main(int argc, char **argv) {
         /* The samples up to the one being heard now, after the last one drawn. */
         uint64_t now = stream_now(dt);
         size_t n = 0;
-        if (ridgeHz != 0) {
+        if (foldHz != 0 && helix) {
+            /* The last periods, ending on the newest period's end. */
+            folder_skip(&fo, now, HELIX_PERIODS);
+            while (folder_next(&fo, now)) {}
+            size_t N = (size_t)(HELIX_PERIODS * fo.P);
+            uint64_t end = (uint64_t)fo.start;
+            size_t m = 1;
+            pts[0] = pts[1] = 2;
+            if (end > N && N > 1 && N <= MAXPTS && stream_range(win, end - N, end) == N)
+                m = helix_points(win, N, (double)Sw / Sh, gain, pts);
+            n = m - 1;
+            shown = now;
+            glBindBuffer(GL_ARRAY_BUFFER, ptBuf);
+            glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(m * 2 * sizeof(float)), pts, GL_STREAM_DRAW);
+        } else if (foldHz != 0) {
             /* Every period done by now; one a 24th of a second is kept. */
             int stride = (int)fmax(1, lround(stream.rate / fo.P / 24));
             folder_skip(&fo, now, stride * RIDGES);
@@ -373,7 +437,7 @@ int main(int argc, char **argv) {
             if (n < now - shown) last[0] = last[1] = 2;   /* lost some: start from a blank */
             shown = now;
         }
-        if (ridgeHz == 0) {
+        if (foldHz == 0) {
             pts[0] = last[0];
             pts[1] = last[1];
             if (n) {
@@ -405,10 +469,10 @@ int main(int argc, char **argv) {
             glUseProgram(beam);
             glUniform2f(uSize, (float)Sw, (float)Sh);
             glUniform1f(uSigma, sigma);
-            /* Ridges fade fast and are drawn afresh every frame: four times
-               the energy, about what a steady trace builds up under the
-               default glow. */
-            double boost = ridgeHz != 0 ? 4 : 1;
+            /* Ridges and helices fade fast and are drawn afresh every frame:
+               four times the energy, about what a steady trace builds up
+               under the default glow. */
+            double boost = foldHz != 0 ? 4 : 1;
             glUniform1f(uEnergy, (float)(boost * Q0 * (Sh / 720.0) * (sigma / 1.3) / stream.rate));
             glBindVertexArray(beamVao);
             glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, (GLsizei)n);

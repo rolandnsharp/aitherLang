@@ -267,15 +267,17 @@ static double row_slide(const float *a, const float *b, int W) {
     return best + (den > 0 ? 0.5 * (l - r) / den : 0);
 }
 
-/* The folder: rows one period each, in order. With P 0 (auto) it finds
-   the pitch ten times a second and holds the fold while the sound still
+/* The folder: rows one period each, in order. With P 0 (auto) it starts
+   at 110 Hz and takes the first pitch it hears (a sound repeating every
+   110th of a second, a 220 Hz tone, mustn't keep the guess); then it
+   finds the pitch ten times a second and holds the fold while the sound still
    repeats at it (a harmonic of it alone does); when it doesn't, it jumps
    to the new pitch once heard twice. Between, each row is compared with
    the one before and the period nudged until the pattern stops sliding,
    within 3% of the pitch found: a phase-locked loop on the rows. */
 typedef struct {
     double rate, P, ref, start, heard;
-    int W, lock, again;
+    int W, lock, again, guess;               /* guess: still on the first guess, 110 Hz */
     int64_t r;                                /* the next row, counted from the start */
     uint64_t nextLook;
     float *span, *rows[2];
@@ -286,7 +288,7 @@ typedef struct {
 static void folder_init(Folder *f, int W, double P, const char *who) {
     f->rate = stream.rate;
     f->W = W;
-    f->lock = P == 0;
+    f->lock = f->guess = P == 0;
     f->P = f->ref = f->lock ? f->rate / 110 : P;   /* auto: 110 Hz till it hears a pitch */
     size_t most = (size_t)fmax(f->P, f->rate / 40 + YIN_N) + 4;
     f->span = calloc(most * 2, sizeof(float));
@@ -313,12 +315,12 @@ static float *folder_next(Folder *f, uint64_t now) {
         f->nextLook = (uint64_t)f->start + (uint64_t)(f->rate / 10);
         int ti = (int)f->ref;
         double stays = p > 0 && ti + 1 < (int)(f->rate / 40) ? f->dif[ti] + (f->dif[ti + 1] - f->dif[ti]) * (f->ref - ti) : 1;
-        if (p > 0 && fabs(p / f->ref - 1) > 0.03 && stays > 0.35) {
+        if (p > 0 && fabs(p / f->ref - 1) > 0.03 && (stays > 0.35 || f->guess)) {
             f->again = f->heard > 0 && fabs(p / f->heard - 1) < 0.03 ? f->again + 1 : 1;
             f->heard = p;
-            if (f->again >= 2 || f->ref == f->rate / 110) {
+            if (f->again >= 2 || f->guess) {
                 f->P = f->ref = p;
-                f->again = 0;
+                f->again = f->guess = 0;
                 fprintf(stderr, "%s: folding at %.2f Hz\n", f->who, f->rate / f->P);
             }
         } else f->again = 0;

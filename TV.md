@@ -196,6 +196,34 @@ period doubling shows as rows that repeat every two, then four; chaos
 as rows all different; its periodic windows as patterns five and three
 rows deep.
 
+## The pond
+
+`--pond` is a picture the stream makes without a patch drawing it: a
+pond the sound stirs, at full screen and 60 steps a second.
+
+```
+./aither patches/aeolian.aither | tools/tv --pond | tools/play hw:rockchipes8388c 20
+./aither patches/knot.aither | tools/tv --pond | tools/play hw:rockchipes8388c 20
+```
+
+The water is stepped as the `vis` branch stepped `rain`'s, on the GPU at
+half the screen's size and drawn full screen: a pair a pixel, the height
+now and a frame ago; each pixel pulled toward its eight neighbours'
+mean, read 2.5 pixels apart so the ripples come out round, keeping 99.3%
+of its speed, with a gentle spring back to level. Its hue is the phase
+of the swing and its brightness how far it swings, as rain's.
+
+What stirs it is the beam: every 60th of a second the stream's pairs
+since the last are drawn into the water as the scope would draw them
+(square, in the middle), and the push is how that drawing changed from
+the last one, softened over a few pixels. So a shape that moves, a knot
+turning, a cloud of voices churning, leaves wakes and rings that spread,
+cross and reflect off the edges; a shape that stands still stops
+pushing, and the water around it calms. The beam itself shows faintly on
+top. `--size` sets the water's size (half the screen unless given; 640×360
+in `--frames`, which records 30 of the 60 steps a second), `--gain` its
+brightness.
+
 ## What tv cannot do
 
 Thin lines and curves: a raster shows a curve only where its pixels

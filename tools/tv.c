@@ -35,6 +35,10 @@
                sides, as a pair has them, spins turning backwards on the
                left. Brightness is level (70 dB), hue the pitch class
                (C red; every octave the same colour).
+   --pond      a pond the sound stirs: water at half the screen's size,
+               stepped 60 times a second on the GPU, pushed by the beam's
+               path as it changes, so moving shapes leave wakes and a
+               still one calms (as the vis branch's rain stepped water).
    --recur S   a recurrence plot of the last S seconds: bright where the
                signal at one moment (across) is near itself at another
                (up), hue the pair's phase there.
@@ -394,13 +398,188 @@ static int recur(Display *d, int W, double S, double gain, int smooth, int dest)
     return 0;
 }
 
+/* --pond: a pond the sound stirs (TV.md, The pond). The water is a pair
+   a pixel, its height now and a frame ago, stepped by the GPU 60 times a
+   second at half the screen's size, as tools/vis stepped rain's (the vis
+   branch): each pixel pulled toward its eight neighbours' mean, h pixels
+   apart so ripples come out round, keeping `keep` of its speed, with a
+   gentle spring back to level. What stirs it is the beam: every 60th of
+   a second the stream's pairs since the last are drawn into a deposit,
+   as scope draws them, and the force is the change from the last
+   deposit, so a moving shape leaves a wake and a still one calms. */
+static const char *DepVS =
+    "#version 300 es\n"
+    "layout(location = 0) in vec2 p;\n"
+    "uniform vec2 uScale;\n"
+    "void main() { gl_Position = vec4(p * uScale, 0.0, 1.0); }\n";
+static const char *DepFS =
+    "#version 300 es\n"
+    "precision highp float;\n"
+    "uniform float uInk;\n"
+    "out vec4 o;\n"
+    "void main() { o = vec4(uInk, 0.0, 0.0, 0.0); }\n";
+static const char *StepFS =
+    "#version 300 es\n"
+    "precision highp float;\n"
+    "in vec2 uv;\n"
+    "uniform highp sampler2D uW, uNow, uWas;\n"
+    "uniform vec2 uH;\n"                              /* h, in uv */
+    "uniform float uKeep, uPush;\n"
+    "out vec4 o;\n"
+    "void main() {\n"
+    "  vec2 w = texture(uW, uv).rg;\n"
+    "  float u = w.r;\n"
+    "  float e = texture(uW, uv + vec2(uH.x, 0.0)).r, wv = texture(uW, uv - vec2(uH.x, 0.0)).r;\n"
+    "  float n = texture(uW, uv + vec2(0.0, uH.y)).r, s = texture(uW, uv - vec2(0.0, uH.y)).r;\n"
+    "  float c = texture(uW, uv + uH).r + texture(uW, uv - uH).r\n"
+    "          + texture(uW, uv + vec2(uH.x, -uH.y)).r + texture(uW, uv + vec2(-uH.x, uH.y)).r;\n"
+    "  float lap = (4.0 * (e + wv + n + s) + c - 20.0 * u) / 6.0;\n"
+    "  float force = 0.0;\n"                         /* the push, softened over h: the beam's lines are a pixel thin */
+    "  for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {\n"
+    "    vec2 q = uv + vec2(float(i), float(j)) * uH;\n"
+    "    force += (texture(uNow, q).r - texture(uWas, q).r) * (i == 0 && j == 0 ? 4.0 : (i == 0 || j == 0 ? 2.0 : 1.0));\n"
+    "  }\n"
+    "  force *= uPush / 16.0;\n"
+    "  float next = u + (u - w.g) * uKeep + 0.3 * lap - u * 0.02 + force;\n"
+    "  o = vec4(clamp(next, -50.0, 50.0), u, 0.0, 0.0);\n"
+    "}\n";
+static const char *PondFS =
+    "#version 300 es\n"
+    "precision highp float;\n"
+    "in vec2 uv;\n"
+    "uniform highp sampler2D uW, uNow;\n"
+    "uniform float uGain;\n"
+    "out vec4 o;\n"
+    "vec3 hue(float h) {\n"
+    "  return clamp(abs(fract(h + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);\n"
+    "}\n"
+    "void main() {\n"
+    "  vec2 w = texture(uW, uv).rg;\n"
+    "  vec2 z = vec2(w.r, (w.r - w.g) * 3.5) * 6.0 * uGain;\n"   /* the swing as a phasor, as rain's */
+    "  float m = length(z);\n"
+    "  vec3 col = m > 0.0 ? hue(atan(z.y, z.x) / 6.2831853) * m / (0.5 + m) : vec3(0.0);\n"
+    "  col += vec3(0.5, 0.6, 0.55) * min(texture(uNow, uv).r * 0.6, 0.5);\n"   /* the beam, faintly, on top */
+    "  o = vec4(col, 1.0);\n"
+    "}\n";
+
+static int pond(Display *d, int W, int H, double gain, int dest) {
+    double rate = stream.rate;
+    int precise = gl_has("GL_EXT_color_buffer_float") && gl_has("GL_OES_texture_float_linear");
+    GLenum ifmt = precise ? GL_RG32F : GL_RG16F, type = precise ? GL_FLOAT : GL_HALF_FLOAT;
+    GLuint dep = gl_program(DepVS, DepFS), step = gl_program(GL_FULLSCREEN_VS, StepFS), show = gl_program(GL_FULLSCREEN_VS, PondFS);
+    GLuint water[2], wF[2], deps[2], dF[2];
+    for (int i = 0; i < 2; i++) {
+        wF[i] = gl_target(&water[i], W, H, ifmt, GL_RG, type, GL_LINEAR);
+        dF[i] = gl_target(&deps[i], W, H, ifmt, GL_RG, type, GL_LINEAR);
+    }
+    GLuint empty, vao, buf;
+    glGenVertexArrays(1, &empty);
+    glGenVertexArrays(1, &vao);
+    glBindVertexArray(vao);
+    glGenBuffers(1, &buf);
+    glBindBuffer(GL_ARRAY_BUFFER, buf);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, (void *)0);
+    size_t most = (size_t)(rate / 15) + 2;
+    float *pts = calloc(most * 2, sizeof(float));
+
+    int frames = dest == DEST_FRAMES;
+    if (frames)
+        fprintf(stderr, "tv: %dx%d rgb24 frames to a file, %d a second\n"
+                "  ffmpeg -f rawvideo -pix_fmt rgb24 -s %dx%d -r %d -i FILE out.mp4\n",
+                W, H, HEADLESS_FPS, W, H, HEADLESS_FPS);
+    int cur = 0;
+    uint64_t shown = 0, tick = 0;
+    double prev = now_s();
+    for (;;) {
+        uint64_t now;
+        if (frames) {
+            /* 60 steps a second of the stream's time, every other one written */
+            now = (uint64_t)((tick + 1) * rate / 60);
+            while (stream.head < now && !stream.eof && !display_quit) sleep_s(0.002);
+            if (stream.head < now || display_quit) break;
+        } else {
+            double t = now_s(), dt = t - prev;
+            if (dt > 0.25) dt = 0.25;
+            prev = t;
+            now = stream_now(dt);
+            if (display_poll(d) || (stream.eof && now >= stream.head)) break;
+        }
+        tick++;
+
+        /* 1. The beam since the last step, into this step's deposit. */
+        size_t n = 0;
+        if (now > shown) {
+            if (now - shown > most - 1) shown = now - (most - 1);
+            n = stream_range(pts, shown, now);
+            shown = now;
+        }
+        int nx = cur ^ 1;
+        glBindFramebuffer(GL_FRAMEBUFFER, dF[nx]);
+        glViewport(0, 0, W, H);
+        glClearColor(0, 0, 0, 0);
+        glClear(GL_COLOR_BUFFER_BIT);
+        if (n > 1) {
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_ONE, GL_ONE);
+            glUseProgram(dep);
+            glUniform2f(glGetUniformLocation(dep, "uScale"), 0.9f * H / W, 0.9f);   /* square, as the scope's */
+            glUniform1f(glGetUniformLocation(dep, "uInk"), (float)(0.04 * 735 / (double)n));
+            glBindVertexArray(vao);
+            glBindBuffer(GL_ARRAY_BUFFER, buf);
+            glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(n * 2 * sizeof(float)), pts, GL_STREAM_DRAW);
+            glDrawArrays(GL_LINE_STRIP, 0, (GLsizei)n);
+            glDisable(GL_BLEND);
+        }
+
+        /* 2. The water steps, pushed by how the deposit changed. */
+        glBindFramebuffer(GL_FRAMEBUFFER, wF[nx]);
+        glViewport(0, 0, W, H);
+        glUseProgram(step);
+        glUniform1i(glGetUniformLocation(step, "uW"), 0);
+        glUniform1i(glGetUniformLocation(step, "uNow"), 1);
+        glUniform1i(glGetUniformLocation(step, "uWas"), 2);
+        glUniform2f(glGetUniformLocation(step, "uH"), 2.5f / W, 2.5f / H);
+        glUniform1f(glGetUniformLocation(step, "uKeep"), 0.993f);
+        glUniform1f(glGetUniformLocation(step, "uPush"), 1.5f);
+        glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, water[cur]);
+        glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, deps[nx]);
+        glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D, deps[cur]);
+        glBindVertexArray(empty);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        cur = nx;
+
+        /* 3. The pond, full screen (or, recording, every other step). */
+        if (frames && (tick & 1)) continue;
+        if (frames) display_target(d, W, H);
+        else {
+            int w, h;
+            display_size(d, &w, &h);
+            display_target(d, w, h);
+        }
+        glUseProgram(show);
+        glUniform1i(glGetUniformLocation(show, "uW"), 0);
+        glUniform1i(glGetUniformLocation(show, "uNow"), 1);
+        glUniform1f(glGetUniformLocation(show, "uGain"), (float)gain);
+        glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, water[cur]);
+        glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, deps[cur]);
+        glBindVertexArray(empty);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glActiveTexture(GL_TEXTURE0);
+        display_present(d);
+    }
+    display_close(d);
+    return 0;
+}
+
 static void usage(void) {
     fputs("usage: aither visuals.aither | tv [--size 64x48] [--smooth] [--scan] [--gain G] [--window | --term | --frames FILE]\n"
-          "       ... | tv [--fold HZ|BPMbpm|auto [--average] | --spectrum HZ | --recur SECONDS] ...\n"
+          "       ... | tv [--fold HZ|BPMbpm|auto [--average] | --spectrum HZ | --recur SECONDS | --pond] ...\n"
           "  float pairs in on stdin, the same out on stdout; full screen unless --window;\n"
           "  --scan draws rows as they arrive, not whole frames (not for --frames);\n"
           "  --fold folds at a period, a row each, scrolling up; --average adds their mean;\n"
           "  --spectrum scrolls the spectrum, -HZ to +HZ; --recur is a recurrence plot;\n"
+          "  --pond: water the beam stirs, 60 steps a second (--size is the water's, half the screen's);\n"
           "  f toggles full screen, q or Escape quits\n",
           stderr);
 }
@@ -409,7 +588,7 @@ int main(int argc, char **argv) {
     const char *path = NULL;
     int W = 64, H = 48, dest = -1, smooth = 0, windowed = 0, scan = 0, sized = 0;
     double foldHz = 0, gain = 1, specHz = 0, recurS = 0;
-    int average = 0;
+    int average = 0, pondOn = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--size") && i + 1 < argc) {
             if (sscanf(argv[++i], "%dx%d", &W, &H) != 2) { usage(); return 2; }
@@ -422,6 +601,7 @@ int main(int argc, char **argv) {
             else if (*end) { usage(); return 2; }
             if (!(foldHz > 0)) { usage(); return 2; }
         } else if (!strcmp(argv[i], "--average")) average = 1;
+        else if (!strcmp(argv[i], "--pond")) pondOn = 1;
         else if (!strcmp(argv[i], "--spectrum") && i + 1 < argc) {
             specHz = atof(argv[++i]);
             if (!(specHz > 0)) { usage(); return 2; }
@@ -437,13 +617,13 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--frames") && i + 1 < argc) { dest = DEST_FRAMES; path = argv[++i]; }
         else { usage(); return 2; }
     }
-    if ((foldHz != 0) + (specHz > 0) + (recurS > 0) > 1) {
-        fputs("tv: one readout at a time: --fold, --spectrum or --recur\n", stderr);
+    if ((foldHz != 0) + (specHz > 0) + (recurS > 0) + pondOn > 1) {
+        fputs("tv: one readout at a time: --fold, --spectrum, --recur or --pond\n", stderr);
         return 2;
     }
     if ((foldHz != 0 || specHz > 0) && !sized) { W = 256; H = 192; }
     if (recurS > 0) { if (!sized) W = 256; H = W; }
-    if (W < 1 || H < 1 || (long)W * H > RING / 4) {
+    if (W < 1 || H < 1 || (!pondOn && (long)W * H > RING / 4)) {
         fprintf(stderr, "tv: a picture has from 1 to %d pixels (512x512)\n", RING / 4);
         return 2;
     }
@@ -464,6 +644,13 @@ int main(int argc, char **argv) {
     if (foldHz != 0) return scroll(&d, W, H, foldHz > 0 ? stream.rate / foldHz : 0, 0, average, gain, smooth, dest);
     if (specHz > 0) return scroll(&d, W, H, stream.rate / 100, specHz, 0, gain, smooth, dest);   /* 100 rows a second */
     if (recurS > 0) return recur(&d, W, recurS, gain, smooth, dest);
+    if (pondOn) {
+        if (!sized) {
+            if (dest == DEST_WINDOW) { int w, h; display_size(&d, &w, &h); W = w / 2; H = h / 2; }
+            else { W = 640; H = 360; }
+        }
+        return pond(&d, W, H, gain, dest);
+    }
     if (dest == DEST_FRAMES)
         fprintf(stderr, "tv: %dx%d rgb24 frames to %s, %.6g a second at AITHER_RATE %g\n"
                 "  ffmpeg -f rawvideo -pix_fmt rgb24 -s %dx%d -r %.6g -i %s out.mp4\n",
