@@ -3073,7 +3073,10 @@ static int shared_name(Ctx* c, const char* s) {
   return has(&c->file_vars, s) || has(&c->top_lets, s) || has(&c->play_set, s);
 }
 
-static void uses(Ctx* c, Node* n, Map* bound, Use* u, Map* defs_seen, int in_def);
+/* A unit inside a play: the play, and the names its own lets give. */
+typedef struct { const char* play; Map* local; } Within;
+
+static void uses(Ctx* c, Node* n, Map* bound, Use* u, Map* defs_seen, int in_def, Within* w);
 
 static void def_uses(Ctx* c, const char* name, Use* u, Map* defs_seen) {
   Node* d = user_def(c, name);
@@ -3081,14 +3084,16 @@ static void def_uses(Ctx* c, const char* name, Use* u, Map* defs_seen) {
   incl(c, defs_seen, name);
   Map bound = {{0}, 0};
   for (int i = 0; i < d->nparams; i++) incl(c, &bound, d->params[i]);
-  for (int i = 0; i < d->nkids; i++) uses(c, d->kids[i], &bound, u, defs_seen, 1);
+  for (int i = 0; i < d->nkids; i++) uses(c, d->kids[i], &bound, u, defs_seen, 1, NULL);
 }
 
-static void uses(Ctx* c, Node* n, Map* bound, Use* u, Map* defs_seen, int in_def) {
+static void uses(Ctx* c, Node* n, Map* bound, Use* u, Map* defs_seen, int in_def, Within* w) {
   if (!n) return;
   switch (n->kind) {
   case nkIdent:
-    if (!has(bound, n->str) && shared_name(c, n->str)) incl(c, &u->reads, n->str);
+    if (has(bound, n->str)) break;
+    if (w && has(w->local, n->str)) incl(c, &u->reads, F(c, "%s.%s", w->play, n->str));
+    else if (shared_name(c, n->str)) incl(c, &u->reads, n->str);
     break;
   case nkLambda:
     for (int i = 0; i < n->nparams; i++) incl(c, bound, n->params[i]);
@@ -3111,7 +3116,7 @@ static void uses(Ctx* c, Node* n, Map* bound, Use* u, Map* defs_seen, int in_def
     break;
   default: break;
   }
-  for (int i = 0; i < n->nkids; i++) uses(c, n->kids[i], bound, u, defs_seen, in_def);
+  for (int i = 0; i < n->nkids; i++) uses(c, n->kids[i], bound, u, defs_seen, in_def, w);
 }
 
 static int task_root(int* up, int i) {
@@ -3126,19 +3131,38 @@ static void task_join(int* up, int a, int b) {
 
 /* The tables `aither profile` reads: each slot's task, and which task
  * needs which, as pairs. */
-static void emit_tasks(Ctx* c, Node** units, int n, Buf* out) {
+typedef struct { Node* st; Node* play; int last; } Unit;
+
+static void emit_tasks(Ctx* c, Unit* units, int n, Buf* out) {
   Use* use = al(c, (n ? n : 1) * sizeof(Use));
+  Node* play = NULL;
+  Within w = {0};
   for (int i = 0; i < n; i++) {
-    Node* s = units[i];
+    Node* s = units[i].st;
     Map bound = {{0}, 0}, defs_seen = {{0}, 0};
+    if (!units[i].play) {
+      if (s->kind == nkLet) {
+        incl(c, &use[i].writes, s->str);
+        uses(c, s->kids[0], &bound, &use[i], &defs_seen, 0, NULL);
+      } else if (s->kind != nkPlay) {
+        uses(c, s, &bound, &use[i], &defs_seen, 0, NULL);
+      }
+      continue;
+    }
+    if (units[i].play != play) {
+      play = units[i].play;
+      w.play = play->str;
+      w.local = al(c, sizeof(Map));
+      Node* bn = play->kids[0];
+      if (bn->kind == nkBlock)
+        for (int k = 0; k < bn->nkids; k++) if (bn->kids[k]->kind == nkLet) incl(c, w.local, bn->kids[k]->str);
+    }
     if (s->kind == nkLet) {
-      incl(c, &use[i].writes, s->str);
-      uses(c, s->kids[0], &bound, &use[i], &defs_seen, 0);
-    } else if (s->kind == nkPlay) {
-      incl(c, &use[i].writes, s->str);
-      uses(c, s->kids[0], &bound, &use[i], &defs_seen, 0);
+      incl(c, &use[i].writes, F(c, "%s.%s", w.play, s->str));
+      uses(c, s->kids[0], &bound, &use[i], &defs_seen, 0, &w);
     } else {
-      uses(c, s, &bound, &use[i], &defs_seen, 0);
+      if (units[i].last) incl(c, &use[i].writes, w.play);
+      uses(c, s, &bound, &use[i], &defs_seen, 0, &w);
     }
   }
   /* Writers of each name; two or more are one task. */
@@ -3223,6 +3247,7 @@ static const char* emit_program(Ctx* c, Node* program) {
   }
 
   Buf body = {0};
+  Unit* units = al(c, MAX_PROF_SLOTS * sizeof(Unit));
   bcat(c, &body, "static void tick1(VoiceState* s, double* outL, double* outR) {\n");
   bcat(c, &body, "  double prof_last = 0.0;\n");
   bcat(c, &body, "  if (s->profiling) { prof_last = n_now(); s->prof_ticks++; }\n");
@@ -3300,6 +3325,14 @@ static const char* emit_program(Ctx* c, Node* program) {
       for (int si = 0; si < nst; si++) {
         Node* st = stmts[si];
         c->scope = F(c, "play %s/%s", nm, stmt_scope(c, st, si == nst - 1));
+        /* Each of the play's statements is timed on its own. */
+        if (si > 0 && prof_names.n < MAX_PROF_SLOTS) {
+          Node* was = stmts[si - 1];
+          units[prof_names.n] = (Unit){was, s, 0};
+          spush(c, &prof_names, F(c, "play %s/%s (line %d)", nm, stmt_scope(c, was, 0), was->line));
+          badd(c, &body, "    if (s->profiling) { double prof_now = n_now(); s->prof[%d] += prof_now - prof_last; "
+               "prof_last = prof_now; }\n", prof_names.n - 1);
+        }
         if (si == nst - 1 && st->kind != nkLet && st->kind != nkVar && st->kind != nkAssign && st->kind != nkIdxAssign) {
           V v = emit(c, inner, st, &body);
           const char* l = v.pair ? v.l : once(c, &body, v.l);
@@ -3338,7 +3371,13 @@ static const char* emit_program(Ctx* c, Node* program) {
     if (s->kind != nkDef && s->kind != nkImport) {
       const char* loc = (s->source[0] && !eq(s->source, c->patch_path))
                           ? F(c, "%s %d", s->source, s->line) : F(c, "line %d", s->line);
-      if (prof_names.n < MAX_PROF_SLOTS) spush(c, &prof_names, F(c, "%s (%s)", stmt_scope(c, s, i == final_idx), loc));
+      if (prof_names.n < MAX_PROF_SLOTS) {
+        Node* play = s->kind == nkPlay ? s : NULL;
+        Node* bn = play ? s->kids[0] : NULL;
+        Node* last = !play ? s : bn->kind == nkBlock ? bn->kids[bn->nkids - 1] : bn;
+        units[prof_names.n] = (Unit){last, play, 1};
+        spush(c, &prof_names, F(c, "%s (%s)", stmt_scope(c, s, i == final_idx), loc));
+      }
       badd(c, &body, "  if (s->profiling) { double prof_now = n_now(); s->prof[%d] += prof_now - prof_last; "
            "prof_last = prof_now; }\n", prof_names.n - 1);
     }
@@ -3370,13 +3409,7 @@ static const char* emit_program(Ctx* c, Node* program) {
   if (prof_names.n == 0) bcat(c, &body, "0");
   bcat(c, &body, "};\n");
   badd(c, &body, "const long prof_count = %d;\n\n", prof_names.n);
-  {
-    Node** units = al(c, (program->nkids ? program->nkids : 1) * sizeof(Node*));
-    int nu = 0;
-    for (int i = 0; i < program->nkids && nu < MAX_PROF_SLOTS; i++)
-      if (program->kids[i]->kind != nkDef && program->kids[i]->kind != nkImport) units[nu++] = program->kids[i];
-    emit_tasks(c, units, nu, &body);
-  }
+  emit_tasks(c, units, prof_names.n, &body);
   bcat(c, &body, BLOCK_TEMPLATE);
 
   /* The prelude, now that the state's shape is known. */

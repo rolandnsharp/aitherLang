@@ -232,3 +232,11 @@ cycles. What caps the rest is one heavy part, of two kinds:
   `chimera`'s `wet`). Pipelining (the reverb on the block before) splits
   it at a block's latency, the sound unchanged but late; and `chimera`'s
   voices split by the poly loop's range.
+
+**A play's statements are units too** (done in the report): a play's lets
+are names shared within the play, its last statement writes the play, and
+each statement is timed on its own. `tests/tasks.c` holds the rules on
+general shapes rather than on any one set: a band of plays (apart), lets
+in one play (apart, the output waits for both), a conductor (readers
+apart, each waits), a read before the writer (a need, not a merge), two
+parts that need each other (one task), two writers of a name (one task).
