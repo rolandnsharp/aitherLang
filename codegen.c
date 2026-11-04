@@ -3327,6 +3327,46 @@ static double node_cost(Ctx* c, Node* n, int depth) {
   return v;
 }
 
+/* The same estimate, and how much of it is inside repeated instances
+ * (`sum`, `each`, with a count of 2 or more), for the graph report
+ * (AITHER_GRAPH_REPORT, notes/graph-2026-11-02.md). */
+static double inst_cost(Ctx* c, Node* n, int depth, int inside, double* in_inst) {
+  if (!n || depth > 64) return 0.0;
+  double v = 1.0;
+  if (n->kind == nkCall) {
+    Node* d = user_def(c, n->str);
+    if (d) {
+      double dv = 0.0;
+      for (int i = 0; i < d->nkids; i++) dv += inst_cost(c, d->kids[i], depth + 1, inside, in_inst);
+      v += dv;
+    } else if (eq(n->str, "sin") || eq(n->str, "cos") || eq(n->str, "exp") || eq(n->str, "log") ||
+               eq(n->str, "tanh") || eq(n->str, "pow") || eq(n->str, "atan2") || eq(n->str, "tan"))
+      v += 3.0;
+    if ((eq(n->str, "sum") || eq(n->str, "each")) && n->nkids == 2) {
+      double N;
+      if (!const_value(c, c->top, n->kids[0], &N) || N < 1) N = 8;
+      double body = N * inst_cost(c, n->kids[1], depth + 1, 1, NULL);
+      if (in_inst && N >= 2 && !inside) *in_inst += body;
+      return v + inst_cost(c, n->kids[0], depth + 1, inside, in_inst) + body;
+    }
+  }
+  for (int i = 0; i < n->nkids; i++) v += inst_cost(c, n->kids[i], depth + 1, inside, in_inst);
+  return v;
+}
+
+static void graph_report(Ctx* c) {
+  double total = 0.0, inst = 0.0;
+  double* w = al(c, (c->ntasks ? c->ntasks : 1) * sizeof(double));
+  for (int i = 0; i < c->nunits; i++) {
+    double k = inst_cost(c, c->units[i].st, 0, 0, &inst);
+    total += k;
+    w[c->unit_task[i]] += k;
+  }
+  double big = 0.0;
+  for (int t = 0; t < c->ntasks; t++) if (w[t] > big) big = w[t];
+  fprintf(stderr, "graph %.0f %.0f %.0f %d\n", total, inst, big, c->ntasks);
+}
+
 /* A task merges no further than this. A single huge function is slow
  * under TCC (bush_doof_e's blocks: 28 s in one task, 19 s in tasks of
  * about this size, per 10 s of sound on the uConsole) and no faster
@@ -3717,6 +3757,7 @@ static void plan_tasks(Ctx* c, Node* program) {
   for (int i = 0; i < n; i++) { int r = task_root(up, i); if (id[r] < 0) id[r] = c->ntasks++; }
   for (int i = 0; i < n; i++) c->unit_task[i] = id[task_root(up, i)];
   explain_groups(c, &arrays);
+  if (getenv("AITHER_GRAPH_REPORT")) graph_report(c);
   c->nfine = c->ntasks;
   c->fine_task = al(c, (n ? n : 1) * sizeof(int));
   memcpy(c->fine_task, c->unit_task, (n ? n : 1) * sizeof(int));
