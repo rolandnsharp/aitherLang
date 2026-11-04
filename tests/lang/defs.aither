@@ -269,3 +269,21 @@ play a:
   let k = 4
   apply(x => x + k, 1)
 a
+
+# --- a number given where a pair meets it stays a number: inside a pair's side, and broadcast
+# expect: 9, 0
+def g(b):
+  [b, 0] * b
+g(3)
+
+# --- the same, a spin of its harmonic
+# expect: 0.55, 0
+def turnn(n, ph):
+  [cos(n * ph), sin(n * ph)] * (1.1 / n)
+turnn(2, 0)
+
+# --- a pair given to the same def still goes whole
+# expect: 9, 0
+def g(b):
+  [b[0], 0] * b
+g([3, 2])

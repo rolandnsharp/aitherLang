@@ -1385,8 +1385,12 @@ static V emit_def(Ctx* c, Scope* sc, Node* def, Node* call, Buf* pre) {
   Node* body = def->kids[0];
   if (!split) {
     Scope* inner = push(c, names);
+    /* Taken whole only when given a pair, or indexed: a number stays one
+     * number, and broadcasting does the rest where it meets a pair. */
     for (int i = 0; i < np; i++)
-      if (!bound[i]) bind_value(c, inner, def->params[i], args[i], whole[i], call->kids[i], sc, pre);
+      if (!bound[i])
+        bind_value(c, inner, def->params[i], args[i],
+                   whole[i] && (args[i].pair || indexes(body, def->params[i])), call->kids[i], sc, pre);
     spush(c, &c->def_stack, def->str);
     V r = body->kind == nkBlock ? emit_block(c, inner, body, pre) : emit(c, inner, body, pre);
     c->def_stack.n--;
