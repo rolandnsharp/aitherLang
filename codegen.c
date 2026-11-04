@@ -107,6 +107,8 @@ struct Ctx {
   Unit* units; Use* use; int nunits;
   int* unit_task; int ntasks;
   int* fine_task; int nfine; /* the finest split, before clustering: what `aither profile` predicts from */
+  Strs glue;                /* why parts were kept in one task, for `check` */
+  double* ucost;            /* each unit's estimated cost */
   Map unit_costs;           /* def name -> its body's estimated cost (v) */
   int cur_unit;             /* the unit being emitted; -1 outside them */
   Map writers;              /* shared name -> p = int[] writer units, n = how many */
@@ -3497,6 +3499,112 @@ static int tasks_wanted(void) {
   return e && *e ? atoi(e) : pool_threads() > 1 ? 4 * pool_threads() : 1;
 }
 
+/* What a unit belongs to, for `check`: its play (>= 0, an index into
+ * the units' plays by first unit), or -1 for a line of its own. */
+static int unit_play(Ctx* c, int u) {
+  if (!c->units[u].play) return -1;
+  for (int k = 0; k <= u; k++) if (c->units[k].play == c->units[u].play) return k;
+  return -1;
+}
+
+static int same_owner(Ctx* c, int a, int b) {
+  int pa = unit_play(c, a), pb = unit_play(c, b);
+  return pa >= 0 ? pa == pb : pb < 0 && a == b;
+}
+
+static const char* shown_name(Ctx* c, const char* key) {
+  if (has(&c->file_vars, key)) return F(c, "$%s", key);
+  const char* dot = strchr(key, '.');
+  if (dot) return F(c, "%.*s's %s", (int)(dot - key), key, dot + 1);
+  return key;
+}
+
+/* Up to four names, then how many more. */
+static void name_list(Ctx* c, Buf* o, Strs* v) {
+  for (int i = 0; i < v->n && i < 4; i++) badd(c, o, i ? ", %s" : "%s", v->v[i]);
+  if (v->n > 4) badd(c, o, " and %d more", v->n - 4);
+}
+
+static void push_once(Ctx* c, Strs* v, const char* s) {
+  for (int i = 0; i < v->n; i++) if (eq(v->v[i], s)) return;
+  spush(c, v, s);
+}
+
+/* Why the finest split kept parts together, for `check`: each task of
+ * more than one owner (play, or top-level line) that holds a tenth of
+ * the voice's estimated cost or more, heaviest first, five at most. A
+ * loop is named by the values read from below their writer, the reads
+ * that close it. */
+static void explain_groups(Ctx* c, Map* arrays) {
+  int n = c->nunits, nt = c->ntasks;
+  double total = 0.0;
+  double* w = al(c, (nt ? nt : 1) * sizeof(double));
+  for (int i = 0; i < n; i++) { double k = node_cost(c, c->units[i].st, 0); w[c->unit_task[i]] += k; total += k; }
+  char* shown = al(c, nt ? nt : 1);
+  for (int round = 0; round < 5; round++) {
+    int g = -1;
+    for (int t = 0; t < nt; t++)
+      if (!shown[t] && (g < 0 || w[t] > w[g])) g = t;
+    if (g < 0 || total <= 0 || w[g] < 0.1 * total) break;
+    shown[g] = 1;
+    /* its owners */
+    Strs plays = {0};
+    int lo = -1, hi = -1, lines = 0, first = -1, owners = 0;
+    for (int i = 0; i < n; i++) {
+      if (c->unit_task[i] != g) continue;
+      if (first < 0) first = i;
+      if (!same_owner(c, first, i)) owners = 1;
+      if (c->units[i].play) push_once(c, &plays, c->units[i].play->str);
+      else {
+        int ln = c->units[i].st->line;
+        if (lo < 0 || ln < lo) lo = ln;
+        if (ln > hi) hi = ln;
+        lines++;
+      }
+    }
+    if (!owners) continue;
+    /* why */
+    Strs both = {0}, arr = {0}, loop = {0};
+    for (int i = 0; i < n; i++) {
+      if (c->unit_task[i] != g) continue;
+      for (int b = 0; b < NBUCKETS; b++) {
+        for (Ent* e = c->use[i].writes.b[b]; e; e = e->next) {
+          Ent* f = hfind(&c->writers, e->key);
+          int* ws = f->p;
+          if (ws[0] != i) continue;
+          for (int k = 1; k < f->n; k++)
+            if (c->unit_task[ws[k]] == g && !same_owner(c, i, ws[k])) { push_once(c, &both, shown_name(c, e->key)); break; }
+        }
+        for (Ent* e = c->use[i].reads.b[b]; e; e = e->next) {
+          Ent* f = hfind(&c->writers, e->key);
+          if (!f) continue;
+          int late, wu = pick_writer(f, i, &late);
+          if (c->unit_task[wu] != g || same_owner(c, i, wu)) continue;
+          if (has(arrays, e->key)) push_once(c, &arr, shown_name(c, e->key));
+          else if (late) push_once(c, &loop, shown_name(c, e->key));
+        }
+      }
+    }
+    Buf o = {0};
+    for (int i = 0; i < plays.n && i < 6; i++) badd(c, &o, i ? ", %s" : "%s", plays.v[i]);
+    if (plays.n > 6) badd(c, &o, " and %d more plays", plays.n - 6);
+    if (lines) {
+      if (plays.n) bcat(c, &o, ", ");
+      if (lines == 1) badd(c, &o, "line %d", lo);
+      else badd(c, &o, "%d lines from %d to %d", lines, lo, hi);
+    }
+    char pc[32];
+    snprintf(pc, sizeof pc, "%.0f", 100 * w[g] / total);
+    badd(c, &o, " (%s%%):", pc);
+    const char* sep = " ";
+    if (loop.n) { badd(c, &o, "%sa loop through ", sep); name_list(c, &o, &loop); sep = "; "; }
+    if (both.n) { badd(c, &o, "%sboth write ", sep); name_list(c, &o, &both); sep = "; "; }
+    if (arr.n) { badd(c, &o, "%sreads the array ", sep); name_list(c, &o, &arr); sep = "; "; }
+    if (eq(sep, " ")) bcat(c, &o, " read one another");
+    spush(c, &c->glue, bstr(&o));
+  }
+}
+
 /* The units in the order they are emitted, what each reads and writes,
  * and their tasks. Arrays don't cross tasks: a unit reading another's
  * array joins it. */
@@ -3608,6 +3716,7 @@ static void plan_tasks(Ctx* c, Node* program) {
   c->ntasks = 0;
   for (int i = 0; i < n; i++) { int r = task_root(up, i); if (id[r] < 0) id[r] = c->ntasks++; }
   for (int i = 0; i < n; i++) c->unit_task[i] = id[task_root(up, i)];
+  explain_groups(c, &arrays);
   c->nfine = c->ntasks;
   c->fine_task = al(c, (n ? n : 1) * sizeof(int));
   memcpy(c->fine_task, c->unit_task, (n ? n : 1) * sizeof(int));
@@ -3661,7 +3770,18 @@ static void emit_task_tables(Ctx* c, int nslots, Buf* out) {
   for (int k = 0; k < ne; k++) badd(c, out, k ? ", %d, %d" : "%d, %d", ed[2 * k], ed[2 * k + 1]);
   if (!ne) bcat(c, out, "0");
   bcat(c, out, "};\n");
-  badd(c, out, "const long task_nneeds = %d;\n\n", ne);
+  badd(c, out, "const long task_nneeds = %d;\n", ne);
+  /* how it runs: each slot's task after clustering, and what each costs */
+  bcat(c, out, "const int run_of[] = {");
+  for (int i = 0; i < nslots; i++) badd(c, out, i ? ", %d" : "%d", i < c->nunits ? c->unit_task[i] : 0);
+  if (!nslots) bcat(c, out, "0");
+  badd(c, out, "};\nconst long run_count = %d;\nconst double unit_cost[] = {", c->ntasks);
+  for (int i = 0; i < nslots; i++) badd(c, out, i ? ", %.0f" : "%.0f", i < c->nunits ? node_cost(c, c->units[i].st, 0) : 0.0);
+  if (!nslots) bcat(c, out, "0");
+  bcat(c, out, "};\nconst char* const task_glue[] = {");
+  for (int i = 0; i < c->glue.n; i++) badd(c, out, i ? ", \"%s\"" : "\"%s\"", escape_prof(c, c->glue.v[i]));
+  if (!c->glue.n) bcat(c, out, "0");
+  badd(c, out, "};\nconst long task_glue_count = %d;\n\n", c->glue.n);
 }
 
 /* ---- the buffers between tasks ----

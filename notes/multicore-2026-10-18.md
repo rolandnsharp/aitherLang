@@ -372,3 +372,20 @@ A53s while a worker holds the second A72 (the C compiles in the same
 16 s for 11 tasks or 50, alone). Fewer late blocks in all (38 against
 162), but a longer wait for -O2. Not measured: a laptop's equal cores,
 where the gain should go past two.
+
+## Step 4: `check` shows the split (2026-11-04)
+
+`check` (and so `send`) ends with how the voice runs and, for each task
+of parts kept together that holds a tenth of its estimated cost or
+more, why. From the compiler: `run_of`, `unit_cost`, `task_glue` beside
+the profile's tables. For example:
+
+    sync:    runs as 7 tasks on 2 cores; largest 97.5% by estimate (set z (line 58) and others)
+             kept in one task:
+               7 lines from 58 to 73 (98%): reads the array $z
+    field:   kept in one task:
+               64 lines from 1 to 64 (94%): both write $x0, $v0, $x1, $v1 and 28 more
+
+Silent when nothing heavy is glued (bush_doof_e: 82 tasks, the largest
+8%). A loop is named by its reads from below their writer, the reads
+that close it.

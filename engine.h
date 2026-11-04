@@ -60,6 +60,7 @@ typedef struct {
   int            rolled_back, stuck;
   long           nan_events, runaway_events;
   int            retrying;     /* runaway-muted, will fade back in */
+  char*          tasks;        /* how it runs as tasks, and why parts were kept together; "" if one */
 } CheckSnap;
 
 /* Reads the AITHER_* settings; the stdlib's text is kept (not copied). */

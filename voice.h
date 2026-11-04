@@ -134,6 +134,7 @@ void      voice_tick(Voice* v, double t, double* l, double* r);
 void      voice_tick_block(Voice* v, long n, double* outL, double* outR);
 int       voice_prof_names(Voice* v, const char*** names);
 int       voice_tasks(Voice* v, const int** task_of, const int** needs, long* nneeds);
+int       voice_run_split(Voice* v, const int** run_of, const double** cost, const char* const** glue, long* nglue);
 double    voice_clock_read_cost(void);
 double    voice_mono_now(void);
 

@@ -658,6 +658,20 @@ int voice_tasks(Voice* v, const int** task_of, const int** needs, long* nneeds) 
   return (int)*count;
 }
 
+int voice_run_split(Voice* v, const int** run_of, const double** cost, const char* const** glue, long* nglue) {
+  /* How the voice runs: each profile slot's task, each slot's estimated
+   * cost, and why parts were kept together. 0 when the code has none. */
+  if (!v->cur.lib) return 0;
+  const int* of = tcc_get_symbol(v->cur.lib, "run_of");
+  const long* count = tcc_get_symbol(v->cur.lib, "run_count");
+  const double* uc = tcc_get_symbol(v->cur.lib, "unit_cost");
+  const char* const* g = tcc_get_symbol(v->cur.lib, "task_glue");
+  const long* ng = tcc_get_symbol(v->cur.lib, "task_glue_count");
+  if (!of || !count || !uc || !g || !ng) return 0;
+  *run_of = of; *cost = uc; *glue = g; *nglue = *ng;
+  return (int)*count;
+}
+
 int voice_prof_names(Voice* v, const char*** names) {
   /* `aither profile`'s slot names, as the voice's code lists them. */
   if (!v->cur.lib) return 0;

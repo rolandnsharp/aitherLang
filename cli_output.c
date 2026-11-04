@@ -207,6 +207,7 @@ char* cli_check(const CheckSnap* q) {
     bprintf(&b, "\n  QUIET VOICE: the loudest part is at %s dB but the voice puts out %s dB: the final expression is scaling it down",
             db_stripped(loudest_heard, a), db_stripped(vrms, c));
   }
+  if (q->tasks && *q->tasks) bput(&b, q->tasks);
   char a[16], c[16];
   bprintf(&b, "\nmaster  rms=%sdB peak=%sdB", db_stripped(fmax_nim(q->master.rms_l, q->master.rms_r), a),
           db_stripped(fmax_nim(q->master.peak_l, q->master.peak_r), c));

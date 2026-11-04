@@ -1324,6 +1324,45 @@ static char* meter_after_send(const char* name) {
   return idx >= 0 ? cli_meter_line(name, &st) : NULL;
 }
 
+/* How a voice runs as tasks, for `check`: how many on how many cores,
+ * the largest by the compiler's estimate, and why parts were kept in one
+ * task. "" for a voice that runs as one task and kept nothing apart. */
+static char* split_text(Voice* v) {
+  const int* run_of; const double* cost; const char* const* glue; long nglue;
+  int nt = voice_run_split(v, &run_of, &cost, &glue, &nglue);
+  const char** names = NULL;
+  int n = voice_prof_names(v, &names);
+  Buf o = {0};
+  if (nt > 1 && n > 0) {
+    double* w = calloc(nt, sizeof *w);
+    const char** first = calloc(nt, sizeof *first);
+    int* units = calloc(nt, sizeof *units);
+    double total = 0.0;
+    for (int i = 0; i < n; i++) {
+      int t = run_of[i];
+      if (t < 0 || t >= nt) continue;
+      w[t] += cost[i];
+      total += cost[i];
+      units[t]++;
+      if (!first[t]) first[t] = names[i];
+    }
+    int big = 0;
+    for (int t = 1; t < nt; t++) if (w[t] > w[big]) big = t;
+    int th = pool_threads();
+    char a[32];
+    pct(a, w[big], total);
+    bprintf(&o, "\n  runs as %d tasks on %d core%s; largest %s%% by estimate (%s%s)", nt, th, th == 1 ? "" : "s", a,
+            first[big] ? first[big] : "?", units[big] > 1 ? " and others" : "");
+    free(w); free(first); free(units);
+  }
+  if (nglue > 0) {
+    bprintf(&o, "\n  kept in one task:");
+    for (long i = 0; i < nglue; i++) bprintf(&o, "\n    %s", glue[i]);
+  }
+  if (!o.s) return sdup("");
+  return bdone(&o);
+}
+
 static char* check(const char* name) {
   CheckSnap q = {0};
   lock_for_command();
@@ -1338,6 +1377,7 @@ static char* check(const char* name) {
     q.nan_events = s->nan_events;
     q.runaway_events = s->runaway_events;
     q.retrying = s->runaway && s->retry_at > 0.0;
+    q.tasks = split_text(s->voice);
   } else {
     q.voice.name = sdup("");
   }
@@ -1345,6 +1385,7 @@ static char* check(const char* name) {
   unlock();
   char* r = cli_check(&q);
   free(q.voice.name);
+  free(q.tasks);
   free_parts(q.parts, q.nparts);
   return r;
 }
