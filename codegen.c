@@ -1213,6 +1213,17 @@ static unsigned noise_seed(Ctx* c, int rid) {
   return seed ? seed : 2463534242u;
 }
 
+/* Is this C text a number, nothing more (parentheses around it allowed)? */
+static int c_number(const char* t) {
+  while (*t == '(' || *t == ' ') t++;
+  if (*t == '-') t++;
+  if (!(*t >= '0' && *t <= '9')) return 0;
+  char* end;
+  strtod(t, &end);
+  while (*end == ')' || *end == ' ') end++;
+  return *end == 0;
+}
+
 static V emit_block(Ctx* c, Scope* sc, Node* b, Buf* pre);
 
 static V emit_voice_loop(Ctx* c, Scope* sc, Node* call, Node* body, const char* param, long N, Buf* pre) {
@@ -2016,7 +2027,27 @@ static void emit_local_stmt(Ctx* c, Scope* sc, Node* st, Buf* pre) {
      * pair is a "pvar" region (the flag, two sides), a number a "var". */
     Buf init_pre = {0};
     V v = emit(c, sc, st->kids[0], &init_pre);
-    if (v.pair) {
+    /* A first value that is a number, known now, is given once a block,
+     * before any sample (hoist_init), not checked for every sample: the
+     * state holds it before its first use either way. */
+    int settle = !c->loop_nv && !init_pre.n && c_number(v.l) && (!v.pair || c_number(v.r));
+    if (v.pair && settle) {
+      const char* flag = fresh(c, "pf");
+      const char* off = register_region(c, "pvar", 3, st->str);
+      spush(c, &c->hoist_inits, F(c, "  if (s->pool[%s] == 0.0) { s->pool[%s + 1] = (%s); s->pool[%s + 2] = (%s); s->pool[%s] = 1.0; }\n",
+                                  off, off, v.l, off, v.r, off));
+      badd(c, pre, "  long %s = %s;\n", flag, off);
+      Ent* e = lput(c, &sc->stereo, st->str);
+      e->a = F(c, "s->pool[%s + 1]", flag);
+      e->b = F(c, "s->pool[%s + 2]", flag);
+    } else if (settle) {
+      const char* flag = fresh(c, "vf");
+      const char* off = register_region(c, "var", 2, st->str);
+      spush(c, &c->hoist_inits, F(c, "  if (s->pool[%s] == 0.0) { s->pool[%s + 1] = (%s); s->pool[%s] = 1.0; }\n",
+                                  off, off, v.l, off));
+      badd(c, pre, "  long %s = %s;\n", flag, off);
+      lput(c, &sc->names, st->str)->a = F(c, "s->pool[%s + 1]", flag);
+    } else if (v.pair) {
       const char* flag = fresh(c, "pf");
       const char* off = register_region(c, "pvar", 3, st->str);
       badd(c, pre, "  long %s = %s;\n  if (s->pool[%s] == 0.0) {\n%s    s->pool[%s + 1] = (%s);\n"
