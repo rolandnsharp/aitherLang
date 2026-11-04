@@ -268,3 +268,11 @@ general shapes (notes/multicore/shapes, timed by notes/multicore/tm.c;
   step 2 as after: tick() runs hoist_init every sample. Renders, audit,
   try, the corpus and the tests would gain from rendering through
   tick_block.
+
+**Offline renders through tick_block (2026-11-04).** render_voice runs a
+block at a time, with its own clock (t0 + i / sr), each sample before
+the guard and the fade, and each part's sound per sample, through three
+header pointers the engine leaves NULL (t_buf, raw_out, part_buf). Corpus
+unchanged, make exact 180/180, make test 67/67. The heaviest renders
+gain most (bush_doof_e 19 s → 9 s, didge_scope_vP_trombone_singer 18 s →
+11 s); the corpus as a whole 92 s → 86 s, most of its time compiling.

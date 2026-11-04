@@ -306,9 +306,12 @@ static const char* BLOCK_TEMPLATE =
 "  for (long b0 = 0; b0 < n; b0 += AITHER_MAXN) {\n"
 "    const long m = n - b0 < AITHER_MAXN ? n - b0 : AITHER_MAXN;\n"
 "    for (long k = 0; k < m; k++) {\n"
-"      s->time_frac += s->dt;\n"
-"      if (s->time_frac >= 1.0) { s->time_sec += 1.0; s->time_frac -= 1.0; }\n"
-"      s->t = s->time_sec + s->time_frac;\n"
+"      if (s->t_buf) s->t = s->t_buf[b0 + k];\n"
+"      else {\n"
+"        s->time_frac += s->dt;\n"
+"        if (s->time_frac >= 1.0) { s->time_sec += 1.0; s->time_frac -= 1.0; }\n"
+"        s->t = s->time_sec + s->time_frac;\n"
+"      }\n"
 "      if (s->in_buf) { s->in_l = s->in_buf[2*(b0 + k)]; s->in_r = s->in_buf[2*(b0 + k) + 1]; }\n"
 "      else { s->in_l = 0.0; s->in_r = 0.0; }\n"
 "      B[XB_T * S + k] = s->t; B[XB_IN_L * S + k] = s->in_l; B[XB_IN_R * S + k] = s->in_r;\n"
@@ -338,6 +341,9 @@ static const char* BLOCK_TEMPLATE =
 "    for (long k = 0; k < m; k++) {\n"
 "      double l, r;\n"
 "      outs(S, B, k, &l, &r);\n"
+"      if (s->raw_out) { s->raw_out[2*(b0 + k)] = l; s->raw_out[2*(b0 + k) + 1] = r; }\n"
+"      if (s->part_buf)\n"
+"        for (long p = 0; p < 2 * np; p++) s->part_buf[(b0 + k) * 2 * np + p] = B[(XB_PART + p) * S + k];\n"
 "      if (!(l == l) || !(r == r) || l > 1e6 || l < -1e6 || r > 1e6 || r < -1e6) {\n"
 "        s->bad++; l = 0.0; r = 0.0;\n"
 "      }\n"
@@ -3909,7 +3915,10 @@ static const char* emit_program(Ctx* c, Node* program) {
     "  const char* stuck_at;\n"
     "  double* prof;\n"
     "  long    profiling;\n"
-    "  long    prof_ticks;\n");
+    "  long    prof_ticks;\n"
+    "  const double* t_buf;\n"
+    "  double* raw_out;\n"
+    "  double* part_buf;\n");
   for (int i = 0; i < c->top_var_names.n; i++) badd(c, &pre, "  double v_%s;\n", c->top_var_names.v[i]);
   badd(c, &pre, "  unsigned char inited[%d];\n", c->top_var_names.n > 1 ? c->top_var_names.n : 1);
   bcat(c, &pre, "} VoiceState;\n\n");

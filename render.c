@@ -107,35 +107,67 @@ int render_voice(Voice* v, double seconds, int sr, const double* in_l, const dou
     lp1[p] = lowpass(split, 0.5412, sr);
     lp2[p] = lowpass(split, 1.3066, sr);
   }
+  /* A block at a time through tick_block, as the engine runs it, with
+   * the render's own clock (t0 + i / sr), every sample as the voice made
+   * it (no guard, no fade) and every part's sound each sample. A gain
+   * ramp in progress holds, as it did a sample at a time. */
+  enum { BLK = 512 };
+  VoiceHeader* h = v->cur.state;
+  double* tb = malloc(BLK * sizeof(double));
+  double* raw = malloc(2 * BLK * sizeof(double));
+  double* inb = malloc(2 * BLK * sizeof(double));
+  double* pb = malloc((size_t)(np > 0 ? 2 * np : 2) * BLK * sizeof(double));
+  double* scratch = malloc(2 * BLK * sizeof(double));
+  double* held = calloc(np + 1, sizeof(double));
+  for (int p = 0; p < np; p++) { held[p] = h->part_fade_delta[p]; h->part_fade_delta[p] = 0.0; }
+  double* was_in = h->in_buf;
+  double was_fade = h->fade_gain, was_delta = h->fade_delta;
+  h->fade_gain = 1.0; h->fade_delta = 0.0;
+  h->t_buf = tb; h->raw_out = raw; h->part_buf = pb; h->in_buf = inb;
   int rc = 0;
-  for (long i = 0; i < n_skip + n; i++) {
-    if (feed_input) {               /* the recording a frame at a time; silence past its end */
-      dsp_input_l = i < n_in ? in_l[i] : 0.0;
-      dsp_input_r = i < n_in ? in_r[i] : 0.0;
+  long total = n_skip + n;
+  for (long i0 = 0; i0 < total && rc == 0; i0 += BLK) {
+    long m = total - i0 < BLK ? total - i0 : BLK;
+    for (long k = 0; k < m; k++) {
+      long i = i0 + k;
+      tb[k] = t0 + (double)i / (double)sr;
+      if (feed_input) {             /* the recording a frame at a time; silence past its end */
+        inb[2 * k] = i < n_in ? in_l[i] : 0.0;
+        inb[2 * k + 1] = i < n_in ? in_r[i] : 0.0;
+      } else {
+        inb[2 * k] = dsp_input_l;
+        inb[2 * k + 1] = dsp_input_r;
+      }
     }
-    double l = 0.0, r = 0.0;          /* a patch with no output leaves them as they are */
-    voice_tick(v, t0 + (double)i / (double)sr, &l, &r);
-    if (l != l || r != r) {
-      snprintf(err, errlen, "patch produced NaN at %.3fs (sample %ld of %ld)",
-               (double)i / (double)sr, i, n_skip + n);
-      rc = -1;
-      break;
-    }
-    if (i < n_skip) continue;
-    out->left[i - n_skip] = l;
-    out->right[i - n_skip] = r;
-    for (int p = 0; p < np; p++) {
-      double pl = v->part_out[2 * p], pr = v->part_out[2 * p + 1];
-      double m = (pl + pr) * 0.5;
-      double low = step(&lp2[p], step(&lp1[p], m));
-      sum_sq[p] += m * m;
-      low_sq[p] += low * low;
-      peak[p] = dmax(peak[p], dmax(fabs(pl), fabs(pr)));
+    voice_tick_block(v, m, scratch, scratch + BLK);
+    for (long k = 0; k < m; k++) {
+      long i = i0 + k;
+      double l = raw[2 * k], r = raw[2 * k + 1];
+      if (l != l || r != r) {
+        snprintf(err, errlen, "patch produced NaN at %.3fs (sample %ld of %ld)",
+                 (double)i / (double)sr, i, total);
+        rc = -1;
+        break;
+      }
+      if (i < n_skip) continue;
+      out->left[i - n_skip] = l;
+      out->right[i - n_skip] = r;
+      for (int p = 0; p < np; p++) {
+        double pl = pb[k * 2 * np + 2 * p], pr = pb[k * 2 * np + 2 * p + 1];
+        double mm = (pl + pr) * 0.5;
+        double low = step(&lp2[p], step(&lp1[p], mm));
+        sum_sq[p] += mm * mm;
+        low_sq[p] += low * low;
+        peak[p] = dmax(peak[p], dmax(fabs(pl), fabs(pr)));
+      }
     }
   }
-  if (feed_input) dsp_input_l = dsp_input_r = 0.0;
+  h->t_buf = NULL; h->raw_out = NULL; h->part_buf = NULL; h->in_buf = was_in;
+  h->fade_gain = was_fade; h->fade_delta = was_delta;
+  for (int p = 0; p < np; p++) h->part_fade_delta[p] = held[p];
+  free(tb); free(raw); free(inb); free(pb); free(scratch); free(held);
   if (rc == 0) {
-    out->parts = calloc(np ? np : 1, sizeof(PartLevel));
+    out->parts = calloc(np > 0 ? (size_t)np : 1, sizeof(PartLevel));
     out->nparts = np;
     for (int p = 0; p < np; p++) {
       const char* name = v->cur.part_names[p];

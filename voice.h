@@ -47,6 +47,12 @@ typedef struct {
   double* prof;               /* `aither profile`: seconds per slot */
   long    profiling;
   long    prof_ticks;
+  /* For render (NULL in the engine): the clock a sample at a time, each
+   * sample as the voice made it (before the guard and the fade), each
+   * part's sound each sample (2 * n_parts a sample). */
+  const double* t_buf;
+  double* raw_out;
+  double* part_buf;
 } VoiceHeader;
 
 /* A region of the pool, owned by the voice (its strings malloc'd). */
