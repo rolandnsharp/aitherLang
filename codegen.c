@@ -3415,7 +3415,24 @@ static int xb_park(Ctx* c, int part) { return XB_FIXED + c->nplays + part; }
 static int xb_part(Ctx* c, int part, int side) { return XB_FIXED + 2 * c->nplays + 2 * part + side; }
 
 static const char* xb(Ctx* c, int row, const char* idx) {
-  return F(c, "aither_B[%d * aither_S + %s]", row, idx);
+  return F(c, "aither_r%d[%s]", row, idx);
+}
+
+/* A pointer to each row `text` reads or writes, made once: TCC doesn't
+ * fold row * S + i out of the loop itself. */
+static void declare_rows(Ctx* c, const char* text, Buf* out) {
+  Map seen = {{0}, 0};
+  for (const char* p = strstr(text, "aither_r"); p; p = strstr(p + 1, "aither_r")) {
+    const char* q = p + 8;
+    if (*q < '0' || *q > '9') continue;
+    int row = atoi(q);
+    while (*q >= '0' && *q <= '9') q++;
+    if (*q != '[') continue;
+    const char* k = F(c, "%d", row);
+    if (has(&seen, k)) continue;
+    incl(c, &seen, k);
+    badd(c, out, "  double* const aither_r%d = aither_B + %d * aither_S;\n", row, row);
+  }
 }
 
 static int xbuf(Ctx* c, const char* key, int wu, int pair) {
@@ -3710,8 +3727,8 @@ static const char* emit_program(Ctx* c, Node* program) {
     order[k] = pick;
   }
   for (int t = 0; t < nt; t++) {
-    badd(c, &body, "static void task_%d(VoiceState* s, long aither_n, long aither_S, double* aither_B) {\n", t);
-    bcat(c, &body, "  double prof_last = 0.0; (void)prof_last;\n");
+    Buf whole = body;
+    body = (Buf){0};
     /* Where its `$state` stood when the block began, for reads from above. */
     for (int b = 0; b < NBUCKETS; b++)
       for (Ent* x = c->xbufs.b[b]; x; x = x->next) {
@@ -3721,11 +3738,8 @@ static const char* emit_program(Ctx* c, Node* program) {
         badd(c, &body, "  %s = (%s);\n", xb(c, (int)x->n, "0"), x->a);
         if (x->pairs) badd(c, &body, "  %s = (%s);\n", xb(c, (int)x->n + 1, "0"), x->b);
       }
-    bcat(c, &body, "  for (long aither_i = 0; aither_i < aither_n; aither_i++) {\n");
-    badd(c, &body, "  const double aither_t = %s; (void)aither_t;\n", xb(c, XB_T, "aither_i"));
-    badd(c, &body, "  const double aither_in_l = %s, aither_in_r = %s; (void)aither_in_l; (void)aither_in_r;\n",
-         xb(c, XB_IN_L, "aither_i"), xb(c, XB_IN_R, "aither_i"));
-    bcat(c, &body, "  if (s->profiling) prof_last = n_now();\n");
+    Buf pro = body;
+    body = (Buf){0};
     for (int k = 0; k < nu; ) {
       if (c->unit_task[k] != t) { k++; continue; }
       int part = unit_part[k];
@@ -3750,6 +3764,22 @@ static const char* emit_program(Ctx* c, Node* program) {
              xb(c, xb_part(c, part, 1), "aither_i"), nm);
       k = end;
     }
+    /* The loop's head: the clock and the input where its units read them. */
+    Buf loop = body, head = {0};
+    const char* lt = bstr(&loop);
+    if (strstr(lt, "aither_t")) badd(c, &head, "  const double aither_t = %s;\n", xb(c, XB_T, "aither_i"));
+    if (strstr(lt, "aither_in_"))
+      badd(c, &head, "  const double aither_in_l = %s, aither_in_r = %s; (void)aither_in_l; (void)aither_in_r;\n",
+           xb(c, XB_IN_L, "aither_i"), xb(c, XB_IN_R, "aither_i"));
+    body = whole;
+    badd(c, &body, "static void task_%d(VoiceState* s, long aither_n, long aither_S, double* aither_B) {\n", t);
+    bcat(c, &body, "  double prof_last = 0.0; (void)prof_last; (void)aither_B; (void)aither_S;\n");
+    declare_rows(c, F(c, "%s%s%s", bstr(&pro), bstr(&head), lt), &body);
+    bcat(c, &body, bstr(&pro));
+    bcat(c, &body, "  for (long aither_i = 0; aither_i < aither_n; aither_i++) {\n");
+    bcat(c, &body, bstr(&head));
+    if (strstr(lt, "prof_last")) bcat(c, &body, "  if (s->profiling) prof_last = n_now();\n");
+    bcat(c, &body, lt);
     bcat(c, &body, "  }\n}\n\n");
   }
   bcat(c, &body, "static void run_tasks(VoiceState* s, long aither_n, long aither_S, double* aither_B) {\n");
@@ -3758,6 +3788,8 @@ static const char* emit_program(Ctx* c, Node* program) {
   /* The voice's sound at sample i: the final expression's, or with none
    * the plays', added in the file's order. */
   bcat(c, &body, "static void outs(long aither_S, double* aither_B, long aither_i, double* outL, double* outR) {\n");
+  Buf whole = body;
+  body = (Buf){0};
   if (final_idx >= 0) {
     badd(c, &body, "  *outL = %s; *outR = %s;\n", xb(c, XB_OUT_L, "aither_i"), xb(c, XB_OUT_R, "aither_i"));
   } else if (c->play_names.n > 0) {
@@ -3768,6 +3800,12 @@ static const char* emit_program(Ctx* c, Node* program) {
     bcat(c, &body, ";\n");
   } else {
     bcat(c, &body, "  (void)aither_S; (void)aither_B; (void)aither_i;\n  *outL = 0.0; *outR = 0.0;\n");
+  }
+  {
+    Buf o = body;
+    body = whole;
+    declare_rows(c, bstr(&o), &body);
+    bcat(c, &body, bstr(&o));
   }
   bcat(c, &body, "}\n\n");
 

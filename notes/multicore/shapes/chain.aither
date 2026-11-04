@@ -1,0 +1,3 @@
+let dry = saw(TAU * phasor(110)) * discharge(impulse(2), 8) * 0.3 |> lpf(1200, 0.6)
+let wet = dry |> reverb(2.5, 0.4)
+dry + wet * 0.3

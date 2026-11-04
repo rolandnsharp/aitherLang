@@ -1,0 +1,1 @@
+sum(64, n => sin(TAU * phasor(55 * n)) / n) * 0.1

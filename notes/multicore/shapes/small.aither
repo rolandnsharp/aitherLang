@@ -1,0 +1,10 @@
+$pos = 0
+$pos = $pos + 0.001
+let lfo = sin(TAU * t * 0.5)
+play pads:
+  let p1 = sin(TAU * phasor(220 + $pos)) * 0.1
+  let p2 = [sin(TAU * phasor(330)), sin(TAU * phasor(331))] * lfo
+  p1 + p2
+play bass:
+  saw(TAU * phasor(55)) * 0.2
+pads + bass

@@ -240,3 +240,31 @@ general shapes rather than on any one set: a band of plays (apart), lets
 in one play (apart, the output waits for both), a conductor (readers
 apart, each waits), a read before the writer (a need, not a merge), two
 parts that need each other (one task), two writers of a name (one task).
+
+## Step 2, done, and what it costs on one core (2026-11-04)
+
+Committed b719f14; rows indexed through pointers made once a task after.
+Seconds for 10 s of sound on the uConsole, before step 2 → after, on
+general shapes (notes/multicore/shapes, timed by notes/multicore/tm.c;
+"live" is tick_block, "offline" is tick):
+
+| shape | TCC live | TCC offline | -O2 live | -O2 offline |
+|---|---|---|---|---|
+| band (8 plays) | 3.37 → 4.11 | 3.84 → 4.80 | 1.78 → 1.78 | 2.48 → 2.49 |
+| bank (64 partials, one line) | 3.89 → 3.97 | 12.1 → 12.2 | 1.61 → 1.60 | 7.55 → 7.56 |
+| field (16 coupled) | 1.53 → 1.76 | 1.42 → 1.88 | 0.43 → 0.43 | 0.43 → 0.50 |
+| chain (into a reverb) | 0.61 → 0.73 | 1.12 → 1.31 | 0.43 → 0.43 | 1.03 → 1.07 |
+| lets (120 one-line lets) | 7.09 → 9.54 | 21.8 → 29.8 | 2.88 → 3.60 | 13.8 → 15.7 |
+
+- **-O2 live, what a voice plays once its build lands: unchanged**, but
+  for tiny units (120 lets, +25%): each pays a loop and a buffer store
+  as dear as its own work. The grain problem (notes/graph-2026-11-02.md).
+- **TCC: 15–35% slower,** its unoptimised code paying each task's
+  overhead. It matters on the uConsole, where a voice runs on TCC until
+  its -O2 build lands (5 s to two minutes).
+- **The fix for both is clustering:** about as many tasks as cores,
+  balanced by cost. One core: one task, the code before step 2 exactly.
+- **Offline is 1.4–4.7× slower than live on the same -O2 code**, before
+  step 2 as after: tick() runs hoist_init every sample. Renders, audit,
+  try, the corpus and the tests would gain from rendering through
+  tick_block.

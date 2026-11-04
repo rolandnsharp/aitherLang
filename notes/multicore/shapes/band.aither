@@ -1,0 +1,16 @@
+play p1:
+  lpf(saw(TAU * phasor(1 * 55)), 800 + 400 * sin(TAU * 0.1 * t), 0.5) * 0.05
+play p2:
+  lpf(saw(TAU * phasor(2 * 55)), 800 + 400 * sin(TAU * 0.2 * t), 0.5) * 0.05
+play p3:
+  lpf(saw(TAU * phasor(3 * 55)), 800 + 400 * sin(TAU * 0.3 * t), 0.5) * 0.05
+play p4:
+  lpf(saw(TAU * phasor(4 * 55)), 800 + 400 * sin(TAU * 0.4 * t), 0.5) * 0.05
+play p5:
+  lpf(saw(TAU * phasor(5 * 55)), 800 + 400 * sin(TAU * 0.5 * t), 0.5) * 0.05
+play p6:
+  lpf(saw(TAU * phasor(6 * 55)), 800 + 400 * sin(TAU * 0.6 * t), 0.5) * 0.05
+play p7:
+  lpf(saw(TAU * phasor(7 * 55)), 800 + 400 * sin(TAU * 0.7 * t), 0.5) * 0.05
+play p8:
+  lpf(saw(TAU * phasor(8 * 55)), 800 + 400 * sin(TAU * 0.8 * t), 0.5) * 0.05
