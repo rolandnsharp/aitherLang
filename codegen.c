@@ -58,6 +58,12 @@ typedef struct { Ent* b[NBUCKETS]; int n; } Map;
 typedef struct { char* s; size_t n, cap; } Buf;
 typedef struct { const char** v; int n, cap; } Strs;
 
+/* A unit: a top-level statement, or one statement of a play (`last`: the
+ * play's final one, which gives its sound). What it reads and writes of
+ * the file's shared names. */
+typedef struct { Node* st; Node* play; int last; } Unit;
+typedef struct { Map reads, writes; } Use;
+
 struct Ctx {
   Arena* a;
   jmp_buf jump;
@@ -96,6 +102,16 @@ struct Ctx {
   int each_depth;
   Buf deferred;
   Map recursive, tail_checked, stereo_seen, pure_seen;
+  /* Tasks: the units, each one's task, and the buffers between tasks. */
+  Unit* units; Use* use; int nunits;
+  int* unit_task; int ntasks;
+  int cur_unit;             /* the unit being emitted; -1 outside them */
+  Map writers;              /* shared name -> p = int[] writer units, n = how many */
+  Map xbufs;                /* "name#writer unit" -> n = first buffer (-1: not yet), pairs */
+  int nbufs;
+  int nplays;
+  Scope* play_scope;        /* the play being emitted: its own lets' scope */
+  const char* play_name;
 };
 
 static void* al(Ctx* c, size_t n) { return arena_alloc(c->a, n); }
@@ -254,64 +270,98 @@ static const char* const LIBM1[] = {"sin", "cos", "tan", "tanh", "exp", "log",
                                     "floor", "ceil", "sqrt", NULL};
 
 /* The two entry points, after every patch's tick1. */
+/* The drivers. Both run the tasks (run_tasks) over a block of
+ * buffers: tick one sample (render, try, the tests), tick_block n of
+ * them in runs of AITHER_MAXN (the engine). Before the tasks: the clock,
+ * the input, each part's gain and park flag a sample at a time, the
+ * gain ramps stepped as they always were; after: the guard, the voice's
+ * fade and the meters, in the order they were. */
 static const char* BLOCK_TEMPLATE =
 "extern double n_input_l(void);\n"
 "extern double n_input_r(void);\n"
 "\n"
 "void tick(VoiceState* s, double* outL, double* outR) {\n"
+"  enum { S = 2 };\n"
+"  double B[AITHER_NB * S];\n"
 "  hoist_init(s);\n"
 "  s->in_l = n_input_l(); s->in_r = n_input_r();\n"
-"  tick1(s, outL, outR);\n"
+"  B[XB_T * S] = s->t; B[XB_IN_L * S] = s->in_l; B[XB_IN_R * S] = s->in_r;\n"
+"  for (long p = 0; p < AITHER_NP; p++) {\n"
+"    B[(XB_GAIN + p) * S] = s->part_gains[p];\n"
+"    B[(XB_PARK + p) * S] = s->part_park ? s->part_park[p] : 0.0;\n"
+"  }\n"
+"  if (s->profiling) s->prof_ticks++;\n"
+"  run_tasks(s, 1, S, B);\n"
+"  outs(S, B, 0, outL, outR);\n"
+"  if (s->part_out)\n"
+"    for (long p = 0; p < 2 * AITHER_NP; p++) s->part_out[p] = B[(XB_PART + p) * S];\n"
 "}\n"
 "\n"
 "void tick_block(VoiceState* s, long n, double* outL, double* outR) {\n"
 "  const long np = s->n_parts;\n"
+"  enum { S = AITHER_MAXN + 1 };\n"
+"  double B[AITHER_NB * S];\n"
 "  hoist_init(s);\n"
 "  s->bad = 0; s->peak_raw = 0.0; s->stuck = 0;\n"
-"  for (long i = 0; i < n; i++) {\n"
-"    s->time_frac += s->dt;\n"
-"    if (s->time_frac >= 1.0) { s->time_sec += 1.0; s->time_frac -= 1.0; }\n"
-"    s->t = s->time_sec + s->time_frac;\n"
-"    if (s->in_buf) { s->in_l = s->in_buf[2*i]; s->in_r = s->in_buf[2*i + 1]; }\n"
-"    else { s->in_l = 0.0; s->in_r = 0.0; }\n"
-"    double l, r;\n"
-"    tick1(s, &l, &r);\n"
-"    if (!(l == l) || !(r == r) || l > 1e6 || l < -1e6 || r > 1e6 || r < -1e6) {\n"
-"      s->bad++; l = 0.0; r = 0.0;\n"
-"    }\n"
-"    double al = fabs(l), ar = fabs(r);\n"
-"    if (al > s->peak_raw) s->peak_raw = al;\n"
-"    if (ar > s->peak_raw) s->peak_raw = ar;\n"
-"    /* the voice's fade, then the parts' gain ramps: for the next sample */\n"
-"    s->fade_gain += s->fade_delta;\n"
-"    if (s->fade_gain > 1.0) s->fade_gain = 1.0;\n"
-"    if (s->fade_gain < 0.0) s->fade_gain = 0.0;\n"
-"    if (s->fade_gain >= 1.0 && s->fade_delta > 0.0) s->fade_delta = 0.0;\n"
-"    for (long p = 0; p < np; p++) {\n"
-"      double d = s->part_fade_delta[p];\n"
-"      if (d != 0.0) {\n"
-"        double target = s->part_fade_target[p];\n"
-"        double g = s->part_gains[p] + d;\n"
-"        if ((d > 0.0 && g >= target) || (d < 0.0 && g <= target)) {\n"
-"          s->part_gains[p] = target; s->part_fade_delta[p] = 0.0;\n"
-"          if (s->part_park_pending[p] && target <= 0.0) {\n"
-"            s->part_park[p] = 1.0; s->part_park_pending[p] = 0;\n"
+"  for (long b0 = 0; b0 < n; b0 += AITHER_MAXN) {\n"
+"    const long m = n - b0 < AITHER_MAXN ? n - b0 : AITHER_MAXN;\n"
+"    for (long k = 0; k < m; k++) {\n"
+"      s->time_frac += s->dt;\n"
+"      if (s->time_frac >= 1.0) { s->time_sec += 1.0; s->time_frac -= 1.0; }\n"
+"      s->t = s->time_sec + s->time_frac;\n"
+"      if (s->in_buf) { s->in_l = s->in_buf[2*(b0 + k)]; s->in_r = s->in_buf[2*(b0 + k) + 1]; }\n"
+"      else { s->in_l = 0.0; s->in_r = 0.0; }\n"
+"      B[XB_T * S + k] = s->t; B[XB_IN_L * S + k] = s->in_l; B[XB_IN_R * S + k] = s->in_r;\n"
+"      for (long p = 0; p < AITHER_NP; p++) {\n"
+"        B[(XB_GAIN + p) * S + k] = s->part_gains[p];\n"
+"        B[(XB_PARK + p) * S + k] = s->part_park ? s->part_park[p] : 0.0;\n"
+"      }\n"
+"      /* the parts' gain ramps: for the next sample */\n"
+"      for (long p = 0; p < np; p++) {\n"
+"        double d = s->part_fade_delta[p];\n"
+"        if (d != 0.0) {\n"
+"          double target = s->part_fade_target[p];\n"
+"          double g = s->part_gains[p] + d;\n"
+"          if ((d > 0.0 && g >= target) || (d < 0.0 && g <= target)) {\n"
+"            s->part_gains[p] = target; s->part_fade_delta[p] = 0.0;\n"
+"            if (s->part_park_pending[p] && target <= 0.0) {\n"
+"              s->part_park[p] = 1.0; s->part_park_pending[p] = 0;\n"
+"            }\n"
+"          } else {\n"
+"            s->part_gains[p] = g < 0.0 ? 0.0 : (g > 1.0 ? 1.0 : g);\n"
 "          }\n"
-"        } else {\n"
-"          s->part_gains[p] = g < 0.0 ? 0.0 : (g > 1.0 ? 1.0 : g);\n"
 "        }\n"
 "      }\n"
 "    }\n"
-"    const double g = s->fade_gain;\n"
-"    outL[i] = l * g; outR[i] = r * g;\n"
-"    /* per-part meters, after the voice fade like the voice's own */\n"
-"    for (long p = 0; p < np; p++) {\n"
-"      double a0 = fabs(s->part_out[2*p]), a1 = fabs(s->part_out[2*p + 1]);\n"
-"      double a = (a0 > a1 ? a0 : a1) * g;\n"
-"      double pk = s->part_peak[p] * s->peak_decay;\n"
-"      s->part_peak[p] = pk > a ? pk : a;\n"
-"      s->part_sq[p] = s->part_sq[p] * (1.0 - s->rms_alpha) + a * a * s->rms_alpha;\n"
+"    if (s->profiling) s->prof_ticks += m;\n"
+"    run_tasks(s, m, S, B);\n"
+"    for (long k = 0; k < m; k++) {\n"
+"      double l, r;\n"
+"      outs(S, B, k, &l, &r);\n"
+"      if (!(l == l) || !(r == r) || l > 1e6 || l < -1e6 || r > 1e6 || r < -1e6) {\n"
+"        s->bad++; l = 0.0; r = 0.0;\n"
+"      }\n"
+"      double al = fabs(l), ar = fabs(r);\n"
+"      if (al > s->peak_raw) s->peak_raw = al;\n"
+"      if (ar > s->peak_raw) s->peak_raw = ar;\n"
+"      /* the voice's fade: for the next sample */\n"
+"      s->fade_gain += s->fade_delta;\n"
+"      if (s->fade_gain > 1.0) s->fade_gain = 1.0;\n"
+"      if (s->fade_gain < 0.0) s->fade_gain = 0.0;\n"
+"      if (s->fade_gain >= 1.0 && s->fade_delta > 0.0) s->fade_delta = 0.0;\n"
+"      const double g = s->fade_gain;\n"
+"      outL[b0 + k] = l * g; outR[b0 + k] = r * g;\n"
+"      /* per-part meters, after the voice fade like the voice's own */\n"
+"      for (long p = 0; p < np; p++) {\n"
+"        double a0 = fabs(B[(XB_PART + 2*p) * S + k]), a1 = fabs(B[(XB_PART + 2*p + 1) * S + k]);\n"
+"        double a = (a0 > a1 ? a0 : a1) * g;\n"
+"        double pk = s->part_peak[p] * s->peak_decay;\n"
+"        s->part_peak[p] = pk > a ? pk : a;\n"
+"        s->part_sq[p] = s->part_sq[p] * (1.0 - s->rms_alpha) + a * a * s->rms_alpha;\n"
+"      }\n"
 "    }\n"
+"    if (s->part_out && m > 0)\n"
+"      for (long p = 0; p < 2 * AITHER_NP; p++) s->part_out[p] = B[(XB_PART + p) * S + m - 1];\n"
 "  }\n"
 "}\n";
 
@@ -1517,7 +1567,7 @@ static void declare_state_array(Ctx* c, Scope* sc, Node* st, Buf* pre, int top_l
          "    for (long _k = 0; _k < %d; ++_k) s->pool[%s + 1 + _k] = _v;\n"
          "    s->pool[%s] = 1.0;\n  }\n", base, bstr(&init_pre), iv.l, gens * n, base, base);
   if (every > 0)
-    badd(c, pre, "  if (((long)floor(s->t * s->sr + 0.5) - 1) %% %ld == 0)\n"
+    badd(c, pre, "  if (((long)floor(aither_t * s->sr + 0.5) - 1) %% %ld == 0)\n"
          "    for (long _k = 0; _k < %d; ++_k) s->pool[%s + 1 + _k] = s->pool[%s + 1 + %d + _k];\n",
          every, n * w, base, base, n * w);
 }
@@ -1818,9 +1868,17 @@ static void emit_clock_turner(Ctx* c, Scope* sc, Node* arg, const char* rate, Bu
 }
 
 /* The turning point a `let` of `TAU * phasor(f)` made, if `name` means it. */
+static Ent* turner_across(Ctx* c, const char* name);
+
 static Ent* find_turner(Ctx* c, Scope* sc, const char* name) {
   for (Scope* s = sc; s; s = s->parent) {
-    if (lfind(s->names, name)) return hfind(&c->turners, F(c, "%p/%s", (void*)s, name));
+    if (lfind(s->names, name)) {
+      if (s == c->play_scope && c->cur_unit >= 0 && !c->in_hoist) {
+        Ent* x = turner_across(c, name);
+        if (x) return x;
+      }
+      return hfind(&c->turners, F(c, "%p/%s", (void*)s, name));
+    }
     if (lfind(s->stereo, name) || lfind(s->numlits, name) || lfind(s->fns, name) ||
         lfind(s->lambdas, name) || lfind(s->arrays, name) || lfind(s->larrays, name) ||
         lfind(s->sarrays, name))
@@ -2380,18 +2438,18 @@ static Node* file_var_decl(Ctx* c, const char* name);
 /* A built-in name's value, or NULL. A name the patch binds comes first:
  * `let sweep = ...` is the patch's own. */
 static const char* builtin_value(const char* s) {
-  if (eq(s, "t")) return "s->t";
+  if (eq(s, "t")) return "aither_t";
   if (eq(s, "sr")) return "s->sr";
   if (eq(s, "dt")) return "s->dt";
   /* The voice's own time: a sweep from the origin the engine sets (a
    * new voice, `aither sweep`), so a patch never subtracts. */
-  if (eq(s, "sweep")) return "((s->t) - (s->sweep_origin))";
+  if (eq(s, "sweep")) return "((aither_t) - (s->sweep_origin))";
   if (eq(s, "PI")) return "3.14159265358979323846";
   if (eq(s, "TAU")) return "(2.0 * 3.14159265358979323846)";
   return NULL;
 }
 
-static V emit_ident(Ctx* c, Scope* sc, Node* n) {
+static V emit_ident_raw(Ctx* c, Scope* sc, Node* n) {
   const char* s = n->str;
   for (Scope* x = sc; x; x = x->parent) {
     Ent* e = lfind(x->names, s);
@@ -2430,12 +2488,24 @@ static V emit_ident(Ctx* c, Scope* sc, Node* n) {
      * until then it reads 0. Its shape comes from how its first value is
      * written, a pair literal or a pair builtin. */
     decide_var(c, file_var_decl(c, s));
-    return emit_ident(c, sc, n);
+    return emit_ident_raw(c, sc, n);
   }
   const char* b = builtin_value(s);
   if (b) return mono(b);
   fail(c, "unknown identifier: %s %s", s, err_loc(c, n));
   return mono("");
+}
+
+static const char* shared_key(Ctx* c, Scope* sc, const char* s);
+static V cross_read(Ctx* c, const char* key, V v);
+
+/* A name as the unit being emitted reads it: from its buffer when its
+ * writer is another task (multicore, notes/multicore-2026-10-18.md). */
+static V emit_ident(Ctx* c, Scope* sc, Node* n) {
+  V v = emit_ident_raw(c, sc, n);
+  if (c->cur_unit < 0 || c->in_hoist) return v;
+  const char* key = shared_key(c, sc, n->str);
+  return key ? cross_read(c, key, v) : v;
 }
 
 /* An `if`: only the branch taken runs. Plain values pick with `?:`;
@@ -2820,7 +2890,7 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
       return vpair(re, im);
     }
     pair_operands(c, sc, n, pre, 0, "no arguments");     /* input */
-    return vpair("s->in_l", "s->in_r");
+    return vpair("aither_in_l", "aither_in_r");
   }
   if (in(name, PAIR_READERS)) {
     const char** a = pair_operands(c, sc, n, pre, 2, "one pair (or two numbers)");
@@ -3067,8 +3137,6 @@ static void mention(Ctx* c, Node* n, Map* plays, Map* reached) {
  * through any depth. Nothing here changes the code: it tells `aither
  * profile` how the voice would split. */
 
-typedef struct { Map reads, writes; } Use;
-
 static int shared_name(Ctx* c, const char* s) {
   return has(&c->file_vars, s) || has(&c->top_lets, s) || has(&c->play_set, s);
 }
@@ -3102,11 +3170,17 @@ static void uses(Ctx* c, Node* n, Map* bound, Use* u, Map* defs_seen, int in_def
     def_uses(c, n->str, u, defs_seen);
     break;
   case nkLet:
+    /* its value is read before its name is bound */
+    for (int i = 0; i < n->nkids; i++) uses(c, n->kids[i], bound, u, defs_seen, in_def, w);
     incl(c, bound, n->str);
-    break;
+    return;
   case nkVar:
-    if (in_def) incl(c, bound, n->str);
-    else incl(c, &u->writes, n->str);
+    if (in_def) {
+      for (int i = 0; i < n->nkids; i++) uses(c, n->kids[i], bound, u, defs_seen, in_def, w);
+      incl(c, bound, n->str);
+      return;
+    }
+    incl(c, &u->writes, n->str);
     break;
   case nkAssign: case nkIdxAssign:
     if (!has(bound, n->str) && shared_name(c, n->str)) {
@@ -3129,52 +3203,119 @@ static void task_join(int* up, int a, int b) {
   if (a != b) up[a > b ? a : b] = a < b ? a : b;
 }
 
-/* The tables `aither profile` reads: each slot's task, and which task
- * needs which, as pairs. */
-typedef struct { Node* st; Node* play; int last; } Unit;
 
-static void emit_tasks(Ctx* c, Unit* units, int n, Buf* out) {
-  Use* use = al(c, (n ? n : 1) * sizeof(Use));
+static int array_rhs(Node* rhs) {
+  if (!rhs) return 0;
+  if (rhs->kind == nkArr) return rhs->nkids != 2 && rhs->nkids > 0 && !all_nums(rhs);
+  return is_array_make(rhs);
+}
+
+static void collect_idx_targets(Ctx* c, Node* n, Map* out) {
+  if (!n) return;
+  if (n->kind == nkIdxAssign && n->str[0]) incl(c, out, n->str);
+  for (int i = 0; i < n->nkids; i++) collect_idx_targets(c, n->kids[i], out);
+}
+
+static int play_nst(Node* play) {
+  Node* bn = play->kids[0];
+  return bn->kind == nkBlock ? bn->nkids : 1;
+}
+
+static Node* play_stmt(Node* play, int si) {
+  Node* bn = play->kids[0];
+  return bn->kind == nkBlock ? bn->kids[si] : bn;
+}
+
+/* The writer a unit reads `w`'s name from: the last one above it in the
+ * file, as it stands after that unit this sample; with none above, the
+ * last one of all, as it stood after it the sample before (`late`). */
+static int pick_writer(Ent* w, int u, int* late) {
+  int* ws = w->p;
+  int wu = -1;
+  for (int k = 0; k < w->n; k++) if (ws[k] < u) wu = ws[k];
+  *late = wu < 0;
+  return wu < 0 ? ws[w->n - 1] : wu;
+}
+
+/* The units in the order they are emitted, what each reads and writes,
+ * and their tasks. Arrays don't cross tasks: a unit reading another's
+ * array joins it. */
+static void plan_tasks(Ctx* c, Node* program) {
+  int n = 0;
+  for (int i = 0; i < program->nkids; i++) {
+    Node* s = program->kids[i];
+    if (s->kind == nkDef || s->kind == nkImport) continue;
+    n += s->kind == nkPlay ? play_nst(s) : 1;
+  }
+  c->nunits = n;
+  c->units = al(c, (n ? n : 1) * sizeof(Unit));
+  c->use = al(c, (n ? n : 1) * sizeof(Use));
+  c->unit_task = al(c, (n ? n : 1) * sizeof(int));
+  Map arrays = {{0}, 0};
+  collect_idx_targets(c, program, &arrays);
+  for (int k = 0; k < c->nvar_decls; k++)
+    if (c->var_decls[k]->nkids && array_rhs(c->var_decls[k]->kids[0])) incl(c, &arrays, c->var_decls[k]->str);
+  int u = 0;
+  for (int i = 0; i < program->nkids; i++) {
+    Node* s = program->kids[i];
+    if (s->kind == nkDef || s->kind == nkImport) continue;
+    if (s->kind == nkLet && array_rhs(s->kids[0])) incl(c, &arrays, s->str);
+    if (s->kind != nkPlay) { c->units[u++] = (Unit){s, NULL, 1}; continue; }
+    int nst = play_nst(s);
+    for (int si = 0; si < nst; si++) {
+      Node* st = play_stmt(s, si);
+      if (st->kind == nkLet && array_rhs(st->kids[0])) incl(c, &arrays, F(c, "%s.%s", s->str, st->str));
+      c->units[u++] = (Unit){st, s, si == nst - 1};
+    }
+  }
+  Use* use = c->use;
   Node* play = NULL;
   Within w = {0};
   for (int i = 0; i < n; i++) {
-    Node* s = units[i].st;
+    Node* s = c->units[i].st;
     Map bound = {{0}, 0}, defs_seen = {{0}, 0};
-    if (!units[i].play) {
+    if (!c->units[i].play) {
       if (s->kind == nkLet) {
         incl(c, &use[i].writes, s->str);
         uses(c, s->kids[0], &bound, &use[i], &defs_seen, 0, NULL);
-      } else if (s->kind != nkPlay) {
+      } else {
         uses(c, s, &bound, &use[i], &defs_seen, 0, NULL);
       }
       continue;
     }
-    if (units[i].play != play) {
-      play = units[i].play;
+    if (c->units[i].play != play) {
+      play = c->units[i].play;
       w.play = play->str;
       w.local = al(c, sizeof(Map));
-      Node* bn = play->kids[0];
-      if (bn->kind == nkBlock)
-        for (int k = 0; k < bn->nkids; k++) if (bn->kids[k]->kind == nkLet) incl(c, w.local, bn->kids[k]->str);
+      for (int k = 0; k < play_nst(play); k++)
+        if (play_stmt(play, k)->kind == nkLet) incl(c, w.local, play_stmt(play, k)->str);
     }
     if (s->kind == nkLet) {
       incl(c, &use[i].writes, F(c, "%s.%s", w.play, s->str));
       uses(c, s->kids[0], &bound, &use[i], &defs_seen, 0, &w);
     } else {
-      if (units[i].last) incl(c, &use[i].writes, w.play);
+      if (c->units[i].last) incl(c, &use[i].writes, w.play);
       uses(c, s, &bound, &use[i], &defs_seen, 0, &w);
     }
   }
-  /* Writers of each name; two or more are one task. */
+  /* Each name's writers, in file order; two or more are one task. */
   int* up = al(c, (n ? n : 1) * sizeof(int));
   for (int i = 0; i < n; i++) up[i] = i;
-  Map first = {{0}, 0};
   for (int i = 0; i < n; i++)
     for (int b = 0; b < NBUCKETS; b++)
       for (Ent* e = use[i].writes.b[b]; e; e = e->next) {
-        Ent* f = hfind(&first, e->key);
-        if (f) task_join(up, (int)f->n, i);
-        else hput(c, &first, e->key)->n = i;
+        Ent* f = hfind(&c->writers, e->key);
+        if (!f) { f = hput(c, &c->writers, e->key); f->p = al(c, (n ? n : 1) * sizeof(int)); }
+        int* ws = f->p;
+        ws[f->n++] = i;
+        task_join(up, ws[0], i);
+      }
+  /* Arrays stay with their writers. */
+  for (int i = 0; i < n; i++)
+    for (int b = 0; b < NBUCKETS; b++)
+      for (Ent* e = use[i].reads.b[b]; e; e = e->next) {
+        Ent* f = hfind(&c->writers, e->key);
+        if (f && has(&arrays, e->key)) task_join(up, ((int*)f->p)[0], i);
       }
   /* Needs, then the cycles among them: reachability, n is a few hundred. */
   int words = (n + 63) / 64;
@@ -3183,12 +3324,12 @@ static void emit_tasks(Ctx* c, Unit* units, int n, Buf* out) {
   for (int i = 0; i < n; i++)
     for (int b = 0; b < NBUCKETS; b++)
       for (Ent* e = use[i].reads.b[b]; e; e = e->next) {
-        Ent* f = hfind(&first, e->key);
+        Ent* f = hfind(&c->writers, e->key);
         if (!f) continue;
-        int w = task_root(up, (int)f->n);
-        reach[(size_t)i * words + w / 64] |= 1ull << (w % 64);
+        int wr = task_root(up, ((int*)f->p)[0]);
+        reach[(size_t)i * words + wr / 64] |= 1ull << (wr % 64);
       }
-  /* A unit merged into a writer's task needs what the task needs. */
+  /* A unit merged into a task needs what the task needs. */
   for (int i = 0; i < n; i++) {
     int r = task_root(up, i);
     if (r != i) for (int k = 0; k < words; k++) reach[(size_t)r * words + k] |= reach[(size_t)i * words + k];
@@ -3196,38 +3337,188 @@ static void emit_tasks(Ctx* c, Unit* units, int n, Buf* out) {
   for (int k = 0; k < n; k++)
     for (int i = 0; i < n; i++)
       if (REACH(i, k))
-        for (int w = 0; w < words; w++) reach[(size_t)i * words + w] |= reach[(size_t)k * words + w];
+        for (int x = 0; x < words; x++) reach[(size_t)i * words + x] |= reach[(size_t)k * words + x];
   for (int i = 0; i < n; i++)
     for (int j = i + 1; j < n; j++)
       if (REACH(i, j) && REACH(j, i)) task_join(up, i, j);
+  #undef REACH
   /* Number the tasks in file order. */
   int* id = al(c, (n ? n : 1) * sizeof(int));
-  int ntasks = 0;
   for (int i = 0; i < n; i++) id[i] = -1;
-  for (int i = 0; i < n; i++) { int r = task_root(up, i); if (id[r] < 0) id[r] = ntasks++; }
-  bcat(c, out, "const int task_of[] = {");
-  for (int i = 0; i < n; i++) badd(c, out, i ? ", %d" : "%d", id[task_root(up, i)]);
-  if (!n) bcat(c, out, "0");
-  bcat(c, out, "};\n");
-  badd(c, out, "const long task_count = %d;\n", ntasks);
-  /* Direct needs between tasks, once each. */
-  unsigned char* seen = al(c, (size_t)(ntasks ? ntasks : 1) * (ntasks ? ntasks : 1));
-  long nedges = 0;
-  bcat(c, out, "const int task_needs[] = {");
+  c->ntasks = 0;
+  for (int i = 0; i < n; i++) { int r = task_root(up, i); if (id[r] < 0) id[r] = c->ntasks++; }
+  for (int i = 0; i < n; i++) c->unit_task[i] = id[task_root(up, i)];
+  /* The values that cross from one task to another, each from the writer
+   * its reader reads. A play's sound crosses in its part's buffers. */
   for (int i = 0; i < n; i++)
     for (int b = 0; b < NBUCKETS; b++)
       for (Ent* e = use[i].reads.b[b]; e; e = e->next) {
-        Ent* f = hfind(&first, e->key);
-        if (!f) continue;
-        int a = id[task_root(up, i)], w = id[task_root(up, (int)f->n)];
-        if (a == w || seen[(size_t)a * ntasks + w]) continue;
-        seen[(size_t)a * ntasks + w] = 1;
-        badd(c, out, nedges++ ? ", %d, %d" : "%d, %d", a, w);
+        Ent* f = hfind(&c->writers, e->key);
+        if (!f || has(&c->play_set, e->key) || c->unit_task[((int*)f->p)[0]] == c->unit_task[i]) continue;
+        int late;
+        int wu = pick_writer(f, i, &late);
+        Ent* x = hput(c, &c->xbufs, F(c, "%s#%d", e->key, wu));
+        if (!x->a) { x->n = -1; x->a = ""; x->b = ""; }
       }
-  if (!nedges) bcat(c, out, "0");
+}
+
+/* Which task needs which, as pairs, once each. */
+static int task_edges(Ctx* c, int* out) {
+  int nt = c->ntasks, ne = 0;
+  unsigned char* seen = al(c, (size_t)(nt ? nt : 1) * (nt ? nt : 1));
+  for (int i = 0; i < c->nunits; i++)
+    for (int b = 0; b < NBUCKETS; b++)
+      for (Ent* e = c->use[i].reads.b[b]; e; e = e->next) {
+        Ent* f = hfind(&c->writers, e->key);
+        if (!f) continue;
+        int a = c->unit_task[i], w = c->unit_task[((int*)f->p)[0]];
+        if (a == w || seen[(size_t)a * nt + w]) continue;
+        seen[(size_t)a * nt + w] = 1;
+        if (out) { out[2 * ne] = a; out[2 * ne + 1] = w; }
+        ne++;
+      }
+  return ne;
+}
+
+/* The tables `aither profile` reads: each slot's task, and which task
+ * needs which, as pairs. */
+static void emit_task_tables(Ctx* c, int nslots, Buf* out) {
+  bcat(c, out, "const int task_of[] = {");
+  for (int i = 0; i < nslots; i++) badd(c, out, i ? ", %d" : "%d", c->unit_task[i]);
+  if (!nslots) bcat(c, out, "0");
   bcat(c, out, "};\n");
-  badd(c, out, "const long task_nneeds = %ld;\n\n", nedges);
-  #undef REACH
+  badd(c, out, "const long task_count = %d;\n", c->ntasks);
+  int ne = task_edges(c, NULL);
+  int* ed = al(c, (ne ? ne : 1) * 2 * sizeof(int));
+  task_edges(c, ed);
+  bcat(c, out, "const int task_needs[] = {");
+  for (int k = 0; k < ne; k++) badd(c, out, k ? ", %d, %d" : "%d, %d", ed[2 * k], ed[2 * k + 1]);
+  if (!ne) bcat(c, out, "0");
+  bcat(c, out, "};\n");
+  badd(c, out, "const long task_nneeds = %d;\n\n", ne);
+}
+
+/* ---- the buffers between tasks ----
+ *
+ * One array, `aither_B`, a row of `aither_S` samples per buffer: the
+ * clock, the input, the output, each part's gain, park flag and sound,
+ * then the values that cross. A crossing value's row holds, at i + 1,
+ * the value after its writer at sample i, and at 0 the value when the
+ * block began (a read from above its writer reads one sample back). */
+enum { XB_T, XB_IN_L, XB_IN_R, XB_OUT_L, XB_OUT_R, XB_FIXED };
+static int xb_gain(Ctx* c, int part) { (void)c; return XB_FIXED + part; }
+static int xb_park(Ctx* c, int part) { return XB_FIXED + c->nplays + part; }
+static int xb_part(Ctx* c, int part, int side) { return XB_FIXED + 2 * c->nplays + 2 * part + side; }
+
+static const char* xb(Ctx* c, int row, const char* idx) {
+  return F(c, "aither_B[%d * aither_S + %s]", row, idx);
+}
+
+static int xbuf(Ctx* c, const char* key, int wu, int pair) {
+  Ent* e = hfind(&c->xbufs, F(c, "%s#%d", key, wu));
+  if (!e) fail(c, "internal: '%s' crosses between tasks without a buffer", key);
+  if (e->n < 0) { e->n = c->nbufs; e->pairs = pair; c->nbufs += pair ? 2 : 1; }
+  return (int)e->n;
+}
+
+/* The shared name an identifier read here stands for: a play's own let
+ * ("play.name"), a file-level name, or NULL for anything local. */
+static const char* shared_key(Ctx* c, Scope* sc, const char* s) {
+  for (Scope* x = sc; x && x != c->top; x = x->parent)
+    if (lfind(x->names, s) || lfind(x->stereo, s) || lfind(x->arrays, s) || lfind(x->larrays, s) ||
+        lfind(x->sarrays, s) || lfind(x->numlits, s) || lfind(x->fns, s) || lfind(x->lambdas, s))
+      return x == c->play_scope ? F(c, "%s.%s", c->play_name, s) : NULL;
+  return shared_name(c, s) ? s : NULL;
+}
+
+static int play_index(Ctx* c, const char* name) {
+  for (int i = 0; i < c->play_names.n; i++) if (eq(c->play_names.v[i], name)) return i;
+  fail(c, "internal: play '%s' read before it is emitted", name);
+  return -1;
+}
+
+/* A read of `key`, as `v` in its writer's task, from the unit being
+ * emitted: unchanged in that task, its buffer from any other. */
+static V cross_read(Ctx* c, const char* key, V v) {
+  Ent* w = hfind(&c->writers, key);
+  if (!w || c->cur_unit < 0) return v;
+  int* ws = w->p;
+  if (c->unit_task[ws[0]] == c->unit_task[c->cur_unit]) return v;
+  if (has(&c->play_set, key)) {
+    int part = play_index(c, key);
+    return vpair(xb(c, xb_part(c, part, 0), "aither_i"), xb(c, xb_part(c, part, 1), "aither_i"));
+  }
+  int late, wu = pick_writer(w, c->cur_unit, &late);
+  int b = xbuf(c, key, wu, v.pair);
+  const char* idx = late ? "aither_i" : "aither_i + 1";
+  return v.pair ? vpair(xb(c, b, idx), xb(c, b + 1, idx)) : mono(xb(c, b, idx));
+}
+
+static V emit_ident_raw(Ctx* c, Scope* sc, Node* n);
+
+/* A play's let read through sin and cos from another task: its turning
+ * point's two sides, from the rows its writer stored them in; NULL when
+ * it doesn't cross (or has no turning point). */
+static Ent* turner_across(Ctx* c, const char* name) {
+  const char* key = F(c, "%s.%s", c->play_name, name);
+  Ent* w = hfind(&c->writers, key);
+  if (!w || c->unit_task[((int*)w->p)[0]] == c->unit_task[c->cur_unit]) return NULL;
+  int late, wu = pick_writer(w, c->cur_unit, &late);
+  Ent* x = hfind(&c->xbufs, F(c, "%s~turn#%d", key, wu));
+  if (!x || x->n < 0) return NULL;
+  Ent* t = al(c, sizeof(Ent));
+  t->a = xb(c, (int)x->n, "aither_i + 1");
+  t->b = xb(c, (int)x->n + 1, "aither_i + 1");
+  return t;
+}
+
+/* Is `s`, seen from `sc`, a value (a number or a pair) rather than a
+ * table, an array or a function? */
+static int value_name(Ctx* c, Scope* sc, const char* s) {
+  for (Scope* x = sc; x; x = x->parent) {
+    if (lfind(x->names, s) || lfind(x->stereo, s)) return 1;
+    if (lfind(x->arrays, s) || lfind(x->larrays, s) || lfind(x->sarrays, s) || lfind(x->fns, s) ||
+        lfind(x->lambdas, s)) return 0;
+  }
+  if (has(&c->stereo_lets, s) || has(&c->pair_vars, s)) return 1;
+  if (hfind(&c->top_arrays, s) || has(&c->top_larrays, s) || has(&c->top_sarrays, s)) return 0;
+  return has(&c->top_lets, s) || has(&c->top_var_set, s) || has(&c->file_vars, s);
+}
+
+/* After unit `u`: what it wrote that another task reads, into its rows.
+ * `park` gets the stores of its `$state` alone, for a parked play, where
+ * the unit doesn't run and the value stands. */
+static void store_crossing(Ctx* c, int u, Scope* sc, Buf* out, Buf* park) {
+  for (int b = 0; b < NBUCKETS; b++)
+    for (Ent* e = c->use[u].writes.b[b]; e; e = e->next) {
+      Ent* x = hfind(&c->xbufs, F(c, "%s#%d", e->key, u));
+      if (!x) continue;
+      const char* dot = strchr(e->key, '.');
+      const char* name = dot ? dot + 1 : e->key;
+      if (!value_name(c, sc, name)) continue;
+      Node id = {0};
+      id.kind = nkIdent; id.str = name; id.source = ""; id.line = c->units[u].st->line;
+      int was = c->cur_unit;
+      c->cur_unit = -1;
+      V v = emit_ident_raw(c, sc, &id);
+      c->cur_unit = was;
+      int row = xbuf(c, e->key, u, v.pair);
+      x->a = v.l; x->b = v.r;
+      const char* st = v.pair
+        ? F(c, "  %s = (%s); %s = (%s);\n", xb(c, row, "aither_i + 1"), v.l, xb(c, row + 1, "aither_i + 1"), v.r)
+        : F(c, "  %s = (%s);\n", xb(c, row, "aither_i + 1"), v.l);
+      bcat(c, out, st);
+      if (park && has(&c->file_vars, e->key)) bcat(c, park, st);
+      /* a play's let of a turning: its turning point crosses with it */
+      Ent* tn = dot && sc == c->play_scope ? hfind(&c->turners, F(c, "%p/%s", (void*)sc, name)) : NULL;
+      if (tn) {
+        Ent* tx = hput(c, &c->xbufs, F(c, "%s~turn#%d", e->key, u));
+        tx->n = c->nbufs; tx->pairs = 1; tx->a = ""; tx->b = "";
+        c->nbufs += 2;
+        badd(c, out, "  %s = (%s); %s = (%s);\n", xb(c, (int)tx->n, "aither_i + 1"), tn->a,
+             xb(c, (int)tx->n + 1, "aither_i + 1"), tn->b);
+      }
+    }
 }
 
 static const char* emit_program(Ctx* c, Node* program) {
@@ -3247,13 +3538,13 @@ static const char* emit_program(Ctx* c, Node* program) {
   }
 
   Buf body = {0};
-  Unit* units = al(c, MAX_PROF_SLOTS * sizeof(Unit));
-  bcat(c, &body, "static void tick1(VoiceState* s, double* outL, double* outR) {\n");
-  bcat(c, &body, "  double prof_last = 0.0;\n");
-  bcat(c, &body, "  if (s->profiling) { prof_last = n_now(); s->prof_ticks++; }\n");
   Strs prof_names = {0};
   Scope* top = push(c, NULL);
   c->top = top;
+  c->nplays = c->play_set.n;
+  c->cur_unit = -1;
+  plan_tasks(c, program);
+  c->nbufs = XB_FIXED + 4 * c->nplays;
 
   int final_idx = -1;
   for (int i = program->nkids - 1; i >= 0; i--) {
@@ -3266,24 +3557,79 @@ static const char* emit_program(Ctx* c, Node* program) {
     }
   }
 
+  /* Each unit's code on its own, to be laid into its task's loop. */
+  int nu = c->nunits;
+  Buf* chunk = al(c, (nu ? nu : 1) * sizeof(Buf));
+  Buf* park_store = al(c, (nu ? nu : 1) * sizeof(Buf));
+  int* unit_part = al(c, (nu ? nu : 1) * sizeof(int));
+  int u = 0;
+  #define PROF_LINE(B) do { if (u < MAX_PROF_SLOTS) badd(c, (B), "  if (s->profiling) { double prof_now = n_now(); " \
+    "s->prof[%d] += prof_now - prof_last; prof_last = prof_now; }\n", u); } while (0)
   for (int i = 0; i < program->nkids; i++) {
     Node* s = program->kids[i];
-    const char* src = s->source[0] ? s->source : c->patch_path;
-    if (src[0] && s->line > 0) badd(c, &body, "#line %d \"%s\"\n", s->line, src);
-    c->scope = stmt_scope(c, s, i == final_idx);
     if (i > 0 && program->kids[i - 1]->kind == nkLet) incl(c, &c->lets_done, program->kids[i - 1]->str);
-    switch (s->kind) {
-    case nkDef: break;
-    case nkImport:
+    if (s->kind == nkDef) continue;
+    if (s->kind == nkImport)
       fail(c, "import \"%s\" was not resolved — the program was built without import expansion %s",
            s->str, err_loc(c, s));
-      break;
-    case nkVar: bcat(c, &body, var_init(c, top, s)); break;
+    const char* src = s->source[0] ? s->source : c->patch_path;
+    const char* loc = (s->source[0] && !eq(s->source, c->patch_path))
+                        ? F(c, "%s %d", s->source, s->line) : F(c, "line %d", s->line);
+    c->scope = stmt_scope(c, s, i == final_idx);
+    if (s->kind == nkPlay) {
+      int part = c->play_names.n;
+      spush(c, &c->play_names, s->str);
+      Scope* inner = push(c, top);
+      const char* nm = s->str;
+      c->play_scope = inner;
+      c->play_name = nm;
+      int nst = play_nst(s);
+      for (int si = 0; si < nst; si++, u++) {
+        Node* st = play_stmt(s, si);
+        Buf* body = &chunk[u];
+        unit_part[u] = part;
+        c->cur_unit = u;
+        if (src[0] && st->line > 0) badd(c, body, "#line %d \"%s\"\n", st->line, src);
+        c->scope = F(c, "play %s/%s", nm, stmt_scope(c, st, si == nst - 1));
+        if (si == nst - 1 && st->kind != nkLet && st->kind != nkVar && st->kind != nkAssign && st->kind != nkIdxAssign) {
+          V v = emit(c, inner, st, body);
+          const char* l = v.pair ? v.l : once(c, body, v.l);
+          const char* r = v.pair ? v.r : l;
+          badd(c, body, "    p_%s_l = (%s) * %s;\n", nm, l, xb(c, xb_gain(c, part), "aither_i"));
+          badd(c, body, "    p_%s_r = (%s) * %s;\n", nm, r, xb(c, xb_gain(c, part), "aither_i"));
+        } else switch (st->kind) {
+        case nkLet:
+          if (has(&c->play_set, st->str))
+            fail(c, "'%s' is the name of a play block — choose a different local variable name %s",
+                 st->str, err_loc(c, st));
+          emit_let(c, inner, st->str, st->kids[0], body, NULL);
+          break;
+        case nkVar: bcat(c, body, var_init(c, inner, st)); break;
+        case nkAssign: file_assign(c, inner, st, body); break;
+        case nkIdxAssign: bcat(c, body, emit_idx_assign(c, inner, st)); break;
+        default: emit(c, inner, st, body);
+        }
+        store_crossing(c, u, inner, body, &park_store[u]);
+        if (u < MAX_PROF_SLOTS)
+          spush(c, &prof_names, si == nst - 1 ? F(c, "play %s (%s)", nm, loc)
+                                              : F(c, "play %s/%s (line %d)", nm, stmt_scope(c, st, 0), st->line));
+        PROF_LINE(body);
+      }
+      c->play_scope = NULL;
+      c->play_name = NULL;
+      continue;
+    }
+    Buf* body = &chunk[u];
+    unit_part[u] = -1;
+    c->cur_unit = u;
+    if (src[0] && s->line > 0) badd(c, body, "#line %d \"%s\"\n", s->line, src);
+    switch (s->kind) {
+    case nkVar: bcat(c, body, var_init(c, top, s)); break;
     case nkLet: {
       Node* rhs = s->kids[0];
       int numeric = rhs->kind == nkArr && all_nums(rhs);
       if ((rhs->kind == nkArr && rhs->nkids != 2 && rhs->nkids > 0 && !numeric) || is_array_make(rhs)) {
-        declare_local_array(c, top, s->str, rhs, &body, 1);
+        declare_local_array(c, top, s->str, rhs, body, 1);
       } else if (numeric) {
         const char** items = al(c, (rhs->nkids + 1) * sizeof(char*));
         Ent* e = hput(c, &c->top_arrays, s->str);
@@ -3291,16 +3637,16 @@ static const char* emit_program(Ctx* c, Node* program) {
         e->n = rhs->nkids;
         e->node = rhs;
         if (rhs->nkids == 2) {
-          badd(c, &body, "  double l_%s_l = %s;\n  double l_%s_r = %s;\n", s->str, items[0], s->str, items[1]);
+          badd(c, body, "  double l_%s_l = %s;\n  double l_%s_r = %s;\n", s->str, items[0], s->str, items[1]);
           incl(c, &c->stereo_lets, s->str);
         }
       } else {
-        V v = emit(c, top, rhs, &body);
+        V v = emit(c, top, rhs, body);
         if (v.pair) {
-          badd(c, &body, "  double l_%s_l = (%s);\n  double l_%s_r = (%s);\n", s->str, v.l, s->str, v.r);
+          badd(c, body, "  double l_%s_l = (%s);\n  double l_%s_r = (%s);\n", s->str, v.l, s->str, v.r);
           incl(c, &c->stereo_lets, s->str);
         } else {
-          badd(c, &body, "  double l_%s = (%s);\n", s->str, v.l);
+          badd(c, body, "  double l_%s = (%s);\n", s->str, v.l);
           double cv;
           if (const_value(c, top, rhs, &cv)) lput(c, &top->numlits, s->str)->v = cv;
           else note_invariant(c, top, s->str, rhs, top);
@@ -3308,80 +3654,26 @@ static const char* emit_program(Ctx* c, Node* program) {
       }
       break;
     }
-    case nkAssign: file_assign(c, top, s, &body); break;
-    case nkIdxAssign: bcat(c, &body, emit_idx_assign(c, top, s)); break;
-    case nkPlay: {
-      int part = c->play_names.n;
-      spush(c, &c->play_names, s->str);
-      Scope* inner = push(c, top);
-      const char* nm = s->str;
-      badd(c, &body, "  double p_%s_l, p_%s_r;\n", nm, nm);
-      badd(c, &body, "  if (s->part_park && s->part_park[%d] != 0.0) {\n    p_%s_l = 0.0; p_%s_r = 0.0;\n"
-           "    if (s->part_out) { s->part_out[%d] = 0.0; s->part_out[%d] = 0.0; }\n  } else {\n",
-           part, nm, nm, 2 * part, 2 * part + 1);
-      Node* bn = s->kids[0];
-      Node** stmts = bn->kind == nkBlock ? bn->kids : &s->kids[0];
-      int nst = bn->kind == nkBlock ? bn->nkids : 1;
-      for (int si = 0; si < nst; si++) {
-        Node* st = stmts[si];
-        c->scope = F(c, "play %s/%s", nm, stmt_scope(c, st, si == nst - 1));
-        /* Each of the play's statements is timed on its own. */
-        if (si > 0 && prof_names.n < MAX_PROF_SLOTS) {
-          Node* was = stmts[si - 1];
-          units[prof_names.n] = (Unit){was, s, 0};
-          spush(c, &prof_names, F(c, "play %s/%s (line %d)", nm, stmt_scope(c, was, 0), was->line));
-          badd(c, &body, "    if (s->profiling) { double prof_now = n_now(); s->prof[%d] += prof_now - prof_last; "
-               "prof_last = prof_now; }\n", prof_names.n - 1);
-        }
-        if (si == nst - 1 && st->kind != nkLet && st->kind != nkVar && st->kind != nkAssign && st->kind != nkIdxAssign) {
-          V v = emit(c, inner, st, &body);
-          const char* l = v.pair ? v.l : once(c, &body, v.l);
-          const char* r = v.pair ? v.r : l;
-          badd(c, &body, "    p_%s_l = (%s) * s->part_gains[%d];\n", nm, l, part);
-          badd(c, &body, "    p_%s_r = (%s) * s->part_gains[%d];\n", nm, r, part);
-          badd(c, &body, "    if (s->part_out) { s->part_out[%d] = p_%s_l; s->part_out[%d] = p_%s_r; }\n",
-               2 * part, nm, 2 * part + 1, nm);
-          continue;
-        }
-        switch (st->kind) {
-        case nkLet:
-          if (has(&c->play_set, st->str))
-            fail(c, "'%s' is the name of a play block — choose a different local variable name %s",
-                 st->str, err_loc(c, st));
-          emit_let(c, inner, st->str, st->kids[0], &body, NULL);
-          break;
-        case nkVar: bcat(c, &body, var_init(c, inner, st)); break;
-        case nkAssign: file_assign(c, inner, st, &body); break;
-        case nkIdxAssign: bcat(c, &body, emit_idx_assign(c, inner, st)); break;
-        default: emit(c, inner, st, &body);
-        }
-      }
-      bcat(c, &body, "  }\n");
-      break;
-    }
+    case nkAssign: file_assign(c, top, s, body); break;
+    case nkIdxAssign: bcat(c, body, emit_idx_assign(c, top, s)); break;
     default:
       if (i == final_idx) {
-        V v = emit(c, top, s, &body);
-        const char* l = v.pair ? v.l : once(c, &body, v.l);
-        badd(c, &body, "  *outL = (%s); *outR = (%s);\n", l, v.pair ? v.r : l);
+        V v = emit(c, top, s, body);
+        const char* l = v.pair ? v.l : once(c, body, v.l);
+        badd(c, body, "  %s = (%s); %s = (%s);\n", xb(c, XB_OUT_L, "aither_i"), l,
+             xb(c, XB_OUT_R, "aither_i"), v.pair ? v.r : l);
       } else {
-        emit(c, top, s, &body);
+        emit(c, top, s, body);
       }
     }
-    if (s->kind != nkDef && s->kind != nkImport) {
-      const char* loc = (s->source[0] && !eq(s->source, c->patch_path))
-                          ? F(c, "%s %d", s->source, s->line) : F(c, "line %d", s->line);
-      if (prof_names.n < MAX_PROF_SLOTS) {
-        Node* play = s->kind == nkPlay ? s : NULL;
-        Node* bn = play ? s->kids[0] : NULL;
-        Node* last = !play ? s : bn->kind == nkBlock ? bn->kids[bn->nkids - 1] : bn;
-        units[prof_names.n] = (Unit){last, play, 1};
-        spush(c, &prof_names, F(c, "%s (%s)", stmt_scope(c, s, i == final_idx), loc));
-      }
-      badd(c, &body, "  if (s->profiling) { double prof_now = n_now(); s->prof[%d] += prof_now - prof_last; "
-           "prof_last = prof_now; }\n", prof_names.n - 1);
-    }
+    if (s->kind == nkLet) incl(c, &c->lets_done, s->str);
+    store_crossing(c, u, top, body, NULL);
+    if (u < MAX_PROF_SLOTS) spush(c, &prof_names, F(c, "%s (%s)", stmt_scope(c, s, i == final_idx), loc));
+    PROF_LINE(body);
+    u++;
   }
+  #undef PROF_LINE
+  c->cur_unit = -1;
   /* The parts the output reaches, by name, and so the ones it doesn't. */
   c->unheard = (Strs){0};
   if (final_idx >= 0 && c->play_names.n > 0) {
@@ -3392,24 +3684,98 @@ static const char* emit_program(Ctx* c, Node* program) {
     for (int i = 0; i < c->play_names.n; i++)
       if (!has(&reached, c->play_names.v[i])) spush(c, &c->unheard, c->play_names.v[i]);
   }
-  /* No final expression: a file of plays plays them all. */
-  if (final_idx < 0 && c->play_names.n > 0) {
-    bcat(c, &body, "  *outL = ");
-    for (int i = 0; i < c->play_names.n; i++) badd(c, &body, i ? " + p_%s_l" : "p_%s_l", c->play_names.v[i]);
-    bcat(c, &body, ";\n  *outR = ");
-    for (int i = 0; i < c->play_names.n; i++) badd(c, &body, i ? " + p_%s_r" : "p_%s_r", c->play_names.v[i]);
-    bcat(c, &body, ";\n");
+
+  /* The tasks, in an order that runs each after the tasks it needs (the
+   * lowest-numbered ready one first, so the file's order where it can). */
+  int nt = c->ntasks;
+  int ne = task_edges(c, NULL);
+  int* ed = al(c, (ne ? ne : 1) * 2 * sizeof(int));
+  task_edges(c, ed);
+  int* order = al(c, (nt ? nt : 1) * sizeof(int));
+  char* placed = al(c, nt ? nt : 1);
+  for (int k = 0; k < nt; k++) {
+    int pick = -1;
+    for (int t = 0; t < nt && pick < 0; t++) {
+      if (placed[t]) continue;
+      int ready = 1;
+      for (int e = 0; e < ne && ready; e++) if (ed[2 * e] == t && !placed[ed[2 * e + 1]]) ready = 0;
+      if (ready) pick = t;
+    }
+    if (pick < 0) fail(c, "internal: the tasks need each other in a ring");
+    placed[pick] = 1;
+    order[k] = pick;
   }
-  /* Nothing to play (a library, the stdlib): silence, not whatever the
-   * caller's outputs held. */
-  if (final_idx < 0 && c->play_names.n == 0) bcat(c, &body, "  *outL = 0.0; *outR = 0.0;\n");
+  for (int t = 0; t < nt; t++) {
+    badd(c, &body, "static void task_%d(VoiceState* s, long aither_n, long aither_S, double* aither_B) {\n", t);
+    bcat(c, &body, "  double prof_last = 0.0; (void)prof_last;\n");
+    /* Where its `$state` stood when the block began, for reads from above. */
+    for (int b = 0; b < NBUCKETS; b++)
+      for (Ent* x = c->xbufs.b[b]; x; x = x->next) {
+        const char* hash = strrchr(x->key, '#');
+        const char* key = F(c, "%.*s", (int)(hash - x->key), x->key);
+        if (x->n < 0 || !has(&c->file_vars, key) || c->unit_task[atoi(hash + 1)] != t) continue;
+        badd(c, &body, "  %s = (%s);\n", xb(c, (int)x->n, "0"), x->a);
+        if (x->pairs) badd(c, &body, "  %s = (%s);\n", xb(c, (int)x->n + 1, "0"), x->b);
+      }
+    bcat(c, &body, "  for (long aither_i = 0; aither_i < aither_n; aither_i++) {\n");
+    badd(c, &body, "  const double aither_t = %s; (void)aither_t;\n", xb(c, XB_T, "aither_i"));
+    badd(c, &body, "  const double aither_in_l = %s, aither_in_r = %s; (void)aither_in_l; (void)aither_in_r;\n",
+         xb(c, XB_IN_L, "aither_i"), xb(c, XB_IN_R, "aither_i"));
+    bcat(c, &body, "  if (s->profiling) prof_last = n_now();\n");
+    for (int k = 0; k < nu; ) {
+      if (c->unit_task[k] != t) { k++; continue; }
+      int part = unit_part[k];
+      if (part < 0) { bcat(c, &body, bstr(&chunk[k])); k++; continue; }
+      /* A run of one play's units: skipped while the play is parked. */
+      Node* play = c->units[k].play;
+      const char* nm = play->str;
+      int end = k, has_last = 0;
+      while (end < nu && c->units[end].play == play) {
+        if (c->unit_task[end] == t && c->units[end].last) has_last = 1;
+        end++;
+      }
+      if (has_last) badd(c, &body, "  double p_%s_l, p_%s_r;\n", nm, nm);
+      badd(c, &body, "  if (%s != 0.0) {\n", xb(c, xb_park(c, part), "aither_i"));
+      if (has_last) badd(c, &body, "    p_%s_l = 0.0; p_%s_r = 0.0;\n", nm, nm);
+      for (int j = k; j < end; j++) if (c->unit_task[j] == t) bcat(c, &body, bstr(&park_store[j]));
+      bcat(c, &body, "  } else {\n");
+      for (int j = k; j < end; j++) if (c->unit_task[j] == t) bcat(c, &body, bstr(&chunk[j]));
+      bcat(c, &body, "  }\n");
+      if (has_last)
+        badd(c, &body, "  %s = p_%s_l; %s = p_%s_r;\n", xb(c, xb_part(c, part, 0), "aither_i"), nm,
+             xb(c, xb_part(c, part, 1), "aither_i"), nm);
+      k = end;
+    }
+    bcat(c, &body, "  }\n}\n\n");
+  }
+  bcat(c, &body, "static void run_tasks(VoiceState* s, long aither_n, long aither_S, double* aither_B) {\n");
+  for (int k = 0; k < nt; k++) badd(c, &body, "  task_%d(s, aither_n, aither_S, aither_B);\n", order[k]);
   bcat(c, &body, "}\n\n");
+  /* The voice's sound at sample i: the final expression's, or with none
+   * the plays', added in the file's order. */
+  bcat(c, &body, "static void outs(long aither_S, double* aither_B, long aither_i, double* outL, double* outR) {\n");
+  if (final_idx >= 0) {
+    badd(c, &body, "  *outL = %s; *outR = %s;\n", xb(c, XB_OUT_L, "aither_i"), xb(c, XB_OUT_R, "aither_i"));
+  } else if (c->play_names.n > 0) {
+    bcat(c, &body, "  *outL = ");
+    for (int i = 0; i < c->play_names.n; i++) badd(c, &body, i ? " + %s" : "%s", xb(c, xb_part(c, i, 0), "aither_i"));
+    bcat(c, &body, ";\n  *outR = ");
+    for (int i = 0; i < c->play_names.n; i++) badd(c, &body, i ? " + %s" : "%s", xb(c, xb_part(c, i, 1), "aither_i"));
+    bcat(c, &body, ";\n");
+  } else {
+    bcat(c, &body, "  (void)aither_S; (void)aither_B; (void)aither_i;\n  *outL = 0.0; *outR = 0.0;\n");
+  }
+  bcat(c, &body, "}\n\n");
+
   bcat(c, &body, "const char* const prof_names[] = {");
   for (int i = 0; i < prof_names.n; i++) badd(c, &body, i ? ", \"%s\"" : "\"%s\"", escape_prof(c, prof_names.v[i]));
   if (prof_names.n == 0) bcat(c, &body, "0");
   bcat(c, &body, "};\n");
   badd(c, &body, "const long prof_count = %d;\n\n", prof_names.n);
-  emit_tasks(c, units, prof_names.n, &body);
+  emit_task_tables(c, prof_names.n, &body);
+  badd(c, &body, "#define AITHER_NB %d\n#define AITHER_NP %d\n#define AITHER_MAXN 128\n", c->nbufs, c->nplays);
+  badd(c, &body, "#define XB_T %d\n#define XB_IN_L %d\n#define XB_IN_R %d\n#define XB_GAIN %d\n#define XB_PARK %d\n#define XB_PART %d\n",
+       XB_T, XB_IN_L, XB_IN_R, XB_FIXED, XB_FIXED + c->nplays, XB_FIXED + 2 * c->nplays);
   bcat(c, &body, BLOCK_TEMPLATE);
 
   /* The prelude, now that the state's shape is known. */

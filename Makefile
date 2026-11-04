@@ -40,13 +40,13 @@ tools/tv: tools/tv.c tools/display.h
 # runs ./aither itself, so make builds it first. The corpus, exact and
 # temporal_audit are programs of their own.
 TESTCFLAGS := -std=gnu23 -O2 -Wall -ffp-contract=off -pthread
-TOOLS  := tests/corpus.c tests/exact.c tests/temporal_audit.c tests/bench.c
+TOOLS  := tests/corpus.c tests/exact.c tests/temporal_audit.c tests/bench.c tests/blocks.c
 TESTS  := $(filter-out $(TOOLS),$(wildcard tests/*.c))
 
 tests/run: $(TESTS) tests/check.h $(ENGINE) $(HDR) stdlib.aither
 	$(CC) $(TESTCFLAGS) -o $@.tmp $(TESTS) $(ENGINE) $(LIBS) && mv -f $@.tmp $@
 
-tests/corpus tests/exact tests/temporal_audit tests/bench: tests/%: tests/%.c $(ENGINE) $(HDR) stdlib.aither
+tests/corpus tests/exact tests/temporal_audit tests/bench tests/blocks: tests/%: tests/%.c $(ENGINE) $(HDR) stdlib.aither
 	$(CC) $(TESTCFLAGS) -o $@.tmp $< $(ENGINE) $(LIBS) && mv -f $@.tmp $@
 
 test: aither tests/run
@@ -70,7 +70,12 @@ bench: tests/bench
 exact: tests/exact
 	tests/exact
 
-clean:
-	rm -rf aither *.tmp tools/*.tmp tests/*.tmp nimcache/ tests/run tests/corpus tests/exact tests/temporal_audit tests/bench tools/play tools/card tools/pad tools/scope tools/tv tools/rate
+# Every patch rendered a sample at a time and a block of tasks at a time:
+# the bits must match (tests/blocks.c).
+blocks: tests/blocks
+	tests/blocks
 
-.PHONY: all clean test corpus corpus-update exact bench
+clean:
+	rm -rf aither *.tmp tools/*.tmp tests/*.tmp nimcache/ tests/run tests/corpus tests/exact tests/temporal_audit tests/bench tests/blocks tools/play tools/card tools/pad tools/scope tools/tv tools/rate
+
+.PHONY: all clean test corpus corpus-update exact bench blocks
