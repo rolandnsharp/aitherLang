@@ -522,40 +522,121 @@ int voice_upgrade(Voice* v, long gen, void* lib, TickFn tick) {
 
 /* ------------------------------------------------------------- -O2 builds */
 
+/* The files a voice's C compiles as, at -O2: one, or, when it was cut
+ * into tasks and there are cores to spare, the tail and a few files of
+ * tasks, each with the prelude, compiled at once (codegen's markers:
+ * prelude, then the cut, hoist_init, each task, the tail). The bits are
+ * the same: the same functions, compiled alone. */
+typedef struct { char* src; const char* defs; } Unit_;
+
+static int split_units(const char* csrc, Unit_* out, int max) {
+  const char* cut = strstr(csrc, "/*@@cut@@*/");
+  const char* tail = strstr(csrc, "/*@@tail@@*/");
+  const char* first = strstr(csrc, "/*@@task@@*/");
+  long cores = sysconf(_SC_NPROCESSORS_ONLN);
+  int ntasks = 0;
+  for (const char* p = first; p && p < tail; p = strstr(p + 1, "/*@@task@@*/")) ntasks++;
+  int groups = (int)(cores < max ? cores : max) - 1;
+  if (groups > ntasks) groups = ntasks;
+  const char* e = getenv("AITHER_CC_JOBS");
+  if (e && *e) groups = atoi(e) - 1;
+  if (!cut || !tail || !first || first < cut || tail < first || groups < 1) return 0;
+  /* the tasks, largest first, each to the group with the least so far */
+  const char** at = malloc(ntasks * sizeof *at);
+  long* len = malloc(ntasks * sizeof *len);
+  int* grp = malloc(ntasks * sizeof *grp);
+  long* load = calloc(groups, sizeof *load);
+  int k = 0;
+  for (const char* p = first; p && p < tail; p = strstr(p + 1, "/*@@task@@*/")) at[k++] = p;
+  for (int i = 0; i < ntasks; i++) len[i] = (i + 1 < ntasks ? at[i + 1] : tail) - at[i];
+  char* done = calloc(ntasks, 1);
+  for (int n = 0; n < ntasks; n++) {
+    int big = -1;
+    for (int i = 0; i < ntasks; i++) if (!done[i] && (big < 0 || len[i] > len[big])) big = i;
+    int g = 0;
+    for (int j = 1; j < groups; j++) if (load[j] < load[g]) g = j;
+    grp[big] = g; load[g] += len[big]; done[big] = 1;
+  }
+  size_t plen = cut - csrc;
+  for (int g = 0; g < groups; g++) {
+    size_t total = plen + 1;
+    for (int i = 0; i < ntasks; i++) if (grp[i] == g) total += len[i];
+    char* u = malloc(total), *w = u;
+    memcpy(w, csrc, plen); w += plen;
+    for (int i = 0; i < ntasks; i++) if (grp[i] == g) { memcpy(w, at[i], len[i]); w += len[i]; }
+    *w = 0;
+    out[g] = (Unit_){u, "-DAITHER_SHARED=extern -DAITHER_TASKFN="};
+  }
+  /* the tail: the prelude, hoist_init, and everything after the tasks */
+  size_t hl = first - cut, tl = strlen(tail);
+  char* u = malloc(plen + hl + tl + 1);
+  memcpy(u, csrc, plen);
+  memcpy(u + plen, cut, hl);
+  memcpy(u + plen + hl, tail, tl + 1);
+  out[groups] = (Unit_){u, "-DAITHER_SHARED= -DAITHER_TASKFN="};
+  free(at); free(len); free(grp); free(load); free(done);
+  return groups + 1;
+}
+
 int voice_compile_optimized(const char* csrc, long state_size, int background,
                             void** lib_out, TickFn* tick_out, char* err, int errlen) {
-  char dir[256], base[320], cfile[340], ofile[340], cmd[2048];
+  enum { MAX_UNITS = 8 };
+  char dir[256], base[320];
   snprintf(dir, sizeof dir, "%s/aither-%d", getenv("TMPDIR") ? getenv("TMPDIR") : "/tmp", (int)getpid());
   mkdir(dir, 0700);
   snprintf(base, sizeof base, "%s/opt-%lx", dir, (unsigned long)pthread_self());
-  snprintf(cfile, sizeof cfile, "%s.c", base);
-  snprintf(ofile, sizeof ofile, "%s.o", base);
-  FILE* f = fopen(cfile, "w");
-  if (!f) { snprintf(err, errlen, "can't write %s", cfile); return -1; }
-  fputs(csrc, f);
-  fclose(f);
+  Unit_ units[MAX_UNITS];
+  int nu = split_units(csrc, units, MAX_UNITS);
+  if (nu == 0) { units[0] = (Unit_){strdup(csrc), ""}; nu = 1; }
+  char cfile[MAX_UNITS][360], ofile[MAX_UNITS][360];
+  FILE* pp[MAX_UNITS] = {0};
+  int bad = 0;
+  for (int i = 0; i < nu; i++) {
+    snprintf(cfile[i], sizeof cfile[i], "%s-%d.c", base, i);
+    snprintf(ofile[i], sizeof ofile[i], "%s-%d.o", base, i);
+    FILE* f = fopen(cfile[i], "w");
+    if (!f) { snprintf(err, errlen, "can't write %s", cfile[i]); bad = 1; break; }
+    fputs(units[i].src, f);
+    fclose(f);
+  }
+  for (int i = 0; i < nu; i++) free(units[i].src);
   /* A live engine builds beside playing voices at nice 19, so the audio
    * wins any core both want. -ffp-contract=off: no fused multiply-adds,
-   * so it computes TCC's bits and the swap can't move a voice. */
-  snprintf(cmd, sizeof cmd,
-           "%scc -O2 -march=native -ffp-contract=off -fno-stack-protector "
-           "-fno-asynchronous-unwind-tables -c -o '%s' '%s' 2>&1",
-           background && access("/usr/bin/nice", X_OK) == 0 ? "nice -n 19 " : "", ofile, cfile);
-  FILE* pp = popen(cmd, "r");
+   * so it computes TCC's bits and the swap can't move a voice. The files
+   * compile at once, each its own cc. */
+  for (int i = 0; i < nu && !bad; i++) {
+    char cmd[2048];
+    snprintf(cmd, sizeof cmd,
+             "%scc -O2 -march=native -ffp-contract=off -fno-stack-protector "
+             "-fno-asynchronous-unwind-tables %s -c -o '%s' '%s' 2>&1",
+             background && access("/usr/bin/nice", X_OK) == 0 ? "nice -n 19 " : "", units[i].defs, ofile[i],
+             cfile[i]);
+    pp[i] = popen(cmd, "r");
+  }
   char out[1024] = "";
-  size_t got = pp ? fread(out, 1, sizeof out - 1, pp) : 0;
-  out[got] = 0;
-  int code = pp ? pclose(pp) : -1;
-  unlink(cfile);
-  if (code != 0) { unlink(ofile); snprintf(err, errlen, "cc failed: %s", out); return -1; }
+  for (int i = 0; i < nu; i++) {
+    if (!pp[i]) { if (!bad) snprintf(out, sizeof out, "can't run cc"); bad = 1; continue; }
+    char o[1024];
+    size_t got = fread(o, 1, sizeof o - 1, pp[i]);
+    o[got] = 0;
+    if (pclose(pp[i]) != 0 && !bad) { bad = 1; snprintf(out, sizeof out, "%s", o); }
+  }
+  for (int i = 0; i < nu; i++) unlink(cfile[i]);
+  if (bad) {
+    for (int i = 0; i < nu; i++) unlink(ofile[i]);
+    if (!err[0] || out[0]) snprintf(err, errlen, "cc failed: %s", out);
+    return -1;
+  }
   pthread_mutex_lock(&tcc_lock);
   tcc_error[0] = 0;
   TCCState* s = new_tcc(err, errlen);
-  int ok = s && tcc_add_file(s, ofile) >= 0 && tcc_relocate(s) >= 0;
+  int ok = s != NULL;
+  for (int i = 0; i < nu && ok; i++) ok = tcc_add_file(s, ofile[i]) >= 0;
+  ok = ok && tcc_relocate(s) >= 0;
   TickFn tick = ok ? (TickFn)tcc_get_symbol(s, "tick") : NULL;
   int (*size_fn)(void) = ok ? (int (*)(void))tcc_get_symbol(s, "voice_state_size") : NULL;
   pthread_mutex_unlock(&tcc_lock);
-  unlink(ofile);
+  for (int i = 0; i < nu; i++) unlink(ofile[i]);
   if (!ok || !tick || !size_fn || size_fn() != state_size) {
     if (s) tcc_delete(s);
     snprintf(err, errlen, ok ? "optimized build doesn't match the loaded layout"

@@ -1096,7 +1096,7 @@ static const char* hoist(Ctx* c, const char* cexpr) {
   if (c->loop_nv && strstr(cexpr, "aither_vk")) {
     /* It depends on the voice: one a voice, filled once a block. */
     const char* arr = F(c, "h_%d", c->hoist_decls.n);
-    spush(c, &c->hoist_decls, F(c, "static double %s[%d];\n", arr, c->loop_nv));
+    spush(c, &c->hoist_decls, F(c, "AITHER_SHARED double %s[%d];\n", arr, c->loop_nv));
     spush(c, &c->hoist_inits, F(c, "  for (long aither_vk = 0; aither_vk < %d; aither_vk++) %s[aither_vk] = (%s);\n",
                                 c->loop_nv, arr, cexpr));
     const char* at = F(c, "%s[aither_vk]", arr);
@@ -1104,7 +1104,7 @@ static const char* hoist(Ctx* c, const char* cexpr) {
     return at;
   }
   const char* name = F(c, "h_%d", c->hoist_decls.n);
-  spush(c, &c->hoist_decls, F(c, "static double %s;\n", name));
+  spush(c, &c->hoist_decls, F(c, "AITHER_SHARED double %s;\n", name));
   spush(c, &c->hoist_inits, F(c, "  %s = (%s);\n", name, cexpr));
   hput(c, &c->hoist_seen, cexpr)->a = name;
   return name;
@@ -1129,7 +1129,7 @@ static const char* hoist_arr(Ctx* c, int n, const char* init_call) {
   if (e) return e->a;
   if (c->loop_nv && strstr(init_call, "aither_vk")) {
     const char* arr = F(c, "h_%d", c->hoist_decls.n);
-    spush(c, &c->hoist_decls, F(c, "static double %s[%d][%d];\n", arr, c->loop_nv, n));
+    spush(c, &c->hoist_decls, F(c, "AITHER_SHARED double %s[%d][%d];\n", arr, c->loop_nv, n));
     const char* at = F(c, "%s[aither_vk]", arr);
     spush(c, &c->hoist_inits, F(c, "  for (long aither_vk = 0; aither_vk < %d; aither_vk++) %s;\n",
                                 c->loop_nv, replace_all(c, init_call, "$H", at)));
@@ -1137,7 +1137,7 @@ static const char* hoist_arr(Ctx* c, int n, const char* init_call) {
     return at;
   }
   const char* name = F(c, "h_%d", c->hoist_decls.n);
-  spush(c, &c->hoist_decls, F(c, "static double %s[%d];\n", name, n));
+  spush(c, &c->hoist_decls, F(c, "AITHER_SHARED double %s[%d];\n", name, n));
   spush(c, &c->hoist_inits, F(c, "  %s;\n", replace_all(c, init_call, "$H", name)));
   hput(c, &c->hoist_seen, init_call)->a = name;
   return name;
@@ -1902,13 +1902,13 @@ static void emit_clock_turner(Ctx* c, Scope* sc, Node* arg, const char* rate, Bu
   if (c->loop_nv) {
     /* In a loop of voices, each voice's: its offset gets the voice's
      * stride when the loop is done (emit_voice_loop). */
-    spush(c, &c->hoist_decls, F(c, "static double %s[%d], %s[%d];\n", was_k, c->loop_nv, was_k0, c->loop_nv));
+    spush(c, &c->hoist_decls, F(c, "AITHER_SHARED double %s[%d], %s[%d];\n", was_k, c->loop_nv, was_k0, c->loop_nv));
     spush(c, &c->hoist_inits, F(c, "  for (long aither_vk = 0; aither_vk < %d; aither_vk++) {\n"
                                 "  if (!(%s == %s[aither_vk] && %s == %s[aither_vk])) s->pool[%s + 2] = 0.0;\n"
                                 "  %s[aither_vk] = %s; %s[aither_vk] = %s;\n  }\n",
                                 c->loop_nv, k, was_k, k0, was_k0, off, was_k, k, was_k0, k0));
   } else
-    spush(c, &c->hoist_decls, F(c, "static double %s, %s;\n", was_k, was_k0));
+    spush(c, &c->hoist_decls, F(c, "AITHER_SHARED double %s, %s;\n", was_k, was_k0));
   if (!c->loop_nv)
     spush(c, &c->hoist_inits, F(c, "  if (!(%s == %s && %s == %s)) s->pool[%s + 2] = 0.0;\n  %s = %s; %s = %s;\n",
                                 k, was_k, k0, was_k0, off, was_k, k, was_k0, k0));
@@ -4245,7 +4245,7 @@ static const char* emit_program(Ctx* c, Node* program) {
       badd(c, &head, "  const double aither_in_l = %s, aither_in_r = %s; (void)aither_in_l; (void)aither_in_r;\n",
            xb(c, XB_IN_L, "aither_i"), xb(c, XB_IN_R, "aither_i"));
     body = whole;
-    badd(c, &body, "static void task_%d(VoiceState* s, long aither_n, long aither_S, double* aither_B) {\n", t);
+    badd(c, &body, "/*@@task@@*/\nAITHER_TASKFN void task_%d(VoiceState* s, long aither_n, long aither_S, double* aither_B) {\n", t);
     bcat(c, &body, "  double prof_last = 0.0; (void)prof_last; (void)aither_B; (void)aither_S;\n");
     declare_rows(c, F(c, "%s%s%s", bstr(&pro), bstr(&head), lt), &body);
     bcat(c, &body, bstr(&pro));
@@ -4255,6 +4255,10 @@ static const char* emit_program(Ctx* c, Node* program) {
     bcat(c, &body, lt);
     bcat(c, &body, "  }\n}\n\n");
   }
+  /* Where a parallel -O2 build cuts the file (voice.c): the tasks above,
+   * each its own; what follows, with the prelude, one more. */
+  bcat(c, &body, "/*@@tail@@*/\n");
+  for (int t = 0; t < nt; t++) badd(c, &body, "AITHER_TASKFN void task_%d(VoiceState*, long, long, double*);\n", t);
   bcat(c, &body, "static void run_tasks(VoiceState* s, long aither_n, long aither_S, double* aither_B) {\n");
   for (int k = 0; k < nt; k++) badd(c, &body, "  task_%d(s, aither_n, aither_S, aither_B);\n", order[k]);
   bcat(c, &body, "}\n\n");
@@ -4323,6 +4327,11 @@ static const char* emit_program(Ctx* c, Node* program) {
   /* The prelude, now that the state's shape is known. */
   Buf pre = {0};
   bcat(c, &pre, "#include <math.h>\n");
+  /* One file: the block's hoisted values and the tasks are its own. A
+   * parallel -O2 build (voice.c) defines these to share them between
+   * files: the values once, the tasks callable from the tail. */
+  bcat(c, &pre, "#ifndef AITHER_SHARED\n#define AITHER_SHARED static\n#endif\n"
+                "#ifndef AITHER_TASKFN\n#define AITHER_TASKFN static\n#endif\n");
   bcat(c, &pre, "typedef struct DspState DspState;\n");
   for (int i = 0; dsp_natives[i].name; i++) {
     const NativeSpec* sp = &dsp_natives[i];
@@ -4420,6 +4429,7 @@ static const char* emit_program(Ctx* c, Node* program) {
 
   Buf hoistc = {0};
   for (int i = 0; i < c->hoist_decls.n; i++) bcat(c, &hoistc, c->hoist_decls.v[i]);
+  bcat(c, &hoistc, "/*@@cut@@*/\n");
   bcat(c, &hoistc, "static void hoist_init(VoiceState* s) {\n");
   for (int i = 0; i < c->hoist_inits.n; i++) bcat(c, &hoistc, c->hoist_inits.v[i]);
   bcat(c, &hoistc, "  (void)s;\n}\n\n");

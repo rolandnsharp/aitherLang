@@ -389,3 +389,28 @@ the profile's tables. For example:
 Silent when nothing heavy is glued (bush_doof_e: 82 tasks, the largest
 8%). A loop is named by its reads from below their writer, the reads
 that close it.
+
+## The -O2 build in parallel (2026-11-04)
+
+The -O2 build was one cc over the voice's whole C file: 17.8 s for
+bush_doof_e on the uConsole, and beside the pool (a worker holding the
+second A72) -O2 landed 37 s after a send. Now codegen marks the file
+(the prelude; `/*@@cut@@*/` before hoist_init; `/*@@task@@*/` before each
+task; `/*@@tail@@*/` before run_tasks) and voice.c compiles it as several
+files at once, one cc each: the tasks shared out by size into one file
+per core but one, and the tail (hoist_init, run_tasks, the tables, tick,
+tick_block). The hoisted values are `AITHER_SHARED` (static in one file,
+defined in the tail and extern in the rest when split), the tasks
+`AITHER_TASKFN`. TCC's one file is unchanged. AITHER_CC_JOBS sets how
+many files (1: one, as before).
+
+| | one file | parallel |
+|---|---|---|
+| bush_doof_e, build alone | 17.8 s | 6.9 s |
+| tesla_jam, build alone | 10.1 s | 4.0 s |
+| bush_doof_e live, pool: -O2 lands after | 37 s | 17 s |
+| bush_doof_e live, one thread: -O2 lands after | 12 s | 10.5 s |
+
+Live, bush_doof_e's first minute: 16 late periods on the pool (38
+before), all before -O2 landed. make exact 181/181, and 181/181 on the
+finest split (the most files).
