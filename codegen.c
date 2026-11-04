@@ -3330,6 +3330,21 @@ static double node_cost(Ctx* c, Node* n, int depth) {
 /* The same estimate, and how much of it is inside repeated instances
  * (`sum`, `each`, with a count of 2 or more), for the graph report
  * (AITHER_GRAPH_REPORT, notes/graph-2026-11-02.md). */
+/* Whether n, its defs followed, calls a native other than a phasor or a
+ * sine: what a vector lane can't take as it stands. */
+static int calls_native(Ctx* c, Node* n, int depth) {
+  if (!n || depth > 64) return 0;
+  if (n->kind == nkCall) {
+    Node* d = user_def(c, n->str);
+    if (d) { for (int i = 0; i < d->nkids; i++) if (calls_native(c, d->kids[i], depth + 1)) return 1; }
+    else if (native(n->str) && !eq(n->str, "phasor")) return 1;
+  }
+  for (int i = 0; i < n->nkids; i++) if (calls_native(c, n->kids[i], depth + 1)) return 1;
+  return 0;
+}
+
+static double inst_plain;   /* the graph report: instance cost with no natives */
+
 static double inst_cost(Ctx* c, Node* n, int depth, int inside, double* in_inst) {
   if (!n || depth > 64) return 0.0;
   double v = 1.0;
@@ -3346,7 +3361,10 @@ static double inst_cost(Ctx* c, Node* n, int depth, int inside, double* in_inst)
       double N;
       if (!const_value(c, c->top, n->kids[0], &N) || N < 1) N = 8;
       double body = N * inst_cost(c, n->kids[1], depth + 1, 1, NULL);
-      if (in_inst && N >= 2 && !inside) *in_inst += body;
+      if (in_inst && N >= 2 && !inside) {
+        *in_inst += body;
+        if (!calls_native(c, n->kids[1], depth + 1)) inst_plain += body;
+      }
       return v + inst_cost(c, n->kids[0], depth + 1, inside, in_inst) + body;
     }
   }
@@ -3356,6 +3374,7 @@ static double inst_cost(Ctx* c, Node* n, int depth, int inside, double* in_inst)
 
 static void graph_report(Ctx* c) {
   double total = 0.0, inst = 0.0;
+  inst_plain = 0.0;
   double* w = al(c, (c->ntasks ? c->ntasks : 1) * sizeof(double));
   for (int i = 0; i < c->nunits; i++) {
     double k = inst_cost(c, c->units[i].st, 0, 0, &inst);
@@ -3364,7 +3383,7 @@ static void graph_report(Ctx* c) {
   }
   double big = 0.0;
   for (int t = 0; t < c->ntasks; t++) if (w[t] > big) big = w[t];
-  fprintf(stderr, "graph %.0f %.0f %.0f %d\n", total, inst, big, c->ntasks);
+  fprintf(stderr, "graph %.0f %.0f %.0f %d %.0f\n", total, inst, big, c->ntasks, inst_plain);
 }
 
 /* A task merges no further than this. A single huge function is slow
