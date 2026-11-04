@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "codegen.h"
+#include "pool.h"
 #include "dsp.h"
 
 /* The most pool a voice may have, in slots: 512 MB. */
@@ -339,7 +340,9 @@ static const char* BLOCK_TEMPLATE =
 "      }\n"
 "    }\n"
 "    if (s->profiling) s->prof_ticks += m;\n"
-"    run_tasks(s, m, S, B);\n"
+"    if (AITHER_NT < 2 || !s->par ||\n"
+"        !s->par(s, AITHER_NT, aither_task_fns, aither_task_waits, aither_task_feeds_at, aither_task_feeds, m, S, B))\n"
+"      run_tasks(s, m, S, B);\n"
 "    for (long k = 0; k < m; k++) {\n"
 "      double l, r;\n"
 "      outs(S, B, k, &l, &r);\n"
@@ -3328,81 +3331,149 @@ static double node_cost(Ctx* c, Node* n, int depth) {
  * under -O2; a patch below it is one task. */
 enum { TASK_COST_CAP = 2000 };
 
-/* Merge the finest tasks into at most `want`, none past the cap. Two can
- * merge only if no path runs between them through a third, or the merge
- * would need itself. The cheapest task that fits with a partner merges
- * into it: one it feeds or is fed by if it can (a buffer fewer), the
- * cheapest of those. Merged units keep the file's order, which is what
- * one task means, so any clustering computes the same bits. */
-static void cluster_tasks(Ctx* c, int want) {
+/* What a task costs beyond its work, each run: being taken, its loop,
+ * its buffers crossing cores. In the units of node_cost. */
+enum { TASK_OVERHEAD = 20 };
+
+typedef unsigned long long Bits;
+#define BIT(m, i, j) ((m)[(size_t)(i) * words + (j) / 64] >> ((j) % 64) & 1)
+#define SET(m, i, j) ((m)[(size_t)(i) * words + (j) / 64] |= 1ull << ((j) % 64))
+#define CLR(m, i, j) ((m)[(size_t)(i) * words + (j) / 64] &= ~(1ull << ((j) % 64)))
+
+typedef struct {
+  int nt, words, cores;
+  Bits* need;        /* need[a] has bit w: a reads what w writes */
+  char* alive;
+  double* cost;
+  double* fin;       /* scratch: when each task can finish, cores unlimited */
+  char* mark;        /* scratch: 0 not seen, 1 on the path, 2 done */
+} Cl;
+
+/* When x can finish with b merged into a (b < 0: as it is); -1 on a loop. */
+static double cl_finish(Cl* g, int x, int a, int b) {
+  int words = g->words;
+  if (g->mark[x] == 2) return g->fin[x];
+  if (g->mark[x] == 1) return -1.0;
+  g->mark[x] = 1;
+  double start = 0.0;
+  for (int pass = 0; pass < (x == a && b >= 0 ? 2 : 1); pass++) {
+    const Bits* row = g->need + (size_t)(pass ? b : x) * words;
+    for (int k = 0; k < words; k++)
+      for (Bits m = row[k]; m; m &= m - 1) {
+        int y = k * 64 + __builtin_ctzll(m);
+        if (y == b) y = a;
+        if (y == x) continue;
+        double f = cl_finish(g, y, a, b);
+        if (f < 0) return -1.0;
+        if (f > start) start = f;
+      }
+  }
+  double c = g->cost[x] + (x == a && b >= 0 ? g->cost[b] : 0.0) + TASK_OVERHEAD;
+  g->mark[x] = 2;
+  return g->fin[x] = start + c;
+}
+
+/* How long the tasks take on g->cores, at least: the longest path, or
+ * the work shared out evenly, whichever is more. -1 if merging b into a
+ * makes a loop. */
+static double cl_bound(Cl* g, int a, int b) {
+  double cp = 0.0, work = 0.0;
+  memset(g->mark, 0, g->nt);
+  for (int x = 0; x < g->nt; x++) {
+    if (!g->alive[x] || x == b) continue;
+    double f = cl_finish(g, x, a, b);
+    if (f < 0) return -1.0;
+    if (f > cp) cp = f;
+    work += g->cost[x] + TASK_OVERHEAD;
+  }
+  if (b >= 0) work += g->cost[b];
+  work /= g->cores;
+  return cp > work ? cp : work;
+}
+
+typedef struct { int a, b; double c; } Pair;
+
+static int by_pair_cost(const void* x, const void* y) {
+  double d = ((const Pair*)x)->c - ((const Pair*)y)->c;
+  return d < 0 ? -1 : d > 0;
+}
+
+/* Merge the finest tasks for `cores`, none past the cap. Candidates are a
+ * task and one it reads from, or two read by the same task (or by the
+ * output), cheapest first; a merge is made when it doesn't lengthen how
+ * long the tasks take on that many cores, at least (cl_bound), and
+ * makes no loop. A chain merges, as it saves the overhead; small tasks
+ * side by side merge while the work outweighs the longest path; big
+ * ones side by side stay apart, to run at once. On one core everything
+ * merges, up to the cap. Merged units keep the file's order, which is
+ * what one task means, so any clustering computes the same bits. */
+static void cluster_tasks(Ctx* c, int cores) {
   const double cap = TASK_COST_CAP;
   int nt = c->ntasks, n = c->nunits;
-  if (want < 1 || nt <= want) return;
+  if (cores < 1 || nt < 2) return;
   int words = (nt + 63) / 64;
-  unsigned long long* need = al(c, (size_t)nt * words * 8);
-  unsigned long long* reach = al(c, (size_t)nt * words * 8);
-  #define BIT(m, i, j) ((m)[(size_t)(i) * words + (j) / 64] >> ((j) % 64) & 1)
-  #define SET(m, i, j) ((m)[(size_t)(i) * words + (j) / 64] |= 1ull << ((j) % 64))
-  #define CLR(m, i, j) ((m)[(size_t)(i) * words + (j) / 64] &= ~(1ull << ((j) % 64)))
+  Cl g = {nt, words, cores, al(c, (size_t)nt * words * 8), al(c, nt), al(c, nt * sizeof(double)),
+          al(c, nt * sizeof(double)), al(c, nt)};
   for (int i = 0; i < n; i++)
     for (int b = 0; b < NBUCKETS; b++)
       for (Ent* e = c->use[i].reads.b[b]; e; e = e->next) {
         Ent* f = hfind(&c->writers, e->key);
         if (!f) continue;
         int a = c->unit_task[i], w = c->unit_task[((int*)f->p)[0]];
-        if (a != w) SET(need, a, w);
+        if (a != w) SET(g.need, a, w);
       }
-  double* cost = al(c, nt * sizeof(double));
   int* to = al(c, nt * sizeof(int));     /* each fine task's cluster */
-  char* alive = al(c, nt);
-  for (int t = 0; t < nt; t++) { to[t] = t; alive[t] = 1; }
-  for (int i = 0; i < n; i++) cost[c->unit_task[i]] += node_cost(c, c->units[i].st, 0);
-  for (int left = nt; left > want; left--) {
-    memcpy(reach, need, (size_t)nt * words * 8);
-    for (int k = 0; k < nt; k++)
-      if (alive[k])
-        for (int i = 0; i < nt; i++)
-          if (alive[i] && BIT(reach, i, k))
-            for (int x = 0; x < words; x++) reach[(size_t)i * words + x] |= reach[(size_t)k * words + x];
-    /* The cheapest task that has a partner it fits with. */
-    int t = -1, best = -1;
-    char* tried = al(c, nt);
-    for (;;) {
-      t = -1;
-      for (int k = 0; k < nt; k++) if (alive[k] && !tried[k] && (t < 0 || cost[k] < cost[t])) t = k;
-      if (t < 0) break;
-      tried[t] = 1;
-      int best_near = 0;
-      for (int p = 0; p < nt; p++) {
-        if (!alive[p] || p == t || cost[t] + cost[p] > cap) continue;
-        int safe = 1;
-        for (int x = 0; x < nt && safe; x++) {
-          if (!alive[x] || x == t || x == p) continue;
-          if (BIT(need, t, x) && BIT(reach, x, p)) safe = 0;  /* t -> x -> ... -> p */
-          if (BIT(need, p, x) && BIT(reach, x, t)) safe = 0;  /* p -> x -> ... -> t */
-        }
-        if (!safe) continue;
-        int near = BIT(need, t, p) || BIT(need, p, t);
-        if (best < 0 || near > best_near || (near == best_near && cost[p] < cost[best])) { best = p; best_near = near; }
+  for (int t = 0; t < nt; t++) { to[t] = t; g.alive[t] = 1; }
+  for (int i = 0; i < n; i++) g.cost[c->unit_task[i]] += node_cost(c, c->units[i].st, 0);
+  double cur = cl_bound(&g, -1, -1);
+  int* preds = al(c, (nt + 1) * sizeof(int));
+  char* fed = al(c, nt);
+  for (int changed = 1; changed;) {
+    changed = 0;
+    /* the candidates */
+    int np = 0, capp = 64;
+    Pair* pr = al(c, capp * sizeof(Pair));
+    #define ADD(x, y) do { \
+      if (np == capp) { Pair* q = al(c, (capp *= 2) * sizeof(Pair)); memcpy(q, pr, np * sizeof(Pair)); pr = q; } \
+      pr[np++] = (Pair){x, y, g.cost[x] + g.cost[y]}; } while (0)
+    memset(fed, 0, nt);
+    for (int x = 0; x <= nt; x++) {
+      if (x < nt && !g.alive[x]) continue;
+      int k = 0;
+      for (int y = 0; y < nt; y++) {
+        if (!g.alive[y]) continue;
+        if (x < nt ? BIT(g.need, x, y) : !fed[y]) preds[k++] = y;
+        if (x < nt && BIT(g.need, x, y)) { fed[y] = 1; ADD(x, y); }
       }
-      if (best >= 0) break;
+      /* side by side: each with the next cheapest */
+      for (int i = 1; i < k; i++)
+        for (int j = i; j > 0 && g.cost[preds[j]] < g.cost[preds[j - 1]]; j--) {
+          int t = preds[j]; preds[j] = preds[j - 1]; preds[j - 1] = t;
+        }
+      for (int i = 0; i + 1 < k; i++) ADD(preds[i], preds[i + 1]);
     }
-    if (best < 0) break;  /* nothing fits: as few as the cap allows */
-    /* best takes in t */
-    alive[t] = 0;
-    cost[best] += cost[t];
-    for (int x = 0; x < nt; x++) {
-      if (BIT(need, t, x)) SET(need, best, x);
-      if (BIT(need, x, t)) { SET(need, x, best); CLR(need, x, t); }
+    #undef ADD
+    qsort(pr, np, sizeof(Pair), by_pair_cost);
+    for (int q = 0; q < np; q++) {
+      int a = pr[q].a, b = pr[q].b;
+      if (!g.alive[a] || !g.alive[b] || g.cost[a] + g.cost[b] > cap) continue;
+      if (a > b) { int t = a; a = b; b = t; }
+      double nb = cl_bound(&g, a, b);
+      if (nb < 0 || nb > cur + 1e-9) continue;
+      /* a takes in b */
+      cur = nb;
+      changed = 1;
+      g.alive[b] = 0;
+      g.cost[a] += g.cost[b];
+      for (int x = 0; x < nt; x++) {
+        if (BIT(g.need, b, x)) SET(g.need, a, x);
+        if (BIT(g.need, x, b)) { SET(g.need, x, a); CLR(g.need, x, b); }
+      }
+      for (int x = 0; x < words; x++) g.need[(size_t)b * words + x] = 0;
+      CLR(g.need, a, a);
+      for (int k = 0; k < nt; k++) if (to[k] == b) to[k] = a;
     }
-    for (int x = 0; x < words; x++) need[(size_t)t * words + x] = 0;
-    CLR(need, best, best);
-    CLR(need, best, t);
-    for (int k = 0; k < nt; k++) if (to[k] == t) to[k] = best;
   }
-  #undef BIT
-  #undef SET
-  #undef CLR
   /* Number the clusters in file order. */
   int* id = al(c, nt * sizeof(int));
   for (int k = 0; k < nt; k++) id[k] = -1;
@@ -3413,13 +3484,17 @@ static void cluster_tasks(Ctx* c, int want) {
     c->unit_task[i] = id[k];
   }
 }
+#undef BIT
+#undef SET
+#undef CLR
 
-/* How many tasks a voice is cut into, at most: AITHER_TASKS if set (0:
- * as many as can run apart, the finest), else one until there are
- * workers; the cap can leave more. */
+/* How many cores a voice's tasks are planned for: AITHER_TASKS if set
+ * (0: none, the finest split), else four per thread the pool runs on. */
 static int tasks_wanted(void) {
   const char* e = getenv("AITHER_TASKS");
-  return e && *e ? atoi(e) : 1;
+  /* four times the threads: a schedule with slack (bush_doof_e on two
+   * cores: planned for 2, 6.4 s; for 8, 5.1 s; for 16, 5.0 s) */
+  return e && *e ? atoi(e) : pool_threads() > 1 ? 4 * pool_threads() : 1;
 }
 
 /* The units in the order they are emitted, what each reads and writes,
@@ -3972,6 +4047,33 @@ static const char* emit_program(Ctx* c, Node* program) {
   bcat(c, &body, "static void run_tasks(VoiceState* s, long aither_n, long aither_S, double* aither_B) {\n");
   for (int k = 0; k < nt; k++) badd(c, &body, "  task_%d(s, aither_n, aither_S, aither_B);\n", order[k]);
   bcat(c, &body, "}\n\n");
+  /* The same tasks for the pool: each one's function, how many it waits
+   * for, and the ones it feeds. */
+  bcat(c, &body, "static void* const aither_task_fns[] = {");
+  for (int t = 0; t < nt; t++) badd(c, &body, t ? ", (void*)task_%d" : "(void*)task_%d", t);
+  bcat(c, &body, "};\nstatic const int aither_task_waits[] = {");
+  for (int t = 0; t < nt; t++) {
+    int w = 0;
+    for (int e = 0; e < ne; e++) if (ed[2 * e] == t) w++;
+    badd(c, &body, t ? ", %d" : "%d", w);
+  }
+  bcat(c, &body, "};\nstatic const int aither_task_feeds_at[] = {0");
+  {
+    int at = 0;
+    for (int t = 0; t < nt; t++) {
+      for (int e = 0; e < ne; e++) if (ed[2 * e + 1] == t) at++;
+      badd(c, &body, ", %d", at);
+    }
+  }
+  bcat(c, &body, "};\nstatic const int aither_task_feeds[] = {");
+  {
+    int any = 0;
+    for (int t = 0; t < nt; t++)
+      for (int e = 0; e < ne; e++)
+        if (ed[2 * e + 1] == t) badd(c, &body, any++ ? ", %d" : "%d", ed[2 * e]);
+    if (!any) bcat(c, &body, "0");
+  }
+  badd(c, &body, "};\n#define AITHER_NT %d\n\n", nt);
   /* The voice's sound at sample i: the final expression's, or with none
    * the plays', added in the file's order. */
   bcat(c, &body, "static void outs(long aither_S, double* aither_B, long aither_i, double* outL, double* outR) {\n");
@@ -4099,7 +4201,8 @@ static const char* emit_program(Ctx* c, Node* program) {
     "  long    prof_ticks;\n"
     "  const double* t_buf;\n"
     "  double* raw_out;\n"
-    "  double* part_buf;\n");
+    "  double* part_buf;\n"
+    "  int (*par)(void*, long, void* const*, const int*, const int*, const int*, long, long, double*);\n");
   for (int i = 0; i < c->top_var_names.n; i++) badd(c, &pre, "  double v_%s;\n", c->top_var_names.v[i]);
   badd(c, &pre, "  unsigned char inited[%d];\n", c->top_var_names.n > 1 ? c->top_var_names.n : 1);
   bcat(c, &pre, "} VoiceState;\n\n");

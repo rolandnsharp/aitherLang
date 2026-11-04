@@ -5,12 +5,14 @@
 #include <time.h>
 #include "voice.h"
 #include "render.h"
+#include "pool.h"
 extern const char aither_stdlib[];
 static double now(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + t.tv_nsec * 1e-9; }
 int main(int argc, char** argv) {
   FILE* f = fopen(argv[1], "rb"); fseek(f, 0, SEEK_END); long n = ftell(f); rewind(f);
   char* src = calloc(n + 1, 1); fread(src, 1, n, f); fclose(f);
   int opt = atoi(argv[2]);
+  if (getenv("AITHER_THREADS")) { pool_start(); pool_claim(); }
   char err[4096]; int kind;
   Prepared* p = voice_prepare(aither_stdlib, src, argv[1], argv[1], 48000.0, 0, 1, &kind, err, sizeof err);
   if (!p) { fprintf(stderr, "%s\n", err); return 1; }

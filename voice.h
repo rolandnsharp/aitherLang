@@ -53,6 +53,10 @@ typedef struct {
   const double* t_buf;
   double* raw_out;
   double* part_buf;
+  /* pool_run (pool.h) when the voice's tasks may run on several cores,
+   * else NULL: the generated tick_block runs them in order itself. */
+  int (*par)(void* s, long nt, void* const* fns, const int* waits, const int* feeds_at, const int* feeds,
+             long n, long S, double* B);
 } VoiceHeader;
 
 /* A region of the pool, owned by the voice (its strings malloc'd). */

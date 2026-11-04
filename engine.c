@@ -19,6 +19,7 @@
 #include <sys/stat.h>
 #include <sys/un.h>
 #include "engine.h"
+#include "pool.h"
 #include "analysis.h"
 #include "cli_output.h"
 #include "midi.h"
@@ -1656,6 +1657,7 @@ static void pump_pipe(void) {
 static void* pipe_worker(void* arg) {
   (void)arg;
   aither_realtime("aither");
+  pool_claim();
   pump_pipe();
   /* The reader closed the pipe: that is the end of the session. After a
    * `kill` the server thread ends it, and says bye. */
@@ -1716,6 +1718,8 @@ void engine_run(char** files, int nfiles, double seconds) {
     exit(1);
   }
   signal(SIGPIPE, SIG_IGN);
+  /* The workers first: the voices are cut into tasks for them. */
+  pool_start();
   if (seconds <= 0.0) start_optimizer();
   for (int i = 0; i < nfiles; i++) {
     char* path = absolute(files[i]);
@@ -1732,6 +1736,7 @@ void engine_run(char** files, int nfiles, double seconds) {
       for (int i = 0; i < slot_count; i++) render_optimize(slots[i].voice);
     pipe_limit = (long long)(seconds * (double)sample_rate);
     running = 1;
+    pool_claim();
     pump_pipe();
     exit(0);
   }

@@ -37,6 +37,7 @@
 #include <sys/syscall.h>
 #include <fcntl.h>
 #include <stdint.h>
+#include <pthread.h>
 
 static pid_t rt_tid;        /* the thread aither_realtime set up, 0 if none */
 static int rt_cpu = -1;     /* the core it was last pinned to */
@@ -111,4 +112,82 @@ void aither_repin(void) {
     if (rt_tid == 0 || getenv("AITHER_RT_CPU")) return;
     int cpu = last_online();
     if (cpu >= 0 && cpu != rt_cpu && pin(rt_tid, cpu) == 0) rt_cpu = cpu;
+}
+
+/* The cores online, from "0-5" or "0-3,5", highest first, into out. */
+static int online_cores(int *out, int max) {
+    FILE *f = fopen("/sys/devices/system/cpu/online", "r");
+    if (!f) return 0;
+    char buf[256] = {0};
+    if (!fgets(buf, sizeof buf, f)) buf[0] = 0;
+    fclose(f);
+    int n = 0, lo = -1, cur = -1, on[1024] = {0}, top = -1;
+    for (char *p = buf;; p++) {
+        if (*p >= '0' && *p <= '9') cur = (cur < 0 ? 0 : cur * 10) + (*p - '0');
+        else if (*p == '-') { lo = cur; cur = -1; }
+        else {
+            if (cur >= 0 && cur < 1024) {
+                for (int k = lo >= 0 ? lo : cur; k <= cur; k++) on[k] = 1;
+                if (cur > top) top = cur;
+            }
+            lo = cur = -1;
+            if (!*p) break;
+        }
+    }
+    for (int k = top; k >= 0 && n < max; k--) if (on[k]) out[n++] = k;
+    return n;
+}
+
+/* A core's speed relative to the fastest (1024), as ARM's kernels say
+   it (the uConsole: 1024 for an A72, 381 for an A53); 1024 if unsaid. */
+static int capacity(int cpu) {
+    char path[96];
+    snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu%d/cpu_capacity", cpu);
+    FILE *f = fopen(path, "r");
+    int c = 1024;
+    if (f) { if (fscanf(f, "%d", &c) != 1) c = 1024; fclose(f); }
+    return c;
+}
+
+/* The pool's cores: the fastest online, those within 3/4 of the best.
+   A task on a slow core holds up every task waiting for it: on mains the
+   uConsole's two A72s alone ran bush_doof_e's blocks 1.73x as fast as
+   one, and adding its four A53s took that back to 1.35x. On battery
+   only the A53s are online, all alike, and all are used. */
+static int fast_cores(int *out, int max) {
+    int all[1024], n = online_cores(all, 1024), best = 0, k = 0;
+    for (int i = 0; i < n; i++) if (capacity(all[i]) > best) best = capacity(all[i]);
+    for (int i = 0; i < n && k < max; i++) if (capacity(all[i]) * 4 >= best * 3) out[k++] = all[i];
+    return k;
+}
+
+int aither_cores_online(void) {
+    int cores[1024];
+    int n = fast_cores(cores, 1024);
+    return n > 0 ? n : 1;
+}
+
+/* The pool's k-th worker (pool.c): pinned to the k-th of the fast cores
+   that isn't the audio core, highest first, then any other core online
+   (when AITHER_THREADS asks for more), at the audio thread's priority, so a task the mix waits for
+   isn't put off behind something else. AITHER_RT=0: neither. */
+int aither_realtime_worker(int k) {
+    const char *off = getenv("AITHER_RT");
+    if (off && strcmp(off, "0") == 0) return -1;
+    int cores[2048], n = fast_cores(cores, 1024), audio = audio_cpu(), cpu = -1;
+    int rest[1024], nr = online_cores(rest, 1024);
+    for (int i = 0; i < nr; i++) {
+        int dup = 0;
+        for (int j = 0; j < n; j++) if (cores[j] == rest[i]) dup = 1;
+        if (!dup) cores[n++] = rest[i];
+    }
+    for (int i = 0, j = 0; i < n; i++) {
+        if (cores[i] == audio) continue;
+        if (j++ == k) { cpu = cores[i]; break; }
+    }
+    if (cpu >= 0) pin((pid_t)syscall(SYS_gettid), cpu);
+    const char *pe = getenv("AITHER_RT_PRIO");
+    struct sched_param sp = { .sched_priority = pe && *pe ? atoi(pe) : 70 };
+    pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp);
+    return cpu;
 }

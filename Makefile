@@ -4,10 +4,10 @@ CC     := cc
 CFLAGS := -std=gnu23 -O3 -march=native -flto -fno-plt -fno-stack-protector \
           -fno-math-errno -ffp-contract=off -pthread
 LIBS   := -ltcc -ldl -lasound -lm
-ENGINE := engine.c voice.c render.c analysis.c cli_output.c midi.c alsa_midi.c realtime.c \
+ENGINE := engine.c voice.c render.c analysis.c cli_output.c midi.c alsa_midi.c realtime.c pool.c \
           codegen.c parser.c imports.c dsp.c stdlib.c
 HDR    := engine.h voice.h render.h analysis.h cli_output.h midi.h codegen.h parser.h \
-          imports.h dsp.h
+          imports.h dsp.h pool.h
 
 all: aither
 

@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include "voice.h"
+#include "pool.h"
 #include "imports.h"
 #include "dsp.h"
 #include "midi.h"
@@ -640,6 +641,7 @@ void voice_tick_block(Voice* v, long n, double* outL, double* outR) {
   /* n samples from the clock in the header: the engine's path. */
   VoiceHeader* h = v->cur.state;
   h->sweep_origin = v->sweep_origin;
+  h->par = pool_threads() > 1 ? pool_run : NULL;
   v->cur.tick_block(v->cur.state, n, outL, outR);
 }
 

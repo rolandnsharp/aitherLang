@@ -11,6 +11,9 @@
  * C-E-G chord), in blocks of 300 (so the runs of 128 inside a block are
  * crossed too), and compares every sample's bits.
  *
+ * With AITHER_THREADS set, the blocks run on the pool's workers (pool.h),
+ * tasks on several cores at once, against one core a sample at a time.
+ *
  * Patches named on the command line are checked instead of every one. */
 
 #define _GNU_SOURCE
@@ -22,6 +25,7 @@
 #include "../voice.h"
 #include "../render.h"
 #include "../midi.h"
+#include "../pool.h"
 
 extern const char aither_stdlib[];
 
@@ -96,6 +100,10 @@ static int blocks(const char* path, double* out, char* err, int errlen) {
 static int by_str(const void* a, const void* b) { return strcmp(*(char* const*)a, *(char* const*)b); }
 
 int main(int argc, char** argv) {
+  if (getenv("AITHER_THREADS")) {
+    printf("on %d threads\n", pool_start());
+    pool_claim();
+  }
   char** files = NULL;
   int n = 0, cap = 0;
   if (argc > 1) {

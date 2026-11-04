@@ -1668,6 +1668,17 @@ unlimited, and is pinned again about once a second as cores come and go;
 `tools/play` and `tools/card` do the same. Without the `rtprio` limit it
 says so and runs at normal priority; `AITHER_RT=0` turns it off. Offline
 renders don't. See notes/realtime-2026-10-19.md (`realtime.c`).
+A voice runs as tasks, cut where its parts can run apart (a `$state`
+written twice, an array, or a loop between them keeps them together),
+merged by cost for the cores it runs on, each task a block at a time.
+The engine runs them on a pool (`pool.c`): `AITHER_THREADS` threads in
+all, counting the mix thread (default: the fastest cores online, within
+3/4 of the best by the kernel's `cpu_capacity`: the uConsole's two A72s
+on mains, its four A53s on battery). Each worker is pinned to a core of
+its own, at the mix thread's priority. Any split, on any number of
+threads, gives the same bits (`make blocks`); `AITHER_TASKS` sets the
+cores the split is planned for (0: the finest). See
+notes/multicore-2026-10-18.md.
 Each voice's block has a deadline, `AITHER_WATCHDOG` seconds (0.5;
 0 for none), which only a recursion can overrun: it checks the clock
 every 65 536 steps, and past the deadline it gives up (see

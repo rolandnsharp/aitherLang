@@ -313,3 +313,62 @@ Blocks, what the engine runs, are as fast as before step 2 or faster
 everywhere but band on TCC (+15%, the same as one task: not the split;
 its cost is somewhere in the block's frame, to find). Big patches on TCC
 gain a third, which is the uConsole while a -O2 build compiles.
+
+## Step 3: the worker pool (2026-11-04)
+
+`pool.c`. The mix thread and AITHER_THREADS - 1 workers, each pinned to a
+core of its own at the mix thread's priority. Each run of a block (128
+samples) is a job: the generated tick_block hands the pool its tasks
+(`par` in the header), each task with how many it waits for and which
+it feeds. A task joins a ready queue when its last need ends; whoever
+reaches it first takes it, the mix thread too. Between jobs a worker
+spins 200 µs, then sleeps on a futex. Only a thread that claimed the
+pool (the engine's mix thread, a test) uses it; any other runs its
+tasks in order, as before.
+
+**Clustering changed for it.** Merging by cost alone (the commit
+before) glued early and late units together until the tasks were nearly
+a chain: bush_doof_e on 4 threads was slower than on 1. Now a merge is
+made only if it doesn't lengthen how long the tasks would take on P
+cores, at least: the longest path, or the work shared out evenly
+(with 20 units of overhead a task), whichever is more. Chains merge;
+small tasks side by side merge while the work outweighs the longest
+path; big ones stay apart. P is four times the threads, for slack (on
+two: planned for 2, 6.4 s; for 8, 5.1 s; for 16, 5.0 s). One thread
+plans for one: everything merges, up to the cap, as before.
+
+**Only the fast cores, by default.** A task on a slow core holds up
+everything waiting for it. On the uConsole on mains (two A72s, four
+A53s, `cpu_capacity` 1024 and 381), bush_doof_e's blocks ran 1.73x as
+fast on the two A72s and 1.35x with all six. So the pool takes the
+cores within 3/4 of the best: the two A72s on mains, all four A53s on
+battery (alike). AITHER_THREADS asks for more.
+
+Seconds per 10 s of sound, blocks, uConsole on mains (2 threads):
+
+| shape | TCC: 1 thread → pool | -O2: 1 thread → pool |
+|---|---|---|
+| bush_doof_e | 19.6 → 10.3 | 8.9 → 5.0 |
+| tesla_jam | 7.3 → 4.4 | 4.2 → 2.7 |
+| band | 0.98 → 0.74 | 0.58 → 0.33 |
+| lets | 1.55 → 1.27 | 0.61 → 0.51 |
+| bank, chain, field | unchanged | unchanged |
+
+Bit-identical: `AITHER_THREADS= make blocks` (2 threads), and 6 threads
+on the finest split (A53s too, the most tasks at once), 181/181 each;
+make test 67/67 (engine_live runs the pool); make exact 181/181.
+
+**Live** (notes/multicore/pacer.c: reads the pipe at 48 kHz in periods
+of 512 like a card, 50 ms latency, restarts after a late period, counts
+them; silent). bush_doof_e for 90 s from a cold start:
+
+- one thread: 160 late in the first 10 s (TCC), -O2 landed at about
+  12 s, then 2 in 80 s.
+- the pool: 4–6 late every 5 s on TCC, -O2 landed at about 37 s, then
+  none.
+
+The -O2 build took three times as long beside the pool: cc gets the
+A53s while a worker holds the second A72 (the C compiles in the same
+16 s for 11 tasks or 50, alone). Fewer late blocks in all (38 against
+162), but a longer wait for -O2. Not measured: a laptop's equal cores,
+where the gain should go past two.
