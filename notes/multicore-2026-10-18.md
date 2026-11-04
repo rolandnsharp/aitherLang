@@ -276,3 +276,40 @@ header pointers the engine leaves NULL (t_buf, raw_out, part_buf). Corpus
 unchanged, make exact 180/180, make test 67/67. The heaviest renders
 gain most (bush_doof_e 19 s → 9 s, didge_scope_vP_trombone_singer 18 s →
 11 s); the corpus as a whole 92 s → 86 s, most of its time compiling.
+
+## Clustering (2026-11-04)
+
+The finest split stays what `aither profile` predicts from. The voice
+runs merged tasks: each unit costs its tree (a node 1, a transcendental
+4, a def call its body, `sum`/`each` N times their body), and the
+cheapest task merges into a partner it feeds or is fed by, if no path
+runs between them through a third (or the merge would need itself).
+Merging keeps the file's order inside a task, so any clustering gives
+the same bits: `make blocks` at AITHER_TASKS unset, 0 (finest), 2 and 3,
+every patch bit-identical.
+
+Merging stops at AITHER_TASKS tasks (default 1, until there are
+workers) or where a merge would pass a cost of 2000. The cap came from
+measuring: TCC is slow on one huge function (bush_doof_e, blocks per
+10 s of sound: 28 s as one task, 18–20 s in tasks of 1000–3000), and
+-O2 doesn't care. A patch under the cap is one task.
+
+Seconds per 10 s of sound, uConsole, block | per sample:
+
+| shape | before step 2 | finest | clustered |
+|---|---|---|---|
+| band, TCC | 0.85 \| 0.93 | 0.97 \| 1.21 | 0.98 \| 1.14 |
+| band, -O2 | 0.53 \| 0.60 | 0.52 \| 0.65 | 0.52 \| 0.64 |
+| bank, TCC | 0.86 \| 2.80 | 0.90 \| 2.78 | 0.88 \| 2.76 |
+| field, TCC | 0.35 \| 0.31 | 0.41 \| 0.45 | 0.34 \| 0.33 |
+| lets, TCC | 1.72 \| 5.04 | 2.11 \| 9.08 | 1.54 \| 5.09 |
+| lets, -O2 | 0.68 \| 2.88 | 1.34 \| 3.49 | 0.63 \| 2.78 |
+| bush_doof_e, TCC | 26.3 \| 31.6 | 18.3 \| 45.5 | 18.9 \| 34.9 |
+| bush_doof_e, -O2 | 9.5 \| 12.6 | 9.0 \| 20.6 | 8.8 \| 13.2 |
+| tesla_jam, TCC | 9.1 \| 15.6 | 7.1 \| 19.9 | 7.2 \| 16.3 |
+| tesla_jam, -O2 | 4.3 \| 6.6 | 4.1 \| 7.7 | 4.2 \| 6.7 |
+
+Blocks, what the engine runs, are as fast as before step 2 or faster
+everywhere but band on TCC (+15%, the same as one task: not the split;
+its cost is somewhere in the block's frame, to find). Big patches on TCC
+gain a third, which is the uConsole while a -O2 build compiles.

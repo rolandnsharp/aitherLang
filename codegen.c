@@ -105,6 +105,8 @@ struct Ctx {
   /* Tasks: the units, each one's task, and the buffers between tasks. */
   Unit* units; Use* use; int nunits;
   int* unit_task; int ntasks;
+  int* fine_task; int nfine; /* the finest split, before clustering: what `aither profile` predicts from */
+  Map unit_costs;           /* def name -> its body's estimated cost (v) */
   int cur_unit;             /* the unit being emitted; -1 outside them */
   Map writers;              /* shared name -> p = int[] writer units, n = how many */
   Map xbufs;                /* "name#writer unit" -> n = first buffer (-1: not yet), pairs */
@@ -3281,6 +3283,145 @@ static int pick_writer(Ent* w, int u, int* late) {
   return wu < 0 ? ws[w->n - 1] : wu;
 }
 
+/* ---- clustering ----
+ *
+ * The finest split gives a task to everything that can run apart. A
+ * task costs a buffer per value crossing out of it and a pass over the
+ * block, so on few cores the tasks are merged back by what they cost,
+ * estimated from the tree: a node is 1, a transcendental 4, a def call
+ * its body's cost, `sum`/`each` N times their body's. */
+static double node_cost(Ctx* c, Node* n, int depth);
+
+static double def_cost(Ctx* c, Node* d, int depth) {
+  Ent* e = hfind(&c->unit_costs, d->str);
+  if (e) return e->v;
+  e = hput(c, &c->unit_costs, d->str);
+  e->v = 1.0;  /* while its body is counted: a recursive def counts once */
+  double v = 0.0;
+  for (int i = 0; i < d->nkids; i++) v += node_cost(c, d->kids[i], depth + 1);
+  e->v = v > 1.0 ? v : 1.0;
+  return e->v;
+}
+
+static double node_cost(Ctx* c, Node* n, int depth) {
+  if (!n || depth > 64) return 0.0;
+  double v = 1.0;
+  if (n->kind == nkCall) {
+    Node* d = user_def(c, n->str);
+    if (d) v += def_cost(c, d, depth);
+    else if (eq(n->str, "sin") || eq(n->str, "cos") || eq(n->str, "exp") || eq(n->str, "log") ||
+             eq(n->str, "tanh") || eq(n->str, "pow") || eq(n->str, "atan2") || eq(n->str, "tan"))
+      v += 3.0;
+    if ((eq(n->str, "sum") || eq(n->str, "each")) && n->nkids == 2) {
+      double N;
+      if (!const_value(c, c->top, n->kids[0], &N) || N < 1) N = 8;
+      return v + node_cost(c, n->kids[0], depth + 1) + N * node_cost(c, n->kids[1], depth + 1);
+    }
+  }
+  for (int i = 0; i < n->nkids; i++) v += node_cost(c, n->kids[i], depth + 1);
+  return v;
+}
+
+/* A task merges no further than this. A single huge function is slow
+ * under TCC (bush_doof_e's blocks: 28 s in one task, 19 s in tasks of
+ * about this size, per 10 s of sound on the uConsole) and no faster
+ * under -O2; a patch below it is one task. */
+enum { TASK_COST_CAP = 2000 };
+
+/* Merge the finest tasks into at most `want`, none past the cap. Two can
+ * merge only if no path runs between them through a third, or the merge
+ * would need itself. The cheapest task that fits with a partner merges
+ * into it: one it feeds or is fed by if it can (a buffer fewer), the
+ * cheapest of those. Merged units keep the file's order, which is what
+ * one task means, so any clustering computes the same bits. */
+static void cluster_tasks(Ctx* c, int want) {
+  const double cap = TASK_COST_CAP;
+  int nt = c->ntasks, n = c->nunits;
+  if (want < 1 || nt <= want) return;
+  int words = (nt + 63) / 64;
+  unsigned long long* need = al(c, (size_t)nt * words * 8);
+  unsigned long long* reach = al(c, (size_t)nt * words * 8);
+  #define BIT(m, i, j) ((m)[(size_t)(i) * words + (j) / 64] >> ((j) % 64) & 1)
+  #define SET(m, i, j) ((m)[(size_t)(i) * words + (j) / 64] |= 1ull << ((j) % 64))
+  #define CLR(m, i, j) ((m)[(size_t)(i) * words + (j) / 64] &= ~(1ull << ((j) % 64)))
+  for (int i = 0; i < n; i++)
+    for (int b = 0; b < NBUCKETS; b++)
+      for (Ent* e = c->use[i].reads.b[b]; e; e = e->next) {
+        Ent* f = hfind(&c->writers, e->key);
+        if (!f) continue;
+        int a = c->unit_task[i], w = c->unit_task[((int*)f->p)[0]];
+        if (a != w) SET(need, a, w);
+      }
+  double* cost = al(c, nt * sizeof(double));
+  int* to = al(c, nt * sizeof(int));     /* each fine task's cluster */
+  char* alive = al(c, nt);
+  for (int t = 0; t < nt; t++) { to[t] = t; alive[t] = 1; }
+  for (int i = 0; i < n; i++) cost[c->unit_task[i]] += node_cost(c, c->units[i].st, 0);
+  for (int left = nt; left > want; left--) {
+    memcpy(reach, need, (size_t)nt * words * 8);
+    for (int k = 0; k < nt; k++)
+      if (alive[k])
+        for (int i = 0; i < nt; i++)
+          if (alive[i] && BIT(reach, i, k))
+            for (int x = 0; x < words; x++) reach[(size_t)i * words + x] |= reach[(size_t)k * words + x];
+    /* The cheapest task that has a partner it fits with. */
+    int t = -1, best = -1;
+    char* tried = al(c, nt);
+    for (;;) {
+      t = -1;
+      for (int k = 0; k < nt; k++) if (alive[k] && !tried[k] && (t < 0 || cost[k] < cost[t])) t = k;
+      if (t < 0) break;
+      tried[t] = 1;
+      int best_near = 0;
+      for (int p = 0; p < nt; p++) {
+        if (!alive[p] || p == t || cost[t] + cost[p] > cap) continue;
+        int safe = 1;
+        for (int x = 0; x < nt && safe; x++) {
+          if (!alive[x] || x == t || x == p) continue;
+          if (BIT(need, t, x) && BIT(reach, x, p)) safe = 0;  /* t -> x -> ... -> p */
+          if (BIT(need, p, x) && BIT(reach, x, t)) safe = 0;  /* p -> x -> ... -> t */
+        }
+        if (!safe) continue;
+        int near = BIT(need, t, p) || BIT(need, p, t);
+        if (best < 0 || near > best_near || (near == best_near && cost[p] < cost[best])) { best = p; best_near = near; }
+      }
+      if (best >= 0) break;
+    }
+    if (best < 0) break;  /* nothing fits: as few as the cap allows */
+    /* best takes in t */
+    alive[t] = 0;
+    cost[best] += cost[t];
+    for (int x = 0; x < nt; x++) {
+      if (BIT(need, t, x)) SET(need, best, x);
+      if (BIT(need, x, t)) { SET(need, x, best); CLR(need, x, t); }
+    }
+    for (int x = 0; x < words; x++) need[(size_t)t * words + x] = 0;
+    CLR(need, best, best);
+    CLR(need, best, t);
+    for (int k = 0; k < nt; k++) if (to[k] == t) to[k] = best;
+  }
+  #undef BIT
+  #undef SET
+  #undef CLR
+  /* Number the clusters in file order. */
+  int* id = al(c, nt * sizeof(int));
+  for (int k = 0; k < nt; k++) id[k] = -1;
+  c->ntasks = 0;
+  for (int i = 0; i < n; i++) {
+    int k = to[c->unit_task[i]];
+    if (id[k] < 0) id[k] = c->ntasks++;
+    c->unit_task[i] = id[k];
+  }
+}
+
+/* How many tasks a voice is cut into, at most: AITHER_TASKS if set (0:
+ * as many as can run apart, the finest), else one until there are
+ * workers; the cap can leave more. */
+static int tasks_wanted(void) {
+  const char* e = getenv("AITHER_TASKS");
+  return e && *e ? atoi(e) : 1;
+}
+
 /* The units in the order they are emitted, what each reads and writes,
  * and their tasks. Arrays don't cross tasks: a unit reading another's
  * array joins it. */
@@ -3392,6 +3533,10 @@ static void plan_tasks(Ctx* c, Node* program) {
   c->ntasks = 0;
   for (int i = 0; i < n; i++) { int r = task_root(up, i); if (id[r] < 0) id[r] = c->ntasks++; }
   for (int i = 0; i < n; i++) c->unit_task[i] = id[task_root(up, i)];
+  c->nfine = c->ntasks;
+  c->fine_task = al(c, (n ? n : 1) * sizeof(int));
+  memcpy(c->fine_task, c->unit_task, (n ? n : 1) * sizeof(int));
+  cluster_tasks(c, tasks_wanted());
   /* The values that cross from one task to another, each from the writer
    * its reader reads. A play's sound crosses in its part's buffers. */
   for (int i = 0; i < n; i++)
@@ -3407,15 +3552,15 @@ static void plan_tasks(Ctx* c, Node* program) {
 }
 
 /* Which task needs which, as pairs, once each. */
-static int task_edges(Ctx* c, int* out) {
-  int nt = c->ntasks, ne = 0;
+static int task_edges_of(Ctx* c, const int* of, int nt, int* out) {
+  int ne = 0;
   unsigned char* seen = al(c, (size_t)(nt ? nt : 1) * (nt ? nt : 1));
   for (int i = 0; i < c->nunits; i++)
     for (int b = 0; b < NBUCKETS; b++)
       for (Ent* e = c->use[i].reads.b[b]; e; e = e->next) {
         Ent* f = hfind(&c->writers, e->key);
         if (!f) continue;
-        int a = c->unit_task[i], w = c->unit_task[((int*)f->p)[0]];
+        int a = of[i], w = of[((int*)f->p)[0]];
         if (a == w || seen[(size_t)a * nt + w]) continue;
         seen[(size_t)a * nt + w] = 1;
         if (out) { out[2 * ne] = a; out[2 * ne + 1] = w; }
@@ -3424,17 +3569,19 @@ static int task_edges(Ctx* c, int* out) {
   return ne;
 }
 
-/* The tables `aither profile` reads: each slot's task, and which task
- * needs which, as pairs. */
+static int task_edges(Ctx* c, int* out) { return task_edges_of(c, c->unit_task, c->ntasks, out); }
+
+/* The tables `aither profile` reads: each slot's task in the finest
+ * split, and which task needs which, as pairs. */
 static void emit_task_tables(Ctx* c, int nslots, Buf* out) {
   bcat(c, out, "const int task_of[] = {");
-  for (int i = 0; i < nslots; i++) badd(c, out, i ? ", %d" : "%d", c->unit_task[i]);
+  for (int i = 0; i < nslots; i++) badd(c, out, i ? ", %d" : "%d", c->fine_task[i]);
   if (!nslots) bcat(c, out, "0");
   bcat(c, out, "};\n");
-  badd(c, out, "const long task_count = %d;\n", c->ntasks);
-  int ne = task_edges(c, NULL);
+  badd(c, out, "const long task_count = %d;\n", c->nfine);
+  int ne = task_edges_of(c, c->fine_task, c->nfine, NULL);
   int* ed = al(c, (ne ? ne : 1) * 2 * sizeof(int));
-  task_edges(c, ed);
+  task_edges_of(c, c->fine_task, c->nfine, ed);
   bcat(c, out, "const int task_needs[] = {");
   for (int k = 0; k < ne; k++) badd(c, out, k ? ", %d, %d" : "%d, %d", ed[2 * k], ed[2 * k + 1]);
   if (!ne) bcat(c, out, "0");
