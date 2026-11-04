@@ -1,0 +1,87 @@
+# lissajous: an instrument where you play the interval and see it. The
+# left ear holds the root; the right plays the note you hold; on the
+# scope the two draw the figure that is their ratio.
+#
+# A beam driven across by one sine and up and down by another draws a
+# Lissajous figure, and its shape is the ratio of the two pitches: the
+# octave, 2 to 1, a figure eight; the fifth, 3 to 2, a pretzel; the
+# fourth, 4 to 3, and the third, 5 to 4, more loops, one more each way
+# for each step of the ratio. Count the lobes along the top and down the
+# side and you have read the interval. In just tuning the figure stands
+# still; here the note runs a hair sharp, so it turns slowly, which is
+# what makes it look like a wire turning in space, and you hear the
+# same as a slow beat.
+#
+# Root is the 4th harmonic of the beam's lap, so the notes are whole
+# harmonics over 4. With nothing held the right ear plays the root too,
+# a quarter turn on, a unison: a circle, breathing flat to a line and
+# back as it turns. A press plucks the note in, the figure swelling;
+# held, it rings, the turn quickening; let go and the figure melts back
+# into the circle. Hold two and the right ear plays both, the figure
+# the two ratios at once.
+#
+# The d-pad: left and right step the root round the circle of fifths,
+# C, G, D, A, E, gliding; up and down change which four notes the
+# buttons play, as harmonics over the root's 4:
+#   3 5 6 8      fourth below, third, fifth, octave
+#   5 6 7 8      third, fifth, natural seventh, octave
+#   6 8 9 10     fifth, octave, ninth, tenth
+#   8 10 12 16   octave, tenth, twelfth, two octaves
+# The buttons, Y A B X, play those four, lowest to highest.
+#
+#   make tools/pad tools/scope
+#   tools/pad --notes &                                 # the gamepad, every key a note
+#   ./aither patches/lissajous.aither | tools/scope | tools/play hw:rockchipes8388c 20
+
+let roots = [130.81, 196.0, 146.83, 220.0, 164.81]   # C3, G3, D3, A3, E3: the circle of fifths
+let sets = [3, 5, 6, 8,
+            5, 6, 7, 8,
+            6, 8, 9, 10,
+            8, 10, 12, 16]
+
+# The d-pad: the root, gliding; the register.
+$root = 2
+$root = clamp($root + midi_trig(43) - midi_trig(42), 0, 4)
+$f = 146.83
+$f = $f + (roots[$root] - $f) * dt * 10
+$reg = 1
+$reg = clamp($reg + midi_trig(40) - midi_trig(41), 0, 3)
+
+# The lap, a quarter of the root.
+let ph = TAU * phasor($f / 4)
+
+# How far the right ear has slipped ahead: the turn. Faster as you play.
+let playing = midi_note(36) + midi_note(37) + midi_note(38) + midi_note(39)
+$go = 0.0
+$go = $go + (0.25 + 0.35 * playing - $go) * dt * 2
+$drift = 0.0
+$drift = $drift + $go * dt
+
+# A note's weight: plucked to full on the press, settling to 0.7 held,
+# fading over a quarter second let go.
+def weight(held):
+  $e = 0.0
+  $since = 9.0
+  $since = if held > 0 then $since + dt else 0
+  let aim = if held > 0 then 0.7 + 0.3 * exp(-$since * 5) else 0
+  $e = $e + (aim - $e) * dt * (if held > 0 then 150 else 5)
+  $e
+
+def voice(w, n, ph, d): w * cos(n * ph + d)
+
+let k = $reg * 4
+let w0 = weight(midi_note(39))
+let w1 = weight(midi_note(36))
+let w2 = weight(midi_note(37))
+let w3 = weight(midi_note(38))
+let held = w0 + w1 + w2 + w3
+let rest = max(1 - held / 0.7, 0)          # gone once a note is held
+let notes = voice(w0, sets[k], ph, $drift) + voice(w1, sets[k + 1], ph, $drift)
+          + voice(w2, sets[k + 2], ph, $drift) + voice(w3, sets[k + 3], ph, $drift)
+let right = (rest * sin(4 * ph + $drift) + notes) / max(held + rest, 0.7)  # held at 0.7 still fills the height
+let left = cos(4 * ph)
+
+# A pluck swells the whole figure a little.
+let swell = 1 + 0.15 * max(held - 0.7 * playing, 0)
+
+[left, right] * 0.55 * swell |> tanh
