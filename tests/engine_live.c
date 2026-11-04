@@ -11,6 +11,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
+#include <sched.h>
 #include <signal.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -27,7 +28,7 @@ static pid_t started[32];
 static int nstarted;
 
 static const char* const made[] = {"quiet.aither", "half.aither", "clock.aither", "sw.aither",
-                                   "mp.aither", "s.sock"};
+                                   "mp.aither", "sm.aither", "s.sock"};
 
 /* Whatever happens, leave no engine running and no directory behind.
  * Only async-signal-safe calls: the watchdog runs it too. */
@@ -145,6 +146,8 @@ static void wait_up(void) {
 
 typedef struct { pid_t pid; int in, out, err; int done, code; } Proc;
 
+static int only_core = -1;        /* start()'s child runs on this core alone, if >= 0 */
+
 static Proc start(const char* patch, const char* arg) {
   int pi[2], po[2], pe[2];
   MUST(pipe2(pi, O_CLOEXEC) == 0 && pipe2(po, O_CLOEXEC) == 0 && pipe2(pe, O_CLOEXEC) == 0, "pipes");
@@ -159,6 +162,12 @@ static Proc start(const char* patch, const char* arg) {
     dup2(po[1], 1);
     dup2(pe[1], 2);
     signal(SIGPIPE, SIG_DFL);
+    if (only_core >= 0) {
+      cpu_set_t one;
+      CPU_ZERO(&one);
+      CPU_SET(only_core, &one);
+      sched_setaffinity(0, sizeof one, &one);
+    }
     execl(EXE, EXE, path, arg, (char*)NULL);
     _exit(127);
   }
@@ -498,6 +507,69 @@ TEST(engine_live) {
     CHECK(ask_has("kill", "OK"), "kill");
     wait_exit(&m, 10000);
     close_all(&m);
+  }
+
+  /* --- 12. `send --mute` names plays that start silent: a new voice's
+   * muted play never sounds, not even for the block before a `mute`
+   * could land (the game's tension layer did, 2026-11-05). On a voice
+   * playing on, they fade out over the send's fade. A play the patch
+   * hasn't is an error, and the voice playing stays. */
+  {
+    write_file("sm.aither", "play a: 0.25\nplay b: 0.25\n[(a + b)[0], 0]\n");
+    Proc q = start("quiet.aither", NULL);
+    close_in(&q);
+    wait_up();
+    framed = &q;
+    char cmd[800];
+    snprintf(cmd, sizeof cmd, "send %s/sm.aither --mute b", dir);
+    char* reply = ask(cmd);
+    MUST(starts(reply, "OK"), "%s: %s", cmd, reply);
+    free(reply);
+    float most = 0, l, r;
+    char got[512 * 8];
+    for (int i = 0; i < 200; i++) {                /* every sample, not just each block's last */
+      MUST(read_n(q.out, got, sizeof got) == (long)sizeof got, "the stream ended early");
+      for (int k = 0; k < 512; k++) most = fmaxf(most, f32_at(got, k, 0));
+    }
+    CHECK(fabsf(most - 0.25f) < 1e-4f, "with b muted from the start the most heard is 0.25: %g", most);
+    CHECK(ask_has("list", "(muted)"), "list shows b muted");
+    until("unmute sm.b", 0.5f, &l, &r);
+    snprintf(cmd, sizeof cmd, "send %s/sm.aither 0.01 --mute a", dir);
+    until(cmd, 0.25f, &l, &r);                    /* playing on: a fades, b stays up */
+    snprintf(cmd, sizeof cmd, "send %s/sm.aither --mute zz", dir);
+    CHECK(ask_starts(cmd, "ERR"), "no such play");
+    frame(&l, &r);
+    CHECK(fabsf(l - 0.25f) < 1e-4f, "after the refused send the voice plays on: %g", l);
+    snprintf(cmd, sizeof cmd, "send %s/sm.aither soon", dir);
+    CHECK(ask_starts(cmd, "ERR"), "a word that is neither a fade nor --mute");
+    snprintf(cmd, sizeof cmd, "send %s/sm.aither --mute", dir);
+    CHECK(ask_starts(cmd, "ERR"), "--mute with nothing after it");
+    CHECK(ask_has("kill", "OK"), "kill");
+    wait_exit(&q, 10000);
+    close_all(&q);
+  }
+
+  /* --- 13. The cores it was started on are the cores it uses: started on
+   * core 0 alone, the audio thread goes to core 0, not the fastest core
+   * online. (Without the rtprio limit nothing is pinned; then nothing to
+   * check.) */
+  {
+    only_core = 0;
+    Proc o = start("quiet.aither", NULL);
+    only_core = -1;
+    close_in(&o);
+    wait_up();
+    CHECK(ask_has("kill", "OK"), "kill");
+    wait_exit(&o, 10000);
+    long n;
+    char* err = read_all(o.err, &n);
+    close_all(&o);
+    char* rt = strstr(err, "real-time: SCHED_FIFO");
+    if (rt) {
+      char* core = strstr(rt, " on core ");
+      CHECK(core && atoi(core + 9) == 0, "started on core 0, the audio thread went to: %.60s", rt);
+    }
+    free(err);
   }
 
   alarm(0);

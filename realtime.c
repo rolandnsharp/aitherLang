@@ -2,9 +2,12 @@
    priority, with memory locked. The engine's mix thread, tools/play and
    tools/card call aither_realtime once, at the start.
 
-   The audio core is the highest-numbered core online (the uConsole's
-   last A72 on mains, its last A53 on battery, when the A72s are off), or
-   AITHER_RT_CPU. Priority is SCHED_FIFO AITHER_RT_PRIO (70); the kernel
+   Cores are chosen only from those the process was started on: its
+   affinity as it began (taskset -c 0-3 aither keeps it, its threads and
+   its compiles on cores 0-3), so another program can keep cores for
+   itself. The audio core is the highest-numbered of those online (the
+   uConsole's last A72 on mains, its last A53 on battery, when the A72s
+   are off), or AITHER_RT_CPU. Priority is SCHED_FIFO AITHER_RT_PRIO (70); the kernel
    still keeps 5% of every second for everything else, so a runaway patch
    can't freeze the machine. Memory is locked only when RLIMIT_MEMLOCK is
    unlimited: with a small limit, locking future allocations would make
@@ -57,19 +60,21 @@ static const char *hold_idle(void) {
     return ", deep idle held off";
 }
 
-/* The highest-numbered core online, from "0-5" or "0-3,5". */
+/* The cores the process was started on, read before any thread pins
+   itself (pinning narrows the mask the next thread inherits). */
+static cpu_set_t allowed;
+static int have_allowed;
+
+__attribute__((constructor)) static void note_allowed(void) {
+    have_allowed = sched_getaffinity(0, sizeof allowed, &allowed) == 0;
+}
+
+static int online_cores(int *out, int max);
+
+/* The highest-numbered core online that the process may use. */
 static int last_online(void) {
-    FILE *f = fopen("/sys/devices/system/cpu/online", "r");
-    if (!f) return -1;
-    char buf[128] = {0};
-    if (!fgets(buf, sizeof buf, f)) buf[0] = 0;
-    fclose(f);
-    int best = -1, n = -1;
-    for (char *p = buf;; p++) {
-        if (*p >= '0' && *p <= '9') n = (n < 0 ? 0 : n * 10) + (*p - '0');
-        else { if (n > best) best = n; n = -1; if (!*p) break; }
-    }
-    return best;
+    int c[1];
+    return online_cores(c, 1) ? c[0] : -1;
 }
 
 static int audio_cpu(void) {
@@ -114,7 +119,8 @@ void aither_repin(void) {
     if (cpu >= 0 && cpu != rt_cpu && pin(rt_tid, cpu) == 0) rt_cpu = cpu;
 }
 
-/* The cores online, from "0-5" or "0-3,5", highest first, into out. */
+/* The cores online that the process may use, from "0-5" or "0-3,5",
+   highest first, into out. If none of its cores is online, all online. */
 static int online_cores(int *out, int max) {
     FILE *f = fopen("/sys/devices/system/cpu/online", "r");
     if (!f) return 0;
@@ -134,7 +140,10 @@ static int online_cores(int *out, int max) {
             if (!*p) break;
         }
     }
-    for (int k = top; k >= 0 && n < max; k--) if (on[k]) out[n++] = k;
+    for (int k = top; k >= 0 && n < max; k--)
+        if (on[k] && (!have_allowed || CPU_ISSET(k, &allowed))) out[n++] = k;
+    if (n == 0)
+        for (int k = top; k >= 0 && n < max; k--) if (on[k]) out[n++] = k;
     return n;
 }
 
@@ -149,7 +158,8 @@ static int capacity(int cpu) {
     return c;
 }
 
-/* The pool's cores: the fastest online, those within 3/4 of the best.
+/* The pool's cores: the fastest online the process may use, those
+   within 3/4 of the best.
    A task on a slow core holds up every task waiting for it: on mains the
    uConsole's two A72s alone ran bush_doof_e's blocks 1.73x as fast as
    one, and adding its four A53s took that back to 1.35x. On battery

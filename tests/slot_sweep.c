@@ -36,7 +36,7 @@ TEST(slot_sweep) {
   for (int i = 0; i < 12; i++) {
     snprintf(name, sizeof name, "aither_test_slot_%d", i);
     if (write_patch(name, paths[i])) { CHECK(0, "can't write %s", paths[i]); return; }
-    err = engine_load(paths[i], 0.0);
+    err = engine_load(paths[i], 0.0, NULL);
     CHECK(err == NULL, "load #%d should succeed, got: %s", i, err);
     free(err);
   }
@@ -61,7 +61,7 @@ TEST(slot_sweep) {
    * the slot count stayed at 12 forever. */
   char new_path[4200];
   if (write_patch("aither_test_slot_new", new_path)) { CHECK(0, "can't write %s", new_path); return; }
-  err = engine_load(new_path, 0.0);
+  err = engine_load(new_path, 0.0, NULL);
   CHECK(err == NULL, "new voice after stopping 12 should succeed, got: %s", err);
   free(err);
 

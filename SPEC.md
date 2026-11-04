@@ -1504,13 +1504,25 @@ wrote, offline. Being plain is what lets any tool write one.
 
 | Command                          | Description                                |
 |----------------------------------|--------------------------------------------|
-| `send <file> [fade]`             | load / hot-swap a patch, then report level, quiet parts, guard trips |
+| `send <file> [fade] [--mute <play>,...]` | load / hot-swap a patch, then report level, quiet parts, guard trips; `--mute` names plays to start silent |
 | `stop <voice> [fade]`            | fade out & remove                          |
 | `clear [fade]`                   | stop all voices                            |
 | `list`                           | show active voices and their parts         |
 | `status`                         | `list` plus the master level               |
 | `sweep <voice> [seconds]`        | where the voice's sweep is; with seconds, set it (0: from the top) |
 | `kill`                           | shut down engine                           |
+
+`send`'s `--mute` names plays of the patch, commas between and no
+spaces (`send harbour.aither 3 --mute tension,danger`). A voice that is
+new, or starting again, has those plays at gain 0 from its first
+sample, so a layer a program brings in later (`unmute
+harbour.tension 4`) is never heard before it is wanted: a `mute` sent
+after the `send` would land a block or more late. On a voice already
+playing, the edit lands and those plays fade out over the send's fade
+(20 ms when left out). A name the compiled patch has no play for is an
+error, as a compile error is: nothing is loaded, and the version
+playing carries on. Anything after the file that is neither the fade
+nor `--mute` is an error.
 
 ### Mute, solo, park
 
@@ -1661,8 +1673,12 @@ put back to 1 each sample. Four multiplies instead of a sine, and the
 same wave to rounding (within 1e-9). Where `f` moves within a block
 (vibrato, FM) the phasor and the sine stay. `AITHER_TURN=0` turns it
 off (PHASORS.md, "Steady sines turn").
-The live mix thread runs on the audio core (the highest-numbered core
-online, `AITHER_RT_CPU` to choose) at `SCHED_FIFO` priority
+Cores are chosen from those the process was started on (its affinity
+as it began, so `taskset -c 0-3 aither` keeps the engine, its workers
+and its compiles on cores 0-3 and leaves the rest to other programs),
+all online cores if none of those is online. The live mix thread runs
+on the audio core (the highest-numbered of them online,
+`AITHER_RT_CPU` to choose) at `SCHED_FIFO` priority
 `AITHER_RT_PRIO` (70), with memory locked when `RLIMIT_MEMLOCK` is
 unlimited, and is pinned again about once a second as cores come and go;
 `tools/play` and `tools/card` do the same. Without the `rtprio` limit it
@@ -1672,7 +1688,7 @@ A voice runs as tasks, cut where its parts can run apart (a `$state`
 written twice, an array, or a loop between them keeps them together),
 merged by cost for the cores it runs on, each task a block at a time.
 The engine runs them on a pool (`pool.c`): `AITHER_THREADS` threads in
-all, counting the mix thread (default: the fastest cores online, within
+all, counting the mix thread (default: the fastest of those cores online, within
 3/4 of the best by the kernel's `cpu_capacity`: the uConsole's two A72s
 on mains, its four A53s on battery). Each worker is pinned to a core of
 its own, at the mix thread's priority. Any split, on any number of

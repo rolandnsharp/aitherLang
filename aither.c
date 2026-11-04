@@ -268,6 +268,7 @@ static void usage(void) {
   puts("                                                 input() reads stdin when it is a pipe");
   puts("");
   puts("  send <file> [fade]          load patch (instant or fade-in seconds)");
+  puts("    --mute <play>[,<play>]    those plays start silent (playing on: fade out)");
   puts("  stop <name> [fade]          fade out & remove voice");
   puts("  mute <target> [fade]        fade to silence; it runs on, in step");
   puts("  unmute <target> [fade]      fade back in");
@@ -341,8 +342,11 @@ int main(int argc, char** argv) {
   if (strcmp(cmd, "help") == 0 || strcmp(cmd, "-h") == 0 || strcmp(cmd, "--help") == 0) {
     usage();
   } else if (strcmp(cmd, "send") == 0) {
-    if (n < 2) die("usage: aither send <file> [fade]");
-    if (n >= 3) snprintf(extra, sizeof extra, " %s", a[2]);
+    if (n < 2) die("usage: aither send <file> [fade] [--mute <play>[,<play>...]]");
+    for (int i = 2; i < n; i++) {
+      size_t at = strlen(extra);
+      snprintf(extra + at, sizeof extra - at, " %s", a[i]);
+    }
     if (!send_patch(a[1], extra)) return 1;
   } else if (strcmp(cmd, "stop") == 0) {
     if (n < 2) die("usage: aither stop <name> [fade]");

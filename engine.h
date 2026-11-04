@@ -74,7 +74,7 @@ char* engine_play_script(const char* path);
 char* engine_command(const char* line);
 
 /* What the commands do, for the tests: NULL, or the error (malloc'd). */
-char* engine_load(const char* path, double fade);
+char* engine_load(const char* path, double fade, const char* muted);   /* muted: plays to start silent, commas between, or NULL */
 char* engine_stop(const char* name, double fade);
 char* engine_silence(const char* name, int on, int park, double fade);
 char* engine_solo(const char* name, double fade);

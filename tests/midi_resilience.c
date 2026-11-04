@@ -53,7 +53,7 @@ TEST(midi_resilience) {
         "tone\n", f);
   fclose(f);
 
-  char* err = engine_load(path, 0.0);
+  char* err = engine_load(path, 0.0, NULL);
   CHECK(err == NULL, "load failed: %s", err);
   free(err);
   char* after = listing();

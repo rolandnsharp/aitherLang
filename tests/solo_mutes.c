@@ -48,8 +48,8 @@ TEST(solo_mutes) {
   }
 
   /* Load both. fade_in=0 → the fade gain starts at 1.0. */
-  ok(engine_load(path_a, 0.0), "load a");
-  ok(engine_load(path_b, 0.0), "load b");
+  ok(engine_load(path_a, 0.0, NULL), "load a");
+  ok(engine_load(path_b, 0.0, NULL), "load b");
 
   /* Sanity: both should be playing. */
   char* s = listing();

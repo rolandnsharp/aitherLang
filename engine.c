@@ -652,7 +652,38 @@ static Prepared* prepare(const char* path, const char* user_src, char** err) {
   return NULL;
 }
 
-char* engine_load(const char* path, double fade_in) {
+static int find_part(Voice* v, const char* name);
+static void set_part_gain_target(Voice* v, int part, double target, double fade);
+
+/* The plays `muted` names (commas between, no spaces), each one that the
+ * compiled patch has; the first it hasn't, or NULL. */
+static char* missing_play(const Version* v, const char* muted) {
+  if (!muted) return NULL;
+  char* list = sdup(muted);
+  char* missing = NULL;
+  for (char* save = NULL, *nm = strtok_r(list, ",", &save); nm && !missing; nm = strtok_r(NULL, ",", &save)) {
+    int found = 0;
+    for (int i = 0; i < v->nparts && !found; i++) found = !strcmp(v->part_names[i], nm);
+    if (!found) missing = sdup(nm);
+  }
+  free(list);
+  return missing;
+}
+
+/* Silence the plays `muted` names: from the first sample when the voice
+ * is starting, over `fade` (the default when 0) when it is playing on. */
+static void mute_named(Voice* v, const char* muted, int starting, double fade) {
+  if (!muted) return;
+  double f = starting ? 0.0 : fade > 0.0 ? fade : DEFAULT_FADE_MS / 1000.0;
+  char* list = sdup(muted);
+  for (char* save = NULL, *nm = strtok_r(list, ",", &save); nm; nm = strtok_r(NULL, ",", &save)) {
+    int p = find_part(v, nm);
+    if (p >= 0) set_part_gain_target(v, p, 0.0, f);
+  }
+  free(list);
+}
+
+char* engine_load(const char* path, double fade_in, const char* muted) {
   if (!is_file(path)) return fmt("file not found: %s", path);
   char* user_src = read_file(path);
   char* name = base_name(path);
@@ -662,6 +693,15 @@ char* engine_load(const char* path, double fade_in) {
   free(user_src);
   if (!prepared) {
     fprintf(stderr, "%s FAIL\n", err[0] == 'i' ? "import" : err[0] == 'c' ? "compile" : "parse");
+    free(name);
+    return err;
+  }
+  char* missing = missing_play(&prepared->v, muted);
+  if (missing) {
+    fprintf(stderr, "FAIL (no play %s)\n", missing);
+    err = fmt("no play named %s in %s (send --mute names its plays)", missing, file_tail(path));
+    free(missing);
+    voice_prepared_free(prepared);
     free(name);
     return err;
   }
@@ -704,6 +744,7 @@ char* engine_load(const char* path, double fade_in) {
     } else if (fade_in > 0.0) {
       s->fade_delta = fade_delta_for(fade_in);
     }
+    mute_named(committed, muted, retrigger, fade_in);
     unlock();
     fprintf(stderr, "ok (%s %s)\n", retrigger ? "retrigger" : "hot-swap", name);
   } else {
@@ -723,6 +764,7 @@ char* engine_load(const char* path, double fade_in) {
     s->active = 1;
     s->fade_gain = fade_in > 0.0 ? 0.0 : 1.0;
     s->fade_delta = fade_in > 0.0 ? fade_delta_for(fade_in) : 0.0;
+    mute_named(committed, muted, 1, fade_in);
     slot_count++;
     unlock();
     fprintf(stderr, "ok (new %s)\n", name);
@@ -1456,8 +1498,24 @@ static char* handle(int n, char** w) {
   lower(verb);
 #define IS(s) (strcmp(verb, s) == 0)
   if (IS("send")) {
-    if (n < 2) return sdup("ERR usage: send <file> [fade-seconds]");
-    char* err = engine_load(w[1], n >= 3 ? parse_float_arg(w[2], 0.0) : 0.0);
+    /* `send <file> [fade] [--mute <play>[,<play>...]]` */
+    const char* usage = "ERR usage: send <file> [fade-seconds] [--mute <play>[,<play>...]]";
+    if (n < 2) return sdup(usage);
+    double fade = 0.0;
+    int have_fade = 0;
+    const char* muted = NULL;
+    for (int i = 2; i < n; i++) {
+      if (!strcmp(w[i], "--mute")) {
+        if (i + 1 >= n || muted) return sdup(usage);
+        muted = w[++i];
+      } else if (!have_fade && !isnan(parse_float_arg(w[i], NAN))) {
+        fade = parse_float_arg(w[i], 0.0);
+        have_fade = 1;
+      } else {
+        return fmt("ERR send: %s is neither a fade in seconds nor --mute", w[i]);
+      }
+    }
+    char* err = engine_load(w[1], fade, muted);
     if (err) return ok_or_err(err);
     char* name = base_name(w[1]);
     char* meter = meter_after_send(name);
@@ -1764,7 +1822,7 @@ void engine_run(char** files, int nfiles, double seconds) {
   if (seconds <= 0.0) start_optimizer();
   for (int i = 0; i < nfiles; i++) {
     char* path = absolute(files[i]);
-    char* err = engine_load(path, 0.0);
+    char* err = engine_load(path, 0.0, NULL);
     free(path);
     if (err) {
       fprintf(stderr, "aither: %s\n", err);
