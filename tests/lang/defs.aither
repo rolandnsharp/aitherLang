@@ -287,3 +287,11 @@ turnn(2, 0)
 def g(b):
   [b[0], 0] * b
 g([3, 2])
+
+# --- a state a def starts from a pair parameter is a pair
+# expect: 0.5, 0.25
+def keep(start):
+  $z = start
+  $z = rotate($z, 0)
+  $z
+keep([0.5, 0.25])

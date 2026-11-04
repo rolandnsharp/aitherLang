@@ -693,25 +693,34 @@ static int is_fn_name(Ctx* c, Scope* sc, const char* name) {
 static const char* pair_var_field(Ctx* c, const char* name, int k) { return F(c, "%s__%d", name, k); }
 static const char* pair_var_ref(Ctx* c, const char* name, int k) { return F(c, "s->v_%s__%d", name, k); }
 
-static int param_index(Node* def, const char* name) {
-  for (int i = 0; i < def->nparams; i++) if (eq(def->params[i], name)) return i;
+/* Which params a def's body reads as a pair. Its own `$x`s and lets are
+ * followed too: one read as a pair makes what it is made of a pair, its
+ * first value and what is put in it, so `$z = start` then `rotate($z,
+ * ..)` makes start a pair. */
+static int* pair_params(Ctx* c, Node* def);
+
+typedef struct {
+  Node* def;
+  int n;              /* params, then locals */
+  const char** names;
+} Pp;
+
+static int pp_index(Pp* pp, const char* name) {
+  for (int i = 0; i < pp->n; i++) if (eq(pp->names[i], name)) return i;
   return -1;
 }
 
-/* Which params a def's body reads as a pair. */
-static int* pair_params(Ctx* c, Node* def);
-
-static int pp_is_pair(int* res, Node* def, Node* n) {
+static int pp_is_pair(int* res, Pp* pp, Node* n) {
   if (!n) return 0;
   switch (n->kind) {
-  case nkIdent: { int k = param_index(def, n->str); return k >= 0 && res[k]; }
+  case nkIdent: { int k = pp_index(pp, n->str); return k >= 0 && res[k]; }
   case nkArr: return n->nkids == 2;
   case nkCall: return in(n->str, PAIR_CALLS);
   case nkBinOp:
     if (!(eq(n->str, "+") || eq(n->str, "-") || eq(n->str, "*") || eq(n->str, "/") || eq(n->str, "^"))) return 0;
-    for (int i = 0; i < n->nkids; i++) if (pp_is_pair(res, def, n->kids[i])) return 1;
+    for (int i = 0; i < n->nkids; i++) if (pp_is_pair(res, pp, n->kids[i])) return 1;
     return 0;
-  case nkUnary: return eq(n->str, "-") && pp_is_pair(res, def, n->kids[0]);
+  case nkUnary: return eq(n->str, "-") && pp_is_pair(res, pp, n->kids[0]);
   default: return 0;
   }
 }
@@ -720,22 +729,23 @@ static int pp_is_pair(int* res, Node* def, Node* n) {
  * however nested): in `left + right - me * 2`, left and right meet the
  * pair me * 2 too. A pair param given a number fills both sides, which is
  * what broadcasting the number would have done, so marking is safe. */
-static void pp_mark_arith(int* res, Node* def, Node* n) {
+static void pp_mark_arith(int* res, Pp* pp, Node* n) {
   if (!n) return;
-  if (n->kind == nkIdent) { int k = param_index(def, n->str); if (k >= 0) res[k] = 1; return; }
+  if (n->kind == nkIdent) { int k = pp_index(pp, n->str); if (k >= 0) res[k] = 1; return; }
   if ((n->kind == nkBinOp && (eq(n->str, "+") || eq(n->str, "-") || eq(n->str, "*") || eq(n->str, "/") || eq(n->str, "^"))) ||
       (n->kind == nkUnary && eq(n->str, "-")))
-    for (int i = 0; i < n->nkids; i++) pp_mark_arith(res, def, n->kids[i]);
+    for (int i = 0; i < n->nkids; i++) pp_mark_arith(res, pp, n->kids[i]);
 }
 
-static void pp_mark(Ctx* c, int* res, Node* def, Node* n) {
+static void pp_mark(Ctx* c, int* res, Pp* pp, Node* n) {
   if (!n) return;
+  Node* def = pp->def;
   switch (n->kind) {
   case nkIdx: {
     Node* a = n->kids[0];
     Node* i = n->kids[1];
     if (a->kind == nkIdent && i->kind == nkNum && ((int)i->num == 0 || (int)i->num == 1)) {
-      int k = param_index(def, a->str);
+      int k = pp_index(pp, a->str);
       if (k >= 0) res[k] = 1;
     }
     break;
@@ -743,10 +753,19 @@ static void pp_mark(Ctx* c, int* res, Node* def, Node* n) {
   case nkBinOp:
     if (eq(n->str, "+") || eq(n->str, "-") || eq(n->str, "*") || eq(n->str, "/") || eq(n->str, "^")) {
       int any = 0;
-      for (int i = 0; i < n->nkids; i++) if (pp_is_pair(res, def, n->kids[i])) any = 1;
-      if (any) pp_mark_arith(res, def, n);
+      for (int i = 0; i < n->nkids; i++) if (pp_is_pair(res, pp, n->kids[i])) any = 1;
+      if (any) pp_mark_arith(res, pp, n);
     }
     break;
+  case nkVar: case nkLet: case nkAssign: {
+    /* a local read as a pair: what it is made of is one */
+    int k = pp_index(pp, n->str);
+    if (k >= def->nparams && n->nkids) {
+      if (res[k]) pp_mark_arith(res, pp, n->kids[0]);
+      else if (pp_is_pair(res, pp, n->kids[0])) res[k] = 1;
+    }
+    break;
+  }
   case nkCall: {
     int* callee = NULL;
     int ncallee = 0;
@@ -757,39 +776,54 @@ static void pp_mark(Ctx* c, int* res, Node* def, Node* n) {
     }
     for (int j = 0; j < n->nkids; j++) {
       Node* arg = n->kids[j];
-      if (eq(n->str, def->str) && j < def->nparams && pp_is_pair(res, def, arg)) res[j] = 1;
+      if (eq(n->str, def->str) && j < def->nparams && pp_is_pair(res, pp, arg)) res[j] = 1;
       int wants = ((in(n->str, PAIR_CALLS) || in(n->str, PAIR_READERS)) && takes_pair_at(n->str, j, n->nkids)) ||
                   (j < ncallee && callee[j]);
-      if (arg->kind != nkIdent) { if (wants) pp_mark_arith(res, def, arg); continue; }
-      int k = param_index(def, arg->str);
-      if (k < 0) continue;
-      if (((in(n->str, PAIR_CALLS) || in(n->str, PAIR_READERS)) && takes_pair_at(n->str, j, n->nkids)) ||
-          (j < ncallee && callee[j]))
-        res[k] = 1;
+      if (arg->kind != nkIdent) { if (wants) pp_mark_arith(res, pp, arg); continue; }
+      int k = pp_index(pp, arg->str);
+      if (k >= 0 && wants) res[k] = 1;
     }
     break;
   }
   default: break;
   }
-  for (int i = 0; i < n->nkids; i++) pp_mark(c, res, def, n->kids[i]);
+  for (int i = 0; i < n->nkids; i++) pp_mark(c, res, pp, n->kids[i]);
+}
+
+static void pp_locals(Ctx* c, Pp* pp, Node* n, int* cap) {
+  if (!n || n->kind == nkLambda || n->kind == nkDef) return;
+  if ((n->kind == nkVar || n->kind == nkLet) && pp_index(pp, n->str) < 0) {
+    if (pp->n == *cap) {
+      *cap *= 2;
+      const char** nm = al(c, *cap * sizeof(char*));
+      memcpy(nm, pp->names, pp->n * sizeof(char*));
+      pp->names = nm;
+    }
+    pp->names[pp->n++] = n->str;
+  }
+  for (int i = 0; i < n->nkids; i++) pp_locals(c, pp, n->kids[i], cap);
 }
 
 static int* pair_params(Ctx* c, Node* def) {
   Ent* e = hfind(&c->pair_param_cache, def->str);
   if (e) return e->p;
   int np = def->nparams;
-  int* res = al(c, (np ? np : 1) * sizeof(int));
+  Pp pp = {def, np, NULL};
+  int cap = np + 8;
+  pp.names = al(c, cap * sizeof(char*));
+  for (int i = 0; i < np; i++) pp.names[i] = def->params[i];
+  pp_locals(c, &pp, def->kids[0], &cap);
+  int n = pp.n;
+  int* res = al(c, (n ? n : 1) * sizeof(int));
   hput(c, &c->pair_param_cache, def->str)->p = res;       /* against call cycles */
-  int* before = al(c, (np ? np : 1) * sizeof(int));
+  int* before = al(c, (n ? n : 1) * sizeof(int));
   for (;;) {
-    memcpy(before, res, np * sizeof(int));
-    pp_mark(c, res, def, def->kids[0]);
-    if (!memcmp(before, res, np * sizeof(int))) break;
+    memcpy(before, res, n * sizeof(int));
+    pp_mark(c, res, &pp, def->kids[0]);
+    if (!memcmp(before, res, n * sizeof(int))) break;
   }
   return res;
 }
-
-
 
 /* ------------------------------------------------- expression codegen
  *
