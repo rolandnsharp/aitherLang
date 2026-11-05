@@ -12,24 +12,26 @@
 # three latitudes make three nested tori, every circle linked with every
 # other. Nothing here is drawn as a torus: the tori are what spinors are.
 #
-# The beam runs round one fibre each 1/110 s (you hear it at 110 Hz),
-# steps to the next fibre round the latitude, and goes through the three
-# latitudes in turn; the view turns slowly so the tori are seen from
-# every side.
+# The beam runs round each fibre in turn, sixteen round each latitude
+# and three latitudes, the whole of it twenty times a second, so the
+# phosphor holds all three tori at once (you hear the beam at about a
+# kilohertz). The fibres creep round their latitude as it goes, so the
+# linked circles slide through each other, and the view turns slowly.
 #
-#   ./aither patches/hopf_tori.aither | tools/scope
-#   ./aither patches/hopf_tori.aither | tools/scope | tools/play hw:rockchipes8388c 20     # and hear it
+#   ./aither patches/hopf_tori.aither | tools/scope --decay 0.9
+#   ./aither patches/hopf_tori.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20     # and hear it
 
-let loop = 110                                             # fibres drawn a second
-let per = 24                                               # fibres round each latitude
-let lats = [0.28, 0.42, 0.56]                              # the latitudes, as fractions of a half turn from the pole
+let per = 16                                               # fibres round each latitude
+let passes = 20                                            # the whole picture, a second
+let loop = passes * per * 3                                # fibres drawn a second
+let lats = [0.3, 0.45, 0.6]                                # the latitudes, as fractions of a half turn from the pole
 
 # Which fibre the beam is on, and how far round it.
 let k = floor(t * loop)
 let alpha = TAU * ((t * loop) mod 1)
 let fibre = k mod (per * 3)
 let theta = PI * lats[floor(fibre / per)]                  # the latitude
-let phi = TAU * (fibre mod per) / per                      # where round it
+let phi = TAU * (fibre mod per) / per + TAU * t / 37       # where round it, creeping
 
 # The spinor: one direction's spinors, turned together by alpha.
 let xi = rotate([cos(theta / 2), 0], alpha)
@@ -43,8 +45,8 @@ let py = xi[1] / away
 let pz = eta[0] / away
 
 # The view: turning slowly about the vertical, tipped well forward so the
-# tori are seen from the side, breathing.
+# tori are seen from the side.
 let turned = rotate([px, py], TAU * t / 29)
-let tip = 1.05 + 0.3 * sin(TAU * t / 41)
+let tip = 1.1
 let tipped = rotate([turned[1], pz], tip)
 [turned[0], tipped[0]] * 0.22
