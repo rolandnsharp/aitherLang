@@ -97,10 +97,68 @@ the dynamics. No outside parameter runs underneath.
 4. Decide whether `t` stays as a convenience or goes. Then decide
    whether Hz stays at the edges or gives way to ratios.
 
+## Pitch, the way Tesla tuned
+
+As his writing describes it (not checked here as physics), Tesla tuned by
+resonance: a circuit's period came from what it was made of, its capacity
+and self-induction, and he tuned circuits to each other, and in his
+wireless work to what he took to be the earth's own period. A frequency
+was relational, a property of the resonator; the second came in only when
+someone measured against a clock.
+
+So in aither: **pitch lives in the resonator and in its ratio to other
+resonators; the step is the medium's grain, not a clock.** The one place
+a second is real is the edge, where the patch meets the outside (the
+sound card, an SDR's centre frequency, a MIDI note, the ear). A sketch:
+
+- A patch has one reference turning, its keynote. Only that one takes a
+  rate from outside, in Hz, at the edge.
+- Everything else turns in ratios to it: 3/2 of that, a bell's partials,
+  the sympathetic bells' octave as 2.
+- A resonator may instead carry its own make (a stiffness and a mass, as
+  Tesla had coil and condenser); its pitch is what they give, in turns a
+  step, with no Hz at all.
+
+Moving the keynote retunes the patch; the same patch runs at 48 kHz for
+sound and 192 kHz for radio, only the edge knowing the rate; `sr` leaves
+patches.
+
+## Each time a turning comes round
+
+`impulse(freq)` already is this, for its own hidden phasor: a 1 on the
+step it wraps. What is missing is the word for a turning the patch
+already has. Proposed, in the stdlib, written in aither: **`passes(z)`**,
+1 on the step a turning comes round past its start, else 0:
+
+- a pair (`spin`, `dho`, a phasor pair): its phase crossing 0 upward;
+- a phasor's 0..1: its wrap;
+- a pair of pairs: its angle coming back through 0, a versor's whole turn
+  (the double cover: a spinor passes once each two turns of what it
+  turns).
+
+Form is then the slow turnings and what they pass: `since(passes(slow))`
+counts steps into a section; `impulse(1 / 8)` becomes
+`passes(slow)` with `slow` one turn in eight seconds' worth of keynote
+turns. The name is open: `passes`, `round` (but patches use `round` as a
+let: hopf_split), or Hamilton's or Tesla's word if one fits.
+
+## sweep, a voice's own count
+
+Yes. Today `sweep` is `t` less the moment it was last set, in seconds:
+a double that grows, set from outside with `aither sweep <voice>
+<seconds>`. Step first, it is **the voice's count of steps since it was
+last set**, kept by the engine as an integer (exact for ever, where a
+double second count is not), set from outside at the edge (in seconds
+there, or turns of the keynote), and read inside as a count. `t` is then
+the same kind of thing: the engine's count, the sweep of everything. Two
+counts, one kind, no clock; and a poly voice's own age is `since` its
+note began, already a count.
+
 ## Open questions
 
-1. Pitch: Hz at the edges only, ratios inside, or ratios throughout?
-2. A slow phasor for form: is there a stdlib word for "each time it comes
-   round" (an edge on a phasor's wrap), or is `since` on a phasor enough?
-3. `sweep` (a voice's own time from its start): it becomes the voice's
-   step count, which a poly voice already has a start for.
+1. Pitch: settled above as a direction (ratios inside, Hz at the edge);
+   open is how a patch names its keynote, and whether a resonator's own
+   make (stiffness and mass) is a stdlib form.
+2. The word for `passes`.
+3. Whether `t` stays as a name at all once `sweep` and `since` are
+   counts.
