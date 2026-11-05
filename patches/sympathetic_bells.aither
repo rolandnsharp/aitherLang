@@ -1,0 +1,123 @@
+# sympathetic_bells: two bells resonating with each other through a field
+# (notes/spinors-2026-11-05.md, "Instruments resonating through the
+# field").
+#
+# Two bells of struck_bell's kind, each mode a doublet pair, the second
+# an octave above the first, so they share modes: its hum is the first's
+# prime (196 Hz), its prime the first's nominal (392 Hz). Between them is
+# a field, held as its dipole part, a direction and a size: each bell
+# pours its vibration into it along the way it faces, and is driven by
+# it along the way it faces. That is COMPOSING's sympathetic strings
+# ("Coupling: one sample of shared state") with the field for the
+# bridge: every bell writes it and every bell reads it, a sample later.
+# Resonance does the choosing: the field carries all of the first bell,
+# and the second answers only on the modes they share.
+#
+# Like two antennas: facing the same way they share the field fully,
+# turned crosswise they don't hear each other at all, turned to face
+# opposite ways they answer inverted. The second bell's facing is a
+# rotation (a, b) made from a turn and a tilt, the way it faces the Hopf
+# map of the spinor of "ahead" turned by it.
+#
+# Each bell hears the field less its own part (its own sound coming back
+# to it would be a second, louder loop); the first bell is struck every
+# 8 s by itself, so the second's answer can be heard without playing. The
+# first bell is on the left, the second on the right.
+#
+# The gamepad (tools/pad): A strikes the first bell, B the second; hold A
+# and press left and right to turn the second bell (CC 21), up and down
+# to tilt it (CC 20); hold B and press up and down for a stronger field
+# (CC 22), up to the edge where the two would feed each other without
+# end.
+#
+# Measured, the first bell struck once: facing the same way, the second
+# answers 20 dB under it on the shared modes (196 and 392 Hz), its answer
+# growing over the first seconds; crosswise, 58 dB under, silent; half
+# turned, 23 dB; turned to face opposite, as loud as aligned, inverted.
+#   tools/pad & AITHER_MIDI=aither-pad ./aither patches/sympathetic_bells.aither | tools/play hw:rockchipes8388c 20
+
+# ---------------------------------------------------------------- the bells
+
+# Six modes: frequency over the prime, ring (s, to 1/e), level, how many
+# times round the bell each winds, and how far its doublet is split (a
+# bell with a flat side, as struck_bell).
+let ratio = [0.5, 1.0, 1.2, 1.5, 2.0, 2.5]
+let ring  = [9.0, 5.0, 4.0, 2.2, 3.0, 1.6]
+let level = [0.7, 0.5, 0.45, 0.25, 0.55, 0.3]
+let winds = [2, 2, 3, 3, 4, 4]
+let split = [1.006, 1.0093, 1.0108, 1.0072, 1.0089, 1.0101]
+
+# A bell: every push (a strike, or the field) reaches each mode's pair
+# turned by the mode's winding at where it lands, over 2 pi f so a strike
+# of area 1 rings each mode at its level.
+def bell(push_in, prime, where):
+  sum(6, k =>
+    let f = prime * ratio[k - 1]
+    let p = rotate([push_in / (TAU * f), 0], winds[k - 1] * where)
+    let a = resonator(p[0], f, 2 / ring[k - 1])
+    let b = resonator(p[1], f * split[k - 1], 2 / ring[k - 1])
+    (a + b) * level[k - 1])
+
+# A strike: a push of area 1 swelling and dying over a millisecond.
+def push(trig): (discharge(trig, 1 / 0.001) - discharge(trig, 1 / 0.0003)) / 0.0007
+
+# ---------------------------------------------------------------- facing
+
+# The way a spinor points (Hopf map), and a rotation (a, b) applied to a
+# spinor and composed, as in spinfield.
+def hopf_xy(xi, eta): turn(conj(xi), eta) * 2
+def hopf_z(xi, eta): amplitude(xi) * amplitude(xi) - amplitude(eta) * amplitude(eta)
+def turned_xi(a, b, xi, eta): turn(a, xi) + turn(b, eta)
+def turned_eta(a, b, xi, eta): turn(conj(a), eta) - turn(conj(b), xi)
+def comp_a(a1, b1, a2, b2): turn(a1, a2) - turn(b1, conj(b2))
+def comp_b(a1, b1, a2, b2): turn(a1, b2) + turn(b1, conj(a2))
+
+# The first bell faces ahead (x). The second: turned about the vertical,
+# then tilted, from the knobs (each starting at 0: facing the same way).
+let yaw = slew(midi_cc(21), 0.05) * TAU
+let tilt = slew(midi_cc(20), 0.05) * TAU
+let ya = [cos(yaw / 2), -sin(yaw / 2)]
+let yb = [0, 0]
+let ta = [cos(tilt / 2), 0]
+let tb = [-sin(tilt / 2), 0]
+let ra = comp_a(ya, yb, ta, tb)
+let rb = comp_b(ya, yb, ta, tb)
+let r2 = sqrt(0.5)
+let ahead_xi = [r2, 0]                                     # the spinor of "ahead" (+x)
+let ahead_eta = [r2, 0]
+let f2xy = hopf_xy(turned_xi(ra, rb, ahead_xi, ahead_eta), turned_eta(ra, rb, ahead_xi, ahead_eta))
+let f2z = hopf_z(turned_xi(ra, rb, ahead_xi, ahead_eta), turned_eta(ra, rb, ahead_xi, ahead_eta))
+let f1xy = [1, 0]
+let f1z = 0
+
+# ---------------------------------------------------------------- the field
+
+# The field as last sample's bells left it: its dipole, X + iY and Z, and
+# each bell's own part, so each can hear the others.
+$s1 = 0
+$s2 = 0
+let field_xy = f1xy * $s1 + f2xy * $s2
+let field_z = f1z * $s1 + f2z * $s2
+# How strongly the bells share the field. A loop has a gain: measured
+# (struck once, left to ring 40 s), the ringing dies away up to about
+# 0.55, the bells holding each other longer the stronger it is; at 0.7
+# it barely holds, and from 0.85 it grows until the engine's guard mutes
+# it. So the knob goes 0.4 to 0.6.
+let strength = 0.4 + 0.2 * midi_cc(22)
+# What each bell hears: the field along its facing, less its own part.
+def along(fxy, fz, vxy, vz): turn(conj(fxy), vxy)[0] + fz * vz
+let heard1 = along(f1xy, f1z, field_xy - f1xy * $s1, field_z - f1z * $s1) * strength
+let heard2 = along(f2xy, f2z, field_xy - f2xy * $s2, field_z - f2z * $s2) * strength
+
+# ---------------------------------------------------------------- playing
+
+let auto = impulse(1 / 8)                                  # the first bell strikes itself every 8 s
+let hit1 = push(auto + midi_trig(36)) * 0.9
+let hit2 = push(midi_trig(37)) * 0.9
+let b1 = bell(hit1 + heard1, 196, 0.4)
+let b2 = bell(hit2 + heard2, 392, 1.1)
+$s1 = b1
+$s2 = b2
+
+let mix = pan(b1 * 0.12, -0.6) + pan(b2 * 0.12, 0.6)
+mix |> reverb(2.2, 0.12) |> tanh
