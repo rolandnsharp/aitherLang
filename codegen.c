@@ -3400,13 +3400,18 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
     if (eq(name, "axis"))
       fail(c, "axis(q) is a pair of pairs' axis (Hamilton's Ax q), and this is %s %s",
            n->nkids == 1 ? F(c, "given %s", given(c, n->kids[0], ops[0])) : "the wrong number of arguments", err_loc(c, n));
+    /* turn and unturn are strict: two arguments, both pairs (both pairs of
+     * pairs above). Nothing is read as a pair that wasn't written as one. */
+    if ((eq(name, "turn") || eq(name, "unturn")) && (n->nkids != 2 || !ops[0].pair || !ops[1].pair))
+      fail(c, "%s takes two pairs, `%s(z, w)` (or two pairs of pairs), and is given %s %s", name, name,
+           n->nkids ? givens(c, n->kids, ops, n->nkids) : "nothing", err_loc(c, n));
     if (eq(name, "turn")) {
-      const char** a = flatten_operands(c, n, ops, 4, "two pairs (or four numbers)");
+      const char** a = flatten_operands(c, n, ops, 4, "two pairs");
       return vpair(F(c, "(%s * %s - %s * %s)", a[0], a[2], a[1], a[3]),
                    F(c, "(%s * %s + %s * %s)", a[0], a[3], a[1], a[2]));
     }
     if (eq(name, "unturn")) {              /* z turned back by w's angle, divided by its size */
-      const char** a = flatten_operands(c, n, ops, 4, "two pairs (or four numbers)");
+      const char** a = flatten_operands(c, n, ops, 4, "two pairs");
       const char* d = fresh(c, "unturn_d");
       badd(c, pre, "  double %s = %s * %s + %s * %s;\n", d, a[2], a[2], a[3], a[3]);
       return vpair(F(c, "(%s == 0.0 ? 0.0 : (%s * %s + %s * %s) / %s)", d, a[0], a[2], a[1], a[3], d),
@@ -3420,24 +3425,8 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
     if (eq(name, "amplitude")) return mono(F(c, "sqrt(%s * %s + %s * %s)", a[0], a[0], a[1], a[1]));
     return mono(F(c, "atan2(%s, %s)", a[1], a[0]));
   }
-  if (in(name, PAIR_CALLS)) {
+  if (in(name, PAIR_CALLS)) {          /* turn, unturn and conj are above */
     const char* f = name;
-    if (eq(f, "turn")) {
-      const char** a = pair_operands(c, sc, n, pre, 4, "two pairs (or four numbers)");
-      return vpair(F(c, "(%s * %s - %s * %s)", a[0], a[2], a[1], a[3]),
-                   F(c, "(%s * %s + %s * %s)", a[0], a[3], a[1], a[2]));
-    }
-    if (eq(f, "unturn")) {                 /* z turned back by w's angle, divided by its size */
-      const char** a = pair_operands(c, sc, n, pre, 4, "two pairs (or four numbers)");
-      const char* d = fresh(c, "unturn_d");
-      badd(c, pre, "  double %s = %s * %s + %s * %s;\n", d, a[2], a[2], a[3], a[3]);
-      return vpair(F(c, "(%s == 0.0 ? 0.0 : (%s * %s + %s * %s) / %s)", d, a[0], a[2], a[1], a[3], d),
-                   F(c, "(%s == 0.0 ? 0.0 : (%s * %s - %s * %s) / %s)", d, a[1], a[2], a[0], a[3], d));
-    }
-    if (eq(f, "conj")) {
-      const char** a = pair_operands(c, sc, n, pre, 2, "one pair (or two numbers)");
-      return vpair(a[0], F(c, "(-(%s))", a[1]));
-    }
     if (eq(f, "analytic")) {
       const char** a = pair_operands(c, sc, n, pre, 1, "one signal");
       const char* off_a = register_region(c, "hilbert_a", 17, NULL);

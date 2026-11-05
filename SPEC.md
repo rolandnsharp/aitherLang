@@ -772,6 +772,10 @@ read as a complex number only by the operations that turn it
 Undoing a turn by a unit pair is turning by its conjugate:
 `turn(turn(z, w), conj(w))` is `z`.
 
+`turn` and `unturn` are strict: two arguments, both pairs (or both pairs
+of pairs). Numbers aren't gathered into pairs, so `turn([1, 2], 3, 4)`
+and `turn(1, 2, 3, 4)` are errors that name what was given.
+
 **Read the whole pair.** A pair from an oscillator, `analytic` or
 `spin` is a phasor: two sides a quarter turn apart. Most of what is
 wanted from it reads both sides at once, exactly and at every sample:

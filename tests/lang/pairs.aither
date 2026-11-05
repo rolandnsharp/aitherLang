@@ -233,3 +233,15 @@ def g(freq):
   let a = TAU * phasor(freq)
   [cos(a), sin(a)]
 g(1)
+
+# --- turn is strict: two pairs, nothing read as a pair that wasn't written as one
+# error: turn takes two pairs, `turn(z, w)` (or two pairs of pairs), and is given `[1, 2]`, a pair; `3`, a number, and `4`, a number
+turn([1, 2], 3, 4)
+
+# --- ... nor four numbers
+# error: turn takes two pairs
+turn(1, 2, 3, 4)
+
+# --- ... nor a pair and a number
+# error: unturn takes two pairs
+unturn([1, 2], 3)
