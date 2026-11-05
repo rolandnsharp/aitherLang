@@ -5,22 +5,23 @@
 # one. Nothing here is a sample or an envelope: the sound is the modes
 # answering the force.
 #
-# Playing it
-#   key        where you strike: the twelve notes of an octave go round
-#              the bell (C at 0, each semitone 30 degrees on), and the
-#              octaves go up it, C3 at the lip to C7 near the shoulder
+# Playing it, on the uConsole's gamepad (tools/pad --notes)
+#   B, Y, A, X   strike, from the bottom button up: the lip, the waist,
+#                the shoulder, the crown
+#   up, down     a harder or a softer striker, in four steps from bronze
+#                to soft wood; it doesn't strike
+#   left, right  come at the bell from another side, 45 degrees a press;
+#                this bell has a flat side, so its warble changes as you go
+#                round, from none to deep
+#     tools/pad --notes & AITHER_MIDI=aither-pad ./aither patches/struck_bell.aither | tools/play hw:rockchipes8388c 20
+# On a MIDI keyboard
+#   key        where: the twelve notes of an octave go round the bell, the
+#              octaves up it, C3 at the lip to C7 near the shoulder
+#              (C2 to G2 are the pad's buttons and d-pad, above)
 #   velocity   how fast the striker is moving
 #   CC 20      the striker, hard bronze (0) to a soft wooden mallet (1)
-#   CC 21      further up the bell, added to the key's height (0: none)
 #   CC 22      lighter: the strike's speed brought down (0: as played)
-#   the pitch never changes: it is the bell's
-#
-# On the uConsole's gamepad (tools/pad): A, B, X and Y strike at four
-# places a quarter of the way round, at the lip; hold A and press up and
-# down for the striker, left and right to move up the bell; hold B and
-# press up and down to strike lighter. Each press of A or B is a strike
-# too, as it is a note.
-#   tools/pad & AITHER_MIDI=aither-pad ./aither patches/struck_bell.aither | tools/play hw:rockchipes8388c 20
+# The pitch never changes: it is the bell's.
 #
 # The physics, each a line or two below
 # - The bell's modes, named as founders name them (hum, prime, tierce,
@@ -59,18 +60,27 @@ let prime = 196.0                                          # G3; the hum is G2
 # The modes: frequency over the prime, how long each rings (s, to 1/e),
 # how strongly each radiates, the nodal meridians' count m, where its
 # nodal circle sits up the bell (0 the lip, 1 the shoulder; 9: none),
-# and how far the doublet is split by the bell's asymmetry.
+# and how far the doublet is split by the bell's asymmetry. A fine bell's
+# pairs sit a tenth of a percent apart and beat once in seconds; this one
+# has a flat side, about 1%, so they beat at a hertz or two and where you
+# strike round it decides how deep.
 let ratio  = [0.5, 1.0, 1.2, 1.5, 2.0, 2.5, 3.0, 4.2]
 let ring   = [9.0, 5.0, 4.0, 2.2, 3.0, 1.6, 1.1, 0.6]
 let level  = [0.7, 0.5, 0.45, 0.25, 0.55, 0.3, 0.25, 0.15]
 let winds  = [2, 2, 3, 3, 4, 4, 5, 6]
 let circle = [9, 0.6, 0.5, 0.25, 0.7, 0.35, 0.6, 0.45]
-let split  = [1.0006, 1.0013, 1.0021, 1.0009, 1.0017, 1.0011, 1.0024, 1.0031]
+let split  = [1.006, 1.0093, 1.0108, 1.0072, 1.0089, 1.0101, 1.0117, 1.0098]
 let phi0   = 0.4                                           # the bell's own asymmetry points here
 
-let soft = slew(midi_cc(20), 0.05)                         # the striker: bronze .. wood
-let higher = midi_cc(21)                                   # further up the bell
+# The pad's d-pad (notes 40 to 43) sets, without striking: the striker
+# in four steps, and the side the striker comes from.
+$striker = 0
+$striker = clamp($striker + (midi_trig(41) - midi_trig(40)) / 3, 0, 1)
+$side = 0
+$side = $side + TAU / 8 * (midi_trig(43) - midi_trig(42))
+let soft = clamp(slew(midi_cc(20), 0.05) + $striker, 0, 1)         # the striker: bronze .. wood
 let lighter = 1 - 0.9 * midi_cc(22)                        # the strike's speed, brought down
+let pad_height = [0.66, 0, 1, 0.33]                        # A, B, X, Y: shoulder, lip, crown, waist
 
 # Each key is a strike: how long since each slot's latest note-on.
 let ages = array(16, i => since(midi_voice_on(i + 1)))
@@ -95,17 +105,19 @@ play bell:
     # Every strike's push into this mode's pair, while one lasts.
     let push = if hitting < 1 then [0, 0] else sum(16, n =>
       let age = ages[n - 1]
-      let force = if age < 0.01 then contact(age, midi_voice_vel(n) * lighter, soft) else 0
       let key = midi_voice_key(n)
-      let around = TAU * (key mod 12) / 12 - phi0
-      let up = clamp((floor(key / 12) - 4) / 4 + higher, 0, 1)
+      let dpad = key >= 40 and key <= 43
+      let force = if age < 0.01 and not dpad then contact(age, midi_voice_vel(n) * lighter, soft) else 0
+      let button = key >= 36 and key <= 39
+      let around = (if button then 0 else TAU * (key mod 12) / 12) + $side - phi0
+      let up = if button then pad_height[key - 36] else clamp((floor(key / 12) - 4) / 4, 0, 1)
       if force > 0 then rotate([force * height_shape(up, circle[k - 1]), 0], m * around) else [0, 0])
     # A push in force units reaches the mode as its ringing times 2 pi f:
     # divided back, so each rings at its level.
     let w = TAU * f
     let a = resonator(push[0] / w, f, 2 / ring[k - 1])
     let b = resonator(push[1] / w, f * split[k - 1], 2 / ring[k - 1])
-    [a + b * 0.5, a * 0.5 + b] * level[k - 1])
+    (a + b) * level[k - 1])                                # the pair together: its beating is the bell's warble
   modes * 0.1
 
 bell |> reverb(2.4, 0.14) |> tanh
