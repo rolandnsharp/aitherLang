@@ -1,0 +1,103 @@
+# struck_bell: one bell, struck where you choose, as hard as you play,
+# with a mallet as hard or soft as the knob says. A bell is one object:
+# every strike is a force pushed into the same modes, so a second strike
+# on a ringing bell adds to what is ringing, or cancels it, as on a real
+# one. Nothing here is a sample or an envelope: the sound is the modes
+# answering the force.
+#
+# Playing it
+#   key        where you strike: the twelve notes of an octave go round
+#              the bell (C at 0, each semitone 30 degrees on), and the
+#              octaves go up it, C3 at the lip to C7 near the shoulder
+#   velocity   how fast the striker is moving
+#   CC 20      the striker, hard bronze (0) to a soft wooden mallet (1)
+#   the pitch never changes: it is the bell's
+#
+# The physics, each a line or two below
+# - The bell's modes, named as founders name them (hum, prime, tierce,
+#   quint, nominal and above), each with its count of nodal meridians
+#   (how many times it winds round the bell) and nodal circles (Rossing,
+#   "Acoustics of Eastern and Western bells, old and new", J. Acoust.
+#   Soc. Jpn. (E) 10, 1989, https://doi.org/10.1250/ast.10.241).
+# - Where you strike, round the bell: a mode that winds m times round
+#   is a pair of shapes, cos(m phi) and sin(m phi). A perfect bell rings
+#   them as one, but a real one is never quite round, so the two sit a
+#   hair apart in pitch and beat, and a strike at angle phi to the bell's
+#   own asymmetry pushes them as cos and sin of m (phi - phi0): strike
+#   somewhere else and the beating changes (Rossing and Perrier, "Modal
+#   analysis of a Korean bell", JASA 94, 1993,
+#   https://doi.org/10.1121/1.407463, where the beating is designed;
+#   Kim, Moon and Wickert, "Spatial modulation of repeated vibration
+#   modes in rotationally periodic structures", J. Vib. Acoust. 119,
+#   1997, https://doi.org/10.1115/1.568443).
+# - Where you strike, up the bell: a mode with a nodal circle doesn't
+#   move there, and changes sign across it. The heights of the circles
+#   below are illustrative, not measured: tune them by ear.
+# - How hard: Hertz contact. The striker and the bell are pressed together
+#   for a time that shortens as the speed rises (as speed to the -1/5),
+#   and a softer striker stays longer. The force is a half-sine pulse of
+#   that length, its area the striker's momentum; a short pulse reaches
+#   high modes and a long one only the low, so a hard hit is brighter, not
+#   only louder, and a wooden mallet is dark, with no curve drawn for
+#   either (McLaskey and Glaser, "Hertzian impact: experimental study of
+#   the force pulse and resulting stress waves", JASA 128, 2010,
+#   https://doi.org/10.1121/1.3466847).
+#
+#   ./aither patches/struck_bell.aither | tools/play hw:rockchipes8388c 20
+
+let prime = 196.0                                          # G3; the hum is G2
+
+# The modes: frequency over the prime, how long each rings (s, to 1/e),
+# how strongly each radiates, the nodal meridians' count m, where its
+# nodal circle sits up the bell (0 the lip, 1 the shoulder; 9: none),
+# and how far the doublet is split by the bell's asymmetry.
+let ratio  = [0.5, 1.0, 1.2, 1.5, 2.0, 2.5, 3.0, 4.2]
+let ring   = [9.0, 5.0, 4.0, 2.2, 3.0, 1.6, 1.1, 0.6]
+let level  = [0.7, 0.5, 0.45, 0.25, 0.55, 0.3, 0.25, 0.15]
+let winds  = [2, 2, 3, 3, 4, 4, 5, 6]
+let circle = [9, 0.6, 0.5, 0.25, 0.7, 0.35, 0.6, 0.45]
+let split  = [1.0006, 1.0013, 1.0021, 1.0009, 1.0017, 1.0011, 1.0024, 1.0031]
+let phi0   = 0.4                                           # the bell's own asymmetry points here
+
+let soft = slew(midi_cc(20), 0.05)                         # the striker: bronze .. wood
+
+# Each held key is a strike. A new note-on in a slot starts its contact:
+# how long ago it began, and the striker's speed and contact time.
+$struck = array(16)                                        # which note-on each slot last struck with
+$since  = array(16, 1)                                     # seconds since that strike began
+each(16, i => $since[i] = if midi_voice_on(i + 1) != $struck[i] then 0 else $since[i] + dt)
+each(16, i => $struck[i] = midi_voice_on(i + 1))
+
+# The contact force of slot n now (momentum over its contact time, as a
+# half-sine), and where it lands: round the bell and up it.
+def contact(age, vel, soft):
+  let speed = 0.3 + 4.7 * vel                              # m/s
+  let tau = 0.0005 * pow(8, soft) * pow(speed, -0.2)       # s: Hertz, and a softer striker stays longer
+  if age < tau then speed * PI / (2 * tau) * sin(PI * age / tau) else 0
+
+def height_shape(h, c): if c > 1 then 1 - 0.4 * h else cos(PI * 0.5 * h / c)
+
+# Is anything being struck right now? A contact lasts a few ms, so almost
+# always nothing is, and the modes only ring.
+let hitting = sum(16, n => if $since[n - 1] < 0.01 then 1 else 0)
+
+play bell:
+  let modes = sum(8, k =>
+    let f = prime * ratio[k - 1]
+    let m = winds[k - 1]
+    # Every strike's push into this mode's pair, while one lasts.
+    let push = if hitting < 1 then [0, 0] else sum(16, n =>
+      let force = if $since[n - 1] < 0.01 then contact($since[n - 1], midi_voice_vel(n), soft) else 0
+      let key = midi_voice_key(n)
+      let around = TAU * (key mod 12) / 12 - phi0
+      let up = clamp((floor(key / 12) - 4) / 4, 0, 1)
+      if force > 0 then rotate([force * height_shape(up, circle[k - 1]), 0], m * around) else [0, 0])
+    # A push in force units reaches the mode as its ringing times 2 pi f:
+    # divided back, so each rings at its level.
+    let w = TAU * f
+    let a = resonator(push[0] / w, f, 2 / ring[k - 1])
+    let b = resonator(push[1] / w, f * split[k - 1], 2 / ring[k - 1])
+    [a + b * 0.5, a * 0.5 + b] * level[k - 1])
+  modes * 0.1
+
+bell |> reverb(2.4, 0.14) |> tanh
