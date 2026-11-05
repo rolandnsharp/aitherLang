@@ -731,8 +731,8 @@ A number given to the same call runs it once and both sides
 read it. A def's own pair parameters (see "Array parameters":
 `p[0]`, `turn(p, q)`, arithmetic with a pair) take a pair whole
 instead, so `mono(x)` and `turn(z, z)` see both sides. A def that
-makes a pair from a number (`pan`) given a pair on that number
-would make a pair of pairs, and says so. A condition is one
+makes a pair from a number (`pan`, `dho`) given a pair on that number
+makes a pair of pairs, the left side's pair first ("Pairs of pairs"). A condition is one
 number; an `if` runs only the branch it takes.
 
 A pair indexes like a two-entry table: `p[i]` truncates `i`
@@ -804,14 +804,26 @@ turns it by twice q's angle about q's axis. `+`, `-`, `*`, `/`, `mod` and
 Lets, def arguments and returns, lambdas, `if` and `sum` carry them
 whole.
 
+Functions run once a number on them, as they run once a side on a pair,
+each run its own state: `lp1(q, 100)` is four filters, and a def that
+takes numbers (`resonator`) given one runs four times. A def that makes
+a pair from a number, given a pair, makes a pair of pairs, the left
+side's first: `dho(push, [f1, f2], damp)` is two phasors in one value.
+Given a pair of pairs it would make a pair of pairs of pairs, and stops.
+
+`$q = [[1, 0], [0, 0]]` is state of four numbers, in a def or at the
+file's level; it keeps that shape, so a number put in it fills all
+four, and a pair put in it is a stand-in error (which half?).
+
 **Stand-ins, not decisions.** Pairs of pairs are new, and where a
 meaning isn't settled the compiler stops and says so, naming the choices
 and that the rule can change: a pair meeting a pair of pairs in an
 operation (`+`, `turn`: the pair on both halves, or as a complex number
 with its second half 0?), and a patch or play ending in one (the pipe
-carries a pair: which pair?). Not yet built, and refused the same way:
-`$state`, arrays, filters, delays and the other functions that run once
-a side, the voice loop and `def rec`.
+carries a pair: which pair?), a function given a pair of pairs and a
+pair, and a half of one assigned by index (`$q[0] = ...`). Not yet
+built, and refused the same way: arrays of them, the voice loop and
+`def rec`.
 
 Return `[L, R]` for stereo. Plays and the final expression
 may return a float (mono, mirrored to both channels) or a
@@ -1355,8 +1367,10 @@ away (the phasor filter: PHASORS.md). An oscillator turns, so `damp`
 stops just under 1; past critical damping a spring only creeps back,
 and `swell` or `slew` is that tool. `q` is the velocity only when
 undamped; the velocity takes both sides, `v = -(wd · q + damp · w · x)`.
-Given a pair where it takes a number it would make a pair of pairs,
-and says so: two of them, or `resonator`, make a stereo pair.
+Given a pair where it takes a number it makes a pair of pairs, one
+phasor a side: `dho(push, [f, f * 1.0013], damp)` is a doublet, the two
+modes of one partial, as one value ("Pairs of pairs"). Two of them, or
+`resonator`, make a stereo pair.
 
 `resonator` is a `dho` driven by a signal and scaled so a steady signal
 comes out at its own level, returning the position: `decay` is the

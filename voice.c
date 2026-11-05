@@ -255,7 +255,7 @@ static int poisoned(const double* pool, long off, long size) {
 static int bad_var(double x) { return x != x || x - x != 0.0; }
 
 static int is_user_state(const VRegion* r) {
-  return !strcmp(r->type_name, "var") || !strcmp(r->type_name, "pvar");
+  return !strcmp(r->type_name, "var") || !strcmp(r->type_name, "pvar") || !strcmp(r->type_name, "qvar");
 }
 
 /* Defense 2: zero the stateful helpers' regions (filters, delays,

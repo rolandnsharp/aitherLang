@@ -135,13 +135,83 @@ let [[w, _], [_, _]] = q + [1, 2]
 let [[w, _], [_, _]] = turn([[1, 2], [3, 4]], [1, 2])
 [w, w]
 
-# --- what isn't built yet says so: a filter on a pair of pairs
-# error: doesn't take a pair of pairs yet
-let [[w, _], [_, _]] = lp1([[1, 2], [3, 4]], 100)
+# --- a filter runs once a number, each its own state: the same as four filters
+# expect until 2000: 0, 0
+let q = [[sin(TAU * 300 * t), 2], [3, sin(TAU * 50 * t)]]
+let [[w, _], [_, z]] = lp1(q, 100)
+[w - lp1(sin(TAU * 300 * t), 100), z - lp1(sin(TAU * 50 * t), 100)]
+
+# --- a def given a pair, giving a pair a side, gives a pair of pairs: a doublet as one value
+# expect until 2000: 0, 0
+let strike = impulse(10)
+let [a, b] = dho(strike, [440, 443], 0.01)
+[amplitude(a - dho(strike, 440, 0.01)), amplitude(b - dho(strike, 443, 0.01))]
+
+# --- a def that takes numbers, given a pair of pairs, runs once a number
+# expect until 2000: 0, 0
+let strike = impulse(10)
+let [[_, x], [_, z]] = resonator([[strike, strike], [strike, strike * 2]], 300, 4)
+[x - resonator(strike, 300, 4), z - resonator(strike * 2, 300, 4)]
+
+# --- state in a def: a rotation kept, turned by another each sample
+# expect: 0.99500416527802582, 0.099833416646828155
+# expect at 9: 0.54030230586813977, 0.8414709848078965
+def keep_turning(r):
+  $q = [[1, 0], [0, 0]]
+  $q = turn($q, r)
+  $q
+let [[w, _], [_, z]] = keep_turning([[cos(0.1), 0], [0, sin(0.1)]])
+[w, z]
+
+# --- state at the file's level, the same
+# expect: 0.99500416527802582, 0.099833416646828155
+# expect at 9: 0.54030230586813977, 0.8414709848078965
+$q = [[1, 0], [0, 0]]
+$q = turn($q, [[cos(0.1), 0], [0, sin(0.1)]])
+let [[w, _], [_, z]] = $q
+[w, z]
+
+# --- a number put in it fills all four, as it scales all four
+# expect: 0.5, 0.5
+$q = [[1, 2], [3, 4]]
+$q = 0.5
+let [[w, _], [_, z]] = $q
+[w, z]
+
+# --- a state keeps its first value's shape: a pair of pairs isn't given a pair
+# error: is a pair of pairs, and is given a pair
+$q = [[1, 0], [0, 0]]
+$q = [1, 2]
+let [[w, _], [_, _]] = $q
 [w, w]
 
-# --- ... and state
-# error: doesn't take a pair of pairs yet
+# --- ... nor a pair a pair of pairs
+# error: is given a pair of pairs
+def f(x):
+  $z = [0, 0]
+  $z = [[x, 0], [0, 0]]
+  $z
+f(1)
+
+# --- a filter given a pair of pairs and a pair is a stand-in error
+# error: gets a pair of pairs and a pair
+let [[w, _], [_, _]] = lp1([[1, 2], [3, 4]], [100, 200])
+[w, w]
+
+# --- a def that makes a pair from a number, given a pair of pairs, would make a pair of pairs of pairs
+# error: pair of pairs of pairs
+let [[w, _], [_, _]] = dho(1, [[440, 441], [442, 443]], 0.1)
+[w, w]
+
+# --- half of one isn't assigned by index yet
+# error: can't be assigned by index yet
 $q = [[1, 0], [0, 0]]
+$q[0] = [0, 1]
 let [[w, _], [_, _]] = $q
+[w, w]
+
+# --- what isn't built yet says so: an array of them
+# error: doesn't take a pair of pairs yet
+let qs = array(3, [[1, 0], [0, 0]])
+let [[w, _], [_, _]] = qs[0]
 [w, w]

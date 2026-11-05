@@ -688,9 +688,10 @@ turns, so the velocity takes both sides,
 `v = -(wd * q + damp * w * x)` with `wd = w * sqrt(1 - damp^2)`, the
 rate it turns. Chained physics uses it (a damping force, one
 oscillator's velocity driving another); the didge patches show it,
-with a comment. A pair given where `dho` takes a number would make a
-pair of pairs, which is an error: use two, or `resonator`, which
-returns a number.
+with a comment. A pair given where `dho` takes a number makes a pair
+of pairs, a phasor a side (a bell's doublet as one value:
+`let [a, b] = dho(push, [f, f * 1.0013], damp)`); for a stereo pair use
+two, or `resonator`, which returns a number.
 
 **Why this is `f(state)`-native.** In a modular synth you pick a
 "filter module" or an "FM module"; the paradigm is baked into

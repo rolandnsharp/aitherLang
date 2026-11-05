@@ -1,14 +1,15 @@
 # The nested pair: a pair may hold pairs
 
-**Status (2026-11-05): stage 1 built.** Nested literals and
-destructuring; pairs of pairs through lets, defs, lambdas, `if`, `sum`
-and plays; side-by-side arithmetic; `turn`, `conj`, `unturn`,
-`amplitude`, `phase` and the new `axis` by Hamilton's operations
+**Status (2026-11-05): stages 1 and 2 (state, functions) built.**
+Nested literals and destructuring; pairs of pairs through lets, defs,
+lambdas, `if`, `sum` and plays; side-by-side arithmetic; `turn`,
+`conj`, `unturn`, `amplitude`, `phase` and the new `axis` by Hamilton's
+operations; `$state` of them, in defs and at the file's level;
+functions run once a number on them; `dho` given a pair a doublet
 (tests/lang/quads.aither, SPEC "Pairs of pairs"). Both open questions
 went to errors that say they are stand-ins. Not yet built, and refused
-with the same stand-in message: `$state`, stateful functions, arrays,
-the voice loop, `def rec`, then the stdlib units and the demos (stage 2
-and 3, "Order of work"). It follows
+with the same stand-in message: arrays of them, the voice loop, `def
+rec`, then the stdlib units and the demos. It follows
 [spinors-2026-11-05.md](spinors-2026-11-05.md), which made way 3 (the
 spinor as aither's third value) the destination and way 2 (defs that
 return small arrays of pairs) the path. This note proposes skipping way
