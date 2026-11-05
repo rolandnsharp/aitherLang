@@ -1,6 +1,9 @@
 # Shapes reported, and `match` on shape
 
-**Status (2026-11-05): a design note, nothing built.** Roland: "1 and 2
+**Status (2026-11-05): part 1's errors built** (each argument quoted as
+written with its shape; a def's split parameters named); `aither check`
+with splits, def rules and `match` not yet (Roland: "remind me to think
+about the others"). Roland: "1 and 2
 sound good". Two ideas from the ML family (OCaml, Haskell), taken at
 aither's size, after pairs of pairs (nested-pair-2026-11-05.md) gave
 values three shapes.

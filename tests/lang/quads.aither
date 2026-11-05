@@ -120,8 +120,8 @@ play b:
 # error: a pair of pairs of pairs
 [[[1, 2], [3, 4]], [[1, 2], [3, 4]]]
 
-# --- a pair and a pair of pairs in + is a stand-in error, saying it can change
-# error: This is a stand-in
+# --- a pair and a pair of pairs in + is a stand-in error, naming both and saying it can change
+# error: `+` between `q`, a pair of pairs, and `[1, 2]`, a pair
 let q = [[1, 2], [3, 4]]
 let [[w, _], [_, _]] = q + [1, 2]
 [w, w]
@@ -131,7 +131,7 @@ let [[w, _], [_, _]] = q + [1, 2]
 [[1, 2], [3, 4]]
 
 # --- turn between a pair of pairs and a pair
-# error: gets a pair of pairs and a pair
+# error: turn is given `[[1, 2], [3, 4]]`, a pair of pairs, and `[1, 2]`, a pair
 let [[w, _], [_, _]] = turn([[1, 2], [3, 4]], [1, 2])
 [w, w]
 
@@ -193,8 +193,8 @@ def f(x):
   $z
 f(1)
 
-# --- a filter given a pair of pairs and a pair is a stand-in error
-# error: gets a pair of pairs and a pair
+# --- a filter given a pair of pairs and a pair is a stand-in error, naming them
+# error: lp1 is given `[[1, 2], [3, 4]]`, a pair of pairs, and `[100, 200]`, a pair
 let [[w, _], [_, _]] = lp1([[1, 2], [3, 4]], [100, 200])
 [w, w]
 
@@ -315,3 +315,24 @@ let [[_, _], [_, z]] = hopf(s)
 def spun(a): apply(about(k, a), i)
 let [[_, x], [y, _]] = spun(0.8)
 [x, y]
+
+# --- a def that takes numbers names the arguments it would run on, and their shapes
+# error: resonator takes numbers, and is given signal = `[[1, 2], [3, 4]]`, a pair of pairs, and freq = `[300, 301]`, a pair
+let [[w, _], [_, _]] = resonator([[1, 2], [3, 4]], [300, 301], 4)
+[w, w]
+
+# --- where one number is needed, the error quotes what it got
+# error: the condition needs one number but gets a pair of pairs, `q`
+let q = [[1, 2], [3, 4]]
+if q then 1 else 0
+
+# --- the output's error quotes the expression
+# error: the patch ends in a pair of pairs, `turn(q, i) * 0.5`
+let q = about(k, 0.3)
+turn(q, i) * 0.5
+
+# --- a sum names the term that doesn't fit
+# error: term 3 (n = 3) is a number
+let s = sum(3, n => if n < 3 then [[n, 0], [0, 0]] else n)
+let [[w, _], [_, _]] = s
+[w, w]

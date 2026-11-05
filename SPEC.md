@@ -830,6 +830,12 @@ steps them. An array keeps its first value's shape: a number stored
 fills an element, a pair into pairs of pairs (or the other way) is a
 stand-in error.
 
+**Errors name shapes.** Where a value's shape is wrong, the error quotes
+each argument as written with its shape (`lp1 is given \`q\`, a pair of
+pairs, and \`[100, 200]\`, a pair`), and a def that takes numbers names
+the parameters it would run on (notes/shapes-and-match-2026-11-05.md,
+part 1, its first step).
+
 **Stand-ins, not decisions.** Pairs of pairs are new, and where a
 meaning isn't settled the compiler stops and says so, naming the choices
 and that the rule can change: a pair meeting a pair of pairs in an
