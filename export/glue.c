@@ -20,6 +20,10 @@ void aither_note_on(int note, int velocity) {
 }
 
 void aither_note_off(int note) { midi_note_off(note); }
+void aither_midi(const unsigned char* msg, int len) { midi_message(msg, len); }
+void aither_note_cc(int note, int cc, double value) { midi_note_cc(note, cc, value); }
+void aither_note_bend(int note, double semitones) { midi_note_bend(note, semitones); }
+void aither_note_pressure(int note, double value) { midi_note_pressure(note, value); }
 void aither_midi_reset(void) { midi_reset_all(); }
 
 /* A recursion's guard: the engine stops one that runs past its block's

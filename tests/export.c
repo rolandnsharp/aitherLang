@@ -1,9 +1,11 @@
 /* aither export: an exported patch, built with cc into a program of its
- * own, plays what the engine plays, bit for bit. Two patches go into one
+ * own, plays what the engine plays, bit for bit. Three patches go into one
  * program (their names mustn't collide), one of them played with keys,
- * a 14-bit knob and input() from a script, the other a field of pairs in
- * arrays (patches/around.aither); each is rendered by ./aither offline
- * and by the program, and the two streams must be the same bytes.
+ * a 14-bit knob and input() from a script, one a field of pairs in
+ * arrays (patches/around.aither), and one an MPE instrument played on
+ * its own channels (the script's channels in the engine, raw MIDI bytes
+ * in the program); each is rendered by ./aither offline and by the
+ * program, and the two streams must be the same bytes.
  *
  * Runs ./aither and cc. */
 
@@ -69,6 +71,17 @@ TEST(export_exact) {
       "1.20 note 60 0\n"
       "1.33 cc 35 3\n"
       "1.60 note 64 0\n");
+  /* An MPE zone (RPN 6 on channel 1), two notes on their own channels,
+   * each bent and pressed and slid on its own, and the master's bend. */
+  put("mpe.aither",
+      "play voices: poly(4, (freq, gate, vel, key, press, slide) => sin(TAU * phasor(freq)) * swell(gate, 0.01, 0.2) * (0.1 + press * 0.2) * (0.5 + slide))\n"
+      "voices * 0.5\n");
+  put("mpe.txt",
+      "0.00 cc 101 0\n0.00 cc 100 6\n0.00 cc 6 15\n"
+      "0.05 bend 9000 2\n0.05 press 40 2\n0.05 note 60 100 2\n"
+      "0.30 note 67 90 3\n0.30 cc 74 120 3\n"
+      "0.50 bend 4000 3\n0.60 press 127 2\n0.70 bend 12000 1\n"
+      "1.20 note 60 0 2\n1.50 note 67 0 3\n");
   /* 2 s of input: a slow chirp, as raw float pairs. */
   {
     char p[700];
@@ -83,7 +96,7 @@ TEST(export_exact) {
   }
   put("host.c",
       "#include <math.h>\n#include <stdio.h>\n#include <stdlib.h>\n"
-      "#include \"aither_rt.h\"\n#include \"mix.h\"\n#include \"around.h\"\n"
+      "#include \"aither_rt.h\"\n#include \"mix.h\"\n#include \"around.h\"\n#include \"mpe.h\"\n"
       "int main(void) {\n"
       "  long n = 96000;\n"
       "  float* in = malloc(sizeof(float) * 2 * n);\n"
@@ -110,6 +123,30 @@ TEST(export_exact) {
       "  for (long i = 0; i < n; i += 1000) around_render(r, out + 2 * i, NULL, n - i < 1000 ? n - i : 1000);\n"
       "  f = fopen(\"around.raw\", \"wb\"); fwrite(out, sizeof(float), 2 * n, f); fclose(f);\n"
       "  around_free(r);\n"
+      "  /* mpe: the script's moves as raw MIDI bytes, channels and all. */\n"
+      "  aither_midi_reset();\n"
+      "  f = fopen(\"mpe.txt\", \"r\");\n"
+      "  char line[128]; double mat[32]; unsigned char msg[32][3]; int mlen[32], mn = 0;\n"
+      "  while (mn < 32 && fgets(line, sizeof line, f)) {\n"
+      "    char k[8]; double x[3] = {0, 0, 0};\n"
+      "    int got = sscanf(line, \"%lf %7s %lf %lf %lf\", &mat[mn], k, &x[0], &x[1], &x[2]);\n"
+      "    int want = k[0] == 'n' || k[0] == 'c' ? 2 : 1, ch = got - 2 > want ? (int)x[want] - 1 : 0;\n"
+      "    if (k[0] == 'n') { msg[mn][0] = (x[1] > 0 ? 0x90 : 0x80) | ch; msg[mn][1] = x[0]; msg[mn][2] = x[1]; mlen[mn] = 3; }\n"
+      "    if (k[0] == 'c') { msg[mn][0] = 0xB0 | ch; msg[mn][1] = x[0]; msg[mn][2] = x[1]; mlen[mn] = 3; }\n"
+      "    if (k[0] == 'b') { msg[mn][0] = 0xE0 | ch; msg[mn][1] = (int)x[0] & 127; msg[mn][2] = (int)x[0] >> 7; mlen[mn] = 3; }\n"
+      "    if (k[0] == 'p') { msg[mn][0] = 0xD0 | ch; msg[mn][1] = x[0]; mlen[mn] = 2; }\n"
+      "    mn++;\n"
+      "  }\n"
+      "  fclose(f);\n"
+      "  mpe* q = mpe_new();\n"
+      "  done = 0;\n"
+      "  for (int i = 0; i <= mn; i++) {\n"
+      "    long due = i < mn ? llround(mat[i] * MPE_RATE) : n;\n"
+      "    if (due > done) { mpe_render(q, out + 2 * done, NULL, due - done); done = due; }\n"
+      "    if (i < mn) aither_midi(msg[i], mlen[i]);\n"
+      "  }\n"
+      "  f = fopen(\"mpe.raw\", \"wb\"); fwrite(out, sizeof(float), 2 * n, f); fclose(f);\n"
+      "  mpe_free(q);\n"
       "  return 0;\n"
       "}\n");
 
@@ -117,18 +154,22 @@ TEST(export_exact) {
   snprintf(cmd, sizeof cmd,
            "cd '%s' && AITHER_RATE=48000 '%s/aither' export mix.aither . > /dev/null && "
            "AITHER_RATE=48000 '%s/aither' export '%s/patches/around.aither' . > /dev/null && "
-           "cc -O2 -ffp-contract=off -w -o host host.c mix.c around.c aither_rt.c -lm && ./host",
-           dir, getcwd((char[1024]){0}, 1024), getcwd((char[1024]){0}, 1024), getcwd((char[1024]){0}, 1024));
+           "AITHER_RATE=48000 '%s/aither' export mpe.aither . > /dev/null && "
+           "cc -O2 -ffp-contract=off -w -o host host.c mix.c around.c mpe.c aither_rt.c -lm && ./host",
+           dir, getcwd((char[1024]){0}, 1024), getcwd((char[1024]){0}, 1024), getcwd((char[1024]){0}, 1024),
+           getcwd((char[1024]){0}, 1024));
   int built = run(cmd) == 0;
   CHECK(built, "export, build and run the host");
   if (built) {
     snprintf(cmd, sizeof cmd,
              "cd '%s' && AITHER_RATE=48000 '%s/aither' mix.aither 2 --play moves.txt < in.raw > mix.engine 2>/dev/null && "
-             "AITHER_RATE=48000 '%s/aither' '%s/patches/around.aither' 2 < /dev/null > around.engine 2>/dev/null",
-             dir, getcwd((char[1024]){0}, 1024), getcwd((char[1024]){0}, 1024), getcwd((char[1024]){0}, 1024));
+             "AITHER_RATE=48000 '%s/aither' '%s/patches/around.aither' 2 < /dev/null > around.engine 2>/dev/null && "
+             "AITHER_RATE=48000 '%s/aither' mpe.aither 2 --play mpe.txt < /dev/null > mpe.engine 2>/dev/null",
+             dir, getcwd((char[1024]){0}, 1024), getcwd((char[1024]){0}, 1024), getcwd((char[1024]){0}, 1024),
+             getcwd((char[1024]){0}, 1024));
     CHECK(run(cmd) == 0, "the engine's renders");
-    const char* names[2] = {"mix", "around"};
-    for (int i = 0; i < 2; i++) {
+    const char* names[3] = {"mix", "around", "mpe"};
+    for (int i = 0; i < 3; i++) {
       char a[700], b[700];
       snprintf(a, sizeof a, "%s/%s.raw", dir, names[i]);
       snprintf(b, sizeof b, "%s/%s.engine", dir, names[i]);

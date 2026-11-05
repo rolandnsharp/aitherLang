@@ -654,6 +654,7 @@ static const char* const BUILTIN_FNS[] = {
   "midi_cc", "midi_note", "midi_freq", "midi_gate",
   "midi_trig", "midi_voice_freq", "midi_voice_gate",
   "midi_voice_vel", "midi_voice_key", "midi_vel",
+  "midi_voice_cc", "midi_voice_press", "midi_voice_bend",
   "amplitude", "phase", NULL};
 
 /* Pair-returning builtins, and the reductions of a pair to a number. */
@@ -908,7 +909,8 @@ static const char* emit1(Ctx* c, Scope* sc, Node* n, Buf* pre, const char* what)
 
 static const char* const MIDI_HELD[] = {"midi_cc", "midi_note", "midi_freq", "midi_gate", "midi_vel",
                                         "midi_voice_freq", "midi_voice_gate", "midi_voice_vel",
-                                        "midi_voice_key", NULL};
+                                        "midi_voice_key", "midi_voice_cc", "midi_voice_press",
+                                        "midi_voice_bend", NULL};
 static const char* const PURE_MATH[] = {"sin", "cos", "tan", "tanh", "exp", "log",
                                         "floor", "ceil", "sqrt", "pow", "min", "max", "clamp",
                                         "abs", "int", NULL};
@@ -1164,13 +1166,16 @@ static int loops_off(void) {
 }
 
 static const char* const VOICE_SLOT[] = {"midi_voice_freq", "midi_voice_gate", "midi_voice_vel",
-                                         "midi_voice_key", NULL};
+                                         "midi_voice_key", "midi_voice_press", "midi_voice_bend",
+                                         "midi_voice_cc", NULL};
 
-/* Is `name` read only as the slot of a voice call (midi_voice_freq(name))? */
+/* Is `name` read only as the slot of a voice call (midi_voice_freq(name),
+ * midi_voice_cc(name, k))? */
 static int only_voice_slot(Node* n, Node* parent, const char* name) {
   if (!n) return 1;
   if (n->kind == nkIdent && eq(n->str, name))
-    return parent && parent->kind == nkCall && parent->nkids == 1 && in(parent->str, VOICE_SLOT);
+    return parent && parent->kind == nkCall && in(parent->str, VOICE_SLOT) && parent->kids[0] == n &&
+           (parent->nkids == 1 || (parent->nkids == 2 && eq(parent->str, "midi_voice_cc")));
   if ((n->kind == nkLet || n->kind == nkVar) && n->str && eq(n->str, name)) return 0;
   if (n->kind == nkLambda)
     for (int i = 0; i < n->nparams; i++) if (eq(n->params[i], name)) return 0;
@@ -2417,7 +2422,8 @@ static const char* const KIND_NAMES[] = {
 static const char* const HOISTED_MATH[] = {"exp", "log", "pow", "sin", "cos", "tan", "tanh", "sqrt", NULL};
 static const char* const MIDI_FNS[] = {"midi_cc", "midi_note", "midi_trig", "midi_freq",
                                        "midi_gate", "midi_voice_freq", "midi_voice_gate",
-                                       "midi_voice_vel", "midi_voice_key", "midi_vel", NULL};
+                                       "midi_voice_vel", "midi_voice_key", "midi_vel",
+                                       "midi_voice_cc", "midi_voice_press", "midi_voice_bend", NULL};
 
 /* A call's arguments, each a value. */
 static V* emit_args(Ctx* c, Scope* sc, Node* n, Buf* pre, int* any_pair) {
@@ -2461,6 +2467,7 @@ static const char* b_minmax(Ctx* c, const char* name, const char** x, int n) {
 static const char* b_clamp(Ctx* c, const char* name, const char** x, int n) { (void)n; (void)name; return F(c, "fmin(fmax(%s, %s), %s)", x[0], x[1], x[2]); }
 static const char* b_int(Ctx* c, const char* name, const char** x, int n) { (void)n; (void)name; return F(c, "((double)(long)(%s))", x[0]); }
 static const char* b_midi(Ctx* c, const char* name, const char** x, int n) {
+  if (n == 2) return F(c, "n_%s((int)(%s), (int)(%s))", name, x[0], x[1]);
   return n ? F(c, "n_%s((int)(%s))", name, x[0]) : F(c, "n_%s()", name);
 }
 
@@ -3035,7 +3042,9 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
     return per_side(c, sc, n, a, any, s_midi_trig, pre, NULL);
   }
   if (((eq(name, "midi_cc") || eq(name, "midi_note") || eq(name, "midi_voice_freq") ||
-        eq(name, "midi_voice_gate") || eq(name, "midi_voice_vel") || eq(name, "midi_voice_key")) && n->nkids == 1) ||
+        eq(name, "midi_voice_gate") || eq(name, "midi_voice_vel") || eq(name, "midi_voice_key") ||
+        eq(name, "midi_voice_press") || eq(name, "midi_voice_bend")) && n->nkids == 1) ||
+      (eq(name, "midi_voice_cc") && n->nkids == 2) ||
       ((eq(name, "midi_freq") || eq(name, "midi_gate") || eq(name, "midi_vel")) && n->nkids == 0)) {
     V* a = emit_args(c, sc, n, pre, &any);
     return map_pure(c, name, a, n->nkids, any, b_midi, pre);
@@ -4385,6 +4394,9 @@ static const char* emit_program(Ctx* c, Node* program) {
     "extern double n_midi_voice_gate(int);\n"
     "extern double n_midi_voice_vel(int);\n"
     "extern double n_midi_voice_key(int);\n"
+    "extern double n_midi_voice_cc(int,int);\n"
+    "extern double n_midi_voice_press(int);\n"
+    "extern double n_midi_voice_bend(int);\n"
     "extern double n_midi_vel(void);\n"
     "extern double n_input_l(void);\n"
     "extern double n_input_r(void);\n"

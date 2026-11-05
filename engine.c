@@ -1657,16 +1657,18 @@ char* engine_command(const char* line) {
 
 /* An offline run's script of MIDI moves (--play): each at its sample,
  * through the writers the live MIDI thread calls. */
-typedef struct { double at; int kind, a, b; } Move;   /* kind: 0 note, 1 cc */
+typedef struct { double at; int kind, a, b, ch; } Move;   /* kind: 0 note, 1 cc, 2 bend, 3 press */
 static Move* moves;
 static long n_moves, next_move;
 
 static void play_moves_due(long long frame) {
   while (next_move < n_moves && (long long)llround(moves[next_move].at * (double)sample_rate) <= frame) {
     Move* m = &moves[next_move++];
-    if (m->kind == 1) midi_cc(m->a, m->b);
-    else if (m->b > 0) midi_note_on(m->a, m->b);
-    else midi_note_off(m->a);
+    if (m->kind == 1) midi_cc_ch(m->ch, m->a, m->b);
+    else if (m->kind == 2) midi_bend_ch(m->ch, m->a);
+    else if (m->kind == 3) midi_pressure_ch(m->ch, m->a);
+    else if (m->b > 0) midi_note_on_ch(m->ch, m->a, m->b);
+    else midi_note_off_ch(m->ch, m->a);
   }
 }
 
@@ -1684,18 +1686,29 @@ char* engine_play_script(const char* path) {
     ln++;
     char* hash = strchr(line, '#');
     if (hash) *hash = 0;
-    double at, a, b;
+    /* `seconds note key velocity [channel]`, `seconds cc number value
+     * [channel]`, `seconds bend value [channel]` (0..16383, 8192
+     * centred), `seconds press value [channel]`; channels 1..16, 1 when
+     * left out, as MIDI numbers them. */
+    double at, x[3];
     char kind[16];
-    int got = sscanf(line, "%lf %15s %lf %lf", &at, kind, &a, &b);
+    int got = sscanf(line, "%lf %15s %lf %lf %lf", &at, kind, &x[0], &x[1], &x[2]);
     if (got <= 0) continue;                         /* blank or a comment */
-    int k = strcmp(kind, "note") == 0 ? 0 : strcmp(kind, "cc") == 0 ? 1 : -1;
-    if (got != 4 || k < 0 || at < 0.0 || a < 0 || a > 127 || b < 0 || b > 127) {
+    int k = strcmp(kind, "note") == 0 ? 0 : strcmp(kind, "cc") == 0 ? 1 : strcmp(kind, "bend") == 0 ? 2
+          : strcmp(kind, "press") == 0 ? 3 : -1;
+    int nums = got - 2, want = k < 2 ? 2 : 1;          /* the numbers before the channel */
+    int ch = nums == want + 1 ? (int)lround(x[want]) : 1;
+    double top = k == 2 ? 16383 : 127;
+    int bad = k < 0 || at < 0.0 || (nums != want && nums != want + 1) || ch < 1 || ch > 16;
+    for (int i = 0; i < want && !bad; i++) bad = x[i] < 0 || x[i] > (i == 0 ? top : 127);
+    if (bad) {
       fclose(f);
-      return fmt("--play: %s line %ld: want `seconds note key velocity` or "
-                           "`seconds cc number value`, 0..127 (velocity 0 lets go)", path, ln);
+      return fmt("--play: %s line %ld: want `seconds note key velocity`, `seconds cc number value` "
+                 "(0..127, velocity 0 lets go), `seconds bend value` (0..16383) or `seconds press value`, "
+                 "each with a channel 1..16 after it if not 1", path, ln);
     }
     if (n == cap) moves = realloc(moves, (cap = cap ? 2 * cap : 64) * sizeof *moves);
-    moves[n++] = (Move){at, k, (int)lround(a), (int)lround(b)};
+    moves[n++] = (Move){at, k, (int)lround(x[0]), want > 1 ? (int)lround(x[1]) : 0, ch - 1};
   }
   fclose(f);
   qsort(moves, n, sizeof *moves, cmp_moves);         /* stable enough: same-time moves keep no order */

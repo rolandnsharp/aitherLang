@@ -1124,14 +1124,17 @@ hot-reloading a patch preserves held notes and knob values.
 |-----------------------|--------------------------------------------------|
 | `midi_cc(n)`          | CC `n` value, `0..1`. `n` in `0..127`; 0..31 are 14-bit when paired with 32..63. |
 | `midi_note(n)`        | Velocity `0..1` while note `n` is held; 0 else. |
-| `midi_freq()`         | Hz of the most recent note-on (mono).            |
+| `midi_freq()`         | Hz of the most recent note-on (mono), bent by its channel's pitch bend. |
 | `midi_gate()`         | 1 while the most recent note is held, 0 after its note-off. |
 | `midi_vel()`          | Velocity `0..1` of the most recent note-on; stays after the note-off. |
 | `midi_trig(n)`        | 1.0 for a single sample on each note-on for `n`; 0 otherwise. Per-voice edge detect. |
-| `midi_voice_freq(n)`  | Hz of the nth held voice (1..16); 0 if slot empty. Stable per held note. |
+| `midi_voice_freq(n)`  | Hz of the nth held voice (1..16), bent by its own bend; 0 if slot empty. Stable per held note. |
 | `midi_voice_gate(n)`  | 1 while the nth voice's key is held (1..16), 0 after release or empty. |
 | `midi_voice_vel(n)`   | Velocity `0..1` the nth voice was struck at; stays after release, 0 if never used. |
 | `midi_voice_key(n)`   | MIDI key number of the nth voice, `0..127`; stays after release, 0 if never used. |
+| `midi_voice_cc(n, k)` | The nth voice's own controller `k`, `0..1`: its channel's, or set for that note alone. |
+| `midi_voice_press(n)` | The nth voice's pressure, `0..1`. |
+| `midi_voice_bend(n)`  | The nth voice's bend in semitones (its own and its MPE zone master's). |
 
 **A gate is a gate; velocity is separate.** Gates are 1 or 0, so
 `adsr(gate, ...)` sounds however softly a key is played (`adsr`
@@ -1161,6 +1164,30 @@ lowest `onAt` (oldest held) is evicted. When a slot's note is
 released its velocity drops to 0 and the slot becomes
 re-allocatable; the freq stays set so a synth's release tail
 still reads a valid pitch.
+
+**Per-note expression and MPE.** Each held note carries its channel,
+its pitch bend, its pressure and its own 128 controllers, and keeps them
+after release for its tail. A note takes its channel's values when it
+starts, and the channel's later bend, pressure and controllers move the
+notes it holds. A keyboard plays every note on one channel, so its notes
+all share the wheel, the aftertouch and the knobs, as before (the pitch
+wheel now bends: two semitones, MIDI's default, or what RPN 0 sets).
+An MPE controller (MIDI Polyphonic Expression, MMA RP-053, 2018) puts
+each note on a channel of its own, so the bend, pressure and slide
+(CC 74) sent there belong to that note alone: a chord in which one note
+bends and another swells. The configuration message (RPN 6 on channel 1
+or 16) sets a zone: its member channels bend 48 semitones and its master
+2, and the master's bend moves every member's note. One key held on two
+channels is two voices. A program sets one held note's values directly,
+by key, at full resolution (`aither_note_cc` and friends in an export,
+below): that is how a game gives each instance its own distance or
+material. The three dimensions reach `poly`'s voices as `freq` (bent),
+`press` and `slide`; any controller is `midi_voice_cc(n, k)`.
+
+Every source arrives as the MIDI 1.0 message it is, channel and all, at
+one reader: the ALSA thread turns its events back into those bytes, an
+export's host hands them over raw (`aither_midi`), and a `--play` script
+names them.
 
 **14-bit controllers.** Controllers 0..31 pair with 32..63, as MIDI
 1.0 has them: `n` carries the coarse 7 bits and `n + 32` the fine 7, and
@@ -1397,8 +1424,11 @@ See TV.md.
 - `midi_keyboard(voice_fn)` — `poly(8, voice_fn)`, the front-door form
 
 `voice_fn` is called with everything known about a key:
-`(freq, gate, vel, key)`, Hz, 1 while held, the velocity it was
-struck at, and the MIDI key number. A lambda names as many as it
+`(freq, gate, vel, key, press, slide)`, Hz (bent by the note's own
+bend), 1 while held, the velocity it was struck at, the MIDI key
+number, its pressure and its slide (CC 74), each 0..1: on an MPE
+controller every note has its own, on a keyboard every note shares the
+channel's. A lambda names as many as it
 uses (a lambda may take fewer arguments than it's called with), so
 `(freq, gate) => ...` works and `(freq, gate, vel) => ...` is
 velocity-sensitive. Each held key drives one voice independently;
@@ -1506,12 +1536,15 @@ An offline run takes its keys and knobs from a script with `--play`:
 ```
 
 Each line of the script is one move at a time in seconds, as MIDI
-plays it, 0..127:
+plays it, 0..127, on channel 1 unless a channel (1..16) follows:
 
 ```
 0.0  note 60 100      # key 60 down at velocity 100
 1.5  note 60 0        # velocity 0: let go
 2.0  cc 21 64         # knob 21 to the middle
+2.5  note 64 90 2     # on channel 2, as an MPE controller plays a note
+2.6  bend 9000 2      # channel 2's pitch bend, 0..16383, 8192 centred
+2.7  press 80 2       # channel 2's pressure
 ```
 
 `#` starts a comment; the lines may come in any order. Each move lands
@@ -1524,7 +1557,7 @@ and the run starts with every key up and every knob at 0, as a fresh
 engine does.
 
 A script is a record of playing, never a place to compose: a time, a
-kind and two numbers a line, with no loops, variables, repeats or
+kind, its numbers and a channel a line, with no loops, variables, repeats or
 includes, and it stays that way (PHILOSOPHY refuses a pattern DSL).
 Sequencing written as music belongs in the patch, as signals (`wave`,
 tables, `sweep`, `tape`); sequencing from another program (a DAW, a
@@ -1639,7 +1672,12 @@ Beside it go `aither_rt.c` and `aither_rt.h`, the runtime: the engine's
 own natives (`dsp.c`) and MIDI state (`midi_state.c`), written out from
 the binary, one per program however many patches it holds. Keys and
 knobs reach every exported patch through it, as every voice in an engine
-reads one MIDI state: `aither_cc(n, value)`, `aither_cc14(n, value)` (a
+reads one MIDI state: `aither_midi(bytes, len)` (one raw MIDI 1.0
+message, on its channel: a plugin's or device's MIDI as it comes, MPE
+included), `aither_note_cc(note, k, value)`, `aither_note_bend(note,
+semitones)` and `aither_note_pressure(note, value)` (a held note's own
+values, by key, at full resolution: one instance's, for a game),
+`aither_cc(n, value)`, `aither_cc14(n, value)` (a
 14-bit pair, 0..16383), `aither_note_on(note, velocity)`,
 `aither_note_off(note)`, `aither_midi_reset()`. Each lands on the next
 sample rendered; to land one mid-block, render up to it first.
@@ -1794,9 +1832,12 @@ voices don't leak the table.
 
 ### MIDI (`midi_state.c`, `midi.c`)
 
-`midi_state.c` is what the keys and knobs are doing, its writers and the
-natives a patch reads, with no ALSA in it, so an export's runtime
-carries it. `midi.c` is the ALSA seq input thread that feeds it. Auto-resubscribes if the port is dropped.
+`midi_state.c` is what the keys and knobs are doing (each held note's
+channel, bend, pressure and controllers; each channel's; MPE zones), its
+writers and the natives a patch reads, with no ALSA in it, so an
+export's runtime carries it. `midi_message` is its one door for raw
+MIDI. `midi.c` is the ALSA seq input thread that feeds it, each event
+turned back into its bytes. Auto-resubscribes if the port is dropped.
 Engine logs a clear line on drop / recovery so silent failure
 isn't a debugging blind spot.
 

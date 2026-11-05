@@ -406,9 +406,14 @@ def struck_bar(strike, freq):
 # ---------------------------------------------------------------- polyphony
 # A MIDI keyboard plays polyphonically. `voice_fn` describes what one
 # held key sounds like, and is called with everything known about it:
-#   voice_fn(freq, gate, vel, key)
-#     freq  Hz          gate  1 while held, 0 after release
-#     vel   velocity 0..1, 0 after release   key  MIDI key number 0..127
+#   voice_fn(freq, gate, vel, key, press, slide)
+#     freq  Hz, bent by the note's own bend   gate  1 while held, 0 after release
+#     vel   velocity 0..1, 0 after release     key   MIDI key number 0..127
+#     press the note's pressure 0..1           slide its CC 74, 0..1
+# press and slide are MPE's second and third dimensions: on an MPE
+# controller each note has its own; on a keyboard they are the channel's
+# aftertouch and CC 74, the same for every note. Any other per-note
+# controller is midi_voice_cc(n, k) in a sum of your own.
 # A lambda names as many as it uses: `(freq, gate) => ...` is fine.
 # poly fans it out across all currently-held notes via sum-unrolling.
 # Every voice is its own independent set of synth state regions —
@@ -418,7 +423,7 @@ def poly(n_voices, voice_fn):
   sum(n_voices, n =>
     let f = midi_voice_freq(n)
     if f > 0 then voice_fn(f, midi_voice_gate(n), midi_voice_vel(n),
-                           midi_voice_key(n))
+                           midi_voice_key(n), midi_voice_press(n), midi_voice_cc(n, 74))
     else 0)
 
 # 95% case — 8 voices is generous for a keyboard performance and cheap

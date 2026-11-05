@@ -10,10 +10,22 @@
 /* Notes held at once. A new one past this evicts the oldest. */
 #define MIDI_MAX_POLYPHONY 16
 
-/* The writer side: the MIDI thread, or a test. */
+/* The writer side: the MIDI thread, a script, an export's host, a test.
+ * Channels are 0..15; the forms without one are channel 0 (MIDI's 1). */
 void  midi_note_on(int note, int velocity);
 void  midi_note_off(int note);
 void  midi_cc(int cc, int value);
+void  midi_note_on_ch(int ch, int note, int velocity);   /* velocity 0 lets go */
+void  midi_note_off_ch(int ch, int note);
+void  midi_cc_ch(int ch, int cc, int value);
+void  midi_bend_ch(int ch, int value);                   /* 0..16383, 8192 centred */
+void  midi_pressure_ch(int ch, int value);               /* channel pressure 0..127 */
+/* A held note's own values, by key, at full resolution. */
+void  midi_note_cc(int note, int cc, double value);      /* 0..1 */
+void  midi_note_bend(int note, double semitones);
+void  midi_note_pressure(int note, double value);        /* 0..1 */
+/* One raw MIDI 1.0 message: notes, controllers, pressure, bend. */
+void  midi_message(const unsigned char* m, int len);
 void  midi_reset_all(void);
 
 /* The sequencer. Text is malloc'd. */
@@ -40,5 +52,8 @@ double n_midi_voice_gate(int n);
 double n_midi_voice_vel(int n);
 double n_midi_voice_key(int n);
 double n_midi_trig(void* state, long at, int n);
+double n_midi_voice_cc(int n, int k);
+double n_midi_voice_press(int n);
+double n_midi_voice_bend(int n);
 
 #endif

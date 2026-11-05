@@ -9,15 +9,13 @@
 #include <string.h>
 #include "midi.h"
 
-typedef void (*aither_note_on_fn)(int note, int velocity);   /* alsa_midi.c */
-typedef void (*aither_note_off_fn)(int note);
-typedef void (*aither_cc_fn)(int cc, int value);
+typedef void (*aither_message_fn)(const unsigned char* m, int len);   /* alsa_midi.c */
 int  aither_alsa_open(const char* client_name);
 int  aither_alsa_connect_from(int client, int port);
 int  aither_alsa_list_ports(char* buf, int bufsize);
 int  aither_alsa_auto_connect(char* outbuf, int outsize);
 int  aither_alsa_parse_address(const char* spec, int* client, int* port);
-void aither_alsa_run(aither_note_on_fn on, aither_note_off_fn off, aither_cc_fn cc);
+void aither_alsa_run(aither_message_fn on_message);
 void aither_alsa_close(void);
 
 /* ------------------------------------------------------------ the sequencer */
@@ -35,7 +33,7 @@ static int last_client = -1, last_port = -1;
 
 static void* run_loop(void* arg) {
   (void)arg;
-  aither_alsa_run(midi_note_on, midi_note_off, midi_cc);
+  aither_alsa_run(midi_message);
   thread_active = 0;
   if (!shutting_down)
     fprintf(stderr, "[aither] MIDI subscription dropped — next `aither send` will attempt auto-resubscribe\n");

@@ -196,7 +196,11 @@ play piano:
 Press multiple keys; hear multiple voices. 8-voice polyphony, oldest
 note evicted at the 9th held key. The lambda runs once per held key
 with that key's frequency and gate (1 while held); name `vel` and `key`
-too, `(freq, gate, vel, key) =>`, for its velocity and MIDI key number.
+too, `(freq, gate, vel, key) =>`, for its velocity and MIDI key number,
+and `press` and `slide` after them for its pressure and CC 74. On an MPE
+controller every note has its own bend, pressure and slide; the pitch
+wheel bends every note on a keyboard. `midi_voice_cc(n, k)`,
+`midi_voice_press(n)` and `midi_voice_bend(n)` read a voice's own.
 
 For controllers (knobs, sliders, pads) and monophonic synths:
 

@@ -6,9 +6,7 @@
 #include <string.h>
 #include <stdio.h>
 
-typedef void (*aither_note_on_fn)(int note, int velocity);
-typedef void (*aither_note_off_fn)(int note);
-typedef void (*aither_cc_fn)(int cc, int value);
+typedef void (*aither_message_fn)(const unsigned char* m, int len);
 
 static snd_seq_t* g_seq = NULL;
 static int g_my_port = -1;
@@ -123,9 +121,10 @@ int aither_alsa_parse_address(const char* spec, int* client, int* port) {
 
 /* Blocking event loop; caller runs this on a dedicated thread. Returns
  * when snd_seq_event_input fails (we closed the sequencer). */
-void aither_alsa_run(aither_note_on_fn on_on,
-                     aither_note_off_fn on_off,
-                     aither_cc_fn on_cc) {
+void aither_alsa_run(aither_message_fn on_message) {
+  /* Each event as the MIDI 1.0 message it stands for, channel and all,
+   * into the one reader every source shares (midi_state.c,
+   * midi_message): a host with raw MIDI calls the same. */
   if (!g_seq) return;
   g_running = 1;
   while (g_running) {
@@ -136,27 +135,42 @@ void aither_alsa_run(aither_note_on_fn on_on,
       break;    /* -ENOSPC and friends: bail; typically a close */
     }
     if (!ev) continue;
+    unsigned char m[3];
     switch (ev->type) {
-      case SND_SEQ_EVENT_NOTEON:
-        /* A note-on with velocity 0 is the common MIDI idiom for note-off. */
-        if (ev->data.note.velocity > 0)
-          on_on(ev->data.note.note, ev->data.note.velocity);
-        else
-          on_off(ev->data.note.note);
+      case SND_SEQ_EVENT_NOTEON:      /* velocity 0 is a note-off, as MIDI has it; the reader knows */
+        m[0] = 0x90 | (ev->data.note.channel & 15), m[1] = ev->data.note.note & 127, m[2] = ev->data.note.velocity & 127;
+        on_message(m, 3);
         break;
       case SND_SEQ_EVENT_NOTEOFF:
-        on_off(ev->data.note.note);
+        m[0] = 0x80 | (ev->data.note.channel & 15), m[1] = ev->data.note.note & 127, m[2] = 0;
+        on_message(m, 3);
         break;
       case SND_SEQ_EVENT_CONTROLLER:
-        on_cc(ev->data.control.param, ev->data.control.value);
+        m[0] = 0xB0 | (ev->data.control.channel & 15), m[1] = ev->data.control.param & 127,
+        m[2] = ev->data.control.value & 127;
+        on_message(m, 3);
         break;
       case SND_SEQ_EVENT_CONTROL14:
         /* ALSA's own 14-bit controller (0..31, 0..16383): the pair it
          * stands for, coarse then fine. */
         if (ev->data.control.param < 32) {
-          on_cc(ev->data.control.param, ev->data.control.value >> 7 & 127);
-          on_cc(ev->data.control.param + 32, ev->data.control.value & 127);
+          m[0] = 0xB0 | (ev->data.control.channel & 15), m[1] = ev->data.control.param & 127,
+          m[2] = ev->data.control.value >> 7 & 127;
+          on_message(m, 3);
+          m[1] = (ev->data.control.param + 32) & 127, m[2] = ev->data.control.value & 127;
+          on_message(m, 3);
         }
+        break;
+      case SND_SEQ_EVENT_PITCHBEND: {  /* ALSA's -8192..8191, MIDI's 0..16383 */
+        int v = ev->data.control.value + 8192;
+        v = v < 0 ? 0 : v > 16383 ? 16383 : v;
+        m[0] = 0xE0 | (ev->data.control.channel & 15), m[1] = v & 127, m[2] = v >> 7 & 127;
+        on_message(m, 3);
+        break;
+      }
+      case SND_SEQ_EVENT_CHANPRESS:
+        m[0] = 0xD0 | (ev->data.control.channel & 15), m[1] = ev->data.control.value & 127;
+        on_message(m, 2);
         break;
       default: break;
     }
