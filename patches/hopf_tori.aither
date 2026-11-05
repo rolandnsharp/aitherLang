@@ -1,0 +1,50 @@
+# hopf_tori: the torus fields inside a spinor, drawn on the scope.
+#
+# A direction is a spinor (xi, eta), two complex numbers, and the
+# direction it points is its Hopf map (notes/spinors-2026-11-05.md). But
+# a direction doesn't fix its spinor: turn both halves together by any
+# phase, (xi, eta) e^(i alpha), and it points the same way. So over every
+# direction there is a whole circle of spinors, its fibre. A spinor is
+# four numbers on a sphere one rung up (the 3-sphere); carried to
+# ordinary space by stereographic projection, each fibre is a circle, and
+# any two of them are linked, once. The fibres over one latitude of the
+# direction sphere lie on a torus, wound round it as Villarceau circles;
+# three latitudes make three nested tori, every circle linked with every
+# other. Nothing here is drawn as a torus: the tori are what spinors are.
+#
+# The beam runs round one fibre each 1/110 s (you hear it at 110 Hz),
+# steps to the next fibre round the latitude, and goes through the three
+# latitudes in turn; the view turns slowly so the tori are seen from
+# every side.
+#
+#   ./aither patches/hopf_tori.aither | tools/scope
+#   ./aither patches/hopf_tori.aither | tools/scope | tools/play hw:rockchipes8388c 20     # and hear it
+
+let loop = 110                                             # fibres drawn a second
+let per = 24                                               # fibres round each latitude
+let lats = [0.28, 0.42, 0.56]                              # the latitudes, as fractions of a half turn from the pole
+
+# Which fibre the beam is on, and how far round it.
+let k = floor(t * loop)
+let alpha = TAU * ((t * loop) mod 1)
+let fibre = k mod (per * 3)
+let theta = PI * lats[floor(fibre / per)]                  # the latitude
+let phi = TAU * (fibre mod per) / per                      # where round it
+
+# The spinor: one direction's spinors, turned together by alpha.
+let xi = rotate([cos(theta / 2), 0], alpha)
+let eta = rotate([sin(theta / 2), 0], alpha + phi)
+
+# Stereographic projection of the four numbers into ordinary space, from
+# the point where eta is i: the circle through it would reach infinity.
+let away = 1 - eta[1]
+let px = xi[0] / away
+let py = xi[1] / away
+let pz = eta[0] / away
+
+# The view: turning slowly about the vertical, tipped well forward so the
+# tori are seen from the side, breathing.
+let turned = rotate([px, py], TAU * t / 29)
+let tip = 1.05 + 0.3 * sin(TAU * t / 41)
+let tipped = rotate([turned[1], pz], tip)
+[turned[0], tipped[0]] * 0.22
