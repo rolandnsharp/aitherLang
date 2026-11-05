@@ -107,13 +107,12 @@ int render_voice(Voice* v, double seconds, int sr, const double* in_l, const dou
     lp1[p] = lowpass(split, 0.5412, sr);
     lp2[p] = lowpass(split, 1.3066, sr);
   }
-  /* A block at a time through tick_block, as the engine runs it, with
-   * the render's own clock (t0 + i / sr), every sample as the voice made
+  /* A block at a time through tick_block, as the engine runs it, from
+   * t0's step (sample i at step t0 sr + i), every sample as the voice made
    * it (no guard, no fade) and every part's sound each sample. A gain
    * ramp in progress holds, as it did a sample at a time. */
   enum { BLK = 512 };
   VoiceHeader* h = v->cur.state;
-  double* tb = malloc(BLK * sizeof(double));
   double* raw = malloc(2 * BLK * sizeof(double));
   double* inb = malloc(2 * BLK * sizeof(double));
   double* pb = malloc((size_t)(np > 0 ? 2 * np : 2) * BLK * sizeof(double));
@@ -123,14 +122,14 @@ int render_voice(Voice* v, double seconds, int sr, const double* in_l, const dou
   double* was_in = h->in_buf;
   double was_fade = h->fade_gain, was_delta = h->fade_delta;
   h->fade_gain = 1.0; h->fade_delta = 0.0;
-  h->t_buf = tb; h->raw_out = raw; h->part_buf = pb; h->in_buf = inb;
+  h->step = nearbyint(t0 * (double)sr);
+  h->raw_out = raw; h->part_buf = pb; h->in_buf = inb;
   int rc = 0;
   long total = n_skip + n;
   for (long i0 = 0; i0 < total && rc == 0; i0 += BLK) {
     long m = total - i0 < BLK ? total - i0 : BLK;
     for (long k = 0; k < m; k++) {
       long i = i0 + k;
-      tb[k] = t0 + (double)i / (double)sr;
       if (feed_input) {             /* the recording a frame at a time; silence past its end */
         inb[2 * k] = i < n_in ? in_l[i] : 0.0;
         inb[2 * k + 1] = i < n_in ? in_r[i] : 0.0;
@@ -162,10 +161,10 @@ int render_voice(Voice* v, double seconds, int sr, const double* in_l, const dou
       }
     }
   }
-  h->t_buf = NULL; h->raw_out = NULL; h->part_buf = NULL; h->in_buf = was_in;
+  h->raw_out = NULL; h->part_buf = NULL; h->in_buf = was_in;
   h->fade_gain = was_fade; h->fade_delta = was_delta;
   for (int p = 0; p < np; p++) h->part_fade_delta[p] = held[p];
-  free(tb); free(raw); free(inb); free(pb); free(scratch); free(held);
+  free(raw); free(inb); free(pb); free(scratch); free(held);
   if (rc == 0) {
     out->parts = calloc(np > 0 ? (size_t)np : 1, sizeof(PartLevel));
     out->nparts = np;

@@ -24,19 +24,13 @@ static const char* Patch =
 enum { N = 4800, BLOCK = 512 };
 static const double SR = 48000.0;
 
-/* One voice, sample by sample, with the engine's clock arithmetic. */
+/* One voice, sample by sample, sample i at step i, as the engine counts. */
 static void single(double* out) {
   Voice* v = must_load(Patch, SR);
-  double sec = 0.0, frac = 0.0, dt = 1.0 / SR;
   for (int i = 0; i < N; i++) {
-    frac += dt;
-    if (frac >= 1.0) {
-      sec += 1.0;
-      frac -= 1.0;
-    }
     dsp_input_l = 0.1 * sin((double)i * 0.01);
     dsp_input_r = -dsp_input_l;
-    tick_at(v, sec + frac, &out[2 * i], &out[2 * i + 1]);
+    tick_at(v, (double)i / SR, &out[2 * i], &out[2 * i + 1]);
   }
   dsp_input_l = dsp_input_r = 0.0;
 }
@@ -45,8 +39,7 @@ static void single(double* out) {
 static void blocks(double* out) {
   Voice* v = must_load(Patch, SR);
   VoiceHeader* hdr = v->cur.state;
-  hdr->time_sec = 0.0;
-  hdr->time_frac = 0.0;
+  hdr->step = 0.0;
   hdr->fade_gain = 1.0;
   hdr->fade_delta = 0.0;
   static double in_buf[2 * BLOCK], outL[BLOCK], outR[BLOCK];

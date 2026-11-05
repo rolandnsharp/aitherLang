@@ -3,6 +3,7 @@
 
 #define _GNU_SOURCE
 #include <libtcc.h>
+#include <math.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -715,15 +716,17 @@ void voice_dispose(Voice* v) {
 /* ------------------------------------------------------------------ ticks */
 
 void voice_tick(Voice* v, double t, double* l, double* r) {
-  /* One sample at engine time t: what render, try and the tests use. */
+  /* One sample at engine time t, in seconds, taken to its step: what the
+   * tests use. */
   VoiceHeader* h = v->cur.state;
-  h->t = t;
+  h->step = nearbyint(t * h->sr);
   h->sweep_origin = v->sweep_origin;
   v->cur.tick(v->cur.state, l, r);
 }
 
 void voice_tick_block(Voice* v, long n, double* outL, double* outR) {
-  /* n samples from the clock in the header: the engine's path. */
+  /* n samples from the step in the header, which it advances: the
+   * engine's path. */
   VoiceHeader* h = v->cur.state;
   h->sweep_origin = v->sweep_origin;
   h->par = pool_threads() > 1 ? pool_run : NULL;

@@ -292,7 +292,7 @@ static const char* BLOCK_TEMPLATE =
 "  double B[AITHER_NB * S];\n"
 "  hoist_init(s);\n"
 "  s->in_l = n_input_l(); s->in_r = n_input_r();\n"
-"  B[XB_T * S] = s->t; B[XB_IN_L * S] = s->in_l; B[XB_IN_R * S] = s->in_r;\n"
+"  B[XB_T * S] = s->step; B[XB_IN_L * S] = s->in_l; B[XB_IN_R * S] = s->in_r;\n"
 "  for (long p = 0; p < AITHER_NP; p++) {\n"
 "    B[(XB_GAIN + p) * S] = s->part_gains[p];\n"
 "    B[(XB_PARK + p) * S] = s->part_park ? s->part_park[p] : 0.0;\n"
@@ -313,15 +313,10 @@ static const char* BLOCK_TEMPLATE =
 "  for (long b0 = 0; b0 < n; b0 += AITHER_MAXN) {\n"
 "    const long m = n - b0 < AITHER_MAXN ? n - b0 : AITHER_MAXN;\n"
 "    for (long k = 0; k < m; k++) {\n"
-"      if (s->t_buf) s->t = s->t_buf[b0 + k];\n"
-"      else {\n"
-"        s->time_frac += s->dt;\n"
-"        if (s->time_frac >= 1.0) { s->time_sec += 1.0; s->time_frac -= 1.0; }\n"
-"        s->t = s->time_sec + s->time_frac;\n"
-"      }\n"
 "      if (s->in_buf) { s->in_l = s->in_buf[2*(b0 + k)]; s->in_r = s->in_buf[2*(b0 + k) + 1]; }\n"
 "      else { s->in_l = 0.0; s->in_r = 0.0; }\n"
-"      B[XB_T * S + k] = s->t; B[XB_IN_L * S + k] = s->in_l; B[XB_IN_R * S + k] = s->in_r;\n"
+"      B[XB_T * S + k] = s->step; s->step += 1.0;\n"
+"      B[XB_IN_L * S + k] = s->in_l; B[XB_IN_R * S + k] = s->in_r;\n"
 "      for (long p = 0; p < AITHER_NP; p++) {\n"
 "        B[(XB_GAIN + p) * S + k] = s->part_gains[p];\n"
 "        B[(XB_PARK + p) * S + k] = s->part_park ? s->part_park[p] : 0.0;\n"
@@ -1748,7 +1743,7 @@ static void declare_state_array(Ctx* c, Scope* sc, Node* st, Buf* pre, int top_l
          "    for (long _k = 0; _k < %d; ++_k) s->pool[%s + 1 + _k] = _v;\n"
          "    s->pool[%s] = 1.0;\n  }\n", base, bstr(&init_pre), iv.l, gens * n, base, base);
   if (every > 0)
-    badd(c, pre, "  if (((long)floor(aither_t * s->sr + 0.5) - 1) %% %ld == 0)\n"
+    badd(c, pre, "  if ((long)aither_step %% %ld == 0)\n"
          "    for (long _k = 0; _k < %d; ++_k) s->pool[%s + 1 + _k] = s->pool[%s + 1 + %d + _k];\n",
          every, n * w, base, base, n * w);
 }
@@ -2038,7 +2033,7 @@ static const char* clock_rate(Ctx* c, Scope* sc, Node* n) {
 
 /* Where `n` is at t = 0, as C, for an `n` clock_rate accepted: c of k t + c. */
 static const char* clock_offset(Ctx* c, Scope* sc, Node* n) {
-  if (is_clock(c, sc, n)) return eq(n->str, "t") ? "0.0" : "(-s->sweep_origin)";
+  if (is_clock(c, sc, n)) return eq(n->str, "t") ? "0.0" : "(-(s->sweep_origin / s->sr))";
   if (is_invariant(c, sc, n)) return emit_invariant(c, sc, n);
   if (n->kind == nkUnary) return F(c, "(-(%s))", clock_offset(c, sc, n->kids[0]));
   Node *a = n->kids[0], *b = n->kids[1];
@@ -2749,7 +2744,7 @@ static const char* builtin_value(const char* s) {
   if (eq(s, "dt")) return "s->dt";
   /* The voice's own time: a sweep from the origin the engine sets (a
    * new voice, `aither sweep`), so a patch never subtracts. */
-  if (eq(s, "sweep")) return "((aither_t) - (s->sweep_origin))";
+  if (eq(s, "sweep")) return "((aither_step - s->sweep_origin) / s->sr)";
   if (eq(s, "PI")) return "3.14159265358979323846";
   if (eq(s, "TAU")) return "(2.0 * 3.14159265358979323846)";
   return NULL;
@@ -4701,7 +4696,12 @@ static const char* emit_program(Ctx* c, Node* program) {
     /* The loop's head: the clock and the input where its units read them. */
     Buf loop = body, head = {0};
     const char* lt = bstr(&loop);
-    if (strstr(lt, "aither_t")) badd(c, &head, "  const double aither_t = %s;\n", xb(c, XB_T, "aither_i"));
+    /* The clock is the step count, a whole number; t is it over the rate,
+     * the same division a render's sample i always had (i / sr). */
+    int uses_t = strstr(lt, "aither_t") != NULL;
+    if (uses_t || strstr(lt, "aither_step"))
+      badd(c, &head, "  const double aither_step = %s; (void)aither_step;\n", xb(c, XB_T, "aither_i"));
+    if (uses_t) bcat(c, &head, "  const double aither_t = aither_step / s->sr; (void)aither_t;\n");
     if (strstr(lt, "aither_in_"))
       badd(c, &head, "  const double aither_in_l = %s, aither_in_r = %s; (void)aither_in_l; (void)aither_in_r;\n",
            xb(c, XB_IN_L, "aither_i"), xb(c, XB_IN_R, "aither_i"));
@@ -4861,7 +4861,7 @@ static const char* emit_program(Ctx* c, Node* program) {
     "  long   idx;\n"
     "  char   overflow;\n"
     "  double sr;\n"
-    "  double t, dt, sweep_origin;\n"
+    "  double step, dt, sweep_origin;\n"
     "  double* part_gains;\n"
     "  double* part_out;\n"
     "  double* part_park;\n"
@@ -4873,7 +4873,6 @@ static const char* emit_program(Ctx* c, Node* program) {
     "  double* in_buf;\n"
     "  double  in_l, in_r;\n"
     "  double  fade_gain, fade_delta;\n"
-    "  double  time_sec, time_frac;\n"
     "  double  peak_decay, rms_alpha;\n"
     "  double  peak_raw;\n"
     "  long    bad;\n"
@@ -4884,7 +4883,6 @@ static const char* emit_program(Ctx* c, Node* program) {
     "  double* prof;\n"
     "  long    profiling;\n"
     "  long    prof_ticks;\n"
-    "  const double* t_buf;\n"
     "  double* raw_out;\n"
     "  double* part_buf;\n"
     "  int (*par)(void*, long, void* const*, const int*, const int*, const int*, long, long, double*);\n");

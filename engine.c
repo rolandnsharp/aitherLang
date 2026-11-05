@@ -240,7 +240,11 @@ static Stats      master;
 static RecentRing master_recent;
 static volatile int running;
 static int        killed;                /* `kill` ended it, not the reader */
-static double     time_sec, time_frac;
+/* The engine's clock: a count of steps (samples) from its start, a whole
+ * number, exact for ever. t is it over the rate, the same division a
+ * render makes, so a render and what plays agree to the bit. */
+static long long  engine_step;
+static double now_sec(void) { return (double)engine_step / (double)sample_rate; }
 static int        input_used;            /* a loaded patch calls input(): offline runs read stdin */
 static pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;
 
@@ -279,7 +283,6 @@ static double *blk_l, *blk_r;            /* one voice's block */
 static double *blk_in;                   /* the input block as doubles */
 
 static void mix_block(double* out_l, double* out_r, const float* input, int frames) {
-  double dt = 1.0 / (double)sample_rate;
   for (int i = 0; i < frames; i++) out_l[i] = out_r[i] = 0.0;
   /* Wait for the lock, never skip the block. The stream is gapless: every
    * sample written is one tick of t, which is what tv and scope count
@@ -298,7 +301,7 @@ static void mix_block(double* out_l, double* out_r, const float* input, int fram
   /* The engine clock at the block's start. Every voice runs the same
    * samples from it, and the engine advances its own copy the same way
    * afterwards, so t has the same bits everywhere. */
-  double t0 = time_sec + time_frac;
+  double t0 = now_sec();
   for (int v = 0; v < slot_count; v++) {
     Slot* s = &slots[v];
     /* A runaway mute lifts by itself after a gap, with a fade-in, so one
@@ -313,8 +316,7 @@ static void mix_block(double* out_l, double* out_r, const float* input, int fram
     if (!s->active || s->muted || s->parked || s->want_rollback) continue;
     Voice* voice = s->voice;
     VoiceHeader* hdr = voice->cur.state;
-    hdr->time_sec = time_sec;
-    hdr->time_frac = time_frac;
+    hdr->step = (double)engine_step;
     hdr->in_buf = in_ptr;
     hdr->fade_gain = s->fade_gain;
     hdr->fade_delta = s->fade_delta;
@@ -417,13 +419,7 @@ static void mix_block(double* out_l, double* out_r, const float* input, int fram
     }
   }
   /* Advance the engine clock the way every voice just did. */
-  for (int i = 0; i < frames; i++) {
-    time_frac += dt;
-    if (time_frac >= 1.0) {
-      time_sec += 1.0;
-      time_frac -= 1.0;
-    }
-  }
+  engine_step += frames;
   for (int i = 0; i < frames; i++) {
     stats_update(&master, out_l[i], out_r[i]);
     master_recent.l[master_recent.idx] = (float)out_l[i];
@@ -563,7 +559,7 @@ static void* doctor(void* arg) {
     for (int i = 0; i < slot_count; i++) {
       Slot* s = &slots[i];
       if (!s->want_rollback) continue;
-      double after = time_sec + time_frac - s->swap_at;
+      double after = now_sec() - s->swap_at;
       if (voice_rollback(s->voice)) {
         s->rolled_back = 1;
         s->bad_run = 0;
@@ -714,7 +710,7 @@ char* engine_load(const char* path, double fade_in, const char* muted) {
    * still saw "voice limit reached" though every slot was silent. */
   sweep_inactive_slots();
   int idx = find_slot(name);
-  double now = time_sec + time_frac;
+  double now = now_sec();
   Voice* committed;
   if (idx >= 0) {
     Slot* s = &slots[idx];
@@ -738,7 +734,7 @@ char* engine_load(const char* path, double fade_in, const char* muted) {
     int retrigger = !s->active ||
                     (!s->held && (s->fade_gain <= 0.0 || s->fade_delta < 0.0));
     if (retrigger) {
-      committed->sweep_origin = now;
+      committed->sweep_origin = (double)engine_step;
       s->active = 1;
       s->fade_gain = fade_in > 0.0 ? 0.0 : 1.0;
       s->fade_delta = fade_in > 0.0 ? fade_delta_for(fade_in) : 0.0;
@@ -757,7 +753,7 @@ char* engine_load(const char* path, double fade_in, const char* muted) {
     }
     committed = voice_new();
     voice_commit(committed, prepared);
-    committed->sweep_origin = now;
+    committed->sweep_origin = (double)engine_step;
     Slot* s = &slots[slot_count];
     memset(s, 0, sizeof *s);
     s->name = sdup(name);
@@ -834,7 +830,7 @@ static char* try_patch(const char* path, double seconds, double skip) {
   Voice* scratch = voice_new();
   lock_for_command();
   int idx = find_slot(name);
-  double now = time_sec + time_frac;
+  double now = now_sec();
   if (idx >= 0 && slots[idx].voice->cur.state) {
     long size = slots[idx].voice->cur.state_size;
     unlock();                            /* allocate outside the audio lock */
@@ -847,7 +843,7 @@ static char* try_patch(const char* path, double seconds, double skip) {
   unlock();
   char* origin = scratch->cur.state ? fmt("live state of %s", name)
                                     : fmt("fresh state (no live voice %s)", name);
-  if (!scratch->cur.state) scratch->sweep_origin = now;
+  if (!scratch->cur.state) scratch->sweep_origin = (double)engine_step;
   voice_commit(scratch, prepared);
   char* head = fmt("try: %s from %s, t=%.1fs, %.1fs", name, origin, now + skip, seconds);
   char* r = try_report(scratch, seconds, skip, now, head);
@@ -1032,7 +1028,7 @@ static char* sweep_voice(const char* name, double seconds) {
    * on. 0 plays the piece from the top. */
   lock_for_command();
   int idx = find_slot(name);
-  if (idx >= 0) slots[idx].voice->sweep_origin = time_sec + time_frac - seconds;
+  if (idx >= 0) slots[idx].voice->sweep_origin = (double)engine_step - nearbyint(seconds * (double)sample_rate);
   unlock();
   return idx < 0 ? fmt("not found: %s", name) : NULL;
 }
@@ -1593,7 +1589,7 @@ static char* handle(int n, char** w) {
     if (n == 2) {
       lock_for_command();
       int idx = find_slot(w[1]);
-      double at = idx >= 0 ? time_sec + time_frac - slots[idx].voice->sweep_origin : 0.0;
+      double at = idx >= 0 ? ((double)engine_step - slots[idx].voice->sweep_origin) / (double)sample_rate : 0.0;
       unlock();
       return idx < 0 ? fmt("ERR not found: %s", w[1]) : fmt("OK\n%.1f", at);
     }

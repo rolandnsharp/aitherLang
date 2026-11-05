@@ -1,8 +1,8 @@
 /* pixel(w, h) and pixel_index(w, h) follow the engine clock: the
- * engine's first sample is pixel 0 and the index steps one a sample,
- * wrapping at w*h, so a patch draws on the grid tv counts. If it slipped
- * by a sample the picture would shear. Run through tick_block, the
- * engine's path, which sets t from its own second/fraction clock. */
+ * engine's first sample (step 0) is pixel 0 and the index steps one a
+ * sample, wrapping at w*h, so a patch draws on the grid tv counts. If it
+ * slipped by a sample the picture would shear. Run through tick_block,
+ * the engine's path, which counts the steps. */
 
 #include "check.h"
 
@@ -12,8 +12,7 @@ static void run(const char* src, double sr, long n, double* l, double* r) {
   Voice* v = must_load(src, sr);
   if (!v) return;
   VoiceHeader* hdr = v->cur.state;
-  hdr->time_sec = 0.0;
-  hdr->time_frac = 0.0;
+  hdr->step = 0.0;
   hdr->fade_gain = 1.0;
   hdr->fade_delta = 0.0;
   hdr->in_buf = NULL;

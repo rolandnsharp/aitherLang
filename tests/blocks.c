@@ -64,21 +64,15 @@ static Voice* load(const char* path, char* err, int errlen) {
   VoiceHeader* h = v->cur.state;
   h->fade_gain = 1.0;
   h->fade_delta = 0.0;
-  h->time_sec = 0.0;
-  h->time_frac = 0.0;
+  h->step = 0.0;
   return v;
 }
 
-/* A sample at a time, the clock as the engine steps it. */
+/* A sample at a time, sample i at step i, as the engine counts. */
 static int single(const char* path, double* out, char* err, int errlen) {
   Voice* v = load(path, err, errlen);
   if (!v) return -1;
-  double sec = 0.0, frac = 0.0, dt = 1.0 / 48000.0;
-  for (int i = 0; i < N; i++) {
-    frac += dt;
-    if (frac >= 1.0) { sec += 1.0; frac -= 1.0; }
-    voice_tick(v, sec + frac, &out[2 * i], &out[2 * i + 1]);
-  }
+  for (int i = 0; i < N; i++) voice_tick(v, (double)i / 48000.0, &out[2 * i], &out[2 * i + 1]);
   voice_dispose(v);
   return 0;
 }

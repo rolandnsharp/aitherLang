@@ -37,11 +37,15 @@ gets a float.
 | `PI`      | 3.14159...                             |
 | `TAU`     | 6.28318... (2π)                        |
 
-`t` is the one clock, shared by every voice. `sweep` is this voice's
-own: 0 when it is first sent, running on through edits, and set with
+`t` is the one clock, shared by every voice. Underneath it is a count:
+the engine counts steps (samples) from its start, a whole number, and
+`t` is the count over the rate, so the first sample is at `t = 0`, the
+same live and in a render, to the bit, and it never drifts however long
+the set (notes/step-first-2026-11-05.md). `sweep` is this voice's own:
+0 when it is first sent, running on through edits, and set with
 `aither sweep <voice> <seconds>` (COMPOSING.md, "The composition
-clock"). It is `t` less the moment it was last set: exact, and free
-to move.
+clock"). It is the steps since the moment it was last set, over the
+rate: exact, and free to move.
 
 ## State
 
@@ -675,7 +679,8 @@ $u = array(w * h, every = w * h)    # steps once a tv frame
 
 `every = M` (`array`'s third parameter) makes a state array step: reads see the elements as they
 were at the last step, and stores land together every M samples of the
-engine clock. It's `each`'s held-back stores, held back for M samples.
+engine clock, from its first (at samples 0, M, 2M, ..., as tv's frames
+begin). It's `each`'s held-back stores, held back for M samples.
 A field that every element must advance from the same moment (a wave on
 a tv raster, where pixels are computed one after another) reads its
 neighbours and itself with no bookkeeping:

@@ -139,19 +139,21 @@ let c = [1, 2, 3]
 c[0] = 5
 c[0]
 
-# --- a stepped array: reads hold between steps, every 4 samples
+# --- a stepped array: reads hold between steps, every 4 samples from the first
 # expect: 0
-# expect at 1: 0.01
+# expect at 3: 0
 # expect at 4: 0.01
-# expect at 5: 0.02
-# expect at 61: 0.16
+# expect at 7: 0.01
+# expect at 8: 0.02
+# expect at 63: 0.15
 $c = array(1, every = 4)
 $c[0] = $c[0] + 1
 $c[0] * 0.01
 
 # --- stepped with the frame: what was stored at the last pixel of the frame before
-# expect at 1: 0.7
+# expect at 7: 0
 # expect at 8: 0.7
+# expect at 15: 0.7
 # expect at 63: 0.7
 let k = pixel_index(4, 2)
 $a = array(1, every = 8)
@@ -172,9 +174,10 @@ $c[0] = $c[0] + 1
 $c[0] * 0.001
 
 # --- inside each, stores wait for the step
-# expect at 1: 0.02
-# expect at 4: 0.04
-# expect at 7: 0.06
+# expect at 2: 0
+# expect at 3: 0.02
+# expect at 6: 0.04
+# expect at 9: 0.06
 $a = array(3, every = 3)
 each(3, i => $a[i] = $a[i] + i)
 $a[2] * 0.01

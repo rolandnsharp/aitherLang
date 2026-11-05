@@ -24,7 +24,8 @@ typedef struct {
   long    idx;
   char    overflow;
   double  sr;
-  double  t, dt, sweep_origin;
+  double  step, dt, sweep_origin;   /* step: this sample's count from the engine's start, a whole number;
+                                       sweep_origin: the step `sweep` counts from */
   double* part_gains;
   double* part_out;
   double* part_park;
@@ -36,7 +37,6 @@ typedef struct {
   double* in_buf;
   double  in_l, in_r;
   double  fade_gain, fade_delta;
-  double  time_sec, time_frac;
   double  peak_decay, rms_alpha;
   double  peak_raw;
   long    bad;
@@ -47,10 +47,9 @@ typedef struct {
   double* prof;               /* `aither profile`: seconds per slot */
   long    profiling;
   long    prof_ticks;
-  /* For render (NULL in the engine): the clock a sample at a time, each
-   * sample as the voice made it (before the guard and the fade), each
-   * part's sound each sample (2 * n_parts a sample). */
-  const double* t_buf;
+  /* For render (NULL in the engine): each sample as the voice made it
+   * (before the guard and the fade), each part's sound each sample
+   * (2 * n_parts a sample). */
   double* raw_out;
   double* part_buf;
   /* pool_run (pool.h) when the voice's tasks may run on several cores,
@@ -88,7 +87,7 @@ typedef struct Voice {
   Version     cur;
   Version     prev;           /* the version before the last commit; prev.state NULL: none */
   void**      old_libs;  int nold, capold;   /* kept alive: an audio thread may still run them */
-  double      sweep_origin;
+  double      sweep_origin;   /* the step `sweep` counts from */
   long        gen;            /* bumped on every commit, so a stale -O2 build is refused */
   /* Parts, by index into cur.part_names. */
   double*        part_gains;

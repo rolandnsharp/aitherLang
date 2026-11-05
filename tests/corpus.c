@@ -216,6 +216,22 @@ static char* fingerprint(const char* path) {
   if (!(late = loaded(src, path, err, sizeof err))) goto fail;
   if (render_voice(late, 0.5, 48000, in[2][0], in[2][1], nin[2], 0, LATE, 1, &w[nw], err, sizeof err)) goto fail;
   nw++;
+  /* AITHER_CORPUS_DUMP=dir: every window's samples too, L R doubles, to
+   * a file named for the patch, so two builds' renders can be compared by
+   * size and not only by hash. */
+  const char* dump = getenv("AITHER_CORPUS_DUMP");
+  if (dump) {
+    char name[4096];
+    int n = snprintf(name, sizeof name, "%s/", dump);
+    for (const char* q = path; *q && n < (int)sizeof name - 8; q++) name[n++] = *q == '/' ? '_' : *q;
+    snprintf(name + n, sizeof name - n, ".raw");
+    FILE* f = fopen(name, "wb");
+    if (f) {
+      for (int k = 0; k < nw; k++)
+        for (long i = 0; i < w[k].n; i++) { fwrite(&w[k].left[i], 8, 1, f); fwrite(&w[k].right[i], 8, 1, f); }
+      fclose(f);
+    }
+  }
   uint64_t h = 0xcbf29ce484222325ull;          /* FNV-1a over the samples' bits */
   double sum = 0, peak = 0;
   long count = 0;

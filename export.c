@@ -282,9 +282,9 @@ int export_patch(const char* path, const char* dir, const char* name, double rat
           "}\n\n",
           name, name, N, N);
   fprintf(c,
-          "double %s_time(const %s* v) { return v->s->time_sec + v->s->time_frac; }\n\n"
-          "void %s_sweep(%s* v, double seconds) { v->s->sweep_origin = v->s->time_sec + v->s->time_frac - seconds; }\n",
-          name, name, name, name);
+          "double %s_time(const %s* v) { return v->s->step / %s_RATE; }\n\n"
+          "void %s_sweep(%s* v, double seconds) { v->s->sweep_origin = v->s->step - nearbyint(seconds * %s_RATE); }\n",
+          name, name, N, name, name, N);
   rc = fclose(c) == 0 ? 0 : -1;
   if (rc) snprintf(err, errlen, "can't write %s", file);
 

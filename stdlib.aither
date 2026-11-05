@@ -278,7 +278,7 @@ def mono(signal): (signal[0] + signal[1]) * 0.5
 # from the first sample the engine wrote. These follow the engine clock,
 # not a counter in the voice, so a hot swap or a newly sent voice lands on
 # the grid tv is counting. The patch and tv must agree on w and h.
-def pixel_index(w, h): (floor(t * sr + 0.5) + w * h - 1) mod (w * h)
+def pixel_index(w, h): floor(t * sr + 0.5) mod (w * h)
 
 # The pixel's centre as a pair: x across -1..1, y up, square pixels, so y
 # spans +-h/w. What the patch returns for it is the pixel's complex value:
@@ -291,7 +291,7 @@ def pixel(w, h):
 
 # Which frame the sample is in, from 0: for what changes once a frame (a
 # zoom, a morph, which of two state arrays is last frame's).
-def frame_number(w, h): floor((floor(t * sr + 0.5) - 1) / (w * h))
+def frame_number(w, h): floor(floor(t * sr + 0.5) / (w * h))
 
 # ---------------------------------------------------------------- spectrum
 # Timbre construction via sum-of-sines. Every physical resonant system

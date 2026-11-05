@@ -1,6 +1,7 @@
 # Step first: no clock, no hertz, only turning
 
-**Status (2026-11-05): a design note, nothing built.** Roland: "to move
+**Status (2026-11-05): step 1 of the transition built** (below); the
+rest a design note. Roland: "to move
 away from dimensions, time, hz and get into the aither way of thinking.
 simplicity is divinity." He also said "perhaps we have both during the
 transition", so `t` stays until rewritten patches show the way without it.
@@ -88,6 +89,17 @@ the dynamics. No outside parameter runs underneath.
 1. `t` stops being the engine's: a stdlib name derived from a step count
    the engine keeps. The patches don't change; the engine loses its
    clock. Measure that the corpus is unchanged.
+   *Built 2026-11-05 (Roland: keep `t` a built-in).* The engine keeps
+   one 64-bit step count; each voice's block starts from it and the
+   generated code counts on, `t` being the count over the rate. Gone:
+   `time_sec` + `time_frac` and their per-sample adding up of `dt` (in
+   the engine, the voice header, the block template and the C export),
+   the render's buffer of times, and `sweep_origin` in seconds (now a
+   step). Found: the live engine added `dt` before using it, so its first
+   sample was at `t = dt` while renders started at 0, and `pixel_index`,
+   `frame_number` and `every` carried a `- 1` for it; now the first
+   sample is step 0 everywhere, live and render agree to the bit, and
+   the three count from it.
 2. `since` counts steps; `pixel_index`, `frame_number` and `every` read
    the count.
 3. Rewrite three patches without `t` and compare them with the originals:
