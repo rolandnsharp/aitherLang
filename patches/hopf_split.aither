@@ -14,18 +14,26 @@
 # see. Glued along the Clifford torus the two are the whole 3-sphere;
 # seen from below, the direction sphere's two hemispheres.
 #
-# Two tori at mirrored latitudes: most of the time held apart, the small
-# donut threaded by the hourglass's waist; every 40 s they swell toward
-# the equator, the hourglass shrinking until its whole torus comes into
-# view, meet as the one Clifford torus, and part again. The circles on
-# each are its fibres, every one linked with every other, sliding as
-# they go.
+# Beside them, on the left, the sphere they are drawn from: the direction
+# sphere, with its two latitudes. The donut is the fibres over the
+# northern one, the hourglass over the southern; as the two latitudes
+# move toward the equator their caps grow until they close into the
+# whole sphere, and on the right the donut and the hourglass meet as one
+# torus, the Clifford torus over the equator. The sphere the tori make
+# together is the 3-sphere: the projection spreads it over all of space,
+# the donut filling the inside and the hourglass everything outside, out
+# through infinity, so it is not a surface to be seen; the sphere on the
+# left is the one under it.
+#
+# Most of the time the two are held apart, the small donut threaded by
+# the hourglass's waist; every 40 s they swell to the equator, meet for a
+# few seconds, and part again. The circles on each torus are its fibres,
+# every one linked with every other, sliding as they go.
 #
 #   ./aither patches/hopf_split.aither | tools/scope --decay 0.9
 
-let per = 18                                               # fibres round each torus
-let passes = 20                                            # the whole picture, a second
-let loop = passes * per * 2
+let per = 16                                               # fibres round each torus
+let passes = 18                                            # the whole picture, a second
 
 # The two latitudes: held near the poles, then once every 40 s swelling
 # to the equator (10 s each way, 4 s met) and back; the other the first's
@@ -33,12 +41,19 @@ let loop = passes * per * 2
 let cyc = t mod 40
 let toward = ease((cyc - 14) / 10) * (1 - ease((cyc - 28) / 10))
 let sweep = 0.14 + 0.36 * toward                           # a fraction of a half turn: 0.14 .. 0.5
-let k = floor(t * loop)
-let alpha = TAU * ((t * loop) mod 1)
-let fibre = k mod (per * 2)
+
+# Each pass: most of the beam on the tori, the rest on the sphere.
+let u = (t * passes) mod 1
+let on_tori = u < 0.68
+let f = u / 0.68 * per * 2                                 # through the fibres
+let g = (u - 0.68) / 0.32 * 4                              # through the sphere's four circles
+let fibre = floor(f)
+let alpha = TAU * (f mod 1)
 let south = floor(fibre / per)                             # 0 the donut, 1 the hourglass
 let theta = PI * (if south > 0 then 1 - sweep else sweep)
 let phi = TAU * (fibre mod per) / per + TAU * t / 37
+
+# ---------------------------------------------------------------- the tori
 
 # One direction's spinors, turned together by alpha.
 let xi = rotate([cos(theta / 2), 0], alpha)
@@ -47,12 +62,22 @@ let eta = rotate([sin(theta / 2), 0], alpha + phi)
 # Stereographic projection from where eta is i, which lies on the south
 # pole's fibre: that fibre is the axis itself, through infinity.
 let away = 1 - eta[1]
-let px = xi[0] / away
-let py = xi[1] / away
-let pz = eta[0] / away
+let turned = rotate([xi[0] / away, xi[1] / away], TAU * t / 31)
+let tipped = rotate([turned[1], eta[0] / away], 1.35)
+let near = amplitude([turned[0], tipped[0]]) * 0.13 < 0.55  # the hourglass's far side, through infinity,
+let tori = if near then [turned[0] * 0.13 + 0.38, tipped[0] * 0.13] else [3, 3]   # off the screen, where the beam blanks
 
-# The view: turning slowly about the axis, tipped so the axis stands
-# upright on the screen.
-let turned = rotate([px, py], TAU * t / 31)
-let tipped = rotate([turned[1], pz], 1.35)
-[turned[0], tipped[0]] * 0.2
+# ---------------------------------------------------------------- the sphere
+
+# The direction sphere, seen at the same tip: its outline, the equator
+# (where the Clifford torus sits), and the two latitudes now drawn.
+let ring = floor(g)
+let a = TAU * (g mod 1)
+let lat = if ring == 1 then PI / 2 else if ring == 2 then PI * sweep else PI * (1 - sweep)
+let on_rim = [cos(a), sin(a)]                              # ring 0: the outline, flat to the screen
+let round = rotate([sin(lat) * cos(a), sin(lat) * sin(a)], TAU * t / 31)
+let seen = rotate([round[1], cos(lat)], 1.35)
+let dot = if ring == 0 then on_rim else [round[0], seen[0]]
+let sphere = [dot[0] * 0.3 - 0.6, dot[1] * 0.3]
+
+if on_tori then tori else sphere
