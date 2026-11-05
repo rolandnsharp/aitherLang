@@ -23,7 +23,10 @@ tried and dropped; each doc says so near the top where that's the case.
   pairs, the one gap (no pair of pairs) and three ways through it;
   spin-½ fields; hearing height (pinna echoes, convolution); six ways to
   think about time other than as `t`. In aither's own lineage
-  (Steinmetz, Tesla), not relativity's. Nothing built.
+  (Steinmetz, Tesla), not relativity's. The destination: the spinor as
+  aither's third value (number, pair, spinor), reached through way 2 by
+  evidence; stereo is already a spinor; instruments resonating through
+  the field.
 - [listening-2026-10-28.md](listening-2026-10-28.md) — patches that
   start from `input()`: a vocoder, sympathetic strings, pitch following,
   ducking (written), a waterfall, radio, measuring on `card` (next).
