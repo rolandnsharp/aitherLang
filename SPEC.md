@@ -815,6 +815,13 @@ Given a pair of pairs it would make a pair of pairs of pairs, and stops.
 file's level; it keeps that shape, so a number put in it fills all
 four, and a pair put in it is a stand-in error (which half?).
 
+Arrays hold them as they hold pairs: `$f = array(N, [[1, 0], [0, 0]])`
+is a field of N rotations (four numbers an element), and `array(N, i =>
+...)` a rule making them; `$f[i]` reads and stores one whole, `each`
+steps them. An array keeps its first value's shape: a number stored
+fills an element, a pair into pairs of pairs (or the other way) is a
+stand-in error.
+
 **Stand-ins, not decisions.** Pairs of pairs are new, and where a
 meaning isn't settled the compiler stops and says so, naming the choices
 and that the rule can change: a pair meeting a pair of pairs in an
@@ -822,8 +829,9 @@ operation (`+`, `turn`: the pair on both halves, or as a complex number
 with its second half 0?), and a patch or play ending in one (the pipe
 carries a pair: which pair?), a function given a pair of pairs and a
 pair, and a half of one assigned by index (`$q[0] = ...`). Not yet
-built, and refused the same way: arrays of them, the voice loop and
-`def rec`.
+built, and refused the same way: the voice loop and `def rec`. A literal
+list `[a, b, c]` holds numbers only, as for pairs: make them with
+`array`.
 
 Return `[L, R]` for stereo. Plays and the final expression
 may return a float (mono, mirrored to both channels) or a

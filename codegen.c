@@ -31,7 +31,7 @@ struct Ent {
   const char* b;      /* stereo: r */
   long n;             /* arrays, larrays, sarrays: length; counters */
   long wo;            /* sarrays: where stores go */
-  int pairs;          /* sarrays, larrays: each element a pair, two slots */
+  int pairs;          /* sarrays, larrays: each element a pair, two slots; 4, a pair of pairs, four */
   int edged;          /* larrays made by array(): 0 past the ends, not cycling */
   double v;           /* numlits */
   Node* node;         /* lambdas, invs; userDefs; arrays: the table's literal */
@@ -875,6 +875,16 @@ static const char* side4(V v, int k) {
   if (!v.pair) return v.l;
   return k == 0 ? v.l : k == 1 ? v.r : k == 2 ? v.l2 : v.r2;
 }
+/* A value's width in numbers: 1, 2 or 4. */
+static int vwidth(V v) { return v.quad ? 4 : v.pair ? 2 : 1; }
+/* Slot j of a value stored w numbers wide: a number fills every slot. */
+static const char* wslot(V v, int w, int j) { return w == 4 ? side4(v, j) : w == 2 && v.pair ? side(v, j) : v.l; }
+/* An array's element width: 1, 2 (pairs) or 4 (pairs of pairs). */
+static int ew(Ent* e) { return e->pairs == 4 ? 4 : e->pairs ? 2 : 1; }
+/* A value from its w slots. */
+static V vwide(int w, const char** x) {
+  return w == 4 ? vquad(x[0], x[1], x[2], x[3]) : w == 2 ? vpair(x[0], x[1]) : mono(x[0]);
+}
 
 static V emit(Ctx* c, Scope* sc, Node* n, Buf* pre);
 static V emit_block(Ctx* c, Scope* sc, Node* blk, Buf* pre);
@@ -926,6 +936,9 @@ static void emit_seq(Ctx* c, Scope* sc, Node** kids, int n, V* out, Buf* pre) {
 /* `n` where one number is needed. */
 static const char* emit1(Ctx* c, Scope* sc, Node* n, Buf* pre, const char* what) {
   V v = emit(c, sc, n, pre);
+  if (v.quad)
+    fail(c, "%s needs one number but gets a pair of pairs — name the number it means, "
+         "let [[w, x], [y, z]] = ... %s", what, err_loc(c, n));
   if (v.pair)
     fail(c, "%s needs one number but gets a pair — pick a side with [0] / [1], or make it "
          "pair state: $x = [0, 0] %s", what, err_loc(c, n));
@@ -1642,15 +1655,19 @@ static V emit_rule_element(Ctx* c, Scope* sc, Node* rule, long k, Buf* pre) {
   return emit(c, iter, b->kids[b->nkids - 1], pre);
 }
 
-/* Every element of a rule, its code into `pre`; whether any is a pair. */
-static V* emit_rule(Ctx* c, Scope* sc, Node* rule, int n, Buf* pre, int* pairs) {
+/* Every element of a rule, its code into `pre`; its width in `w`: 1, 2
+ * if any is a pair, 4 if any is a pair of pairs (a number fills them). */
+static V* emit_rule(Ctx* c, Scope* sc, Node* rule, int n, Buf* pre, int* w) {
   V* vs = al(c, (n + 1) * sizeof(V));
-  *pairs = 0;
+  int pair = 0, quad = 0;
   for (int k = 0; k < n; k++) {
     vs[k] = emit_rule_element(c, sc, rule, k, pre);
-    no_quad(c, vs[k], "an array's elements", rule);
-    if (vs[k].pair) *pairs = 1;
+    if (vs[k].quad) quad = 1; else if (vs[k].pair) pair = 1;
   }
+  if (quad && pair)
+    fail(c, "array: the rule makes pairs and pairs of pairs %s: an array's elements are one shape, and a "
+         "pair among pairs of pairs could be either half. " QUAD_STANDIN, err_loc(c, rule));
+  *w = quad ? 4 : pair ? 2 : 1;
   return vs;
 }
 
@@ -1675,23 +1692,25 @@ static void declare_state_array(Ctx* c, Scope* sc, Node* st, Buf* pre, int top_l
    * init is: a field's starting shape. */
   Node* rule = args.npos == 2 && is_rule(args.pos[1]) ? args.pos[1] : NULL;
   V* rv = NULL;
-  int rule_pairs = 0;
-  if (rule) rv = emit_rule(c, sc, rule, n, &init_pre, &rule_pairs);
-  V iv = rule ? (rule_pairs ? vpair("0.0", "0.0") : mono("0.0"))
-              : args.npos == 2 ? emit(c, sc, args.pos[1], &init_pre) : mono("0.0");
-  int w = iv.pair ? 2 : 1;
-  const char* off = register_region(c, iv.pair ? "sarr2" : "sarr", 1 + gens * n * w, st->str);
+  int w = 1;
+  V iv = mono("0.0");
+  if (rule) rv = emit_rule(c, sc, rule, n, &init_pre, &w);
+  else {
+    if (args.npos == 2) iv = emit(c, sc, args.pos[1], &init_pre);
+    w = vwidth(iv);
+  }
+  const char* off = register_region(c, w == 4 ? "sarr4" : w == 2 ? "sarr2" : "sarr", 1 + gens * n * w, st->str);
   long wo = every > 0 ? (long)n * w : 0;
   const char* base;
   if (top_level) {
     Ent* e = hput(c, &c->top_sarrays, st->str);
-    e->a = off; e->n = n; e->wo = wo; e->pairs = iv.pair;
+    e->a = off; e->n = n; e->wo = wo; e->pairs = w == 4 ? 4 : w == 2;
     base = off;
   } else {
     const char* b = fresh(c, "sa");
     badd(c, pre, "  long %s = %s;\n", b, off);
     Ent* e = lput(c, &sc->sarrays, st->str);
-    e->a = b; e->n = n; e->wo = wo; e->pairs = iv.pair;
+    e->a = b; e->n = n; e->wo = wo; e->pairs = w == 4 ? 4 : w == 2;
     base = b;
   }
   if (rule) {
@@ -1699,12 +1718,18 @@ static void declare_state_array(Ctx* c, Scope* sc, Node* st, Buf* pre, int top_l
     for (int g = 0; g < gens; g++)
       for (int k = 0; k < n; k++) {
         long at = (long)(g * n + k) * w;
-        if (w == 2) badd(c, &fill, "    s->pool[%s + 1 + %ld] = (%s); s->pool[%s + 2 + %ld] = (%s);\n",
+        if (w == 4)
+          for (int j = 0; j < 4; j++) badd(c, &fill, "    s->pool[%s + %ld] = (%s);\n", base, 1 + at + j, wslot(rv[k], 4, j));
+        else if (w == 2) badd(c, &fill, "    s->pool[%s + 1 + %ld] = (%s); s->pool[%s + 2 + %ld] = (%s);\n",
                          base, at, rv[k].l, base, at, rv[k].pair ? rv[k].r : rv[k].l);
         else badd(c, &fill, "    s->pool[%s + 1 + %ld] = (%s);\n", base, at, rv[k].l);
       }
     badd(c, pre, "  if (s->pool[%s] == 0.0) {\n%s%s    s->pool[%s] = 1.0;\n  }\n", base, bstr(&init_pre), bstr(&fill), base);
-  } else if (iv.pair)
+  } else if (w == 4)
+    badd(c, pre, "  if (s->pool[%s] == 0.0) {\n%s    double _q[4] = {(%s), (%s), (%s), (%s)};\n"
+         "    for (long _k = 0; _k < %d; ++_k) for (int _j = 0; _j < 4; ++_j) s->pool[%s + 1 + 4 * _k + _j] = _q[_j];\n"
+         "    s->pool[%s] = 1.0;\n  }\n", base, bstr(&init_pre), iv.l, iv.r, iv.l2, iv.r2, gens * n, base, base);
+  else if (iv.pair)
     badd(c, pre, "  if (s->pool[%s] == 0.0) {\n%s    double _v = (%s), _w = (%s);\n"
          "    for (long _k = 0; _k < %d; ++_k) { s->pool[%s + 1 + 2 * _k] = _v; s->pool[%s + 2 + 2 * _k] = _w; }\n"
          "    s->pool[%s] = 1.0;\n  }\n", base, bstr(&init_pre), iv.l, iv.r, gens * n, base, base, base);
@@ -1736,28 +1761,43 @@ static void declare_local_array(Ctx* c, Scope* sc, const char* name, Node* rhs, 
            name, err_loc(c, rhs));
     int n = array_make_size(c, sc, rhs);
     if (args.npos == 2 && is_rule(args.pos[1])) {
-      int pairs;
-      V* rv = emit_rule(c, sc, args.pos[1], n, pre, &pairs);
-      badd(c, pre, "  double %s[%d];\n", sym, pairs ? 2 * n : n);
+      int w;
+      V* rv = emit_rule(c, sc, args.pos[1], n, pre, &w);
+      int pairs = w == 2;
+      badd(c, pre, "  double %s[%d];\n", sym, w * n);
       for (int k = 0; k < n; k++) {
-        if (pairs) badd(c, pre, "  %s[%d] = (%s); %s[%d] = (%s);\n", sym, 2 * k, rv[k].l, sym, 2 * k + 1, rv[k].pair ? rv[k].r : rv[k].l);
+        if (w == 4) for (int j = 0; j < 4; j++) badd(c, pre, "  %s[%d] = (%s);\n", sym, 4 * k + j, wslot(rv[k], 4, j));
+        else if (pairs) badd(c, pre, "  %s[%d] = (%s); %s[%d] = (%s);\n", sym, 2 * k, rv[k].l, sym, 2 * k + 1, rv[k].pair ? rv[k].r : rv[k].l);
         else badd(c, pre, "  %s[%d] = (%s);\n", sym, k, rv[k].l);
       }
       Ent* e = top_level ? hput(c, &c->top_larrays, name) : lput(c, &sc->larrays, name);
-      e->a = sym; e->n = n; e->pairs = pairs; e->edged = 1;
+      e->a = sym; e->n = n; e->pairs = w == 4 ? 4 : pairs; e->edged = 1;
       return;
     }
     V iv = args.npos == 2 ? emit(c, sc, args.pos[1], pre) : mono("0.0");
-    no_quad(c, iv, "an array's first value", rhs);
-    if (iv.pair)
+    if (iv.quad)
+      badd(c, pre, "  double %s[%d];\n  { double _q[4] = {(%s), (%s), (%s), (%s)}; for (long _k = 0; _k < %d; ++_k) "
+           "for (int _j = 0; _j < 4; ++_j) %s[4 * _k + _j] = _q[_j]; }\n", sym, 4 * n, iv.l, iv.r, iv.l2, iv.r2, n, sym);
+    else if (iv.pair)
       badd(c, pre, "  double %s[%d];\n  { double _v = (%s), _w = (%s); for (long _k = 0; _k < %d; ++_k) { %s[2 * _k] = _v; %s[2 * _k + 1] = _w; } }\n",
            sym, 2 * n, iv.l, iv.r, n, sym, sym);
     else
       badd(c, pre, "  double %s[%d];\n  { double _v = (%s); for (long _k = 0; _k < %d; ++_k) %s[_k] = _v; }\n",
            sym, n, iv.l, n, sym);
     Ent* e = top_level ? hput(c, &c->top_larrays, name) : lput(c, &sc->larrays, name);
-    e->a = sym; e->n = n; e->pairs = iv.pair; e->edged = 1;
+    e->a = sym; e->n = n; e->pairs = iv.quad ? 4 : iv.pair; e->edged = 1;
   }
+}
+
+/* What goes into an element w numbers wide: a number fills it; a pair
+ * of pairs into pairs, or a pair into pairs of pairs, is a stand-in error. */
+static void elem_shape(Ctx* c, V v, int w, const char* name, Node* at) {
+  if (v.quad && w == 2)
+    fail(c, "%s holds pairs, and is given a pair of pairs %s: an array keeps its first value's shape, so start "
+         "it as pairs of pairs, or say which pair to keep. " QUAD_STANDIN, name, err_loc(c, at));
+  if (v.pair && !v.quad && w == 4)
+    fail(c, "%s holds pairs of pairs, and is given a pair %s: it could be either half, or the first with the "
+         "second 0, so write the pair of pairs. " QUAD_STANDIN, name, err_loc(c, at));
 }
 
 /* `name[i] = v`: an element store. */
@@ -1770,9 +1810,20 @@ static const char* emit_idx_assign(Ctx* c, Scope* sc, Node* st) {
       const char* ix = emit1(c, sc, st->kids[1], &pre, "an index");
       const char* it = fresh(c, "ai");
       const char* store;
-      if (sa->pairs) {                     /* a pair element: both sides; a number fills both */
+      if (sa->pairs == 4) {                /* a pair of pairs: all four; a number fills them */
         V v = emit(c, sc, st->kids[2], &pre);
-        no_quad(c, v, "a state array's element", st);
+        elem_shape(c, v, 4, base->str, st);
+        const char* vt[4];
+        badd(c, &pre, "  long %s = (long)(%s);", it, ix);
+        for (int j = 0; j < 4; j++) { vt[j] = fresh(c, "av"); badd(c, &pre, " double %s = (%s);", vt[j], wslot(v, 4, j)); }
+        bcat(c, &pre, "\n");
+        store = F(c, "  if (%s >= 0 && %s < %ld) { s->pool[%s + 1 + %ld + 4 * %s] = %s; s->pool[%s + 2 + %ld + 4 * %s] = %s; "
+                  "s->pool[%s + 3 + %ld + 4 * %s] = %s; s->pool[%s + 4 + %ld + 4 * %s] = %s; }\n",
+                  it, it, sa->n, sa->a, sa->wo, it, vt[0], sa->a, sa->wo, it, vt[1], sa->a, sa->wo, it, vt[2],
+                  sa->a, sa->wo, it, vt[3]);
+      } else if (sa->pairs) {              /* a pair element: both sides; a number fills both */
+        V v = emit(c, sc, st->kids[2], &pre);
+        elem_shape(c, v, 2, base->str, st);
         const char* vl = fresh(c, "av");
         const char* vr = fresh(c, "av");
         badd(c, &pre, "  long %s = (long)(%s); double %s = (%s), %s = (%s);\n", it, ix, vl, v.l, vr, v.r);
@@ -1793,9 +1844,17 @@ static const char* emit_idx_assign(Ctx* c, Scope* sc, Node* st) {
     if (la && la->edged) {              /* made by array(): a store past either end is dropped */
       Buf pre = {0};
       const char* ix = emit1(c, sc, st->kids[1], &pre, "an index");
+      if (la->pairs == 4) {
+        V v = emit(c, sc, st->kids[2], &pre);
+        elem_shape(c, v, 4, base->str, st);
+        badd(c, &pre, "  { long _i = (long)(%s); double _q[4] = {(%s), (%s), (%s), (%s)}; if (_i >= 0 && _i < %ld) "
+             "for (int _j = 0; _j < 4; ++_j) %s[4 * _i + _j] = _q[_j]; }\n",
+             ix, wslot(v, 4, 0), wslot(v, 4, 1), wslot(v, 4, 2), wslot(v, 4, 3), la->n, la->a);
+        return sdup(c, bstr(&pre));
+      }
       if (la->pairs) {
         V v = emit(c, sc, st->kids[2], &pre);
-        no_quad(c, v, "an array's element", st);
+        elem_shape(c, v, 2, base->str, st);
         badd(c, &pre, "  { long _i = (long)(%s); double _l = (%s), _r = (%s); if (_i >= 0 && _i < %ld) { %s[2 * _i] = _l; %s[2 * _i + 1] = _r; } }\n",
              ix, v.l, v.r, la->n, la->a, la->a);
         return sdup(c, bstr(&pre));
@@ -1808,9 +1867,17 @@ static const char* emit_idx_assign(Ctx* c, Scope* sc, Node* st) {
     if (la) {
       Buf pre = {0};
       const char* ix = emit1(c, sc, st->kids[1], &pre, "an index");
+      if (la->pairs == 4) {
+        V v = emit(c, sc, st->kids[2], &pre);
+        elem_shape(c, v, 4, base->str, st);
+        badd(c, &pre, "  { long _i = (long)(%s) %% %ld; if (_i < 0) _i += %ld; double _q[4] = {(%s), (%s), (%s), (%s)}; "
+             "for (int _j = 0; _j < 4; ++_j) %s[4 * _i + _j] = _q[_j]; }\n",
+             ix, la->n, la->n, wslot(v, 4, 0), wslot(v, 4, 1), wslot(v, 4, 2), wslot(v, 4, 3), la->a);
+        return sdup(c, bstr(&pre));
+      }
       if (la->pairs) {
         V v = emit(c, sc, st->kids[2], &pre);
-        no_quad(c, v, "an array's element", st);
+        elem_shape(c, v, 2, base->str, st);
         badd(c, &pre, "  { long _i = (long)(%s) %% %ld; if (_i < 0) _i += %ld; double _l = (%s), _r = (%s); %s[2 * _i] = _l; %s[2 * _i + 1] = _r; }\n",
              ix, la->n, la->n, v.l, v.r, la->a, la->a);
         return sdup(c, bstr(&pre));
@@ -2905,51 +2972,56 @@ static V emit(Ctx* c, Scope* sc, Node* n, Buf* pre) {
     if (a->kind == nkIdent) {
       Ent* sa = lookup_sarray(c, sc, a->str);
       double kv;
+      const char* x[4];
       if (sa && const_value(c, sc, i, &kv)) {   /* an index known now: the element, or 0 past the ends */
         long k = (long)kv;
-        if (k < 0 || k >= sa->n) return sa->pairs ? vpair("0.0", "0.0") : mono("0.0");
-        if (sa->pairs)
-          return vpair(F(c, "s->pool[%s + %ld]", sa->a, 1 + 2 * k), F(c, "s->pool[%s + %ld]", sa->a, 2 + 2 * k));
-        return mono(F(c, "s->pool[%s + %ld]", sa->a, 1 + k));
+        int w = ew(sa);
+        for (int j = 0; j < w; j++)
+          x[j] = k < 0 || k >= sa->n ? "0.0" : F(c, "s->pool[%s + %ld]", sa->a, 1 + w * k + j);
+        return vwide(w, x);
       }
       if (sa) {
         const char* ix = emit1(c, sc, i, pre, "an index");
         const char* t = fresh(c, "ix");
         badd(c, pre, "  long %s = (long)(%s);\n", t, ix);
-        if (sa->pairs)                     /* past either end, [0, 0] */
-          return vpair(F(c, "((%s >= 0 && %s < %ld) ? s->pool[%s + 1 + 2 * %s] : 0.0)", t, t, sa->n, sa->a, t),
-                       F(c, "((%s >= 0 && %s < %ld) ? s->pool[%s + 2 + 2 * %s] : 0.0)", t, t, sa->n, sa->a, t));
-        return mono(F(c, "((%s >= 0 && %s < %ld) ? s->pool[%s + 1 + %s] : 0.0)", t, t, sa->n, sa->a, t));
+        int w = ew(sa);                    /* past either end, 0 */
+        for (int j = 0; j < w; j++)
+          x[j] = w == 1 ? F(c, "((%s >= 0 && %s < %ld) ? s->pool[%s + 1 + %s] : 0.0)", t, t, sa->n, sa->a, t)
+                        : F(c, "((%s >= 0 && %s < %ld) ? s->pool[%s + %d + %d * %s] : 0.0)", t, t, sa->n, sa->a, 1 + j, w, t);
+        return vwide(w, x);
       }
       Ent* la = lookup_larray(c, sc, a->str);
       Ent* found = la ? la : lookup_array(c, sc, a->str);
       if (found && found->edged && found->n > 0 && const_value(c, sc, i, &kv)) {
         long k = (long)kv;           /* made by array(): past either end, 0 */
-        if (k < 0 || k >= found->n) return found->pairs ? vpair("0.0", "0.0") : mono("0.0");
-        if (found->pairs) return vpair(F(c, "%s[%ld]", found->a, 2 * k), F(c, "%s[%ld]", found->a, 2 * k + 1));
-        return mono(F(c, "%s[%ld]", found->a, k));
+        int w = ew(found);
+        for (int j = 0; j < w; j++) x[j] = k < 0 || k >= found->n ? "0.0" : F(c, "%s[%ld]", found->a, w * k + j);
+        return vwide(w, x);
       }
       if (found && found->edged) {
         const char* ix = emit1(c, sc, i, pre, "an index");
         const char* t = fresh(c, "ix");
         badd(c, pre, "  long %s = (long)(%s);\n", t, ix);
-        if (found->pairs)
-          return vpair(F(c, "((%s >= 0 && %s < %ld) ? %s[2 * %s] : 0.0)", t, t, found->n, found->a, t),
-                       F(c, "((%s >= 0 && %s < %ld) ? %s[2 * %s + 1] : 0.0)", t, t, found->n, found->a, t));
-        return mono(F(c, "((%s >= 0 && %s < %ld) ? %s[%s] : 0.0)", t, t, found->n, found->a, t));
+        int w = ew(found);
+        for (int j = 0; j < w; j++)
+          x[j] = w == 1 ? F(c, "((%s >= 0 && %s < %ld) ? %s[%s] : 0.0)", t, t, found->n, found->a, t)
+                        : F(c, "((%s >= 0 && %s < %ld) ? %s[%d * %s + %d] : 0.0)", t, t, found->n, found->a, w, t, j);
+        return vwide(w, x);
       }
       if (found && found->n > 0 && const_value(c, sc, i, &kv)) {
         long k = (long)kv % found->n;
         if (k < 0) k += found->n;
-        if (found->pairs) return vpair(F(c, "%s[%ld]", found->a, 2 * k), F(c, "%s[%ld]", found->a, 2 * k + 1));
-        return mono(F(c, "%s[%ld]", found->a, k));
+        int w = ew(found);
+        for (int j = 0; j < w; j++) x[j] = F(c, "%s[%ld]", found->a, w * k + j);
+        return vwide(w, x);
       }
       if (found) {     /* local arrays and tables wrap round, as a table should */
         const char* ix = emit1(c, sc, i, pre, "an index");
         const char* t = fresh(c, "ix");
         badd(c, pre, "  long %s = (long)(%s) %% %ld; if (%s < 0) %s += %ld;\n", t, ix, found->n, t, t, found->n);
-        if (found->pairs) return vpair(F(c, "%s[2 * %s]", found->a, t), F(c, "%s[2 * %s + 1]", found->a, t));
-        return mono(F(c, "%s[%s]", found->a, t));
+        int w = ew(found);
+        for (int j = 0; j < w; j++) x[j] = w == 1 ? F(c, "%s[%s]", found->a, t) : F(c, "%s[%d * %s + %d]", found->a, w, t, j);
+        return vwide(w, x);
       }
     }
     /* A pair indexes like a two-entry table: the left side for even i,

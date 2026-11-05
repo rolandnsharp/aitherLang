@@ -210,8 +210,42 @@ $q[0] = [0, 1]
 let [[w, _], [_, _]] = $q
 [w, w]
 
-# --- what isn't built yet says so: an array of them
-# error: doesn't take a pair of pairs yet
-let qs = array(3, [[1, 0], [0, 0]])
-let [[w, _], [_, _]] = qs[0]
+# --- a field of rotations: a state array of them, each turned by its own
+# expect: 0.98006657784124163, 0.19866933079506122
+# expect at 4: 0.54030230586813977, 0.8414709848078965
+$f = array(3, [[1, 0], [0, 0]])
+each(3, i => $f[i] = turn($f[i], [[cos(0.1 * (i + 1)), 0], [0, sin(0.1 * (i + 1))]]))
+let [[w, _], [_, z]] = $f[1]
+[w, z]
+
+# --- made by a rule, read by an index known only when it runs
+# expect: 3, 30
+let a = array(4, i => [[i, 0], [0, i * 10]])
+let [[w, _], [_, z]] = a[floor(t * 0 + 3.5)]
+[w, z]
+
+# --- a scratch array of them, stored into, and 0 past its end
+# expect: 7, 0
+let a = array(2, [[0, 0], [0, 0]])
+a[1] = [[7, 0], [0, 0]]
+let [[w, _], [_, _]] = a[1]
+let [[v, _], [_, _]] = a[2]
+[w, v]
+
+# --- an array of pairs isn't given a pair of pairs
+# error: holds pairs, and is given a pair of pairs
+$f = array(2, [0, 0])
+$f[0] = [[1, 0], [0, 0]]
+$f[0]
+
+# --- nor an array of pairs of pairs a pair
+# error: holds pairs of pairs, and is given a pair
+$f = array(2, [[0, 0], [0, 0]])
+$f[0] = [1, 2]
+let [[w, _], [_, _]] = $f[0]
 [w, w]
+
+# --- where one number is needed, a pair of pairs says so
+# error: needs one number but gets a pair of pairs
+let q = [[1, 2], [3, 4]]
+if q then 1 else 0
