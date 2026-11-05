@@ -18,6 +18,11 @@ tried and dropped; each doc says so near the top where that's the case.
   [pluck-2026-10-30.md](pluck-2026-10-30.md).
 
 **Directions to chase**
+- [spinors-2026-11-05.md](spinors-2026-11-05.md) — 3-D fields by spin,
+  not matrices: a direction and a rotation are each two pairs, the one
+  gap (no pair of pairs) and three ways through it; spin-½ fields and
+  SL(2, C); hearing height (pinna echoes, convolution); six ways physics
+  thinks about time other than as `t`. Nothing built.
 - [listening-2026-10-28.md](listening-2026-10-28.md) — patches that
   start from `input()`: a vocoder, sympathetic strings, pitch following,
   ducking (written), a waterfall, radio, measuring on `card` (next).
