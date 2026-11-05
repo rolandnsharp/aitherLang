@@ -31,6 +31,38 @@ The lineage word: Hamilton named unit quaternions versors, Steinmetz's
 word for his turning complex numbers. A pair of pairs is a versor that
 turns in any plane, not only the page's.
 
+## The classical vocabulary
+
+The words follow Hamilton, whose quaternions these are; Maxwell's
+*Treatise* used his notation, and Tait developed it. For each, aither's
+word where it already has one:
+
+| Hamilton | what it is | in aither |
+|---|---|---|
+| i, j, k | the units: i² = j² = k² = ijk = −1, so ij = k, jk = i, ki = j, and ji = −k | `i`, `j`, `k` in the stdlib (they shadow nothing) |
+| S q, V q | the scalar and vector parts | destructuring: `let [[w, x], [y, z]] = q`, w the scalar and [[0, x], [y, z]] the vector |
+| K q | the conjugate | `conj(q)` |
+| T q | the tensor: how big | `amplitude(q)`, aither's word for a pair's size |
+| U q | the versor: the unit, q over its tensor | `q / amplitude(q)` |
+| ∠ q | the angle: q = T q (cos θ + ε sin θ), θ from 0 to π | `phase(q)`, as for a pair, which is a versor in its plane |
+| Ax q | the axis ε, a unit vector | `axis(q)`, new |
+
+So `phase` of a pair of pairs is Hamilton's angle, and the rotation
+q( )q⁻¹ turns a vector by twice it, about the axis (checked: a
+quaternion of angle 22.9° about k turns i by 45.8°). A pair's phase is
+the same thing in its plane, signed by which way round (−π..π), where a
+pair of pairs carries the way round in its axis instead (0..π).
+
+The complex rung is written the way the electrical engineers wrote it:
+Steinmetz's j is the plane's own unit. aither's pairs have no named
+unit (a pair is `[0, 1]`), so nothing clashes; the quaternion units are
+Hamilton's, whose they are.
+
+Hamilton's rotation of a vector is q v q⁻¹ (for a unit q, q v K q):
+that is `apply` below. The Hopf map is later (1931) and has no classical
+spelling; it is written with Hamilton's operations, from the axis k,
+the pole the spinor's θ is measured from.
+
 ## Why the demos say so
 
 Four patches were written the plain way (`spinfield`, `stereo_spin`,
@@ -90,8 +122,9 @@ or [p, p]: a patch says which).
 the other way. **`unturn(q, r)`** is `turn(q, conj(r))` over the size of
 r squared.
 
-**`amplitude(q)`** is the size, all four numbers. What `phase` means for
-a rotation (its angle, about its axis?) is an open question.
+**`amplitude(q)`** is the size, all four numbers (Hamilton's tensor).
+**`phase(q)`** is Hamilton's angle, 0..π, and **`axis(q)`** his axis, a
+unit vector [[0, x], [y, z]] (the classical vocabulary, above).
 
 **Side by side**: `+`, `-`, `*`, `/` on two pairs of pairs act on the
 four numbers; a number scales all four. A pair against a pair of pairs
@@ -112,8 +145,10 @@ let doublet = dho(push, [f, f * 1.0013], damp)     # [[x1, q1], [x2, q2]]: the t
 ## In the stdlib, written in aither
 
 ```
+let i = [[0, 1], [0, 0]]                                                         # Hamilton's units
+let j = [[0, 0], [1, 0]]
 let k = [[0, 0], [0, 1]]
-def about(axis, angle): [[cos(angle / 2), 0], [0, 0]] + axis * sin(angle / 2)   # a turn by angle about a unit axis
+def about(axis, angle): [[cos(angle / 2), 0], [0, 0]] + axis * sin(angle / 2)   # a turn by angle about a unit axis: a versor of half the angle
 def apply(r, v): turn(turn(r, v), conj(r))                                       # a rotation applied to a direction
 def hopf(s): apply(s, k)                                                          # the direction a spinor points
 ```
@@ -180,13 +215,12 @@ rewritten as the first users.
 
 1. A pair against a pair of pairs in `+` and `*`: an error, broadcast,
    or the embedding?
-2. `phase` of a rotation: its angle? An error?
-3. `hopf`'s reference axis: `k` (as above) or `i`? Only the naming of
-   the axes changes.
-4. The units `i`, `j`, `k`: stdlib names (they would shadow nothing:
-   aither has no `i`, `j`, `k`) or left to patches?
-5. The pipe: an error, or a default (the Hopf direction's first two
+2. The pipe: an error, or a default (the Hopf direction's first two
    numbers)?
+
+Settled (Roland, 2026-11-05, "follow the classical field theories"):
+`phase` is Hamilton's angle and `axis` his axis; `i`, `j`, `k` are his
+units, in the stdlib; `hopf` measures from k, the pole.
 
 ## Order of work
 
