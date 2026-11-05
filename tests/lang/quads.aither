@@ -1,0 +1,147 @@
+# Pairs of pairs (notes/nested-pair-2026-11-05.md): Hamilton's quaternions,
+# a pair whose sides are pairs, [[w, x], [y, z]] = w + x i + y j + z k.
+# turn, conj, unturn by his product; amplitude his tensor, phase his
+# angle, axis his axis; everything else side by side. The expected values
+# are from the definitions, worked out apart from aither.
+
+# --- Hamilton's units: ij = k
+# expect: 0, 1
+let i = [[0, 1], [0, 0]]
+let j = [[0, 0], [1, 0]]
+let [[w, x], [y, z]] = turn(i, j)
+[w + x + y, z]
+
+# --- and ji = -k: the one product in aither where order matters
+# expect: 0, -1
+let i = [[0, 1], [0, 0]]
+let j = [[0, 0], [1, 0]]
+let [[w, x], [y, z]] = turn(j, i)
+[w + x + y, z]
+
+# --- i i = -1
+# expect: -1, 0
+let i = [[0, 1], [0, 0]]
+let [[w, x], [y, z]] = turn(i, i)
+[w, x + y + z]
+
+# --- the product of two: (1 + 2i + 3j + 4k)(0.5 - i + 0.25j + 2k), scalar and i
+# expect: -6.25, 5
+let q = [[1, 2], [3, 4]]
+let r = [[0.5, -1], [0.25, 2]]
+let [[w, x], [y, z]] = turn(q, r)
+[w, x]
+
+# --- ... j and k
+# expect: -6.25, 7.5
+let q = [[1, 2], [3, 4]]
+let r = [[0.5, -1], [0.25, 2]]
+let [[w, x], [y, z]] = turn(q, r)
+[y, z]
+
+# --- unturn: q over r, q conj(r) over the size of r squared
+# expect: 1.3647058823529412, -0.5647058823529412
+let q = [[1, 2], [3, 4]]
+let r = [[0.5, -1], [0.25, 2]]
+let [[w, x], [y, z]] = unturn(q, r)
+[w, x]
+
+# --- unturn undoes turn
+# expect: 3, 4
+let q = [[1, 2], [3, 4]]
+let r = [[0.5, -1], [0.25, 2]]
+let [[w, x], [y, z]] = unturn(turn(q, r), r)
+[y, z]
+
+# --- conj: the vector part negated (Hamilton's K)
+# expect: -2, -3
+let [[w, x], [y, z]] = conj([[1, 2], [3, 4]])
+[x, y]
+
+# --- amplitude: the tensor, all four
+# expect: 5.477225575051661
+amplitude([[1, 2], [3, 4]])
+
+# --- phase: Hamilton's angle; axis: his axis, a unit vector
+# expect: 0.4, 1
+let q = [[cos(0.4), 0], [0, sin(0.4)]]
+let [[_, ax], [ay, az]] = axis(q)
+[phase(q), az + ax + ay]
+
+# --- a rotation applied, q v conj(q): i turned by twice the angle about k
+# expect: 0.6967067093471655, 0.7173560908995228
+let q = [[cos(0.4), 0], [0, sin(0.4)]]
+let i = [[0, 1], [0, 0]]
+let [[_, x], [y, _]] = turn(turn(q, i), conj(q))
+[x, y]
+
+# --- indexing gives a half, a pair
+# expect: 3, 4
+let q = [[1, 2], [3, 4]]
+q[1]
+
+# --- side by side: + between two, * by a number
+# expect: 3.25, 4
+let q = [[1, 2], [3, 4]]
+let r = [[0.5, -1], [0.25, 2]]
+let [[_, _], [y, _]] = q + r
+let [[_, x], [_, _]] = q * 2
+[y, x]
+
+# --- a def takes and gives one whole
+# expect: 6, 8
+def twice(v): v + v
+let [[_, _], [y, z]] = twice([[1, 2], [3, 4]])
+[y, z]
+
+# --- an if chooses between two
+# expect: 1, 4
+let q = if t >= 0 then [[1, 2], [3, 4]] else [[0, 0], [0, 0]]
+let [[w, _], [_, z]] = q
+[w, z]
+
+# --- sum adds them
+# expect: 6, 0
+let s = sum(3, n => [[n, 0], [0, 0]])
+let [[w, x], [_, _]] = s
+[w, x]
+
+# --- a file-level one read by two plays
+# expect: 1, 4
+let q = [[1, 2], [3, 4]]
+play a:
+  let [[w, _], [_, _]] = q
+  w
+play b:
+  let [[_, _], [_, z]] = q
+  z
+[a[0], b[0]]
+
+# --- pairs nest once: a pair of pairs of pairs is the octonions, and their product doesn't associate
+# error: a pair of pairs of pairs
+[[[1, 2], [3, 4]], [[1, 2], [3, 4]]]
+
+# --- a pair and a pair of pairs in + is a stand-in error, saying it can change
+# error: This is a stand-in
+let q = [[1, 2], [3, 4]]
+let [[w, _], [_, _]] = q + [1, 2]
+[w, w]
+
+# --- the pipe carries a pair: a patch ending in a pair of pairs is a stand-in error
+# error: the patch ends in a pair of pairs
+[[1, 2], [3, 4]]
+
+# --- turn between a pair of pairs and a pair
+# error: gets a pair of pairs and a pair
+let [[w, _], [_, _]] = turn([[1, 2], [3, 4]], [1, 2])
+[w, w]
+
+# --- what isn't built yet says so: a filter on a pair of pairs
+# error: doesn't take a pair of pairs yet
+let [[w, _], [_, _]] = lp1([[1, 2], [3, 4]], 100)
+[w, w]
+
+# --- ... and state
+# error: doesn't take a pair of pairs yet
+$q = [[1, 0], [0, 0]]
+let [[w, _], [_, _]] = $q
+[w, w]

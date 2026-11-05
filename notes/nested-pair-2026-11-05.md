@@ -1,7 +1,14 @@
 # The nested pair: a pair may hold pairs
 
-**Status (2026-11-05): a design note, nothing built.** For Roland to go
-over before any compiler work. It follows
+**Status (2026-11-05): stage 1 built.** Nested literals and
+destructuring; pairs of pairs through lets, defs, lambdas, `if`, `sum`
+and plays; side-by-side arithmetic; `turn`, `conj`, `unturn`,
+`amplitude`, `phase` and the new `axis` by Hamilton's operations
+(tests/lang/quads.aither, SPEC "Pairs of pairs"). Both open questions
+went to errors that say they are stand-ins. Not yet built, and refused
+with the same stand-in message: `$state`, stateful functions, arrays,
+the voice loop, `def rec`, then the stdlib units and the demos (stage 2
+and 3, "Order of work"). It follows
 [spinors-2026-11-05.md](spinors-2026-11-05.md), which made way 3 (the
 spinor as aither's third value) the destination and way 2 (defs that
 return small arrays of pairs) the path. This note proposes skipping way
@@ -211,12 +218,15 @@ COMPOSING, tests (the doubling formula, associativity, the double
 cover, `dho` given a pair, the pipe's error), and the four demos
 rewritten as the first users.
 
-## Open questions
+## Open questions, answered for now
 
 1. A pair against a pair of pairs in `+` and `*`: an error, broadcast,
-   or the embedding?
+   or the embedding? **An error**, saying it is a stand-in and naming
+   the two readings.
 2. The pipe: an error, or a default (the Hopf direction's first two
-   numbers)?
+   numbers)? **An error**, the same way (Roland, 2026-11-05: "go with
+   errors for both, but explain in the error message that this is just
+   a stand in").
 
 Settled (Roland, 2026-11-05, "follow the classical field theories"):
 `phase` is Hamilton's angle and `axis` his axis; `i`, `j`, `k` are his

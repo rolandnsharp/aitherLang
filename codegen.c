@@ -79,7 +79,7 @@ struct Ctx {
   Strs hoist_decls, hoist_inits;
   Map hoist_seen;
   int in_hoist;
-  Map assigned, play_set, stereo_lets;
+  Map assigned, play_set, stereo_lets, quad_lets;
   Map turners;              /* "<scope>/<let>" -> a = cos side, b = sin side */
   Node* blk; int blk_i;     /* the block being emitted, and the statement */
   Map top_arrays;           /* a = sym, n = length */
@@ -655,7 +655,7 @@ static const char* const BUILTIN_FNS[] = {
   "midi_trig", "midi_voice_freq", "midi_voice_gate",
   "midi_voice_vel", "midi_voice_key", "midi_vel",
   "midi_voice_cc", "midi_voice_press", "midi_voice_bend", "midi_voice_on",
-  "amplitude", "phase", NULL};
+  "amplitude", "phase", "axis", NULL};
 
 /* Pair-returning builtins, and the reductions of a pair to a number. */
 static const char* const PAIR_CALLS[] = {"turn", "unturn", "analytic", "conj", "input", NULL};
@@ -844,10 +844,29 @@ static int* pair_params(Ctx* c, Node* def) {
  * parameters (pair_params) take the pair whole. Only `if` is lazy: a
  * branch's statements run only when it is taken. */
 
-typedef struct { const char* l; const char* r; int pair; } V;
+typedef struct { const char* l; const char* r; int pair; const char* l2; const char* r2; int quad; } V;
 
-static V mono(const char* s) { return (V){s, s, 0}; }
-static V vpair(const char* l, const char* r) { return (V){l, r, 1}; }
+static V mono(const char* s) { return (V){s, s, 0, NULL, NULL, 0}; }
+static V vpair(const char* l, const char* r) { return (V){l, r, 1, NULL, NULL, 0}; }
+
+/* A pair of pairs (notes/nested-pair-2026-11-05.md): a pair whose sides
+ * are pairs, Hamilton's quaternion. Its first half is (l, r), its
+ * second (l2, r2); `pair` is set too, so code that takes it for a pair
+ * must look at `quad` first, and code that doesn't know pairs of pairs
+ * refuses them (no_quad) rather than drop a half. */
+static V vquad(const char* a, const char* b, const char* c2, const char* d) {
+  return (V){a, b, 1, c2, d, 1};
+}
+static V half_of(V v, int k) { return k ? vpair(v.l2, v.r2) : vpair(v.l, v.r); }
+
+/* Where a pair of pairs isn't handled yet the compiler says so, and says
+ * the rule is a stand-in: these are new, and what they should do in each
+ * place is learnt from patches that use them. */
+#define QUAD_STANDIN "This is a stand-in, not a decision: pairs of pairs are new " \
+  "(notes/nested-pair-2026-11-05.md); if you expected something here, say what, and the rule can change."
+static void no_quad(Ctx* c, V v, const char* what, Node* at) {
+  if (v.quad) fail(c, "%s doesn't take a pair of pairs yet %s. " QUAD_STANDIN, what, at ? err_loc(c, at) : "");
+}
 static const char* side(V v, int k) { return k ? v.r : v.l; }
 
 static V emit(Ctx* c, Scope* sc, Node* n, Buf* pre);
@@ -882,6 +901,7 @@ static const char* once(Ctx* c, Buf* pre, const char* s) {
  * or each body) can't change what it reads. */
 static V capture(Ctx* c, Buf* pre, V v) {
   if (!v.pair) return mono(once(c, pre, v.l));
+  if (v.quad) return vquad(once(c, pre, v.l), once(c, pre, v.r), once(c, pre, v.l2), once(c, pre, v.r2));
   return vpair(once(c, pre, v.l), once(c, pre, v.r));
 }
 
@@ -1263,6 +1283,7 @@ static V emit_voice_loop(Ctx* c, Scope* sc, Node* call, Node* body, const char* 
   for (int i = 0; i < nr; i++) copies[i] = r0 + i;
   for (long v = 1; v < N; v++)
     for (int i = 0; i < nr; i++) copies[v * nr + i] = copy_region(c, r0 + i);
+  no_quad(c, t, "a poly voice (the voice loop)", call);
   const char* code = bstr(&own);
   const char* tl = t.l;
   const char* tr = t.r;
@@ -1408,6 +1429,16 @@ static int* takes_pair(Ctx* c, Node* def) {
 /* Bind a value to a parameter: a pair as two temporaries, a number as
  * one, with its compile-time value or invariance noted. */
 static void bind_value(Ctx* c, Scope* inner, const char* p, V v, int whole, Node* arg, Scope* sc, Buf* pre) {
+  if (v.quad) {
+    const char* t[4];
+    for (int k = 0; k < 4; k++) t[k] = fresh(c, F(c, "p_%s_q%d", p, k));
+    badd(c, pre, "  double %s = (%s), %s = (%s), %s = (%s), %s = (%s);\n", t[0], v.l, t[1], v.r, t[2], v.l2, t[3], v.r2);
+    Ent* e = lput(c, &inner->stereo, p);
+    e->a = t[0]; e->b = t[1]; e->n = 4;
+    Ent* h = lput(c, &inner->stereo, F(c, "%s~hi", p));
+    h->a = t[2]; h->b = t[3];
+    return;
+  }
   if (whole) {
     const char* tl = fresh(c, F(c, "p_%s_l", p));
     const char* tr = fresh(c, F(c, "p_%s_r", p));
@@ -1443,7 +1474,7 @@ static V emit_def(Ctx* c, Scope* sc, Node* def, Node* call, Buf* pre) {
     args[i] = emit(c, sc, call->kids[i], &own);
     if (own.n) for (int k = 0; k < i; k++) if (!bound[k]) args[k] = capture(c, pre, args[k]);
     bcat(c, pre, bstr(&own));
-    if (args[i].pair && !whole[i]) split = 1;
+    if (args[i].pair && !whole[i] && !args[i].quad) split = 1;
   }
   Node* body = def->kids[0];
   if (!split) {
@@ -1453,7 +1484,7 @@ static V emit_def(Ctx* c, Scope* sc, Node* def, Node* call, Buf* pre) {
     for (int i = 0; i < np; i++)
       if (!bound[i])
         bind_value(c, inner, def->params[i], args[i],
-                   whole[i] && (args[i].pair || indexes(body, def->params[i])), call->kids[i], sc, pre);
+                   args[i].quad || (whole[i] && (args[i].pair || indexes(body, def->params[i]))), call->kids[i], sc, pre);
     spush(c, &c->def_stack, def->str);
     V r = body->kind == nkBlock ? emit_block(c, inner, body, pre) : emit(c, inner, body, pre);
     c->def_stack.n--;
@@ -1464,15 +1495,15 @@ static V emit_def(Ctx* c, Scope* sc, Node* def, Node* call, Buf* pre) {
     Scope* inner = push(c, names);
     for (int i = 0; i < np; i++) {
       if (bound[i]) continue;
-      V a = whole[i] ? args[i] : mono(side(args[i], k));
-      bind_value(c, inner, def->params[i], a, whole[i], args[i].pair ? NULL : call->kids[i], sc, pre);
+      V a = whole[i] || args[i].quad ? args[i] : mono(side(args[i], k));
+      bind_value(c, inner, def->params[i], a, whole[i] || args[i].quad, args[i].pair ? NULL : call->kids[i], sc, pre);
     }
     spush(c, &c->def_stack, def->str);
     V r = body->kind == nkBlock ? emit_block(c, inner, body, pre) : emit(c, inner, body, pre);
     c->def_stack.n--;
     if (r.pair)
-      fail(c, "%s returns a pair, and given a pair it runs once per side: a pair of pairs %s",
-           def->str, err_loc(c, call));
+      fail(c, "%s returns a pair, and given a pair it runs once per side: a pair of pairs. Pairs of pairs "
+           "made this way aren't built yet %s. " QUAD_STANDIN, def->str, err_loc(c, call));
     res[k] = r.l;
   }
   return vpair(res[0], res[1]);
@@ -1485,6 +1516,7 @@ static const char** pair_operands(Ctx* c, Scope* sc, Node* n, Buf* pre, int want
   int k = 0;
   for (int i = 0; i < n->nkids; i++) {
     V v = emit(c, sc, n->kids[i], pre);
+    no_quad(c, v, n->str, n);
     const char* tl = fresh(c, F(c, "%s_a", n->str));
     badd(c, pre, "  double %s = (%s);\n", tl, v.l);
     r[k++] = tl;
@@ -1504,6 +1536,7 @@ static const char** pair_operands(Ctx* c, Scope* sc, Node* n, Buf* pre, int want
 static const char* assign_pair(Ctx* c, Scope* sc, const char* tl0, const char* tr0, Node* rhs) {
   Buf pre = {0};
   V v = emit(c, sc, rhs, &pre);
+  no_quad(c, v, "$state", rhs);
   const char* tl = fresh(c, "pa_l");
   const char* tr = fresh(c, "pa_r");
   badd(c, &pre, "  double %s = (%s);\n  double %s = (%s);\n  %s = %s;\n  %s = %s;\n",
@@ -1570,6 +1603,7 @@ static V* emit_rule(Ctx* c, Scope* sc, Node* rule, int n, Buf* pre, int* pairs) 
   *pairs = 0;
   for (int k = 0; k < n; k++) {
     vs[k] = emit_rule_element(c, sc, rule, k, pre);
+    no_quad(c, vs[k], "an array's elements", rule);
     if (vs[k].pair) *pairs = 1;
   }
   return vs;
@@ -1669,6 +1703,7 @@ static void declare_local_array(Ctx* c, Scope* sc, const char* name, Node* rhs, 
       return;
     }
     V iv = args.npos == 2 ? emit(c, sc, args.pos[1], pre) : mono("0.0");
+    no_quad(c, iv, "an array's first value", rhs);
     if (iv.pair)
       badd(c, pre, "  double %s[%d];\n  { double _v = (%s), _w = (%s); for (long _k = 0; _k < %d; ++_k) { %s[2 * _k] = _v; %s[2 * _k + 1] = _w; } }\n",
            sym, 2 * n, iv.l, iv.r, n, sym, sym);
@@ -1692,6 +1727,7 @@ static const char* emit_idx_assign(Ctx* c, Scope* sc, Node* st) {
       const char* store;
       if (sa->pairs) {                     /* a pair element: both sides; a number fills both */
         V v = emit(c, sc, st->kids[2], &pre);
+        no_quad(c, v, "a state array's element", st);
         const char* vl = fresh(c, "av");
         const char* vr = fresh(c, "av");
         badd(c, &pre, "  long %s = (long)(%s); double %s = (%s), %s = (%s);\n", it, ix, vl, v.l, vr, v.r);
@@ -1714,6 +1750,7 @@ static const char* emit_idx_assign(Ctx* c, Scope* sc, Node* st) {
       const char* ix = emit1(c, sc, st->kids[1], &pre, "an index");
       if (la->pairs) {
         V v = emit(c, sc, st->kids[2], &pre);
+        no_quad(c, v, "an array's element", st);
         badd(c, &pre, "  { long _i = (long)(%s); double _l = (%s), _r = (%s); if (_i >= 0 && _i < %ld) { %s[2 * _i] = _l; %s[2 * _i + 1] = _r; } }\n",
              ix, v.l, v.r, la->n, la->a, la->a);
         return sdup(c, bstr(&pre));
@@ -1728,6 +1765,7 @@ static const char* emit_idx_assign(Ctx* c, Scope* sc, Node* st) {
       const char* ix = emit1(c, sc, st->kids[1], &pre, "an index");
       if (la->pairs) {
         V v = emit(c, sc, st->kids[2], &pre);
+        no_quad(c, v, "an array's element", st);
         badd(c, &pre, "  { long _i = (long)(%s) %% %ld; if (_i < 0) _i += %ld; double _l = (%s), _r = (%s); %s[2 * _i] = _l; %s[2 * _i + 1] = _r; }\n",
              ix, la->n, la->n, v.l, v.r, la->a, la->a);
         return sdup(c, bstr(&pre));
@@ -1997,6 +2035,16 @@ static void emit_let(Ctx* c, Scope* sc, const char* name, Node* rhs, Buf* pre, c
     return;
   }
   V v = emit(c, sc, rhs, pre);
+  if (v.quad) {                       /* a pair of pairs: its halves under name and name~hi */
+    const char* t[4];
+    for (int k = 0; k < 4; k++) t[k] = cname ? F(c, "%s_q%d", cname, k) : fresh(c, F(c, "l_%s_q%d", name, k));
+    badd(c, pre, "  double %s = (%s), %s = (%s), %s = (%s), %s = (%s);\n", t[0], v.l, t[1], v.r, t[2], v.l2, t[3], v.r2);
+    Ent* e = lput(c, &sc->stereo, name);
+    e->a = t[0]; e->b = t[1]; e->n = 4;
+    Ent* h = lput(c, &sc->stereo, F(c, "%s~hi", name));
+    h->a = t[2]; h->b = t[3];
+    return;
+  }
   if (v.pair) {
     const char* tl = cname ? F(c, "%s_l", cname) : fresh(c, F(c, "l_%s_l", name));
     const char* tr = cname ? F(c, "%s_r", cname) : fresh(c, F(c, "l_%s_r", name));
@@ -2032,6 +2080,7 @@ static void emit_local_stmt(Ctx* c, Scope* sc, Node* st, Buf* pre) {
      * pair is a "pvar" region (the flag, two sides), a number a "var". */
     Buf init_pre = {0};
     V v = emit(c, sc, st->kids[0], &init_pre);
+    no_quad(c, v, F(c, "$%s (state)", st->str), st);
     /* A first value that is a number, known now, is given once a block,
      * before any sample (hoist_init), not checked for every sample: the
      * state holds it before its first use either way. */
@@ -2257,6 +2306,7 @@ static void emit_tail(Ctx* c, Scope* sc, RecLoop* lp, Node* n, Buf* o) {
             if (st && eq(st->a, lp->vl[i])) continue;
           }
           V v = emit(c, sc, a, o);
+      no_quad(c, v, "def rec", a);
           const char* tl = fresh(c, F(c, "next_%s_l", p));
           const char* tr = fresh(c, F(c, "next_%s_r", p));
           badd(c, o, "  double %s = (%s); double %s = (%s);\n", tl, v.l, tr, v.r);
@@ -2277,6 +2327,7 @@ static void emit_tail(Ctx* c, Scope* sc, RecLoop* lp, Node* n, Buf* o) {
   default: break;
   }
   V v = emit(c, sc, n, o);
+    no_quad(c, v, "def rec", n);
   if (v.pair) lp->any_pair = 1;
   badd(c, o, "  %s = (%s); %s = (%s); break;\n", lp->rl, v.l, lp->rr, v.r);
 }
@@ -2431,7 +2482,10 @@ static V* emit_args(Ctx* c, Scope* sc, Node* n, Buf* pre, int* any_pair) {
   V* a = al(c, (n->nkids + 1) * sizeof(V));
   emit_seq(c, sc, n->kids, n->nkids, a, pre);
   *any_pair = 0;
-  for (int i = 0; i < n->nkids; i++) if (a[i].pair) *any_pair = 1;
+  for (int i = 0; i < n->nkids; i++) {
+    no_quad(c, a[i], n->str, n);
+    if (a[i].pair) *any_pair = 1;
+  }
   return a;
 }
 
@@ -2446,6 +2500,7 @@ static const char** sides(Ctx* c, V* a, int n, int k) {
  * pair (a number then read on both). `build` makes one side's text. */
 typedef const char* (*Build)(Ctx* c, const char* name, const char** x, int n);
 static V map_pure(Ctx* c, const char* name, V* a, int n, int any_pair, Build build, Buf* pre) {
+  for (int i = 0; i < n; i++) no_quad(c, a[i], name, NULL);
   if (!any_pair) return mono(build(c, name, sides(c, a, n, 0), n));
   for (int i = 0; i < n; i++)
     if (!a[i].pair) a[i] = mono(once(c, pre, a[i].l));
@@ -2545,6 +2600,10 @@ static V emit_ident_raw(Ctx* c, Scope* sc, Node* n) {
     Ent* e = lfind(x->names, s);
     if (e) return mono(e->a);
     e = lfind(x->stereo, s);
+    if (e && e->n == 4) {                /* a pair of pairs: its second half beside it */
+      Ent* h = lfind(x->stereo, F(c, "%s~hi", s));
+      return vquad(e->a, e->b, h->a, h->b);
+    }
     if (e) return vpair(e->a, e->b);
     if (lfind(x->arrays, s) || lfind(x->larrays, s) || lfind(x->sarrays, s)) break;
   }
@@ -2556,6 +2615,7 @@ static V emit_ident_raw(Ctx* c, Scope* sc, Node* n) {
          c->def_stack.n ? c->def_stack.v[c->def_stack.n - 1] : "a def", s,
          hfind(&c->top_larrays, s) ? "an array of this sample's values" : "a signal", err_loc(c, n));
   Ent* table = lookup_array(c, sc, s);
+  if (has(&c->quad_lets, s)) return vquad(F(c, "l_%s_l", s), F(c, "l_%s_r", s), F(c, "l_%s_l2", s), F(c, "l_%s_r2", s));
   if (has(&c->stereo_lets, s)) return vpair(F(c, "l_%s_l", s), F(c, "l_%s_r", s));
   if (table) fail(c, "%s is a table of %ld numbers, but one number is needed here — index it (%s[i]) "
                   "or hand it to wave %s", s, table->n, s, err_loc(c, n));
@@ -2608,6 +2668,18 @@ static V emit_if(Ctx* c, Scope* sc, Node* n, Buf* pre) {
   Buf pt = {0}, pe = {0};
   V t = emit(c, sc, n->kids[1], &pt);
   V e = n->kids[2] ? emit(c, sc, n->kids[2], &pe) : mono("0.0");
+  if (t.quad || e.quad) {
+    if (!(t.quad && e.quad))
+      fail(c, "an `if` with a pair of pairs on one branch and not the other %s: give both branches pairs "
+           "of pairs. " QUAD_STANDIN, err_loc(c, n));
+    const char* v[4];
+    for (int k = 0; k < 4; k++) v[k] = fresh(c, "ifq");
+    badd(c, pre, "  double %s, %s, %s, %s;\n  if ((%s) != 0.0) {\n%s", v[0], v[1], v[2], v[3], cond, bstr(&pt));
+    badd(c, pre, "  %s = (%s); %s = (%s); %s = (%s); %s = (%s);\n  } else {\n%s", v[0], t.l, v[1], t.r, v[2], t.l2,
+         v[3], t.r2, bstr(&pe));
+    badd(c, pre, "  %s = (%s); %s = (%s); %s = (%s); %s = (%s);\n  }\n", v[0], e.l, v[1], e.r, v[2], e.l2, v[3], e.r2);
+    return vquad(v[0], v[1], v[2], v[3]);
+  }
   int pair = t.pair || e.pair;
   if (!pt.n && !pe.n) {
     const char* ct = pair ? once(c, pre, cond) : cond;
@@ -2651,7 +2723,7 @@ static V emit_binop(Ctx* c, Scope* sc, Node* n, Buf* pre) {
   const char* fmt = NULL;
   if (eq(op, "^")) {
     long k;
-    if (small_power(c, sc, n->kids[1], &k)) {
+    if (!a.quad && small_power(c, sc, n->kids[1], &k)) {
       if (k >= 2) { a.l = once(c, pre, a.l); a.r = a.pair ? once(c, pre, a.r) : a.l; }
       if (!a.pair) return mono(power_of(c, a.l, k));
       return vpair(power_of(c, a.l, k), power_of(c, a.r, k));
@@ -2673,6 +2745,18 @@ static V emit_binop(Ctx* c, Scope* sc, Node* n, Buf* pre) {
   else if (eq(op, "and")) fmt = "((((%1$s) != 0.0) & ((%2$s) != 0.0)) ? 1.0 : 0.0)";
   else if (eq(op, "or")) fmt = "((((%1$s) != 0.0) | ((%2$s) != 0.0)) ? 1.0 : 0.0)";
   else fail(c, "bad binop: %s %s", op, err_loc(c, n));
+  if (a.quad || b.quad) {
+    /* Side by side, four numbers; a number scales all four. */
+    if (!(eq(op, "+") || eq(op, "-") || eq(op, "*") || eq(op, "/") || eq(op, "mod") || eq(op, "^")))
+      fail(c, "`%s` compares or joins numbers, and a pair of pairs is four %s. " QUAD_STANDIN, op, err_loc(c, n));
+    if ((a.pair && !a.quad) || (b.pair && !b.quad))
+      fail(c, "`%s` between a pair and a pair of pairs %s: it could mean the pair on both halves, or the pair "
+           "as a complex number (its second half 0), and those differ, so for now it is an error; write the "
+           "pair as a pair of pairs to say which. " QUAD_STANDIN, op, err_loc(c, n));
+    if (!a.pair) { const char* x = once(c, pre, a.l); a = vquad(x, x, x, x); }
+    if (!b.pair) { const char* x = once(c, pre, b.l); b = vquad(x, x, x, x); }
+    return vquad(F(c, fmt, a.l, b.l), F(c, fmt, a.r, b.r), F(c, fmt, a.l2, b.l2), F(c, fmt, a.r2, b.r2));
+  }
   if (!a.pair && !b.pair) return mono(F(c, fmt, a.l, b.l));
   if (!a.pair) a = mono(once(c, pre, a.l));
   if (!b.pair) b = mono(once(c, pre, b.l));
@@ -2691,6 +2775,10 @@ static V emit(Ctx* c, Scope* sc, Node* n, Buf* pre) {
     if (eq(n->str, "-")) fmt = "(-(%s))";
     else if (eq(n->str, "not")) fmt = "((%s) == 0.0 ? 1.0 : 0.0)";
     else { fail(c, "bad unary: %s %s", n->str, err_loc(c, n)); return mono(""); }
+    if (v.quad) {
+      if (!eq(n->str, "-")) no_quad(c, v, "`not`", n);
+      return vquad(F(c, fmt, v.l), F(c, fmt, v.r), F(c, fmt, v.l2), F(c, fmt, v.r2));
+    }
     if (!v.pair) return mono(F(c, fmt, v.l));
     return vpair(F(c, fmt, v.l), F(c, fmt, v.r));
   }
@@ -2701,8 +2789,14 @@ static V emit(Ctx* c, Scope* sc, Node* n, Buf* pre) {
     if (n->nkids == 2) {
       V lr[2];
       emit_seq(c, sc, n->kids, 2, lr, pre);
+      if (lr[0].quad || lr[1].quad)
+        fail(c, "a pair of pairs of pairs %s: one more doubling would be the octonions, whose product "
+             "doesn't associate, so rotations made of them wouldn't compose. Pairs nest once", err_loc(c, n));
+      if (lr[0].pair && lr[1].pair)            /* a pair of pairs */
+        return vquad(lr[0].l, lr[0].r, lr[1].l, lr[1].r);
       if (lr[0].pair || lr[1].pair)
-        fail(c, "a pair's side needs one number but gets a pair — pick a side with [0] / [1] %s", err_loc(c, n));
+        fail(c, "a pair of pairs has a pair for each half, and this one has a pair and a number %s: write "
+             "the number as a pair ([x, 0], or [x, x]) to say which. " QUAD_STANDIN, err_loc(c, n));
       return vpair(lr[0].l, lr[1].l);
     }
     fail(c, "an array of %d can't be a value here %s — a pair is [L, R]; a table goes in a let, or to wave",
@@ -2773,8 +2867,20 @@ static V emit(Ctx* c, Scope* sc, Node* n, Buf* pre) {
       }
     }
     /* A pair indexes like a two-entry table: the left side for even i,
-     * the right for odd. */
+     * the right for odd. A pair of pairs gives its halves, each a pair. */
     V v = emit(c, sc, a, pre);
+    if (v.quad) {
+      double kv;
+      if (const_value(c, sc, i, &kv)) {
+        long k = (long)kv % 2;
+        if (k < 0) k += 2;
+        return half_of(v, (int)k);
+      }
+      const char* ix = emit1(c, sc, i, pre, "an index");
+      const char* t = fresh(c, "ix");
+      badd(c, pre, "  long %s = (long)(%s) %% 2;\n", t, ix);
+      return vpair(F(c, "((%s == 0) ? (%s) : (%s))", t, v.l, v.l2), F(c, "((%s == 0) ? (%s) : (%s))", t, v.r, v.r2));
+    }
     if (i->kind == nkNum) {
       long k = (long)i->num % 2;
       if (k < 0) k += 2;
@@ -2814,6 +2920,83 @@ static int costly(Ctx* c, Node* n) {
   }
   for (int i = 0; i < n->nkids; i++) if (costly(c, n->kids[i])) return 1;
   return 0;
+}
+
+/* A pair operation's arguments, each emitted once and fixed, so the
+ * operation can look at their shapes (number, pair, pair of pairs)
+ * before choosing its formula. */
+static V* emit_operands(Ctx* c, Scope* sc, Node* n, Buf* pre, int* any_quad) {
+  V* v = al(c, (n->nkids + 1) * sizeof(V));
+  *any_quad = 0;
+  for (int i = 0; i < n->nkids; i++) {
+    v[i] = capture(c, pre, emit(c, sc, n->kids[i], pre));
+    if (v[i].quad) *any_quad = 1;
+  }
+  return v;
+}
+
+/* Those arguments flattened to numbers for a pair formula: a pair gives
+ * its two sides, a number itself (as pair_operands). */
+static const char** flatten_operands(Ctx* c, Node* n, V* v, int want, const char* usage) {
+  const char** r = al(c, (2 * n->nkids + 1) * sizeof(char*));
+  int k = 0;
+  for (int i = 0; i < n->nkids; i++) {
+    r[k++] = v[i].l;
+    if (v[i].pair) r[k++] = v[i].r;
+  }
+  if (k != want)
+    fail(c, "%s takes %s, got %d%s%s", n->str, usage, k, k == 1 ? " number " : " numbers ", err_loc(c, n));
+  return r;
+}
+
+/* Hamilton's operations on pairs of pairs (Cayley–Dickson): a pair of
+ * pairs (a, b) is the quaternion a + b j, with a and b complex.
+ *   (a, b)(c, d) = (a c - b conj(d),  a d + b conj(c))
+ *   conj(a, b) = (conj(a), -b)
+ * Every argument is a pair of pairs: a pair or a number here is an
+ * error, as `turn` takes two pairs and not a pair and a number. */
+static V emit_quad_op(Ctx* c, Node* n, V* q, Buf* pre) {
+  const char* f = n->str;
+  int want = (eq(f, "turn") || eq(f, "unturn")) ? 2 : 1;
+  if (n->nkids != want)
+    fail(c, "%s takes %s %s", f, want == 2 ? "two pairs of pairs (or two pairs)" : "one pair of pairs (or one pair)",
+         err_loc(c, n));
+  for (int i = 0; i < want; i++) {
+    if (!q[i].quad)
+      fail(c, "%s gets a pair of pairs and %s %s: Hamilton's product is between quaternions, and a %s here "
+           "could be read as one in more than one way, so for now it is an error; write it as a pair of "
+           "pairs. " QUAD_STANDIN, f, q[i].pair ? "a pair" : "a number", err_loc(c, n), q[i].pair ? "pair" : "number");
+  }
+  /* each quaternion as w + x i + y j + z k: (a, b) = (w + x i, y + z i) */
+  const char *w1 = q[0].l, *x1 = q[0].r, *y1 = q[0].l2, *z1 = q[0].r2;
+  if (eq(f, "conj")) return vquad(w1, F(c, "(-%s)", x1), F(c, "(-%s)", y1), F(c, "(-%s)", z1));
+  if (eq(f, "amplitude"))
+    return mono(F(c, "sqrt(%s * %s + %s * %s + %s * %s + %s * %s)", w1, w1, x1, x1, y1, y1, z1, z1));
+  if (eq(f, "phase") || eq(f, "axis")) {
+    /* Hamilton: q = T q (cos t + e sin t), t his angle (0..pi), e his axis. */
+    const char* vn = fresh(c, "qv");
+    badd(c, pre, "  double %s = sqrt(%s * %s + %s * %s + %s * %s);\n", vn, x1, x1, y1, y1, z1, z1);
+    if (eq(f, "phase")) return mono(F(c, "atan2(%s, %s)", vn, w1));
+    return vquad("0.0", F(c, "(%s == 0.0 ? 0.0 : %s / %s)", vn, x1, vn), F(c, "(%s == 0.0 ? 0.0 : %s / %s)", vn, y1, vn),
+                 F(c, "(%s == 0.0 ? 1.0 : %s / %s)", vn, z1, vn));
+  }
+  const char *w2 = q[1].l, *x2 = q[1].r, *y2 = q[1].l2, *z2 = q[1].r2;
+  if (eq(f, "unturn")) {           /* q1 conj(q2) over the size of q2 squared */
+    const char* d = fresh(c, "unturn_q");
+    badd(c, pre, "  double %s = %s * %s + %s * %s + %s * %s + %s * %s;\n", d, w2, w2, x2, x2, y2, y2, z2, z2);
+    const char* inv = F(c, "(%s == 0.0 ? 0.0 : 1.0 / %s)", d, d);
+    x2 = F(c, "(-%s)", x2); y2 = F(c, "(-%s)", y2); z2 = F(c, "(-%s)", z2);
+    const char* W = F(c, "(%s * %s - %s * %s - %s * %s - %s * %s)", w1, w2, x1, x2, y1, y2, z1, z2);
+    const char* X = F(c, "(%s * %s + %s * %s + %s * %s - %s * %s)", w1, x2, x1, w2, y1, z2, z1, y2);
+    const char* Y = F(c, "(%s * %s - %s * %s + %s * %s + %s * %s)", w1, y2, x1, z2, y1, w2, z1, x2);
+    const char* Z = F(c, "(%s * %s + %s * %s - %s * %s + %s * %s)", w1, z2, x1, y2, y1, x2, z1, w2);
+    return vquad(F(c, "(%s * %s)", W, inv), F(c, "(%s * %s)", X, inv), F(c, "(%s * %s)", Y, inv), F(c, "(%s * %s)", Z, inv));
+  }
+  /* turn: Hamilton's product, written out (the doubling formula expanded) */
+  return vquad(F(c, "(%s * %s - %s * %s - %s * %s - %s * %s)", w1, w2, x1, x2, y1, y2, z1, z2),
+               F(c, "(%s * %s + %s * %s + %s * %s - %s * %s)", w1, x2, x1, w2, y1, z2, z1, y2),
+               F(c, "(%s * %s - %s * %s + %s * %s + %s * %s)", w1, y2, x1, z2, y1, w2, z1, x2),
+               F(c, "(%s * %s + %s * %s - %s * %s + %s * %s)", w1, z2, x1, y2, y1, x2, z1, w2));
 }
 
 static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
@@ -2891,6 +3074,19 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
       bcat(c, pre, bstr(&own));
       if (terms[k - 1].pair) pair = 1;
     }
+    int quads = 0;
+    for (long k = 0; k < N; k++) quads += terms[k].quad;
+    if (quads) {
+      if (quads != N)
+        fail(c, "sum of pairs of pairs and other values %s: every term should be a pair of pairs. " QUAD_STANDIN,
+             err_loc(c, n));
+      Buf q[4] = {{0}};
+      for (long k = 0; k < N; k++) {
+        const char* parts[4] = {terms[k].l, terms[k].r, terms[k].l2, terms[k].r2};
+        for (int m = 0; m < 4; m++) { if (k) bcat(c, &q[m], " + "); bcat(c, &q[m], parts[m]); }
+      }
+      return vquad(F(c, "(%s)", bstr(&q[0])), F(c, "(%s)", bstr(&q[1])), F(c, "(%s)", bstr(&q[2])), F(c, "(%s)", bstr(&q[3])));
+    }
     Buf l = {0}, r = {0};
     long kept = 0;
     for (long k = 0; k < N; k++) {        /* a term that is 0 (a folded-away branch) adds nothing */
@@ -2951,6 +3147,35 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
     fail(c, "array(N) declares an array: `$f = array(N)` for state that lasts, `let a = array(N)` "
          "for this sample's scratch %s", err_loc(c, n));
   if (eq(name, "noise")) return mono(emit_noise(c, pre));
+  if (eq(name, "turn") || eq(name, "unturn") || eq(name, "conj") || eq(name, "amplitude") ||
+      eq(name, "phase") || eq(name, "axis")) {
+    /* Emitted once; a pair of pairs among them takes Hamilton's formula. */
+    int anyq;
+    V* ops = emit_operands(c, sc, n, pre, &anyq);
+    if (anyq) return emit_quad_op(c, n, ops, pre);
+    if (eq(name, "axis"))
+      fail(c, "axis(q) is a pair of pairs' axis (Hamilton's Ax q), and this is %s %s",
+           n->nkids == 1 ? "not a pair of pairs" : "the wrong number of arguments", err_loc(c, n));
+    if (eq(name, "turn")) {
+      const char** a = flatten_operands(c, n, ops, 4, "two pairs (or four numbers)");
+      return vpair(F(c, "(%s * %s - %s * %s)", a[0], a[2], a[1], a[3]),
+                   F(c, "(%s * %s + %s * %s)", a[0], a[3], a[1], a[2]));
+    }
+    if (eq(name, "unturn")) {              /* z turned back by w's angle, divided by its size */
+      const char** a = flatten_operands(c, n, ops, 4, "two pairs (or four numbers)");
+      const char* d = fresh(c, "unturn_d");
+      badd(c, pre, "  double %s = %s * %s + %s * %s;\n", d, a[2], a[2], a[3], a[3]);
+      return vpair(F(c, "(%s == 0.0 ? 0.0 : (%s * %s + %s * %s) / %s)", d, a[0], a[2], a[1], a[3], d),
+                   F(c, "(%s == 0.0 ? 0.0 : (%s * %s - %s * %s) / %s)", d, a[1], a[2], a[0], a[3], d));
+    }
+    if (eq(name, "conj")) {
+      const char** a = flatten_operands(c, n, ops, 2, "one pair (or two numbers)");
+      return vpair(a[0], F(c, "(-%s)", a[1]));
+    }
+    const char** a = flatten_operands(c, n, ops, 2, "one pair (or two numbers)");
+    if (eq(name, "amplitude")) return mono(F(c, "sqrt(%s * %s + %s * %s)", a[0], a[0], a[1], a[1]));
+    return mono(F(c, "atan2(%s, %s)", a[1], a[0]));
+  }
   if (in(name, PAIR_CALLS)) {
     const char* f = name;
     if (eq(f, "turn")) {
@@ -3007,6 +3232,7 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
       fail(c, "wave: second arg must be an array literal or a let binding to one %s", err_loc(c, arr));
       return mono("");
     }
+    no_quad(c, freq, "wave", n);
     return per_side(c, sc, n, &freq, freq.pair, s_wave, pre, &w);
   }
   /* Builtins and natives: arguments first, then once, or per side. */
@@ -3172,6 +3398,7 @@ static const char* var_init(Ctx* c, Scope* sc, Node* st) {
     return sdup(c, bstr(&init_pre));
   }
   V v = emit(c, sc, st->kids[0], &init_pre);
+  no_quad(c, v, F(c, "$%s (state)", st->str), st);
   int decided = has(&c->pair_vars, st->str) || has(&c->top_var_set, st->str);
   if (!decided) make_var(c, st->str, v.pair);
   else if (has(&c->pair_vars, st->str) != v.pair)
@@ -3929,10 +4156,11 @@ static void declare_rows(Ctx* c, const char* text, Buf* out) {
   }
 }
 
-static int xbuf(Ctx* c, const char* key, int wu, int pair) {
+/* `width`: 1 a number, 2 a pair, 4 a pair of pairs. */
+static int xbuf(Ctx* c, const char* key, int wu, int width) {
   Ent* e = hfind(&c->xbufs, F(c, "%s#%d", key, wu));
   if (!e) fail(c, "internal: '%s' crosses between tasks without a buffer", key);
-  if (e->n < 0) { e->n = c->nbufs; e->pairs = pair; c->nbufs += pair ? 2 : 1; }
+  if (e->n < 0) { e->n = c->nbufs; e->pairs = width > 1; c->nbufs += width; }
   return (int)e->n;
 }
 
@@ -3964,8 +4192,9 @@ static V cross_read(Ctx* c, const char* key, V v) {
     return vpair(xb(c, xb_part(c, part, 0), "aither_i"), xb(c, xb_part(c, part, 1), "aither_i"));
   }
   int late, wu = pick_writer(w, c->cur_unit, &late);
-  int b = xbuf(c, key, wu, v.pair);
+  int b = xbuf(c, key, wu, v.quad ? 4 : v.pair ? 2 : 1);
   const char* idx = late ? "aither_i" : "aither_i + 1";
+  if (v.quad) return vquad(xb(c, b, idx), xb(c, b + 1, idx), xb(c, b + 2, idx), xb(c, b + 3, idx));
   return v.pair ? vpair(xb(c, b, idx), xb(c, b + 1, idx)) : mono(xb(c, b, idx));
 }
 
@@ -4017,9 +4246,12 @@ static void store_crossing(Ctx* c, int u, Scope* sc, Buf* out, Buf* park) {
       c->cur_unit = -1;
       V v = emit_ident_raw(c, sc, &id);
       c->cur_unit = was;
-      int row = xbuf(c, e->key, u, v.pair);
+      int row = xbuf(c, e->key, u, v.quad ? 4 : v.pair ? 2 : 1);
       x->a = v.l; x->b = v.r;
-      const char* st = v.pair
+      const char* st = v.quad
+        ? F(c, "  %s = (%s); %s = (%s); %s = (%s); %s = (%s);\n", xb(c, row, "aither_i + 1"), v.l,
+            xb(c, row + 1, "aither_i + 1"), v.r, xb(c, row + 2, "aither_i + 1"), v.l2, xb(c, row + 3, "aither_i + 1"), v.r2)
+        : v.pair
         ? F(c, "  %s = (%s); %s = (%s);\n", xb(c, row, "aither_i + 1"), v.l, xb(c, row + 1, "aither_i + 1"), v.r)
         : F(c, "  %s = (%s);\n", xb(c, row, "aither_i + 1"), v.l);
       bcat(c, out, st);
@@ -4108,6 +4340,10 @@ static const char* emit_program(Ctx* c, Node* program) {
         c->scope = F(c, "play %s/%s", nm, stmt_scope(c, st, si == nst - 1));
         if (si == nst - 1 && st->kind != nkLet && st->kind != nkVar && st->kind != nkAssign && st->kind != nkIdxAssign) {
           V v = emit(c, inner, st, body);
+          if (v.quad)
+            fail(c, "play %s ends in a pair of pairs %s, and a play is heard as a pair: say which pair, its "
+                 "first half (q[0]), its direction (hopf(q), a pair of pairs too: then a pair from it), or a "
+                 "projection of your own. " QUAD_STANDIN, nm, err_loc(c, st));
           const char* l = v.pair ? v.l : once(c, body, v.l);
           const char* r = v.pair ? v.r : l;
           badd(c, body, "    p_%s_l = (%s) * %s;\n", nm, l, xb(c, xb_gain(c, part), "aither_i"));
@@ -4157,7 +4393,12 @@ static const char* emit_program(Ctx* c, Node* program) {
         }
       } else {
         V v = emit(c, top, rhs, body);
-        if (v.pair) {
+        if (v.quad) {
+          badd(c, body, "  double l_%s_l = (%s);\n  double l_%s_r = (%s);\n  double l_%s_l2 = (%s);\n  double l_%s_r2 = (%s);\n",
+               s->str, v.l, s->str, v.r, s->str, v.l2, s->str, v.r2);
+          incl(c, &c->stereo_lets, s->str);
+          incl(c, &c->quad_lets, s->str);
+        } else if (v.pair) {
           badd(c, body, "  double l_%s_l = (%s);\n  double l_%s_r = (%s);\n", s->str, v.l, s->str, v.r);
           incl(c, &c->stereo_lets, s->str);
         } else {
@@ -4174,6 +4415,10 @@ static const char* emit_program(Ctx* c, Node* program) {
     default:
       if (i == final_idx) {
         V v = emit(c, top, s, body);
+        if (v.quad)
+          fail(c, "the patch ends in a pair of pairs %s, and the pipe carries a pair (a speaker's two sides, "
+               "a scope's x and y, an IQ stream): say which pair, its first half (q[0]), or a projection of "
+               "your own. " QUAD_STANDIN, err_loc(c, s));
         const char* l = v.pair ? v.l : once(c, body, v.l);
         badd(c, body, "  %s = (%s); %s = (%s);\n", xb(c, XB_OUT_L, "aither_i"), l,
              xb(c, XB_OUT_R, "aither_i"), v.pair ? v.r : l);

@@ -775,6 +775,44 @@ one side has to get it); how fast it turns, its frequency, is
 apart. Taking one side (`let [x, _] = p`) throws the other away, and is
 for where one number is all there is room for, such as a mono mix.
 
+### Pairs of pairs
+
+A pair may hold pairs: `[[w, x], [y, z]]` is Hamilton's quaternion
+w + x i + y j + z k (Cayley–Dickson: a pair of complex numbers, the
+first half a + the second half times j). Pairs nest once: a pair of
+pairs of pairs is an error, by design, as one more doubling would be
+the octonions, whose product doesn't associate, so rotations made of
+them wouldn't compose (notes/nested-pair-2026-11-05.md).
+
+Destructuring nests: `let [[w, x], [y, z]] = q`, `let [xi, eta] = s`
+(each half a pair), `_` for what isn't wanted. `q[0]` and `q[1]` are the
+halves, as a pair's sides.
+
+| Function        | On pairs of pairs (Hamilton)                        |
+|-----------------|-----------------------------------------------------|
+| `turn(p, q)`    | his product, (a, b)(c, d) = (ac − b conj(d), ad + b conj(c)); the one product in aither where order matters (ij = k, ji = −k) |
+| `conj(q)`       | his conjugate K q: the vector part negated          |
+| `unturn(p, q)`  | `turn(p, conj(q))` over the size of q squared; `unturn(turn(p, q), q)` is p |
+| `amplitude(q)`  | his tensor T q: the size, all four numbers          |
+| `phase(q)`      | his angle, 0..π, in q = T q (cos θ + ε sin θ); a pair's phase is the same in its plane, signed |
+| `axis(q)`       | his axis ε, a unit vector `[[0, x], [y, z]]`        |
+
+A rotation applies to a vector v (a pair of pairs with w = 0) as
+`turn(turn(q, v), conj(q))`, Hamilton's q v q⁻¹ for a unit q, and
+turns it by twice q's angle about q's axis. `+`, `-`, `*`, `/`, `mod` and
+`^` work side by side on the four numbers, and a number scales all four.
+Lets, def arguments and returns, lambdas, `if` and `sum` carry them
+whole.
+
+**Stand-ins, not decisions.** Pairs of pairs are new, and where a
+meaning isn't settled the compiler stops and says so, naming the choices
+and that the rule can change: a pair meeting a pair of pairs in an
+operation (`+`, `turn`: the pair on both halves, or as a complex number
+with its second half 0?), and a patch or play ending in one (the pipe
+carries a pair: which pair?). Not yet built, and refused the same way:
+`$state`, arrays, filters, delays and the other functions that run once
+a side, the voice loop and `def rec`.
+
 Return `[L, R]` for stereo. Plays and the final expression
 may return a float (mono, mirrored to both channels) or a
 two-element array (stereo).

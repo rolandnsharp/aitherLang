@@ -359,40 +359,71 @@ static Node* node2(P* p, NodeKind k, const char* str, Node* a, Node* b, int line
 
 static Node* parse_expr(P* p);
 
+/* A destructuring pattern: a name, or `[p, q]` of two patterns, so a
+ * pair of pairs unfolds as `let [[w, x], [y, z]] = q`. */
+typedef struct Pat { const char* name; struct Pat* sub[2]; } Pat;
+
+static Pat* parse_pat(P* p) {
+  Pat* pt = arena_alloc(p->c->a, sizeof(Pat));
+  if (peek(p).kind != tkLBracket) {
+    pt->name = expect(p, tkIdent, "a name for a side").str;
+    return pt;
+  }
+  advance(p);
+  for (int k = 0; k < 2; k++) {
+    if (k) {
+      if (peek(p).kind != tkComma) fail(p, "let [a, b] names a pair's two sides: two names");
+      advance(p);
+    }
+    pt->sub[k] = parse_pat(p);
+  }
+  if (peek(p).kind == tkComma) fail(p, "let [a, b] names a pair's two sides: two names");
+  expect(p, tkRBracket, NULL);
+  return pt;
+}
+
+/* The lets a pattern makes from `src`, a name already bound: a name is
+ * `let name = src`, a pair pattern a hidden let of each half and its
+ * own pattern of it (queued in p->extra; `_` binds nothing). */
+static void bind_pat(P* p, Pat* pt, const char* src, int line, int depth) {
+  for (int k = 0; k < 2; k++) {
+    Pat* sp = pt->sub[k];
+    Node* id = node(p, nkIdent, line);
+    id->str = src;
+    Node* ix = node(p, nkNum, line);
+    ix->num = k;
+    Node* part = node2(p, nkIdx, "", id, ix, line);
+    if (sp->name) {
+      if (eq(sp->name, "_")) continue;
+      push(&p->extra, node1(p, nkLet, sp->name, part, line));
+    } else {
+      char buf[256];
+      snprintf(buf, sizeof buf, "%s_%d_%d", src, k, depth);
+      const char* tmp = dup(p->c->a, buf, strlen(buf));
+      push(&p->extra, node1(p, nkLet, tmp, part, line));
+      bind_pat(p, sp, tmp, line, depth + 1);
+    }
+  }
+}
+
 /* After `let`: `name = expr`, or `[a, b] = expr`, which names a pair's
  * two sides: a hidden let of the pair, and `a`, `b` as its [0] and [1]
- * (queued in p->extra; `_` names a side not wanted). */
+ * (queued in p->extra; `_` names a side not wanted). Each side may be a
+ * pattern of its own, for a pair of pairs: `let [[w, x], [y, z]] = q`. */
 static Node* parse_let_rest(P* p, int line) {
   if (peek(p).kind != tkLBracket) {
     const char* name = expect(p, tkIdent, "binding name").str;
     expect(p, tkAssign, NULL);
     return node1(p, nkLet, name, parse_expr(p), line);
   }
-  advance(p);
-  const char* names[2];
-  int n = 0;
-  for (;;) {
-    const char* nm = expect(p, tkIdent, "a name for a side").str;
-    if (n == 2) fail(p, "let [a, b] names a pair's two sides: two names");
-    names[n++] = nm;
-    if (peek(p).kind != tkComma) break;
-    advance(p);
-  }
-  expect(p, tkRBracket, NULL);
-  if (n != 2) fail(p, "let [a, b] names a pair's two sides: two names");
+  Pat* pt = parse_pat(p);
   expect(p, tkAssign, NULL);
+  static int made;                     /* each destructuring its own hidden name */
   char buf[256];
-  snprintf(buf, sizeof buf, "__pair_%s_%s_%d", names[0], names[1], line);
+  snprintf(buf, sizeof buf, "__pair_%d_%d", line, made++);
   const char* tmp = dup(p->c->a, buf, strlen(buf));
   Node* whole = node1(p, nkLet, tmp, parse_expr(p), line);
-  for (int k = 0; k < 2; k++) {
-    if (eq(names[k], "_")) continue;
-    Node* id = node(p, nkIdent, line);
-    id->str = tmp;
-    Node* ix = node(p, nkNum, line);
-    ix->num = k;
-    push(&p->extra, node1(p, nkLet, names[k], node2(p, nkIdx, "", id, ix, line), line));
-  }
+  bind_pat(p, pt, tmp, line, 0);
   return whole;
 }
 
