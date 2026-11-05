@@ -213,6 +213,44 @@ what it means in the piece; some names, and the picture each carries:
 Adding `dt` drifts by microseconds over an hour, nothing you can hear;
 where it must be exact, count samples (`$n = $n + 1`, and `$n * dt`).
 
+### How long since
+
+Strikes, plucks and drops want the time since they happened: a struck
+mode rings as `sin(TAU * f * a) * exp(-a * k)` of it, a contact force is
+a pulse in it. There are two kinds of event, and each has its way.
+
+**From a clock the patch keeps** (a beat, a step, a drop of rain): no
+memory at all. The time since the last step is the clock's own fraction,
+and the step j back is j steps more, so the last few events can be summed
+and each rings out by itself, with no voices and no timers. From
+`patches/rain.aither` (the vis branch), where every raindrop is a bell:
+
+```
+def since_step(step, j, rate): (step - floor(step) + j) / rate     # the drop j steps ago
+def bell(step, j, rate):
+  let a = since_step(step, j, rate)
+  sin(TAU * 587.33 * a) * exp(-a * 3)
+sum(6, j => bell(step, j - 1, rate))                                 # the last six, each ringing
+```
+
+It is a function of the clock, so it is exact, a send keeps it, and
+moving the sweep moves it with everything else.
+
+**From outside** (a key, a game's strike, an SDR's retune): the patch
+can't know when, so it remembers. `since(x)` (stdlib) is seconds since
+`x` last changed, kept as the moment of the change, `t` then, and read
+as `t - that`:
+
+```
+let age = since(midi_voice_on(n))        # since voice n's note began
+let idle = since(midi_cc(20))            # since the knob last moved
+```
+
+Keep the moment, not a sum of `dt`s: `t - $start` is exact, where
+adding `dt` drifts, and `try` and `send` find it where it really is.
+`patches/struck_bell.aither` reads every strike's age so:
+`array(16, i => since(midi_voice_on(i + 1)))`.
+
 `sweep` (often bound as `let pos = sweep`) is your composition
 timeline. Shape the piece as a function of it:
 

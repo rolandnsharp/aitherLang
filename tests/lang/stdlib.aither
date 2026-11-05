@@ -125,3 +125,24 @@ prev($n)
 let p = vdp(220)
 let rate = phase(turn(p, conj(prev(p)))) / (TAU * dt)
 if rate > 150 and rate < 250 then 1 else 0
+
+# --- since(x): seconds since x last changed; long ago before it ever has
+# expect: 5
+# expect at 99: 5
+# expect at 100: 0
+# expect at 148: 0.001
+let x = if t > 99.5 * dt then 1 else 0
+min(since(x), 5)
+
+# --- since: a change back counts as a change too
+# expect at 150: 0.001
+# expect at 200: 0
+# expect at 248: 0.001
+let pulse = if t > 101.5 * dt and t < 199.5 * dt then 1 else 0
+min(since(pulse), 5)
+
+# --- since: x taken as 0 before the start, so a value already there has just begun
+# expect: 0
+# expect at 48: 0.001
+min(since(1), 5)
+

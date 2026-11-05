@@ -114,6 +114,26 @@ def ease(x):
   let c = clamp(x, 0, 1)
   c * c * (3 - 2 * c)
 
+# Seconds since x last changed: since a key went down
+# (since(midi_voice_on(n)), a new note-on in voice n's slot), since a knob
+# moved, since a channel was retuned. 0 on the sample it changes; before
+# it ever has, it reads as a million seconds and more, long ago. Before a
+# patch starts x is taken to have been 0, as a fresh engine has every key
+# and knob, so a note already down (or struck on the very first sample)
+# has just begun; a send keeps the memory, so an edit fakes no change. It
+# keeps the moment of the change, t then, and reads t - that: exact, and
+# where it really is after a send or a try.
+# For something that happens on a clock the patch keeps (a beat, a step,
+# a drop of rain), no memory is needed: the time since is the clock's
+# own fraction, (step - floor(step)) / rate, and j steps back adds j
+# (COMPOSING, "How long since").
+def since(x):
+  $last = 0
+  $changed_at = -1000000
+  $changed_at = if x != $last then t else $changed_at
+  $last = x
+  t - $changed_at
+
 # Previous-sample memory. `prev(x)` is x delayed by one sample.
 # Each call site gets its own 1-sample buffer via call-site state,
 # so `prev(a) + prev(b)` are independent.

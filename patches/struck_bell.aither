@@ -61,13 +61,8 @@ let phi0   = 0.4                                           # the bell's own asym
 
 let soft = slew(midi_cc(20), 0.05)                         # the striker: bronze .. wood
 
-# Each held key is a strike. A new note-on in a slot starts its contact,
-# and the moment it began is kept (`$start = t`, the timer COMPOSING's
-# looper uses: exact, and where it really is after a send or a try).
-$struck = array(16)                                        # which note-on each slot last struck with
-$began  = array(16, -1)                                    # t when that strike began
-each(16, i => $began[i] = if midi_voice_on(i + 1) != $struck[i] then t else $began[i])
-each(16, i => $struck[i] = midi_voice_on(i + 1))
+# Each key is a strike: how long since each slot's latest note-on.
+let ages = array(16, i => since(midi_voice_on(i + 1)))
 
 # The contact force of slot n now (momentum over its contact time, as a
 # half-sine), and where it lands: round the bell and up it.
@@ -80,7 +75,7 @@ def height_shape(h, c): if c > 1 then 1 - 0.4 * h else cos(PI * 0.5 * h / c)
 
 # Is anything being struck right now? A contact lasts a few ms, so almost
 # always nothing is, and the modes only ring.
-let hitting = sum(16, n => if t - $began[n - 1] < 0.01 then 1 else 0)
+let hitting = sum(16, n => if ages[n - 1] < 0.01 then 1 else 0)
 
 play bell:
   let modes = sum(8, k =>
@@ -88,7 +83,7 @@ play bell:
     let m = winds[k - 1]
     # Every strike's push into this mode's pair, while one lasts.
     let push = if hitting < 1 then [0, 0] else sum(16, n =>
-      let age = t - $began[n - 1]
+      let age = ages[n - 1]
       let force = if age < 0.01 then contact(age, midi_voice_vel(n), soft) else 0
       let key = midi_voice_key(n)
       let around = TAU * (key mod 12) / 12 - phi0
