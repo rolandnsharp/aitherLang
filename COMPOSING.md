@@ -1048,6 +1048,36 @@ locks into the next one: a change of chord heard as mode-locking.
   one or two voices; don't put one inside a `sum(N, …)` over many
   partials.
 
+## Pairs of pairs: turning every way round
+
+A pair turns in a plane; a pair of pairs, `[[w, x], [y, z]]`, is
+Hamilton's quaternion and turns every way round (SPEC "Pairs of
+pairs"). Reach for it when something has a direction: a sound's place
+round a listener, a body's facing, a bell's axis, the stereo image as a
+spinor. Write a direction as `[[0, x], [y, z]]` (x ahead, y left, z up)
+and a rotation with the stdlib:
+
+```
+let head = turn(turn(about(k, yaw), about(j, pitch)), about(i, roll))   # right first: roll, pitch, yaw
+let ear  = apply(head, toward_left)                                     # a direction turned by it
+let [[w, _], [_, _]] = turn(ear, field)                                 # minus the dot product
+```
+
+- Keep rotations and directions whole; destructure only where a formula
+  needs a number, as with pairs.
+- A body's turning is one state: `$q = $q + turn($q, spin) * (0.5 * dt)`,
+  then `$q = $q / amplitude($q)`, the spin a direction in the body.
+- `dho(push, [f, f * 1.0013], damp)` is a doublet as one value, the two
+  modes of a partial: a def given a pair, giving a pair a side, gives a
+  pair of pairs. Filters run once a number on them.
+- Where the meaning isn't settled (a pair meeting one, one reaching the
+  output) the compiler stops and says so: it is a stand-in, and the
+  rule can change if you expected something else.
+
+The four demos are written this way, each the same to the sample as its
+plain version of halves: `sympathetic_bells`, `tumble`, `spinfield`,
+`stereo_spin`.
+
 ## Polyphase: phases are turns of one phasor
 
 aither has pairs, not triples, and that is enough for polyphase: it was

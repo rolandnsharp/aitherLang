@@ -1,20 +1,17 @@
 # The nested pair: a pair may hold pairs
 
-**Status (2026-11-05): stages 1 and 2 built.** Nested literals and
+**Status (2026-11-05): built, stages 1 to 3.** Nested literals and
 destructuring; pairs of pairs through lets, defs, lambdas, `if`, `sum`
 and plays; side-by-side arithmetic; `turn`, `conj`, `unturn`,
 `amplitude`, `phase` and the new `axis` by Hamilton's operations;
-`$state` of them, in defs and at the file's level; arrays of them
-(state, scratch, rules, `each`); functions run once a number on them;
-`dho` given a pair a doublet (tests/lang/quads.aither, SPEC "Pairs of
-pairs"). Both open questions went to errors that say they are
-stand-ins. Not yet built, and refused with the same stand-in message:
-the voice loop and `def rec`. Stage 3: `i`, `j`, `k`, `about`,
-`apply` and `hopf` in the stdlib (a patch's own names come first);
-`sympathetic_bells` and `tumble` rewritten with them, measured against
-their plain versions: the bells the same within 2e-13 at every facing
-tried, `tumble`'s picture identical sample for sample (35 lines of
-halves to 21, and 46 to 20). `spinfield` and `stereo_spin` next. It follows
+`$state` and arrays of them; functions once a number on them; `dho`
+given a pair a doublet; `i`, `j`, `k`, `about`, `apply`, `hopf` in the
+stdlib (tests/lang/quads.aither, SPEC "Pairs of pairs", COMPOSING
+"Pairs of pairs"). The four demos rewritten and measured against their
+plain versions: `sympathetic_bells` within 2e-13, `tumble`, `spinfield`
+and `stereo_spin` identical sample for sample. Both open questions went
+to errors that say they are stand-ins. Not yet built, refused the same
+way: the voice loop and `def rec`. It follows
 [spinors-2026-11-05.md](spinors-2026-11-05.md), which made way 3 (the
 spinor as aither's third value) the destination and way 2 (defs that
 return small arrays of pairs) the path. This note proposes skipping way

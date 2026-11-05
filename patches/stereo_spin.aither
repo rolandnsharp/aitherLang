@@ -7,8 +7,8 @@
 #   S1 = |L|^2 - |R|^2           balance, left against right
 #   S2 + i S3 = 2 conj(L) R      correlation: in phase (S2), in quadrature (S3)
 # A mono sound at the centre sits at +S2. Every stereo move is a turn of
-# that sphere, and every turn is two complex numbers (a, b) acting on the
-# spinor, xi' = a xi + b eta, eta' = conj(a) eta - conj(b) xi:
+# that sphere, and every turn is a pair of pairs acting on the spinor by
+# Hamilton's product (SPEC "Pairs of pairs"):
 #   about S3   equal-power panning; a quarter turn is hard left or right,
 #              half a turn is the sides in anti-phase, and a quarter turn
 #              from the centre the other way is mid/side
@@ -16,7 +16,7 @@
 #              (a frequency-free 90 degrees, the Hilbert pair), then
 #              anti-phase
 #   about S2   balance traded for quadrature
-# The three are composed as quaternions into one rotation and played as
+# The three are composed by his product into one rotation and played as
 # the real parts of the turned spinor. With every turn at 0 the sound is
 # the source, through the Hilbert pair (clean above about 30 Hz).
 #
@@ -30,30 +30,13 @@
 
 # ---------------------------------------------------------------- the turns
 
-# A rotation about one axis of the image's sphere by w, as (a, b).
-def about_s1_a(w): [cos(w / 2), -sin(w / 2)]
-def about_s2_b(w): [0, -sin(w / 2)]
-def about_s3_b(w): [-sin(w / 2), 0]
-def cos_half(w): [cos(w / 2), 0]
-
-# Two rotations composed, each half (the plain way: a rotation is two
-# pairs, so it takes two defs).
-def comp_a(a1, b1, a2, b2): turn(a1, a2) - turn(b1, conj(b2))
-def comp_b(a1, b1, a2, b2): turn(a1, b2) + turn(b1, conj(a2))
-
+# The image's sphere in Hamilton's units: balance (S1) is i, quadrature
+# (S3) is j, in phase (S2) is k, each turned the other way round
+# (about(-axis, w) is about(axis, -w)).
 let w3 = slew(midi_cc(21), 0.05) * TAU                    # about S3
 let w1 = slew(midi_cc(20), 0.05) * TAU                    # about S1
 let w2 = slew(midi_cc(22), 0.05) * TAU                    # about S2
-let a3 = cos_half(w3)
-let b3 = about_s3_b(w3)
-let a1 = about_s1_a(w1)
-let b1 = [0, 0]
-let a2 = cos_half(w2)
-let b2 = about_s2_b(w2)
-let a31 = comp_a(a3, b3, a1, b1)
-let b31 = comp_b(a3, b3, a1, b1)
-let ra = comp_a(a31, b31, a2, b2)                          # the whole turn
-let rb = comp_b(a31, b31, a2, b2)
+let r = turn(turn(about(j, -w3), about(i, -w1)), about(k, -w2))   # the whole turn
 
 # ---------------------------------------------------------------- a sound
 
@@ -72,9 +55,10 @@ let src = body + tone + breath
 
 # ---------------------------------------------------------------- the spinor
 
-let xi = analytic(src)                                     # L, analytic
-let eta = analytic(src)                                    # R, analytic (the same: centred)
-let xi2 = turn(ra, xi) + turn(rb, eta)
-let eta2 = turn(conj(ra), eta) - turn(conj(rb), xi)
+# [L, R], each analytic (the same: centred), as Hamilton writes a spinor
+# for his product to turn: L + (-conj(R)) j, so its second half is
+# -conj(R), and the turned R is minus the real part of the second half.
+let side = analytic(src)
+let [[l, _], [minus_r, _]] = turn(r, [side, conj(side) * -1])
 
-[xi2[0], eta2[0]] |> reverb(1.4, 0.1)
+[l, -minus_r] |> reverb(1.4, 0.1)
