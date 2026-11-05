@@ -440,8 +440,8 @@ def poly(n_voices, voice_fn, tail = 0):
     else 0)
 
 # One voice of poly: its note's values in, its sound out, and in its own
-# state whether it has finished. (The state is named apart from the
-# arguments: to the compiler `$on` and `on` are one name.)
+# state whether it has finished. (Its state is named apart from its
+# arguments, as it must be: to the compiler `$on` and `on` are one name.)
 def poly_voice(voice_fn, tail, f, gate, vel, key, press, slide, on):
   $note = 0
   $peak = 0

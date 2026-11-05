@@ -64,6 +64,25 @@ The first `$name = expr` in a scope is a declaration that
 allocates the slot; every later `$name = expr` is an
 assignment.
 
+The sigil is for the reader; to the compiler `$x` and `x` are one
+name. So state can't share its name with a parameter or a `let` it
+could be confused with, and the compiler says so, naming both lines:
+`'x' is both a parameter (patch.aither:1) and the state $x
+(patch.aither:2)`. Before 2026-11-05 it was silent and the two were one
+value: a def's parameter `on` read its state `$on`, a top-level `let x`
+took over `$x`'s reads. What is checked is everything one piece of code
+sees: a def's parameters and lets against its own state; the top
+level's lets against the file's state, which includes every play's
+(`$state` in a play is the file's, by name); a play's lets and a
+lambda's parameters and lets against the state of the code they are
+written in, where `$x` meant that state and would read the name. State
+declared inside a lambda with a `let` of its name outside is ordinary
+shadowing: inside, `$x` and `x` both mean the lambda's state. A def never sees the file's state, so a def's `x` and the
+file's `$x` are fine. A state array is read by index, through the
+arrays, never as a plain name, so `let z = $z[k]` (this element of it) is
+fine too. In a live set the error is a refused send: the version playing
+plays on, and the fix is a rename.
+
 ```
 $x = 0.0
 $x = $x + 0.001     # subsequent assignment, reads then writes

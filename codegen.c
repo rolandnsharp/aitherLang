@@ -4608,6 +4608,134 @@ static void normalize_calls(Ctx* c, Node* n, Shadow* shadow) {
   reorder_args(c, n, def->str, def->params, def->defaults, def->nparams);
 }
 
+/* ---- one name, one meaning: state and a parameter or let can't share ----
+ *
+ * To the compiler `$x` and `x` are one name (the `$` is for the reader),
+ * so a def's parameter `on` and its state `$on` were one value, silently,
+ * and a top-level `let x` took over `$x`'s reads. Now it is an error, at
+ * compile time: in a live set a send that fails changes nothing and the
+ * version playing plays on, so the cost is a rename.
+ *
+ * Frames: the top level (with every play's state, which is file-level by
+ * name; a play's lets are its own frame), each def (a boundary: a def
+ * sees its arguments, not the file's state) and each lambda (which sees
+ * the frames it is written in). A name bound in a frame (a parameter or
+ * a let) clashes with state of that name in the same frame, or in one it
+ * is written in, up to the def or top level that bounds them: there `$x`
+ * meant the outer state and would read the inner name. State declared
+ * inside a frame with a let of its name outside is shadowing, as any
+ * language has it: inside, `$x` and `x` both mean the inner state. */
+typedef struct NameFrame NameFrame;
+struct NameFrame {
+  NameFrame* up;
+  int boundary;                           /* a def, or the top level */
+  const char** bound; Node** bnode; int nb, cb;
+  const char** state; Node** snode; int ns, cs;
+};
+
+static void frame_add(Ctx* c, const char*** v, Node*** nodes, int* n, int* cap, const char* name, Node* at) {
+  if (!name || !*name) return;
+  if (*n == *cap) {
+    int nc = *cap ? *cap * 2 : 8;
+    const char** nv = al(c, nc * sizeof(char*));
+    Node** nn = al(c, nc * sizeof(Node*));
+    if (*n) { memcpy(nv, *v, *n * sizeof(char*)); memcpy(nn, *nodes, *n * sizeof(Node*)); }
+    *v = nv; *nodes = nn; *cap = nc;
+  }
+  (*v)[*n] = name; (*nodes)[*n] = at; (*n)++;
+}
+
+static NameFrame** name_frames;
+static int n_name_frames, cap_name_frames;
+
+static NameFrame* new_frame(Ctx* c, NameFrame* up, int boundary) {
+  NameFrame* f = al(c, sizeof(NameFrame));
+  memset(f, 0, sizeof *f);
+  f->up = up;
+  f->boundary = boundary;
+  if (n_name_frames == cap_name_frames) {
+    cap_name_frames = cap_name_frames ? cap_name_frames * 2 : 64;
+    NameFrame** nf = al(c, cap_name_frames * sizeof(NameFrame*));
+    if (n_name_frames) memcpy(nf, name_frames, n_name_frames * sizeof(NameFrame*));
+    name_frames = nf;
+  }
+  name_frames[n_name_frames++] = f;
+  return f;
+}
+
+static void gather_names(Ctx* c, Node* n, NameFrame* f, NameFrame* top) {
+  if (!n) return;
+  switch (n->kind) {
+  case nkDef: {
+    NameFrame* d = new_frame(c, f, 1);
+    for (int i = 0; i < n->nparams; i++) frame_add(c, &d->bound, &d->bnode, &d->nb, &d->cb, n->params[i], n);
+    for (int i = 0; i < n->nkids; i++) gather_names(c, n->kids[i], d, top);
+    return;
+  }
+  case nkLambda: {
+    NameFrame* l = new_frame(c, f, 0);
+    for (int i = 0; i < n->nparams; i++) frame_add(c, &l->bound, &l->bnode, &l->nb, &l->cb, n->params[i], n);
+    for (int i = 0; i < n->nkids; i++) gather_names(c, n->kids[i], l, top);
+    return;
+  }
+  case nkPlay: {
+    NameFrame* pl = new_frame(c, f, 0);
+    pl->ns = -1;                          /* its state is the top level's: marks a play frame */
+    for (int i = 0; i < n->nkids; i++) gather_names(c, n->kids[i], pl, top);
+    pl->ns = 0;
+    return;
+  }
+  case nkLet:
+    frame_add(c, &f->bound, &f->bnode, &f->nb, &f->cb, n->str, n);
+    break;
+  case nkVar: {
+    /* A state array is read by index, through the arrays, never as a
+     * plain name: `let z = $z[k]`, this element of it, is the idiom. */
+    if (n->nkids > 0 && is_array_make(n->kids[0])) break;
+    /* A play's state is the file's, by name. */
+    NameFrame* owner = f;
+    for (NameFrame* x = f; x; x = x->up) {
+      if (x->boundary) break;
+      if (x->ns == -1) { owner = top; break; }
+    }
+    if (owner->ns == -1) owner = top;
+    frame_add(c, &owner->state, &owner->snode, &owner->ns, &owner->cs, n->str, n);
+    break;
+  }
+  default: break;
+  }
+  for (int i = 0; i < n->nkids; i++) gather_names(c, n->kids[i], f, top);
+}
+
+static void clash(Ctx* c, const char* name, Node* bind, Node* st) {
+  int is_param = bind->kind == nkDef || bind->kind == nkLambda;
+  fail(c, "'%s' is both %s %s and the state $%s %s: to the compiler $%s and %s are one name, so they "
+       "would be one value. Rename one", name, is_param ? "a parameter" : "a let", err_loc(c, bind), name,
+       err_loc(c, st), name, name);
+}
+
+static void check_state_names(Ctx* c, Node* program) {
+  name_frames = NULL;
+  n_name_frames = cap_name_frames = 0;
+  NameFrame* top = new_frame(c, NULL, 1);
+  gather_names(c, program, top, top);
+  for (int k = 0; k < n_name_frames; k++) {
+    NameFrame* f = name_frames[k];
+    for (NameFrame* g = f; g; g = g->up) {
+      for (int i = 0; i < f->nb; i++)
+        for (int j = 0; j < g->ns; j++)
+          if (eq(f->bound[i], g->state[j])) clash(c, f->bound[i], f->bnode[i], g->snode[j]);
+      /* State inside, a parameter or let outside, is plain shadowing:
+       * there `$x` and `x` both mean the inner state, as written. */
+      if (g == f)
+        for (int i = 0; i < f->ns; i++)
+          for (int j = 0; j < g->nb; j++)
+            if (eq(f->state[i], g->bound[j])) clash(c, f->state[i], g->bnode[j], f->snode[i]);
+      if (g->boundary) break;
+    }
+  }
+}
+
 int generate_full(Arena* a, Node* program, const char* patch_path, double sr,
                   int hoist_on, Generated* out, char* err, int errlen) {
   Ctx* c = calloc(1, sizeof(Ctx));
@@ -4618,6 +4746,7 @@ int generate_full(Arena* a, Node* program, const char* patch_path, double sr,
   c->patch_path = patch_path ? patch_path : "";
   c->sr = sr;
   c->scope = "";
+  check_state_names(c, program);
   normalize_calls(c, program, NULL);
   mark_recursion(c);
   const char* src = emit_program(c, program);
