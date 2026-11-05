@@ -141,6 +141,30 @@ static int expand(Arena* a, Node* ast, const char* from, Seen* seen, int as_libr
   return 0;
 }
 
+/* Whether `name` is bound anywhere in n: a let, state, a def or its
+ * parameters, a lambda's parameter. */
+static int binds(const Node* n, const char* name) {
+  if (!n) return 0;
+  if ((n->kind == nkLet || n->kind == nkVar || n->kind == nkDef) && !strcmp(n->str, name)) return 1;
+  if (n->kind == nkDef || n->kind == nkLambda)
+    for (int i = 0; i < n->nparams; i++) if (n->params[i] && !strcmp(n->params[i], name)) return 1;
+  for (int i = 0; i < n->nkids; i++) if (binds(n->kids[i], name)) return 1;
+  return 0;
+}
+
+/* What the patch names comes first: a stdlib constant (Hamilton's i, j,
+ * k) is dropped when the patch or what it imports binds its name
+ * anywhere, and a stdlib def when they define one of the name, so
+ * neither collides with the patch's own. */
+static int shadowed(const Node* s, Kids* kids, int from) {
+  if (s->kind != nkLet && s->kind != nkDef) return 0;
+  for (int i = from; i < kids->n; i++) {
+    const Node* u = kids->v[i];
+    if (s->kind == nkDef ? (u->kind == nkDef && !strcmp(u->str, s->str)) : binds(u, s->str)) return 1;
+  }
+  return 0;
+}
+
 Node* build_program(Arena* a, const char* stdlib_src, const char* src, const char* src_tag,
                     int seed_self, int* kind, char* err, int errlen) {
   char perr[1024];
@@ -160,6 +184,11 @@ Node* build_program(Arena* a, const char* stdlib_src, const char* src, const cha
   int r = expand(a, user, from, &seen, 0, &kids, err, errlen);
   free(seen.v);
   if (r) { free(kids.v); return NULL; }
+  int kept = 0;
+  for (int i = 0; i < std->nkids; i++)
+    if (!shadowed(kids.v[i], &kids, std->nkids)) kids.v[kept++] = kids.v[i];
+  memmove(kids.v + kept, kids.v + std->nkids, (kids.n - std->nkids) * sizeof(Node*));
+  kids.n -= std->nkids - kept;
   *kind = BUILD_OK;
   Node* prog = arena_alloc(a, sizeof(Node));
   prog->kind = nkBlock; prog->line = 1; prog->str = ""; prog->source = "";

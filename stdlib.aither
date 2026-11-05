@@ -37,6 +37,32 @@ def spin(freq):
 # A pair turned by a fixed angle, in radians.
 def rotate(z, angle): turn(z, [cos(angle), sin(angle)])
 
+# ---------------------------------------------------------------- pairs of pairs
+# Hamilton's quaternions, a pair whose sides are pairs, [[w, x], [y, z]] =
+# w + x i + y j + z k (SPEC "Pairs of pairs"). His units: i i = j j = k k
+# = i j k = -1, so i j = k, j k = i, k i = j, and j i = -k. A patch's own
+# i, j or k (a let, an `i =>`) comes first.
+let i = [[0, 1], [0, 0]]
+let j = [[0, 0], [1, 0]]
+let k = [[0, 0], [0, 1]]
+
+# A rotation by angle (radians) about a unit direction: Hamilton's versor
+# of half the angle, cos(angle / 2) + dir sin(angle / 2), since a
+# rotation applied turns by twice its own angle. about(k, a) turns the
+# plane of i and j by a, as rotate does a pair.
+def about(dir, angle): [[cos(angle / 2), 0], [0, 0]] + dir * sin(angle / 2)
+
+# A rotation applied to a direction (a pair of pairs whose first number
+# is 0): Hamilton's r v r^-1, for a unit r. Composed rotations apply
+# right first: apply(turn(r2, r1), v) is r1, then r2.
+def apply(r, v): turn(turn(r, v), conj(r))
+
+# The direction a spinor points (the Hopf map): the pole, k, turned by
+# it. A spinor turned by r points apply(r, ...) of where it pointed, and
+# one turned all the way round, negated, points the same way.
+# (Written out, not through apply, so a patch's own apply can't change it.)
+def hopf(s): turn(turn(s, [[0, 0], [0, 1]]), conj(s))
+
 # Single-sideband frequency shift: every frequency in the signal moves
 # up by hz Hz (down if negative), with no mirror image, unlike a ring
 # modulator. Hz are added, not multiplied, so harmonics stop being

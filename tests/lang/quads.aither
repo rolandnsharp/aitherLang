@@ -249,3 +249,48 @@ let [[w, _], [_, _]] = $f[0]
 # error: needs one number but gets a pair of pairs
 let q = [[1, 2], [3, 4]]
 if q then 1 else 0
+
+# --- the stdlib has Hamilton's units: i j = k, j k = i, k i = j
+# expect: 1, 1
+let [[_, _], [_, z]] = turn(i, j)
+let [[_, x], [_, _]] = turn(j, k)
+[z, x]
+
+# --- ... and k i = j, i j k = -1
+# expect: 1, -1
+let [[_, _], [y, _]] = turn(k, i)
+let [[w, _], [_, _]] = turn(turn(i, j), k)
+[y, w]
+
+# --- a patch's own i, j or k comes first: a let, state, a lambda's parameter
+# expect: 5, 9
+let i = 5
+$k = 1
+[i, sum(3, j => j) + $k * 3]
+
+# --- about: a rotation by an angle about a direction; apply turns a direction by it
+# expect: 0.69670670934716539, 0.71735609089952279
+let [[_, x], [y, _]] = apply(about(k, 0.8), i)
+[x, y]
+
+# --- rotations compose right first: a quarter about k (i to j), then a quarter about i (j to k)
+# expect: 0, 1
+let [[_, _], [y, z]] = apply(turn(about(i, PI / 2), about(k, PI / 2)), i)
+[y, z]
+
+# --- ... and the other way round: about i first (i stays), then about k (i to j)
+# expect: 1, 0
+let [[_, _], [y, z]] = apply(turn(about(k, PI / 2), about(i, PI / 2)), i)
+[y, z]
+
+# --- hopf: the way a spinor points, from the pole k; turned a quarter about i, k goes to -j
+# expect: -1, 0
+let [[_, _], [y, z]] = hopf(about(i, PI / 2))
+[y, z]
+
+# --- the double cover: a spinor turned all the way round is negated, and points the same way
+# expect: -1, 1
+let s = about(i, TAU)
+let [[w, _], [_, _]] = s
+let [[_, _], [_, z]] = hopf(s)
+[w, z]

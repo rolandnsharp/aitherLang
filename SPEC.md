@@ -352,7 +352,9 @@ fib(30)                            # 832040
   without it always finishes each sample. A def that calls
   itself without `rec` is a compile error. (A patch's def
   replaces the stdlib's of the same name, so a wrapper that calls
-  the def it replaces needs a name of its own.) `rec` on a def
+  the def it replaces needs a name of its own; the stdlib's
+  constants `i`, `j` and `k` give way the same, to any let, state,
+  parameter or lambda parameter of the patch's of that name.) `rec` on a def
   that never calls itself changes nothing.
 - A call to itself anywhere but a branch's whole result
   (`fib(n - 1) + fib(n - 2)`) is a compile error: carry the rest
@@ -1323,6 +1325,24 @@ so `turn(spin(220), spin(50))` is `spin(270)` and `turn(p, p)` doubles
 def rotate(z, angle): turn(z, [cos(angle), sin(angle)])
 def freq_shift(signal, hz): turn(analytic(signal), spin(hz))
 ```
+
+```
+let i = [[0, 1], [0, 0]]                  # Hamilton's units ("Pairs of pairs")
+let j = [[0, 0], [1, 0]]
+let k = [[0, 0], [0, 1]]
+def about(dir, angle): [[cos(angle / 2), 0], [0, 0]] + dir * sin(angle / 2)
+def apply(r, v): turn(turn(r, v), conj(r))
+def hopf(s): turn(turn(s, [[0, 0], [0, 1]]), conj(s))
+```
+
+`i`, `j` and `k` are Hamilton's units, i j = k and j i = −k; a patch's
+own names come first. `about(dir, angle)` is the rotation by `angle`
+about a unit direction, his versor of half the angle (applied, a
+rotation turns by twice its own angle). `apply(r, v)` turns a direction
+v (a pair of pairs with w = 0) by r, his r v r⁻¹; composed rotations
+apply right first, `apply(turn(r2, r1), v)` being r1 then r2.
+`hopf(s)` is the way a spinor points, the pole k turned by it: a spinor
+turned all the way round is negated and points the same way.
 
 `rotate` turns a pair by a fixed angle, in radians. `freq_shift` moves
 every frequency in a signal up by `hz` Hz (down if negative), with no

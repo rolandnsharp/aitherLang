@@ -9,8 +9,9 @@ and plays; side-by-side arithmetic; `turn`, `conj`, `unturn`,
 `dho` given a pair a doublet (tests/lang/quads.aither, SPEC "Pairs of
 pairs"). Both open questions went to errors that say they are
 stand-ins. Not yet built, and refused with the same stand-in message:
-the voice loop and `def rec`. Next, stage 3: the stdlib units and
-the demos. It follows
+the voice loop and `def rec`. Stage 3 begun: `i`, `j`, `k`, `about`,
+`apply` and `hopf` in the stdlib (a patch's own names come first); the
+demos rewritten next. It follows
 [spinors-2026-11-05.md](spinors-2026-11-05.md), which made way 3 (the
 spinor as aither's third value) the destination and way 2 (defs that
 return small arrays of pairs) the path. This note proposes skipping way
