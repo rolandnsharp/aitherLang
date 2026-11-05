@@ -1,0 +1,76 @@
+# stereo_spin: stereo as a spinor, every stereo move one rotation
+# (notes/spinors-2026-11-05.md, "Stereo is already a spinor").
+#
+# Make each side analytic and the pair [L, R] is two complex numbers,
+# (xi, eta): a spinor (in optics, a Jones vector). Its Hopf map is the
+# state of the stereo image, a point on a sphere:
+#   S1 = |L|^2 - |R|^2           balance, left against right
+#   S2 + i S3 = 2 conj(L) R      correlation: in phase (S2), in quadrature (S3)
+# A mono sound at the centre sits at +S2. Every stereo move is a turn of
+# that sphere, and every turn is two complex numbers (a, b) acting on the
+# spinor, xi' = a xi + b eta, eta' = conj(a) eta - conj(b) xi:
+#   about S3   equal-power panning; a quarter turn is hard left or right,
+#              half a turn is the sides in anti-phase, and a quarter turn
+#              from the centre the other way is mid/side
+#   about S1   the sides' phases spread apart: in phase, then quadrature
+#              (a frequency-free 90 degrees, the Hilbert pair), then
+#              anti-phase
+#   about S2   balance traded for quadrature
+# The three are composed as quaternions into one rotation and played as
+# the real parts of the turned spinor. With every turn at 0 the sound is
+# the source, through the Hilbert pair (clean above about 30 Hz).
+#
+# Playing it (tools/pad; each knob starts at 0, no turn, and goes round a
+# full circle as it rises):
+#   A + left/right   turn about S3: centre, right, anti-phase, left, centre
+#   A + up/down      turn about S1: in phase, quadrature, anti-phase, ...
+#   B + up/down      turn about S2
+#   tools/pad & AITHER_MIDI=aither-pad ./aither patches/stereo_spin.aither | tools/play hw:rockchipes8388c 20
+# On a scope the image is drawn as it turns: ... | tools/play hw:rockchipes8388c 20 | tools/scope
+
+# ---------------------------------------------------------------- the turns
+
+# A rotation about one axis of the image's sphere by w, as (a, b).
+def about_s1_a(w): [cos(w / 2), -sin(w / 2)]
+def about_s2_b(w): [0, -sin(w / 2)]
+def about_s3_b(w): [-sin(w / 2), 0]
+def cos_half(w): [cos(w / 2), 0]
+
+# Two rotations composed, each half (the plain way: a rotation is two
+# pairs, so it takes two defs).
+def comp_a(a1, b1, a2, b2): turn(a1, a2) - turn(b1, conj(b2))
+def comp_b(a1, b1, a2, b2): turn(a1, b2) + turn(b1, conj(a2))
+
+let w3 = slew(midi_cc(21), 0.05) * TAU                    # about S3
+let w1 = slew(midi_cc(20), 0.05) * TAU                    # about S1
+let w2 = slew(midi_cc(22), 0.05) * TAU                    # about S2
+let a3 = cos_half(w3)
+let b3 = about_s3_b(w3)
+let a1 = about_s1_a(w1)
+let b1 = [0, 0]
+let a2 = cos_half(w2)
+let b2 = about_s2_b(w2)
+let a31 = comp_a(a3, b3, a1, b1)
+let b31 = comp_b(a3, b3, a1, b1)
+let ra = comp_a(a31, b31, a2, b2)                          # the whole turn
+let rb = comp_b(a31, b31, a2, b2)
+
+# ---------------------------------------------------------------- a sound
+
+# A warm tone, struck softly every 1.4 s, with a breath of noise: mono,
+# so it starts at the centre of the sphere.
+let strike = impulse(1 / 1.4)
+def push(trig): (discharge(trig, 1 / 0.001) - discharge(trig, 1 / 0.0003)) / 0.0007
+let body = sum(5, n => resonator(push(strike) * 0.002 / n, 196 * n * (1 + 0.0007 * n * n), 2 / (2.5 / n)))
+let tone = additive(196, warm_shape, 6) * (0.10 + 0.05 * sin(TAU * t / 7))
+let breath = bpf(noise(), 1800, 0.4) * 0.03
+let src = body * 6 + tone + breath
+
+# ---------------------------------------------------------------- the spinor
+
+let xi = analytic(src)                                     # L, analytic
+let eta = analytic(src)                                    # R, analytic (the same: centred)
+let xi2 = turn(ra, xi) + turn(rb, eta)
+let eta2 = turn(conj(ra), eta) - turn(conj(rb), xi)
+
+[xi2[0], eta2[0]] |> reverb(1.4, 0.1)
