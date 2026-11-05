@@ -1,0 +1,114 @@
+# spinfield: a sound field turned every way, by spin, written the plain
+# way (notes/spinors-2026-11-05.md, way 1: a spinor is carried as two
+# pairs, side by side, and a def returns one of them).
+#
+# Three sounds sit round a listener, one low ahead, one circling
+# overhead, one going round at the height of the ears. Each sound's
+# direction is a spinor, two complex numbers (xi, eta). The field they
+# make is held as its first modes: W, everywhere at once; Z, up against
+# down; and X + iY, round the horizon, which is one pair. A spinor gives
+# its direction's modes by the Hopf map, X + iY = 2 conj(xi) eta and
+# Z = |xi|^2 - |eta|^2, so a sound s adds s, s(X + iY) and s Z.
+#
+# The head is a rotation, two complex numbers (a, b), made by composing
+# a yaw, a pitch and a roll as quaternions: (a1, b1)(a2, b2) =
+# (a1 a2 - b1 conj(b2), a1 b2 + b1 conj(a2)). Hearing turns each ear's
+# spinor by the head (xi' = a xi + b eta, eta' = a* eta - b* xi), takes
+# the ear's direction by the Hopf map, and reads the field there:
+# (W + n . (X, Y, Z)) / 2, a cardioid. No matrix anywhere: a rotation of
+# the whole field, every way, is two pairs turning two pairs.
+#
+# The ears are two cardioids pointing a little behind the sides, not a
+# head: the left and right come through, a sound overhead comes through
+# when the head rolls, and front, back, up and down are otherwise alike,
+# as two such microphones hear them (the note's "Hearing height" says
+# what a head and pinnae would add). It is the algebra, to be measured
+# and read, before anything sounds like being there. For headphones.
+#
+# The gamepad (tools/pad): hold A and press left and right to turn the
+# head (CC 21), up and down to roll it (CC 20); hold B and press up and
+# down to look up and down (CC 22).
+#   tools/pad & AITHER_MIDI=aither-pad ./aither patches/spinfield.aither | tools/play hw:rockchipes8388c 20
+
+# ---------------------------------------------------------------- spinors
+
+# A direction as a spinor: theta from straight up, phi round from ahead
+# (x ahead, y to the left, z up). Carried as its two halves.
+def xi_of(theta): [cos(theta / 2), 0]
+def eta_of(theta, phi): rotate([sin(theta / 2), 0], phi)
+
+# The Hopf map: the direction a spinor points, as X + iY and Z.
+def hopf_xy(xi, eta): turn(conj(xi), eta) * 2
+def hopf_z(xi, eta): amplitude(xi) * amplitude(xi) - amplitude(eta) * amplitude(eta)
+
+# A rotation (a, b) applied to a spinor (xi, eta): each half by itself.
+def turned_xi(a, b, xi, eta): turn(a, xi) + turn(b, eta)
+def turned_eta(a, b, xi, eta): turn(conj(a), eta) - turn(conj(b), xi)
+
+# Two rotations composed, (a1, b1) then (a2, b2) inside it: each half.
+def comp_a(a1, b1, a2, b2): turn(a1, a2) - turn(b1, conj(b2))
+def comp_b(a1, b1, a2, b2): turn(a1, b2) + turn(b1, conj(a2))
+
+# ---------------------------------------------------------------- the head
+
+# Yaw about the vertical, pitch about the ears' axis, roll about the line
+# ahead: each a rotation by an angle about an axis, (a, b) =
+# (cos(w/2) - i n_z sin(w/2), -sin(w/2) (n_y + i n_x)).
+let yaw   = (midi_cc(21) - 0.5) * TAU
+let pitch = (midi_cc(22) - 0.5) * PI
+let roll  = (midi_cc(20) - 0.5) * PI
+let ya = [cos(yaw / 2), -sin(yaw / 2)]
+let yb = [0, 0]
+let pa = [cos(pitch / 2), 0]
+let pb = [-sin(pitch / 2), 0]
+let ra = [cos(roll / 2), 0]
+let rb = [0, -sin(roll / 2)]
+let ypa = comp_a(ya, yb, pa, pb)                          # yaw, then pitch inside it
+let ypb = comp_b(ya, yb, pa, pb)
+let ha = comp_a(ypa, ypb, ra, rb)                          # and roll inside that: the head
+let hb = comp_b(ypa, ypb, ra, rb)
+
+# ---------------------------------------------------------------- sounds
+
+# Low ahead and a little left: a drone.
+let drone = (sin(TAU * phasor(110)) + 0.4 * sin(TAU * phasor(220.6)) + 0.2 * sin(TAU * phasor(331.1))) * 0.25
+let d_theta = 0.62 * PI
+let d_phi = 0.7
+# Circling overhead: a bird, chirping falling notes every 1.3 s.
+let cu = (t mod 1.3) / 1.3
+let chirp = if cu < 0.12 then sin(PI * cu / 0.12) else 0
+let bird = sin(TAU * phasor(3200 - 1400 * cu / 0.12)) * chirp * 0.3
+let b_theta = 0.2 * PI
+let b_phi = t * TAU / 17
+# Going round at the ears' height, the other way: a hiss of rain.
+let rain = bpf(noise(), 2500, 0.3) * 0.25
+let r_theta = 0.5 * PI
+let r_phi = -t * TAU / 23
+
+# ---------------------------------------------------------------- the field
+
+let dxi = xi_of(d_theta)
+let deta = eta_of(d_theta, d_phi)
+let bxi = xi_of(b_theta)
+let beta = eta_of(b_theta, b_phi)
+let rxi = xi_of(r_theta)
+let reta = eta_of(r_theta, r_phi)
+
+let W = drone + bird + rain
+let XY = hopf_xy(dxi, deta) * drone + hopf_xy(bxi, beta) * bird + hopf_xy(rxi, reta) * rain
+let Z = hopf_z(dxi, deta) * drone + hopf_z(bxi, beta) * bird + hopf_z(rxi, reta) * rain
+
+# ---------------------------------------------------------------- hearing
+
+# An ear's direction in the head, turned by the head into the world, and
+# the field read there as a cardioid.
+def heard(ha, hb, theta, phi, W, XY, Z):
+  let ex = turned_xi(ha, hb, xi_of(theta), eta_of(theta, phi))
+  let ee = turned_eta(ha, hb, xi_of(theta), eta_of(theta, phi))
+  (W + turn(conj(hopf_xy(ex, ee)), XY)[0] + hopf_z(ex, ee) * Z) * 0.5
+
+let ear_az = 100 * PI / 180                                # a little behind the sides
+let left = heard(ha, hb, PI / 2, ear_az, W, XY, Z)
+let right = heard(ha, hb, PI / 2, -ear_az, W, XY, Z)
+
+[left, right] |> reverb(1.2, 0.08)
