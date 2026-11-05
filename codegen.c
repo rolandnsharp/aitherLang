@@ -2971,7 +2971,7 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
     }
     if (eq(f, "analytic")) {
       const char** a = pair_operands(c, sc, n, pre, 1, "one signal");
-      const char* off_a = register_region(c, "hilbert_a", 16, NULL);
+      const char* off_a = register_region(c, "hilbert_a", 17, NULL);
       const char* off_b = register_region(c, "hilbert_b", 16, NULL);
       const char* re = fresh(c, "an_re");
       const char* im = fresh(c, "an_im");

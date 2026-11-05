@@ -1274,9 +1274,15 @@ It returns the pair, the shifted signal in quadrature, and what hears
 it decides: played, its sides are the shifted sound a quarter turn
 apart, and summed to mono it doesn't cancel; an SDR takes it as IQ.
 Clean above about 30 Hz at 48 kHz, where the Hilbert pair holds its
-quarter turn. The pair's band is a fraction of the rate, clean above
-about `sr / 1600` and up to Nyquist: above about 1.5 kHz at an SDR's
-2.4 MHz, the whole sampled band as an IQ band wants it.
+quarter turn: measured, its sides are a quarter turn apart within 0.7
+degrees and the same size within 1% from 30 Hz to 20 kHz (tests/hilbert).
+The pair's band is a fraction of the rate, clean above about `sr / 1600`
+and up to Nyquist: above about 1.5 kHz at an SDR's 2.4 MHz, the whole
+sampled band as an IQ band wants it. Before 2026-11-05 it wasn't: the
+stages used Niemitalo's coefficients unsquared and missed his one-sample
+delay, so the pair was 4.5 degrees off at 441 Hz and 85 at 10 kHz, and
+`analytic`, `freq_shift` and everything turned by them were spins only
+below a few hundred hertz.
 
 ### Damped oscillator
 

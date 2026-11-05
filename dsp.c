@@ -321,11 +321,17 @@ double n_discharge(DspState* s, long site, double sig, double rate) {
 }
 
 /* ----------------------------------------------------------------- Hilbert
- * Two cascaded 4-stage IIR allpass networks (Niemitalo's coefficients).
- * Their outputs differ by about 90 degrees across the audio band with
- * matched group delay, so one signal into both gives an analytic pair.
- * Each stage: y[n] = c (x[n] + y[n-2]) - x[n-2], with state x[n-2],
- * x[n-1], y[n-2], y[n-1]: 16 slots a branch. */
+ * Two cascaded 4-stage IIR allpass networks (Olli Niemitalo's design and
+ * coefficients). Each stage is y[n] = a^2 (x[n] + y[n-2]) - x[n-2]: the
+ * table holds a, and the stage uses its square. The first network's
+ * output is then delayed one sample; with both, the two outputs are a
+ * quarter turn apart, +-0.7 degrees, from 20 Hz to 20 kHz at 44.1 kHz:
+ * the signal as a spin, going round a circle. Until 2026-11-05 the stages
+ * used a unsquared and nothing was delayed, and the pair was 4.5 degrees
+ * off at 441 Hz, 54 at 5 kHz, 85 at 10 kHz, so above a few hundred hertz
+ * the "spin" wobbled along a line (tests/hilbert.c measures it).
+ * State per stage x[n-2], x[n-1], y[n-2], y[n-1]: 16 slots a network,
+ * and the first network's one-sample delay a 17th. */
 
 static const double hilbert_a[4] = {0.6923878, 0.9360654322959, 0.9882295226860, 0.9987488452737};
 static const double hilbert_b[4] = {0.4021921162426, 0.8561710882487, 0.9722909545651, 0.9952884791278};
@@ -335,7 +341,7 @@ static inline double hilbert(DspState* s, long base, double sig, const double* c
   for (int k = 0; k < 4; k++) {
     long off = base + k * 4;
     double x2 = s->pool[off], x1 = s->pool[off + 1], y2 = s->pool[off + 2], y1 = s->pool[off + 3];
-    double y = coefs[k] * (x + y2) - x2;
+    double y = coefs[k] * coefs[k] * (x + y2) - x2;
     s->pool[off] = x1;
     s->pool[off + 1] = x;
     s->pool[off + 2] = y1;
@@ -345,7 +351,13 @@ static inline double hilbert(DspState* s, long base, double sig, const double* c
   return x;
 }
 
-double n_hilbert_a(DspState* s, long site, double sig) { return hilbert(s, claim(s, site, 16), sig, hilbert_a); }
+double n_hilbert_a(DspState* s, long site, double sig) {
+  long base = claim(s, site, 17);
+  double y = hilbert(s, base, sig, hilbert_a);
+  double out = s->pool[base + 16];                /* one sample late: the design's delay */
+  s->pool[base + 16] = y;
+  return out;
+}
 double n_hilbert_b(DspState* s, long site, double sig) { return hilbert(s, claim(s, site, 16), sig, hilbert_b); }
 
 /* ------------------------------------------------------------------- input */

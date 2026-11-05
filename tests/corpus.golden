@@ -26,8 +26,8 @@ edc/10_drums.aither  FCCDBDF140F0A631  -18.1  -3.1
 edc/10_drums_puzzle.aither  0902A02A8BF98825  -38.1  -18.6
 edc/11_physics.aither  469500DB7D6AE23D  -26.2  -8.9
 edc/11_physics_puzzle.aither  ED79EC9C796F3E0D  -24.6  -12.8
-edc/12_bells.aither  F982A22AE86D7DE0  -31.1  -15.2
-edc/12_bells_puzzle.aither  6AECB0261D980504  -12.1  -4.6
+edc/12_bells.aither  1524BA395E722F84  -31.1  -15.0
+edc/12_bells_puzzle.aither  0BCFE5E979E0AAB5  -12.1  -5.0
 edc/13_composing.aither  F73E3824861445E8  -57.7  -43.9
 edc/13_composing_puzzle.aither  F73E3824861445E8  -57.7  -43.9
 edc/14_keyboard.aither  622A0CC2C5897CD1  -23.9  -10.3
@@ -43,7 +43,7 @@ edc/solutions/08_modulation_puzzle.aither  8BC33D6EFDC6424D  -17.0  -10.5
 edc/solutions/09_fm_puzzle.aither  C874C3135195B9E5  -17.0  -14.0
 edc/solutions/10_drums_puzzle.aither  74173A12E4781515  -27.9  -8.6
 edc/solutions/11_physics_puzzle.aither  F56FBEAC500AC271  -23.1  -11.2
-edc/solutions/12_bells_puzzle.aither  9D95B5C3923E2738  -12.1  -4.6
+edc/solutions/12_bells_puzzle.aither  76D00F01A3F4C65B  -12.1  -4.6
 edc/solutions/13_composing_puzzle.aither  F73E3824861445E8  -57.7  -43.9
 edc/solutions/14_keyboard_puzzle.aither  67C767CD279F6859  -27.8  -14.3
 examples/acid.aither  801DDB0E34EF731D  -10.8  -1.1
@@ -67,7 +67,7 @@ notes/voice-eval/tube24.aither  41984FA61F1EE325  -240.0  -240.0
 notes/voice-eval/tube24_test60.aither  5AAD154F47053DB9  -68.3  -42.3
 notes/voice-eval/tube8.aither  41984FA61F1EE325  -240.0  -240.0
 notes/voice-eval/tube_test.aither  DB5EAA34ABA324CD  -49.0  -36.3
-patches/acid_complex.aither  EF96FC5BF90F6BFD  -18.7  -10.0
+patches/acid_complex.aither  5803B54E4855BC65  -18.7  -10.2
 patches/acid_lead.aither  1C7E7C5B5C28F965  -26.7  -14.3
 patches/acid_state.aither  BD70BE9DEA9EA9E1  -17.5  -6.1
 patches/adaptive_scale.aither  65E2D83747D779A9  -7.5  2.0
@@ -81,7 +81,7 @@ patches/bass.aither  EBFFDA783BA2A205  -11.3  1.7
 patches/bats.aither  C24E9DA48D99DDCA  -36.3  -17.0
 patches/becoming.aither  746FA68184199129  -35.9  -24.9
 patches/bell.aither  41984FA61F1EE325  -240.0  -240.0
-patches/bloom.aither  48E5983059589E45  -26.5  -9.3
+patches/bloom.aither  C22B469174816782  -26.5  -9.2
 patches/bowl.aither  3FC15EF4A4B348E9  -14.5  -1.5
 patches/bush_doof.aither  04BCABEA8DB98375  -24.4  -4.9
 patches/bush_doof_d.aither  C22A3EECB883144B  -21.1  -6.8
@@ -94,7 +94,7 @@ patches/cello_max.aither  05CB0A393A70CCC9  -20.1  -5.0
 patches/chaos.aither  6FB215BB17ECDD38  -30.2  -12.7
 patches/chimera.aither  2C9AD620BC407401  -30.1  -17.0
 patches/chord.aither  FE05C0B6E62C8101  -18.0  -4.2
-patches/complex_pad.aither  8D8F93917E83320C  -20.9  -9.8
+patches/complex_pad.aither  B179EF3F053C5C89  -20.9  -10.4
 patches/contour.aither  007E2027D5D0CDC2  -19.1  -11.4
 patches/crystal.aither  425938CAE791C1C9  -34.7  -14.2
 patches/dho_metamorphosis.aither  B97E86910307F419  -10.5  -4.2
@@ -102,8 +102,8 @@ patches/dho_walk.aither  8A161092F34C3035  -37.5  -12.4
 patches/didge_minor.aither  A95A4C6CF5F47588  -20.5  -6.1
 patches/didge_scope.aither  4EE4515A94CBC175  -20.2  -5.7
 patches/didge_sticks.aither  D6CBA500DA382F82  -22.7  -8.8
-patches/didge_vowels.aither  1805DBCC47B0007B  -39.5  -16.2
-patches/didge_vowels_ref.aither  B7649BA1BF6A2A38  -28.6  -16.2
+patches/didge_vowels.aither  224B3F784CDE1641  -40.1  -16.2
+patches/didge_vowels_ref.aither  27B39727DFB1E5FF  -28.5  -15.9
 patches/didge_wow.aither  F8BEEB2335C61B41  -16.9  -5.0
 patches/distant_beat.aither  B28B5B9BCE64F4C1  -33.9  -19.2
 patches/doof.aither  A64324589504FA81  -25.7  -4.2
@@ -119,9 +119,9 @@ patches/field_vdp.aither  23BFDA81D392E34B  -5.5  -1.9
 patches/flute.aither  71BA92C4DBCC69BD  -29.6  -14.3
 patches/flute_dm.aither  485F7FC4420036E0  -29.3  -15.0
 patches/fm_swarm.aither  00EFEAB7DAF30665  -27.0  -13.0
-patches/follow.aither  24D7EB624C3734F9  -13.3  -6.1
-patches/freq_shifter.aither  80D5D0A10B671F8F  -14.5  -6.4
-patches/gaelic_ladder.aither  90820EA9B3D23913  -24.2  -8.6
+patches/follow.aither  25076DF5BB3D1515  -13.3  -6.2
+patches/freq_shifter.aither  809F1134E2F4A200  -14.6  -6.3
+patches/gaelic_ladder.aither  C352B64939FF6B3A  -24.2  -8.5
 patches/jagged.aither  3FE4AFCD16CBF0F9  -17.8  -4.7
 patches/knot.aither  F7965BC0923A68D2  -9.1  -2.4
 patches/lattice.aither  CBD60B0F0BFC09C9  -34.0  -19.0
@@ -139,8 +139,8 @@ patches/phi_bush.aither  66666817A3F8BC2A  -24.6  -4.4
 patches/pluck_modes.aither  710E79D2B0737D25  -13.0  -2.8
 patches/pluck_places.aither  1BEABF6EB432206D  -12.9  -2.9
 patches/primes.aither  06765B93E06F7E95  -14.4  -1.2
-patches/qigong_drift.aither  3DDAD1BE60561F82  -28.4  -18.3
-patches/qigong_kit.aither  627D0B07EB739999  -24.7  -11.9
+patches/qigong_drift.aither  4905E28F037300A5  -28.6  -17.9
+patches/qigong_kit.aither  D5079C85237AAFAE  -24.6  -11.5
 patches/qigong_light.aither  AF697B082757B9A8  -45.2  -27.9
 patches/quest.aither  D9EABFE1CD65A9C8  -16.4  -5.0
 patches/retreat.aither  0DFCE255197C053F  -18.4  -8.1
