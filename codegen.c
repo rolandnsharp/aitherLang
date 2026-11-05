@@ -97,6 +97,7 @@ struct Ctx {
   int loop_nv;         /* inside a looped sum (poly's voices): its count; else 0 */
   Map pair_vars;
   Map quad_vars;                       /* file-level $vars that are pairs of pairs (in pair_vars too) */
+  Map const_quads;                     /* file-level lets of a pair of pairs of number literals: node, the literal */
   Node** var_decls; int nvar_decls, cap_var_decls;
   Map pair_param_cache;     /* p = int* flags, n = count */
   Map top_sarrays, top_larrays, top_sarray_names;
@@ -881,6 +882,15 @@ static int vwidth(V v) { return v.quad ? 4 : v.pair ? 2 : 1; }
 static const char* wslot(V v, int w, int j) { return w == 4 ? side4(v, j) : w == 2 && v.pair ? side(v, j) : v.l; }
 /* An array's element width: 1, 2 (pairs) or 4 (pairs of pairs). */
 static int ew(Ent* e) { return e->pairs == 4 ? 4 : e->pairs ? 2 : 1; }
+/* `[[a, b], [c, d]]` of number literals. */
+static int quad_literal(Node* n) {
+  if (n->kind != nkArr || n->nkids != 2) return 0;
+  for (int h = 0; h < 2; h++) {
+    Node* x = n->kids[h];
+    if (x->kind != nkArr || x->nkids != 2 || x->kids[0]->kind != nkNum || x->kids[1]->kind != nkNum) return 0;
+  }
+  return 1;
+}
 /* A value from its w slots. */
 static V vwide(int w, const char** x) {
   return w == 4 ? vquad(x[0], x[1], x[2], x[3]) : w == 2 ? vpair(x[0], x[1]) : mono(x[0]);
@@ -1999,7 +2009,7 @@ static const char* clock_rate(Ctx* c, Scope* sc, Node* n) {
   if (is_invariant(c, sc, n)) return "0.0";
   if (n->kind == nkUnary && eq(n->str, "-") && n->nkids == 1) {
     const char* r = clock_rate(c, sc, n->kids[0]);
-    return r ? F(c, "(-%s)", r) : NULL;
+    return r ? F(c, "(-(%s))", r) : NULL;
   }
   if (n->kind != nkBinOp || n->nkids != 2) return NULL;
   Node *a = n->kids[0], *b = n->kids[1];
@@ -2030,7 +2040,7 @@ static const char* clock_rate(Ctx* c, Scope* sc, Node* n) {
 static const char* clock_offset(Ctx* c, Scope* sc, Node* n) {
   if (is_clock(c, sc, n)) return eq(n->str, "t") ? "0.0" : "(-s->sweep_origin)";
   if (is_invariant(c, sc, n)) return emit_invariant(c, sc, n);
-  if (n->kind == nkUnary) return F(c, "(-%s)", clock_offset(c, sc, n->kids[0]));
+  if (n->kind == nkUnary) return F(c, "(-(%s))", clock_offset(c, sc, n->kids[0]));
   Node *a = n->kids[0], *b = n->kids[1];
   if (eq(n->str, "+") || eq(n->str, "-"))
     return F(c, "(%s %s %s)", clock_offset(c, sc, a), n->str, clock_offset(c, sc, b));
@@ -2758,6 +2768,12 @@ static V emit_ident_raw(Ctx* c, Scope* sc, Node* n) {
     if (e) return vpair(e->a, e->b);
     if (lfind(x->arrays, s) || lfind(x->larrays, s) || lfind(x->sarrays, s)) break;
   }
+  Ent* cq = hfind(&c->const_quads, s);
+  if (cq) {                              /* a constant pair of pairs (Hamilton's i): its numbers */
+    Node* q = cq->node;
+    return vquad(num_lit(c, q->kids[0]->kids[0]->num), num_lit(c, q->kids[0]->kids[1]->num),
+                 num_lit(c, q->kids[1]->kids[0]->num), num_lit(c, q->kids[1]->kids[1]->num));
+  }
   /* A def sees the file's constants (numbers and tables known when it
    * compiles), never its signals: those it is given. */
   if (in_def(sc) && !builtin_value(s) && !hfind(&c->top_arrays, s) && !(c->top && lfind(c->top->numlits, s)) &&
@@ -3127,7 +3143,7 @@ static V emit_quad_op(Ctx* c, Node* n, V* q, Buf* pre) {
   }
   /* each quaternion as w + x i + y j + z k: (a, b) = (w + x i, y + z i) */
   const char *w1 = q[0].l, *x1 = q[0].r, *y1 = q[0].l2, *z1 = q[0].r2;
-  if (eq(f, "conj")) return vquad(w1, F(c, "(-%s)", x1), F(c, "(-%s)", y1), F(c, "(-%s)", z1));
+  if (eq(f, "conj")) return vquad(w1, F(c, "(-(%s))", x1), F(c, "(-(%s))", y1), F(c, "(-(%s))", z1));
   if (eq(f, "amplitude"))
     return mono(F(c, "sqrt(%s * %s + %s * %s + %s * %s + %s * %s)", w1, w1, x1, x1, y1, y1, z1, z1));
   if (eq(f, "phase") || eq(f, "axis")) {
@@ -3143,7 +3159,7 @@ static V emit_quad_op(Ctx* c, Node* n, V* q, Buf* pre) {
     const char* d = fresh(c, "unturn_q");
     badd(c, pre, "  double %s = %s * %s + %s * %s + %s * %s + %s * %s;\n", d, w2, w2, x2, x2, y2, y2, z2, z2);
     const char* inv = F(c, "(%s == 0.0 ? 0.0 : 1.0 / %s)", d, d);
-    x2 = F(c, "(-%s)", x2); y2 = F(c, "(-%s)", y2); z2 = F(c, "(-%s)", z2);
+    x2 = F(c, "(-(%s))", x2); y2 = F(c, "(-(%s))", y2); z2 = F(c, "(-(%s))", z2);
     const char* W = F(c, "(%s * %s - %s * %s - %s * %s - %s * %s)", w1, w2, x1, x2, y1, y2, z1, z2);
     const char* X = F(c, "(%s * %s + %s * %s + %s * %s - %s * %s)", w1, x2, x1, w2, y1, z2, z1, y2);
     const char* Y = F(c, "(%s * %s - %s * %s + %s * %s + %s * %s)", w1, y2, x1, z2, y1, w2, z1, x2);
@@ -3328,7 +3344,7 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
     }
     if (eq(name, "conj")) {
       const char** a = flatten_operands(c, n, ops, 2, "one pair (or two numbers)");
-      return vpair(a[0], F(c, "(-%s)", a[1]));
+      return vpair(a[0], F(c, "(-(%s))", a[1]));
     }
     const char** a = flatten_operands(c, n, ops, 2, "one pair (or two numbers)");
     if (eq(name, "amplitude")) return mono(F(c, "sqrt(%s * %s + %s * %s)", a[0], a[0], a[1], a[1]));
@@ -3350,7 +3366,7 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
     }
     if (eq(f, "conj")) {
       const char** a = pair_operands(c, sc, n, pre, 2, "one pair (or two numbers)");
-      return vpair(a[0], F(c, "(-%s)", a[1]));
+      return vpair(a[0], F(c, "(-(%s))", a[1]));
     }
     if (eq(f, "analytic")) {
       const char** a = pair_operands(c, sc, n, pre, 1, "one signal");
@@ -4571,6 +4587,7 @@ static const char* emit_program(Ctx* c, Node* program) {
         }
       } else {
         V v = emit(c, top, rhs, body);
+        if (v.quad && quad_literal(rhs)) hput(c, &c->const_quads, s->str)->node = rhs;   /* a constant, as a number is */
         if (v.quad) {
           badd(c, body, "  double l_%s_l = (%s);\n  double l_%s_r = (%s);\n  double l_%s_l2 = (%s);\n  double l_%s_r2 = (%s);\n",
                s->str, v.l, s->str, v.r, s->str, v.l2, s->str, v.r2);

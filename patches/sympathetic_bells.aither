@@ -15,9 +15,10 @@
 #
 # Like two antennas: facing the same way they share the field fully,
 # turned crosswise they don't hear each other at all, turned to face
-# opposite ways they answer inverted. The second bell's facing is a
-# rotation (a, b) made from a turn and a tilt, the way it faces the Hopf
-# map of the spinor of "ahead" turned by it.
+# opposite ways they answer inverted. The field and the ways the bells
+# face are directions, pairs of pairs whose first number is 0 (Hamilton's
+# vectors, SPEC "Pairs of pairs"); the second bell's facing is "ahead", i,
+# turned by a rotation made of a turn and a tilt.
 #
 # Each bell hears the field less its own part (its own sound coming back
 # to it would be a second, louder loop); the first bell is struck every
@@ -65,51 +66,36 @@ def push(trig): (discharge(trig, 1 / 0.001) - discharge(trig, 1 / 0.0003)) / 0.0
 
 # ---------------------------------------------------------------- facing
 
-# The way a spinor points (Hopf map), and a rotation (a, b) applied to a
-# spinor and composed, as in spinfield.
-def hopf_xy(xi, eta): turn(conj(xi), eta) * 2
-def hopf_z(xi, eta): amplitude(xi) * amplitude(xi) - amplitude(eta) * amplitude(eta)
-def turned_xi(a, b, xi, eta): turn(a, xi) + turn(b, eta)
-def turned_eta(a, b, xi, eta): turn(conj(a), eta) - turn(conj(b), xi)
-def comp_a(a1, b1, a2, b2): turn(a1, a2) - turn(b1, conj(b2))
-def comp_b(a1, b1, a2, b2): turn(a1, b2) + turn(b1, conj(a2))
-
-# The first bell faces ahead (x). The second: turned about the vertical,
-# then tilted, from the knobs (each starting at 0: facing the same way).
+# The first bell faces ahead, i. The second: turned about the vertical,
+# k, then tilted about j, from the knobs (each starting at 0: facing the
+# same way). Composed rotations apply right first.
 let yaw = slew(midi_cc(21), 0.05) * TAU
 let tilt = slew(midi_cc(20), 0.05) * TAU
-let ya = [cos(yaw / 2), -sin(yaw / 2)]
-let yb = [0, 0]
-let ta = [cos(tilt / 2), 0]
-let tb = [-sin(tilt / 2), 0]
-let ra = comp_a(ya, yb, ta, tb)
-let rb = comp_b(ya, yb, ta, tb)
-let r2 = sqrt(0.5)
-let ahead_xi = [r2, 0]                                     # the spinor of "ahead" (+x)
-let ahead_eta = [r2, 0]
-let f2xy = hopf_xy(turned_xi(ra, rb, ahead_xi, ahead_eta), turned_eta(ra, rb, ahead_xi, ahead_eta))
-let f2z = hopf_z(turned_xi(ra, rb, ahead_xi, ahead_eta), turned_eta(ra, rb, ahead_xi, ahead_eta))
-let f1xy = [1, 0]
-let f1z = 0
+let face1 = i
+let face2 = apply(turn(about(j, tilt), about(k, yaw)), i)
 
 # ---------------------------------------------------------------- the field
 
-# The field as last sample's bells left it: its dipole, X + iY and Z, and
-# each bell's own part, so each can hear the others.
+# The field as last sample's bells left it: its dipole, a direction and
+# a size, each bell's own part along its facing, so each can hear the
+# others.
 $s1 = 0
 $s2 = 0
-let field_xy = f1xy * $s1 + f2xy * $s2
-let field_z = f1z * $s1 + f2z * $s2
+let field = face1 * $s1 + face2 * $s2
 # How strongly the bells share the field. A loop has a gain: measured
 # (struck once, left to ring 40 s), the ringing dies away up to about
 # 0.55, the bells holding each other longer the stronger it is; at 0.7
 # it barely holds, and from 0.85 it grows until the engine's guard mutes
 # it. So the knob goes 0.4 to 0.6.
 let strength = 0.4 + 0.2 * midi_cc(22)
-# What each bell hears: the field along its facing, less its own part.
-def along(fxy, fz, vxy, vz): turn(conj(fxy), vxy)[0] + fz * vz
-let heard1 = along(f1xy, f1z, field_xy - f1xy * $s1, field_z - f1z * $s1) * strength
-let heard2 = along(f2xy, f2z, field_xy - f2xy * $s2, field_z - f2z * $s2) * strength
+# What a bell hears: the field along its facing, less its own part. For
+# two directions Hamilton's product is minus their dot product, then
+# their cross product: the dot product is minus its first number.
+def along(face, v):
+  let [[w, _], [_, _]] = turn(face, v)
+  -w
+let heard1 = along(face1, field - face1 * $s1) * strength
+let heard2 = along(face2, field - face2 * $s2) * strength
 
 # ---------------------------------------------------------------- playing
 

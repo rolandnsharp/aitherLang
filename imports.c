@@ -141,26 +141,27 @@ static int expand(Arena* a, Node* ast, const char* from, Seen* seen, int as_libr
   return 0;
 }
 
-/* Whether `name` is bound anywhere in n: a let, state, a def or its
- * parameters, a lambda's parameter. */
-static int binds(const Node* n, const char* name) {
-  if (!n) return 0;
-  if ((n->kind == nkLet || n->kind == nkVar || n->kind == nkDef) && !strcmp(n->str, name)) return 1;
-  if (n->kind == nkDef || n->kind == nkLambda)
-    for (int i = 0; i < n->nparams; i++) if (n->params[i] && !strcmp(n->params[i], name)) return 1;
-  for (int i = 0; i < n->nkids; i++) if (binds(n->kids[i], name)) return 1;
+/* Whether `name` is file-level state in n: a `$name` in a play is the
+ * file's, by name. */
+static int file_state(const Node* n, const char* name) {
+  if (!n || n->kind == nkDef || n->kind == nkLambda) return 0;   /* a def's own state is its own */
+  if ((n->kind == nkVar || n->kind == nkAssign) && !strcmp(n->str, name)) return 1;
+  for (int i = 0; i < n->nkids; i++) if (file_state(n->kids[i], name)) return 1;
   return 0;
 }
 
 /* What the patch names comes first: a stdlib constant (Hamilton's i, j,
- * k) is dropped when the patch or what it imports binds its name
- * anywhere, and a stdlib def when they define one of the name, so
- * neither collides with the patch's own. */
+ * k) is dropped when the patch or what it imports names it at the file's
+ * level (a let, a def, state, in a play too), and a stdlib def when they
+ * define one of the name, so neither collides. A parameter, a lambda's
+ * `k =>` or a play's own let shadows it as any name is shadowed. */
 static int shadowed(const Node* s, Kids* kids, int from) {
   if (s->kind != nkLet && s->kind != nkDef) return 0;
   for (int i = from; i < kids->n; i++) {
     const Node* u = kids->v[i];
-    if (s->kind == nkDef ? (u->kind == nkDef && !strcmp(u->str, s->str)) : binds(u, s->str)) return 1;
+    if (s->kind == nkDef) { if (u->kind == nkDef && !strcmp(u->str, s->str)) return 1; continue; }
+    if ((u->kind == nkLet || u->kind == nkDef) && !strcmp(u->str, s->str)) return 1;
+    if (file_state(u, s->str)) return 1;
   }
   return 0;
 }

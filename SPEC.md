@@ -804,7 +804,8 @@ A rotation applies to a vector v (a pair of pairs with w = 0) as
 turns it by twice q's angle about q's axis. `+`, `-`, `*`, `/`, `mod` and
 `^` work side by side on the four numbers, and a number scales all four.
 Lets, def arguments and returns, lambdas, `if` and `sum` carry them
-whole.
+whole. A file-level let of number literals, `let k = [[0, 0], [0, 1]]`,
+is a constant, as a number is: a def sees it.
 
 Functions run once a number on them, as they run once a side on a pair,
 each run its own state: `lp1(q, 100)` is four filters, and a def that

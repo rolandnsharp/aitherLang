@@ -247,10 +247,10 @@ def f(x): x + root * k
 f(1)
 
 # --- nor the caller's: a name it wasn't given is unknown, whoever calls it
-# error: unknown identifier: k
-def f(x): x + k
+# error: unknown identifier: m
+def f(x): x + m
 play a:
-  let k = 100
+  let m = 100
   f(0)
 a
 

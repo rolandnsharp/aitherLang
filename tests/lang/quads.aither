@@ -268,6 +268,21 @@ let i = 5
 $k = 1
 [i, sum(3, j => j) + $k * 3]
 
+# --- ... and a lambda's or a play's own leaves the stdlib's for the rest of the file
+# expect: 6, 1
+play p:
+  let i = 2
+  i * 3
+let [[_, _], [_, z]] = turn(i, j)
+[p[0] + sum(3, k => 0), z]
+
+# --- state in a play is the file's, so it takes the name too
+# expect: 4
+play p:
+  $j = 4
+  $j
+p[0]
+
 # --- about: a rotation by an angle about a direction; apply turns a direction by it
 # expect: 0.69670670934716539, 0.71735609089952279
 let [[_, x], [y, _]] = apply(about(k, 0.8), i)
@@ -294,3 +309,9 @@ let s = about(i, TAU)
 let [[w, _], [_, _]] = s
 let [[_, _], [_, z]] = hopf(s)
 [w, z]
+
+# --- the units are constants, so a def sees them, as it sees PI
+# expect: 0.69670670934716539, 0.71735609089952279
+def spun(a): apply(about(k, a), i)
+let [[_, x], [y, _]] = spun(0.8)
+[x, y]
