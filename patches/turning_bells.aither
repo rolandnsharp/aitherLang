@@ -1,0 +1,121 @@
+# turning_bells: three bells resonating through a field, each slowly
+# turning, so the form is the turning (sympathetic_bells, with
+# notes/step-first-2026-11-05.md's "form as slow turnings").
+#
+# Three bells of struck_bell's kind: one on 196 Hz, one an octave above
+# (sharing its 196 and 392), one a fifth above (sharing its 294, and the
+# octave bell's 588). Between them a field, held as its dipole, a
+# direction and a size: each bell pours its vibration into it along the
+# way it faces and is driven by it along the way it faces, a sample
+# later. Two bells facing the same way share the field fully, crosswise
+# they don't hear each other, facing apart they answer inverted.
+#
+# And each bell keeps turning, slowly, about its own axis: the first
+# about the vertical (k), the second about the line across (j), the
+# third about the diagonal (i + j + k), at rates 1, 3/2 and 5/4 of one
+# slow turning. Nobody plays an arrangement: every pair of bells passes
+# through facing the same way, crosswise and apart as the turnings carry
+# them, so the sympathy swells, fades and flips by itself, and the whole
+# comes round together every 80 s at the slowest speed. Each bell's
+# turning is its own state, a pair of pairs turned a step each sample:
+# no clock is read for it.
+#
+# The first bell strikes itself every 8 s, so the answers can be heard
+# without playing. The scope shows the first bell against the other two:
+# a line while they're silent, opening into figures as they answer, the
+# figure mirrored when they answer inverted.
+#
+#   ./aither patches/turning_bells.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
+#
+# The gamepad (tools/pad): A, B and X strike the three bells; hold A and
+# press left and right for how fast they turn (CC 21, from the slowest,
+# a turn in 20 s, up to four times that); hold B and press up and down for a stronger field (CC 22).
+#   tools/pad & AITHER_MIDI=aither-pad ./aither patches/turning_bells.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
+
+# ---------------------------------------------------------------- the bells
+
+# Six modes: frequency over the prime, ring (s, to 1/e), level, how many
+# times round the bell each winds, and how far its doublet is split.
+let ratio = [0.5, 1.0, 1.2, 1.5, 2.0, 2.5]
+let ring  = [9.0, 5.0, 4.0, 2.2, 3.0, 1.6]
+let level = [0.7, 0.5, 0.45, 0.25, 0.55, 0.3]
+let winds = [2, 2, 3, 3, 4, 4]
+let split = [1.006, 1.0093, 1.0108, 1.0072, 1.0089, 1.0101]
+
+# A bell: every push (a strike, or the field) reaches each mode's pair
+# turned by the mode's winding at where it lands, over 2 pi f so a strike
+# of area 1 rings each mode at its level.
+def bell(push_in, prime, where):
+  sum(6, n =>
+    let f = prime * ratio[n - 1]
+    let [pa, pb] = rotate([push_in / (TAU * f), 0], winds[n - 1] * where)
+    let a = resonator(pa, f, 2 / ring[n - 1])
+    let b = resonator(pb, f * split[n - 1], 2 / ring[n - 1])
+    (a + b) * level[n - 1])
+
+# A strike: a push of area 1 swelling and dying over a millisecond.
+def push(trig): (discharge(trig, 1 / 0.001) - discharge(trig, 1 / 0.0003)) / 0.0007
+
+# ---------------------------------------------------------------- the turnings
+
+# One slow turning, a turn in 20 s with the knob down, up to four times
+# as fast; each bell's turning a step of it, about its own axis, kept as
+# state and set back to unit size as it goes.
+let speed = 1 + 3 * slew(midi_cc(21), 0.3)
+let step = TAU / 20 * speed * dt
+let axes = [1, 1.5, 1.25]                                  # the rates, as ratios of the one
+let diagonal = (i + j + k) * sqrt(1 / 3)
+$turn1 = [[1, 0], [0, 0]]
+$turn2 = [[1, 0], [0, 0]]
+$turn3 = [[1, 0], [0, 0]]
+let t1 = turn(about(k, step * axes[0]), $turn1)
+let t2 = turn(about(j, step * axes[1]), $turn2)
+let t3 = turn(about(diagonal, step * axes[2]), $turn3)
+$turn1 = t1 / amplitude(t1)
+$turn2 = t2 / amplitude(t2)
+$turn3 = t3 / amplitude(t3)
+
+# Every bell starts facing ahead, i: all in sympathy.
+let face1 = apply($turn1, i)
+let face2 = apply($turn2, i)
+let face3 = apply($turn3, i)
+
+# ---------------------------------------------------------------- the field
+
+# The field as last sample's bells left it, each bell's part along its
+# facing.
+$s1 = 0
+$s2 = 0
+$s3 = 0
+let field = face1 * $s1 + face2 * $s2 + face3 * $s3
+# How strongly the bells share it. A loop has a gain: measured with all
+# three facing the same way (the strongest it gets) and struck once, the
+# ringing dies away up to 0.6, barely at 0.75, and grows from 0.9 until
+# the engine's guard mutes it. So the knob goes 0.3 to 0.6.
+let strength = 0.3 + 0.3 * midi_cc(22)
+# What a bell hears: the field along its facing, less its own part. For
+# two directions Hamilton's product is minus their dot product, then
+# their cross product: the dot product is minus its first number.
+def along(face, v):
+  let [[w, _], [_, _]] = turn(face, v)
+  -w
+let heard1 = along(face1, field - face1 * $s1) * strength
+let heard2 = along(face2, field - face2 * $s2) * strength
+let heard3 = along(face3, field - face3 * $s3) * strength
+
+# ---------------------------------------------------------------- playing
+
+$begun = 0                                                 # 0 on the first sample only
+let auto = impulse(1 / 8) + (1 - $begun)                   # the first bell strikes itself at once, then every 8 s
+$begun = 1
+let b1 = bell(push(auto + midi_trig(36)) * 0.9 + heard1, 196, 0.4)
+let b2 = bell(push(midi_trig(37)) * 0.9 + heard2, 392, 1.1)
+let b3 = bell(push(midi_trig(38)) * 0.9 + heard3, 294, 0.75)
+$s1 = b1
+$s2 = b2
+$s3 = b3
+
+# The first bell on the left, the others' answers on the right, lifted
+# to be heard: on the scope, one against the others.
+let mix = [b1 * 0.35, (b2 + b3) * 1.4]
+mix |> reverb(2.2, 0.12) |> tanh
