@@ -24,6 +24,8 @@
 # 8 s by itself, so the second's answer can be heard without playing. The
 # first bell is on the left, the second on the right.
 #
+#   ... | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20    to see one bell against the other
+#
 # The gamepad (tools/pad): A strikes the first bell, B the second; hold A
 # and press left and right to turn the second bell (CC 21), up and down
 # to tilt it (CC 20); hold B and press up and down for a stronger field
@@ -119,5 +121,10 @@ let b2 = bell(hit2 + heard2, 392, 1.1)
 $s1 = b1
 $s2 = b2
 
-let mix = pan(b1 * 0.12, -0.6) + pan(b2 * 0.12, 0.6)
+# The first bell on the left, the second on the right, each a side to
+# itself, the second's answer lifted to be heard. On the scope the pair
+# is one bell against the other: a flat line while the second is silent,
+# opening into figures as it answers, the figure mirrored when it answers
+# inverted.
+let mix = [b1 * 0.35, b2 * 0.9]
 mix |> reverb(2.2, 0.12) |> tanh
