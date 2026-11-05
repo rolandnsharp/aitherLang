@@ -1135,6 +1135,14 @@ hot-reloading a patch preserves held notes and knob values.
 | `midi_voice_cc(n, k)` | The nth voice's own controller `k`, `0..1`: its channel's, or set for that note alone. |
 | `midi_voice_press(n)` | The nth voice's pressure, `0..1`. |
 | `midi_voice_bend(n)`  | The nth voice's bend in semitones (its own and its MPE zone master's). |
+| `midi_voice_on(n)`    | Which note-on the nth voice is: a count that moves on with every note-on its slot takes (0: never used), so a voice tells a new note from the last, even on the same key. |
+
+What MIDI holds is read once a block: a knob, a key and a voice's
+values change between blocks as far as a block can tell (an offline
+`--play` run cuts its block at each move, so a move still lands on its
+sample). In a voice loop each voice's values are read into an array once
+a block, not per voice per sample. `midi_trig` is the exception: it
+consumes its edge, every sample.
 
 **A gate is a gate; velocity is separate.** Gates are 1 or 0, so
 `adsr(gate, ...)` sounds however softly a key is played (`adsr`
@@ -1420,7 +1428,7 @@ See TV.md.
 
 ### Polyphony
 
-- `poly(n_voices, voice_fn)` — fan a per-key synth across N voices
+- `poly(n_voices, voice_fn, tail = 0)` — fan a per-key synth across N voices
 - `midi_keyboard(voice_fn)` — `poly(8, voice_fn)`, the front-door form
 
 `voice_fn` is called with everything known about a key:
@@ -1443,6 +1451,29 @@ play pad:                              # louder the harder it's played
   midi_keyboard((freq, gate, vel) =>
     additive(freq, warm_shape, 8) * swell(gate, 0.3, 1.5) * vel)
 ```
+
+**A voice that has finished stops.** A released note's slot keeps its
+note so its tail can ring, and before 2026-11-05 its voice ran on after
+the tail had died, until another note took the slot: sixteen notes played
+and let go cost nearly half an A53 for the rest of the set. Now a voice
+that has finished computes nothing and costs what an empty slot does
+until a note-on in its slot wakes it. Finished is the voice's own, kept
+in its own state in each patch (two patches holding one note keep their
+own tails, and nothing is written back to MIDI's table, which another
+thread owns), and `tail` says when:
+
+| `tail` | The voice finishes |
+|--------|--------------------|
+| `0` (default) | released, and its sound has stayed 80 dB under its own peak since the note began, for 100 ms. Relative, so a loud kick, a quiet pad and a radio signal at 1e-6 all ring out to the end and no further; an absolute threshold would cut a weak signal off |
+| seconds | that long after release, whatever it sounds like: for a voice that goes quiet and comes back (a delay, a pre-delay, a gated texture) |
+| `-1` | never: every voice ever played runs on, as before |
+
+Measured on one A53 (an eight-partial voice through a filter): sixteen
+notes released cost 6% where they cost 30%; sixty-four empty slots 2.5%;
+four held notes 11% where they cost 10%, the bookkeeping's price. The
+voice's code is inlined through one more def than before, so a voice's
+`noise()` draws a different stream (as an edit there would): the same
+noise, other numbers.
 
 ---
 

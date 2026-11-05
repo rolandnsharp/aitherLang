@@ -415,16 +415,49 @@ def struck_bar(strike, freq):
 # aftertouch and CC 74, the same for every note. Any other per-note
 # controller is midi_voice_cc(n, k) in a sum of your own.
 # A lambda names as many as it uses: `(freq, gate) => ...` is fine.
-# poly fans it out across all currently-held notes via sum-unrolling.
-# Every voice is its own independent set of synth state regions —
-# phasor, ADSR, filters, etc. all per-voice. Empty slots short-circuit
-# to 0 so the unused voices add nothing to the mix.
-def poly(n_voices, voice_fn):
+# poly fans it out across the held notes via sum-unrolling (a loop when
+# the body allows). Every voice is its own independent set of synth
+# state regions — phasor, ADSR, filters, etc. all per-voice. Empty slots
+# short-circuit to 0 so the unused voices add nothing to the mix.
+#
+# A voice that has finished stops: it computes nothing, and costs what
+# an empty slot does, until a note-on in its slot wakes it. Finished is
+# the voice's own business, decided here in its own state, so two
+# patches holding the same note keep their own tails. `tail` says when:
+#   0 (the default)  released, and its sound has stayed 80 dB under its
+#                    own peak since the note began, for 100 ms: relative,
+#                    so a quiet pad, a loud kick and a radio signal at
+#                    1e-6 all ring out to the end and no further
+#   seconds          that long after release, however it sounds: for a
+#                    voice that goes quiet and comes back (a delay, a
+#                    pre-delay, a gated texture)
+#   -1               never: every voice ever played runs on
+def poly(n_voices, voice_fn, tail = 0):
   sum(n_voices, n =>
     let f = midi_voice_freq(n)
-    if f > 0 then voice_fn(f, midi_voice_gate(n), midi_voice_vel(n),
-                           midi_voice_key(n), midi_voice_press(n), midi_voice_cc(n, 74))
+    if f > 0 then poly_voice(voice_fn, tail, f, midi_voice_gate(n), midi_voice_vel(n), midi_voice_key(n),
+                             midi_voice_press(n), midi_voice_cc(n, 74), midi_voice_on(n))
     else 0)
+
+# One voice of poly: its note's values in, its sound out, and in its own
+# state whether it has finished. (The state is named apart from the
+# arguments: to the compiler `$on` and `on` are one name.)
+def poly_voice(voice_fn, tail, f, gate, vel, key, press, slide, on):
+  $note = 0
+  $peak = 0
+  $quiet = 0
+  $since = 0
+  $done = 0
+  let fresh = on != $note
+  $note = on
+  let over = if fresh or tail < 0 then 0 else $done
+  let s = if over < 1 then voice_fn(f, gate, vel, key, press, slide) else 0
+  let level = max(abs(s[0]), abs(s[1]))
+  $peak = if fresh then level else max($peak, level)
+  $quiet = if fresh or level > $peak * 0.0001 then 0 else $quiet + dt
+  $since = if fresh or gate > 0 then 0 else $since + dt
+  $done = if over > 0 or gate > 0 or tail < 0 then over else (if tail > 0 then (if $since >= tail then 1 else 0) else (if $quiet >= 0.1 then 1 else 0))
+  s
 
 # 95% case — 8 voices is generous for a keyboard performance and cheap
 # at codegen. Use poly(N, ...) when you want a different voice count.

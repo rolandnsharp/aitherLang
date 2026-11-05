@@ -201,6 +201,9 @@ and `press` and `slide` after them for its pressure and CC 74. On an MPE
 controller every note has its own bend, pressure and slide; the pitch
 wheel bends every note on a keyboard. `midi_voice_cc(n, k)`,
 `midi_voice_press(n)` and `midi_voice_bend(n)` read a voice's own.
+A voice that has finished (released, and 80 dB under its own peak) stops
+costing anything until its slot's next note; `poly(n, fn, tail = s)`
+retires it `s` seconds after release instead, `tail = -1` never.
 
 For controllers (knobs, sliders, pads) and monophonic synths:
 

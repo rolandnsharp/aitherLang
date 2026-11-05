@@ -654,7 +654,7 @@ static const char* const BUILTIN_FNS[] = {
   "midi_cc", "midi_note", "midi_freq", "midi_gate",
   "midi_trig", "midi_voice_freq", "midi_voice_gate",
   "midi_voice_vel", "midi_voice_key", "midi_vel",
-  "midi_voice_cc", "midi_voice_press", "midi_voice_bend",
+  "midi_voice_cc", "midi_voice_press", "midi_voice_bend", "midi_voice_on",
   "amplitude", "phase", NULL};
 
 /* Pair-returning builtins, and the reductions of a pair to a number. */
@@ -910,7 +910,7 @@ static const char* emit1(Ctx* c, Scope* sc, Node* n, Buf* pre, const char* what)
 static const char* const MIDI_HELD[] = {"midi_cc", "midi_note", "midi_freq", "midi_gate", "midi_vel",
                                         "midi_voice_freq", "midi_voice_gate", "midi_voice_vel",
                                         "midi_voice_key", "midi_voice_cc", "midi_voice_press",
-                                        "midi_voice_bend", NULL};
+                                        "midi_voice_bend", "midi_voice_on", NULL};
 static const char* const PURE_MATH[] = {"sin", "cos", "tan", "tanh", "exp", "log",
                                         "floor", "ceil", "sqrt", "pow", "min", "max", "clamp",
                                         "abs", "int", NULL};
@@ -1167,7 +1167,7 @@ static int loops_off(void) {
 
 static const char* const VOICE_SLOT[] = {"midi_voice_freq", "midi_voice_gate", "midi_voice_vel",
                                          "midi_voice_key", "midi_voice_press", "midi_voice_bend",
-                                         "midi_voice_cc", NULL};
+                                         "midi_voice_cc", "midi_voice_on", NULL};
 
 /* Is `name` read only as the slot of a voice call (midi_voice_freq(name),
  * midi_voice_cc(name, k))? */
@@ -2423,7 +2423,8 @@ static const char* const HOISTED_MATH[] = {"exp", "log", "pow", "sin", "cos", "t
 static const char* const MIDI_FNS[] = {"midi_cc", "midi_note", "midi_trig", "midi_freq",
                                        "midi_gate", "midi_voice_freq", "midi_voice_gate",
                                        "midi_voice_vel", "midi_voice_key", "midi_vel",
-                                       "midi_voice_cc", "midi_voice_press", "midi_voice_bend", NULL};
+                                       "midi_voice_cc", "midi_voice_press", "midi_voice_bend",
+                                       "midi_voice_on", NULL};
 
 /* A call's arguments, each a value. */
 static V* emit_args(Ctx* c, Scope* sc, Node* n, Buf* pre, int* any_pair) {
@@ -3043,9 +3044,20 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
   }
   if (((eq(name, "midi_cc") || eq(name, "midi_note") || eq(name, "midi_voice_freq") ||
         eq(name, "midi_voice_gate") || eq(name, "midi_voice_vel") || eq(name, "midi_voice_key") ||
-        eq(name, "midi_voice_press") || eq(name, "midi_voice_bend")) && n->nkids == 1) ||
+        eq(name, "midi_voice_press") || eq(name, "midi_voice_bend") || eq(name, "midi_voice_on")) &&
+       n->nkids == 1) ||
       (eq(name, "midi_voice_cc") && n->nkids == 2) ||
       ((eq(name, "midi_freq") || eq(name, "midi_gate") || eq(name, "midi_vel")) && n->nkids == 0)) {
+    /* What MIDI holds is steady over a block (is_invariant), so with
+     * steady arguments it is read once a block: a voice loop's per voice,
+     * into an array, instead of an atomic read per voice per sample. */
+    int steady = c->hoist_on && !c->in_hoist;
+    for (int i = 0; i < n->nkids && steady; i++) steady = is_invariant(c, sc, n->kids[i]);
+    if (steady) {
+      const char** x = al(c, (n->nkids + 1) * sizeof(char*));
+      for (int i = 0; i < n->nkids; i++) x[i] = emit_invariant(c, sc, n->kids[i]);
+      if (n->nkids == 0 || x[0]) return mono(hoist(c, b_midi(c, name, x, n->nkids)));
+    }
     V* a = emit_args(c, sc, n, pre, &any);
     return map_pure(c, name, a, n->nkids, any, b_midi, pre);
   }
@@ -4397,6 +4409,7 @@ static const char* emit_program(Ctx* c, Node* program) {
     "extern double n_midi_voice_cc(int,int);\n"
     "extern double n_midi_voice_press(int);\n"
     "extern double n_midi_voice_bend(int);\n"
+    "extern double n_midi_voice_on(int);\n"
     "extern double n_midi_vel(void);\n"
     "extern double n_input_l(void);\n"
     "extern double n_input_r(void);\n"

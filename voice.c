@@ -89,6 +89,7 @@ static void register_natives(TCCState* s) {
     {"n_midi_voice_cc", (const void*)n_midi_voice_cc},
     {"n_midi_voice_press", (const void*)n_midi_voice_press},
     {"n_midi_voice_bend", (const void*)n_midi_voice_bend},
+    {"n_midi_voice_on", (const void*)n_midi_voice_on},
     {NULL, NULL}};
   for (int i = 0; extra[i].name; i++) tcc_add_symbol(s, extra[i].name, extra[i].fn);
 }

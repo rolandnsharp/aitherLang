@@ -55,5 +55,6 @@ double n_midi_trig(void* state, long at, int n);
 double n_midi_voice_cc(int n, int k);
 double n_midi_voice_press(int n);
 double n_midi_voice_bend(int n);
+double n_midi_voice_on(int n);
 
 #endif

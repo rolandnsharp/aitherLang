@@ -400,6 +400,14 @@ double n_midi_voice_press(int n) {
   return st.held[n - 1].press;
 }
 
+/* Which note-on the nth voice is: a count that moves on every note-on its
+ * slot takes (0: never used), so a voice can tell a new note from the
+ * one before, even on the same key (poly's retiring uses it). */
+double n_midi_voice_on(int n) {
+  if (n < 1 || n > MIDI_MAX_POLYPHONY) return 0.0;
+  return (double)st.held[n - 1].on_at;
+}
+
 /* The nth voice's bend in semitones, its own and its zone master's. */
 double n_midi_voice_bend(int n) {
   if (n < 1 || n > MIDI_MAX_POLYPHONY) return 0.0;
