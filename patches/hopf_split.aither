@@ -1,0 +1,51 @@
+# hopf_split: a donut and an hourglass that fit together into a sphere.
+#
+# The spinors (four numbers, the 3-sphere) split along one torus, where
+# |xi| = |eta| (the Clifford torus), into two halves, and each half is a
+# solid torus. Carried to ordinary space by stereographic projection
+# (hopf_tori), one is the donut, the fibres over the northern half of the
+# direction sphere; the other is everything else, the fibres over the
+# southern half, which wrap round the axis through the donut's hole, fat
+# and pinched in the middle and opening out above and below to close
+# through infinity: an hourglass. Glued along the Clifford torus they are
+# the whole 3-sphere; seen from below, they are the direction sphere's two
+# hemispheres.
+#
+# Two tori are drawn at mirrored latitudes, one in each half. As they
+# sweep, the donut fattens while the hourglass round it slims, until they
+# meet as the one Clifford torus at the equator, and part again. The
+# circles on each are its fibres, every one linked with every other,
+# sliding as they go.
+#
+#   ./aither patches/hopf_split.aither | tools/scope --decay 0.9
+
+let per = 18                                               # fibres round each torus
+let passes = 20                                            # the whole picture, a second
+let loop = passes * per * 2
+
+# The two latitudes: one sweeping from near the north pole to the
+# equator and back, the other its mirror in the south.
+let sweep = 0.12 + 0.38 * (1 - cos(TAU * t / 26)) / 2      # a fraction of a half turn: 0.12 .. 0.5
+let k = floor(t * loop)
+let alpha = TAU * ((t * loop) mod 1)
+let fibre = k mod (per * 2)
+let south = floor(fibre / per)                             # 0 the donut, 1 the hourglass
+let theta = PI * (if south > 0 then 1 - sweep else sweep)
+let phi = TAU * (fibre mod per) / per + TAU * t / 37
+
+# One direction's spinors, turned together by alpha.
+let xi = rotate([cos(theta / 2), 0], alpha)
+let eta = rotate([sin(theta / 2), 0], alpha + phi)
+
+# Stereographic projection from where eta is i, which lies on the south
+# pole's fibre: that fibre is the axis itself, through infinity.
+let away = 1 - eta[1]
+let px = xi[0] / away
+let py = xi[1] / away
+let pz = eta[0] / away
+
+# The view: turning slowly about the axis, tipped so the axis stands
+# upright on the screen.
+let turned = rotate([px, py], TAU * t / 31)
+let tipped = rotate([turned[1], pz], 1.35)
+[turned[0], tipped[0]] * 0.2
