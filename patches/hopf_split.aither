@@ -2,20 +2,24 @@
 #
 # The spinors (four numbers, the 3-sphere) split along one torus, where
 # |xi| = |eta| (the Clifford torus), into two halves, and each half is a
-# solid torus. Carried to ordinary space by stereographic projection
-# (hopf_tori), one is the donut, the fibres over the northern half of the
-# direction sphere; the other is everything else, the fibres over the
-# southern half, which wrap round the axis through the donut's hole, fat
-# and pinched in the middle and opening out above and below to close
-# through infinity: an hourglass. Glued along the Clifford torus they are
-# the whole 3-sphere; seen from below, they are the direction sphere's two
-# hemispheres.
+# solid torus: the inverse of a solid torus, in the 3-sphere, is another
+# one, turned inside out through infinity. Carried to ordinary space by
+# stereographic projection (hopf_tori), one is the donut, the fibres over
+# the northern half of the direction sphere. The other, the fibres over
+# the southern half, is a torus too, but enormous: its outer wall is far
+# off the screen and closes through infinity, and what is near is its
+# inner wall, a narrow waist round the axis through the donut's hole,
+# pinched in the middle and flaring above and below: the hourglass. A
+# torus's inside is saddle-shaped, and here it is the whole of what you
+# see. Glued along the Clifford torus the two are the whole 3-sphere;
+# seen from below, the direction sphere's two hemispheres.
 #
-# Two tori are drawn at mirrored latitudes, one in each half. As they
-# sweep, the donut fattens while the hourglass round it slims, until they
-# meet as the one Clifford torus at the equator, and part again. The
-# circles on each are its fibres, every one linked with every other,
-# sliding as they go.
+# Two tori at mirrored latitudes: most of the time held apart, the small
+# donut threaded by the hourglass's waist; every 40 s they swell toward
+# the equator, the hourglass shrinking until its whole torus comes into
+# view, meet as the one Clifford torus, and part again. The circles on
+# each are its fibres, every one linked with every other, sliding as
+# they go.
 #
 #   ./aither patches/hopf_split.aither | tools/scope --decay 0.9
 
@@ -23,9 +27,12 @@ let per = 18                                               # fibres round each t
 let passes = 20                                            # the whole picture, a second
 let loop = passes * per * 2
 
-# The two latitudes: one sweeping from near the north pole to the
-# equator and back, the other its mirror in the south.
-let sweep = 0.12 + 0.38 * (1 - cos(TAU * t / 26)) / 2      # a fraction of a half turn: 0.12 .. 0.5
+# The two latitudes: held near the poles, then once every 40 s swelling
+# to the equator (10 s each way, 4 s met) and back; the other the first's
+# mirror in the south.
+let cyc = t mod 40
+let toward = ease((cyc - 14) / 10) * (1 - ease((cyc - 28) / 10))
+let sweep = 0.14 + 0.36 * toward                           # a fraction of a half turn: 0.14 .. 0.5
 let k = floor(t * loop)
 let alpha = TAU * ((t * loop) mod 1)
 let fibre = k mod (per * 2)
