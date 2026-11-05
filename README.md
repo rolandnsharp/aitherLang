@@ -173,6 +173,7 @@ aither parts piano                    focused per-play view for one voice
 aither levels master                  master-bus RMS / peak / clips / envelope
 aither spectrum [voice]               FFT of voice's recent buffer (or master)
 aither audit piano.aither 2           offline render + spectral analysis
+aither export country.aither out/      the patch as C to build into any program (SPEC.md, "Export")
 aither sweep piano 0                  the piece plays from the top (aither sweep piano: where it is)
 aither midi list                      ALSA seq input ports
 aither midi connect 28:0              subscribe to a specific port

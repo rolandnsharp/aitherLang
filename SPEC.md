@@ -1599,6 +1599,59 @@ Clips counters clear on read. `spectrum` runs against the
 engine's last ~0.5 s of audio per voice; `audit` is fully
 offline (no engine connection required, ~100 ms turnaround).
 
+### Export
+
+```
+AITHER_RATE=44100 aither export country.aither out/        # out/country.c, country.h, aither_rt.c, aither_rt.h
+cc -O2 -ffp-contract=off game.c out/country.c out/aither_rt.c -lm
+```
+
+`aither export <patch> [dir] [--name n]` writes a patch as C to build
+into any program: a game, a plugin, a board. It is the C the engine
+compiles the patch to, not a translation of it, so built with
+`-ffp-contract=off` it plays the engine's samples bit for bit (the
+`export_exact` test checks two patches, one played from a script with
+keys, a 14-bit knob and `input()`). Without the flag the arithmetic may
+fuse and the sound is the same to the ear, not to the bit. It is C11
+(the MIDI state is `_Atomic`) as gcc and clang take it (one GNU range
+initializer; `-pedantic` warns), needing only `<math.h>`, `<stdlib.h>`,
+`<string.h>` and `<stdatomic.h>`; `#line` marks in it point a compiler's
+complaints at the patch's own lines.
+
+The patch is written as `<n>.c` and `<n>.h`, `n` the file's name made an
+identifier (`--name` chooses), every one of its names prefixed with
+`n`, so any number of patches go into one program. Its interface:
+
+| Call | Does |
+|------|------|
+| `n* n_new(void)` / `n_free(v)` | an instance from t = 0, state fresh; instances are independent |
+| `n_render(v, out, in, frames)` | the next `frames` samples as interleaved float pairs, the engine's own format; `in` is what `input()` hears, the same shape, or NULL |
+| `n_part(name)`, `n_part_name(i)`, `n_PARTS` | the plays, by index |
+| `n_gain(v, part, gain, seconds)` | fade a play to a gain (a mute is 0); it runs on silent, as a muted play does |
+| `n_time(v)`, `n_sweep(v, seconds)` | `t`, and move the sweep |
+| `n_RATE` | the rate it was exported for |
+
+The code is fixed to its rate (`AITHER_RATE`, 48 kHz when unset): a
+delay's buffer and a hoisted coefficient are sized for it, so a patch for
+another rate is exported again.
+
+Beside it go `aither_rt.c` and `aither_rt.h`, the runtime: the engine's
+own natives (`dsp.c`) and MIDI state (`midi_state.c`), written out from
+the binary, one per program however many patches it holds. Keys and
+knobs reach every exported patch through it, as every voice in an engine
+reads one MIDI state: `aither_cc(n, value)`, `aither_cc14(n, value)` (a
+14-bit pair, 0..16383), `aither_note_on(note, velocity)`,
+`aither_note_off(note)`, `aither_midi_reset()`. Each lands on the next
+sample rendered; to land one mid-block, render up to it first.
+
+What the engine does around a voice and an export doesn't: it has no
+socket, no hot reload, no fades between versions, no recursion
+deadline (its host owns the clock, so a recursion runs to the end it was
+written with), and no scrubbing of state after a NaN (a sample that
+isn't a number is played as 0, as in the engine, but the state isn't
+reset). Instances of one patch read the same knobs; per-instance
+controls are not there yet.
+
 ---
 
 ## Implementation
@@ -1739,9 +1792,11 @@ would read a `tanh` as distortion; a player clamps at ±1 for the
 speaker's sake. Voice slots sweep on `send` so stopped
 voices don't leak the table.
 
-### MIDI (`midi.c`)
+### MIDI (`midi_state.c`, `midi.c`)
 
-ALSA seq input thread. Auto-resubscribes if the port is dropped.
+`midi_state.c` is what the keys and knobs are doing, its writers and the
+natives a patch reads, with no ALSA in it, so an export's runtime
+carries it. `midi.c` is the ALSA seq input thread that feeds it. Auto-resubscribes if the port is dropped.
 Engine logs a clear line on drop / recovery so silent failure
 isn't a debugging blind spot.
 
@@ -1759,6 +1814,14 @@ engine knowledge). `render.c` runs a patch offline through
 the same parse → codegen → TCC → tick path the engine uses,
 returning an in-memory buffer. Together they power
 `./aither audit` and `./aither try`.
+
+### Export (`export.c`, `export_text.c`, `export/`)
+
+`aither export`: the patch's generated C with its names prefixed and an
+interface after it, and the runtime, `export/aither_rt.h` with `dsp.h`,
+`midi.h`, `dsp.c`, `midi_state.c` and `export/glue.c` (the public setters
+and the two hooks the engine gives a voice), concatenated from text
+`#embed`ded in the binary, their local includes dropped.
 
 ### CLI dispatch (`aither.c`)
 

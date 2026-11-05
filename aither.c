@@ -4,6 +4,7 @@
  * offline (audit). */
 
 #define _GNU_SOURCE
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,6 +14,7 @@
 #include <sys/stat.h>
 #include <sys/un.h>
 #include "engine.h"
+#include "export.h"
 #include "render.h"
 #include "analysis.h"
 #include "cli_output.h"
@@ -257,7 +259,7 @@ static int send_patch(const char* path, const char* extra) {
 static void usage(void) {
   puts("usage: aither [patch.aither ...] [seconds]      the engine: float pairs on stdout");
   puts("       aither <send|stop|mute|unmute|solo|park|unpark|clear|list|status|levels|"
-       "parts|check|sweep|midi|audit|try|spectrum|kill> [args]");
+       "parts|check|sweep|midi|audit|try|export|spectrum|kill> [args]");
   puts("");
   puts("  aither | aplay -f FLOAT_LE -c 2 -r 48000      play; send patches to it");
   puts("  aither set.aither | tools/play                 same, with a first voice loaded");
@@ -296,6 +298,9 @@ static void usage(void) {
   puts("                              live voice's state and time, without touching the");
   puts("                              sound (default 2s). Catches NaN/runaways first");
   puts("  spectrum [voice]            spectral summary of the engine's recent buffer");
+  puts("  export <patch> [dir] [--name n]");
+  puts("                              the patch as C (n.c, n.h) and its runtime (aither_rt.c,");
+  puts("                              aither_rt.h), at AITHER_RATE, to build into any program");
   puts("  kill                        shut down engine");
 }
 
@@ -405,6 +410,31 @@ int main(int argc, char** argv) {
     char* c = joined("midi", n, a, 1);
     send_cmd(c);
     free(c);
+  } else if (strcmp(cmd, "export") == 0) {
+    /* Offline: the patch as C, at the rate it will play (AITHER_RATE). */
+    const char *path = NULL, *dir = ".", *name = NULL;
+    for (int i = 1; i < n; i++) {
+      if (strcmp(a[i], "--name") == 0 && i + 1 < n) name = a[++i];
+      else if (!path) path = a[i];
+      else if (dir[0] == '.' && dir[1] == 0) dir = a[i];
+      else die("usage: aither export <patch.aither> [dir] [--name name]");
+    }
+    if (!path) die("usage: aither export <patch.aither> [dir] [--name name]");
+    char nm[200];
+    if (name) snprintf(nm, sizeof nm, "%s", name);
+    else export_name_of(path, nm, sizeof nm);
+    int ident = (nm[0] == '_' || isalpha((unsigned char)nm[0]));
+    for (const char* c = nm; *c && ident; c++) ident = *c == '_' || isalnum((unsigned char)*c);
+    if (!ident) die("aither export: --name must be a C identifier");
+    const char* rv = getenv("AITHER_RATE");
+    double rate = rv && *rv ? atof(rv) : 48000.0;
+    if (rate <= 0) die("aither export: AITHER_RATE must be a rate in Hz");
+    char err[4096];
+    if (export_patch(path, dir, nm, rate, err, sizeof err) != 0) {
+      fprintf(stderr, "aither export: %s\n", err);
+      return 1;
+    }
+    printf("%s/%s.c %s/%s.h %s/aither_rt.c %s/aither_rt.h  (%g Hz)\n", dir, nm, dir, nm, dir, dir, rate);
   } else if (strcmp(cmd, "audit") == 0 || strcmp(cmd, "try") == 0) {
     char use[128];
     snprintf(use, sizeof use, "usage: aither %s <patch> [seconds] [--from S]", cmd);
