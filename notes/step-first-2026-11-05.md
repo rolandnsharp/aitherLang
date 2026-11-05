@@ -127,20 +127,40 @@ patches.
 
 `impulse(freq)` already is this, for its own hidden phasor: a 1 on the
 step it wraps. What is missing is the word for a turning the patch
-already has. Proposed, in the stdlib, written in aither: **`passes(z)`**,
-1 on the step a turning comes round past its start, else 0:
+already has. Proposed, in the stdlib, written in aither, in the
+classical words (below): **`transit(z)`**, 1 on the step a turning
+crosses its starting line, else 0:
 
 - a pair (`spin`, `dho`, a phasor pair): its phase crossing 0 upward;
 - a phasor's 0..1: its wrap;
 - a pair of pairs: its angle coming back through 0, a versor's whole turn
-  (the double cover: a spinor passes once each two turns of what it
+  (the double cover: a spinor transits once each two turns of what it
   turns).
 
-Form is then the slow turnings and what they pass: `since(passes(slow))`
-counts steps into a section; `impulse(1 / 8)` becomes
-`passes(slow)` with `slow` one turn in eight seconds' worth of keynote
-turns. The name is open: `passes`, `round` (but patches use `round` as a
-let: hopf_split), or Hamilton's or Tesla's word if one fits.
+Form is then the slow turnings and their transits:
+`since(transit(slow))` counts steps into a section; `impulse(1 / 8)`
+becomes `transit(slow)` with `slow` one revolution in eight seconds'
+worth of keynote turns.
+
+**The classical words** (Roland: "we should use classical language"):
+
+- **revolution**: one whole turn, the astronomers' word since Copernicus
+  (*De revolutionibus*, 1543). For a count of whole turns.
+- **transit**: in astronomy, a body's passage across the meridian, its
+  reference line. That is exactly a turning crossing its start, so it
+  names the event.
+- **period**: the length of one revolution, Tesla's word for a circuit's
+  natural time and Maxwell's for a vibration. It is a length, not an
+  event.
+- **phase** and **epoch**: in the mechanics of harmonic motion (Thomson
+  and Tait, *Treatise on Natural Philosophy*, 1867), the phase is how far
+  round a motion is, and the epoch where it stood at the reckoning's
+  start. aither has `phase`; the epoch is a turning's first value.
+
+So the event is `transit`, and if a count of whole turns is wanted,
+`revolutions(z)`. (Usages are as remembered and not yet checked against
+the originals: check Thomson and Tait's definitions of phase and epoch,
+and Tesla's use of period, before SPEC quotes them.)
 
 ## sweep, a voice's own count
 
@@ -159,6 +179,7 @@ note began, already a count.
 1. Pitch: settled above as a direction (ratios inside, Hz at the edge);
    open is how a patch names its keynote, and whether a resonator's own
    make (stiffness and mass) is a stdlib form.
-2. The word for `passes`.
+2. `transit` and `revolutions`: confirm the classical usages from the
+   sources.
 3. Whether `t` stays as a name at all once `sweep` and `since` are
    counts.
