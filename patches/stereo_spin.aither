@@ -61,10 +61,14 @@ let rb = comp_b(a31, b31, a2, b2)
 # so it starts at the centre of the sphere.
 let strike = impulse(1 / 1.4)
 def push(trig): (discharge(trig, 1 / 0.001) - discharge(trig, 1 / 0.0003)) / 0.0007
-let body = sum(5, n => resonator(push(strike) * 0.002 / n, 196 * n * (1 + 0.0007 * n * n), 2 / (2.5 / n)))
+# Each mode is pushed by its share over 2 pi f, so it rings at that share
+# (a resonator rings a push of area P at P times 2 pi f).
+let body = sum(5, n =>
+  let f = 196 * n * (1 + 0.0007 * n * n)
+  resonator(push(strike) * 0.12 / n / (TAU * f), f, 2 / (2.5 / n)))
 let tone = additive(196, warm_shape, 6) * (0.10 + 0.05 * sin(TAU * t / 7))
 let breath = bpf(noise(), 1800, 0.4) * 0.03
-let src = body * 6 + tone + breath
+let src = body + tone + breath
 
 # ---------------------------------------------------------------- the spinor
 
