@@ -1122,7 +1122,7 @@ hot-reloading a patch preserves held notes and knob values.
 
 | Function              | Description                                      |
 |-----------------------|--------------------------------------------------|
-| `midi_cc(n)`          | CC `n` value, `0..1`. `n` in `0..127`.           |
+| `midi_cc(n)`          | CC `n` value, `0..1`. `n` in `0..127`; 0..31 are 14-bit when paired with 32..63. |
 | `midi_note(n)`        | Velocity `0..1` while note `n` is held; 0 else. |
 | `midi_freq()`         | Hz of the most recent note-on (mono).            |
 | `midi_gate()`         | 1 while the most recent note is held, 0 after its note-off. |
@@ -1162,7 +1162,28 @@ released its velocity drops to 0 and the slot becomes
 re-allocatable; the freq stays set so a synth's release tail
 still reads a valid pitch.
 
-See "CLI" below for `aither midi list / connect / disconnect`.
+**14-bit controllers.** Controllers 0..31 pair with 32..63, as MIDI
+1.0 has them: `n` carries the coarse 7 bits and `n + 32` the fine 7, and
+`midi_cc(n)` reads the pair, `(coarse * 128 + fine) / 16383`, 16384
+steps where a single controller has 128. A coarse value alone reads as
+it always did, `m / 127`, so a 7-bit knob still reaches 1: until the fine
+half arrives it is taken to be the coarse value itself, which comes to
+exactly `m / 127` (MIDI 1.0 resets it to 0, which would stop a 7-bit
+knob at 0.994). A sender of 14 bits sends the coarse half, then the fine,
+and the value is exact from the fine one on. The fine half reads on its
+own too (`midi_cc(n + 32)`, 0..1 in 128 steps), and ALSA's own 14-bit
+event arrives as the pair it stands for. Controllers from 64 up pair with
+nothing. A program driving a patch smoothly (a game, a tracker) sends
+pairs on 0..31; the undefined ones, 3, 9, 14, 15 and 20..31, collide with
+no keyboard's usual knobs.
+
+**Which port.** At start the engine listens to the first MIDI port that
+offers itself. `AITHER_MIDI` chooses instead: a port by name or number
+(`AITHER_MIDI=yalanji`, `Minilab3:0`, `28:0`), as `midi connect` takes
+it, or `none` for nothing until a `midi connect`. A program that starts
+an engine of its own names its own port, so a keyboard plugged in doesn't
+play into it. See "CLI" below for `aither midi list / connect /
+disconnect`.
 
 ---
 

@@ -109,12 +109,32 @@ void midi_note_off(int note) {
     if (st.held[i].note == note && st.held[i].velocity > 0.0) st.held[i].velocity = 0.0;
 }
 
+/* Controllers 0..31 are 14-bit when a sender pairs them (MIDI 1.0): n
+ * carries the coarse 7 bits, n + 32 the fine. The writer keeps each pair
+ * whole here. An MSB alone takes itself as its LSB, (m << 7) | m, which
+ * is m / 127 exactly (m * 129 / 16383), so a 7-bit knob still spans 0..1
+ * and an old patch reads what it always did; MIDI 1.0 says an MSB resets
+ * the LSB to 0, which would stop a 7-bit knob at 0.994. A 14-bit sender
+ * sends the LSB straight after, and from then the value is exact. */
+static int pair[32];
+
 void midi_cc(int cc, int value) {
   if (cc < 0 || cc >= 128) return;
-  st.cc[cc] = (double)value / 127.0;
+  value = value < 0 ? 0 : value > 127 ? 127 : value;
+  if (cc < 32) {
+    pair[cc] = value << 7 | value;
+    st.cc[cc] = pair[cc] / 16383.0;
+    return;
+  }
+  st.cc[cc] = (double)value / 127.0;          /* a fine half reads on its own too */
+  if (cc < 64) {
+    pair[cc - 32] = (pair[cc - 32] & ~127) | value;
+    st.cc[cc - 32] = pair[cc - 32] / 16383.0;
+  }
 }
 
 void midi_reset_all(void) {
+  for (int i = 0; i < 32; i++) pair[i] = 0;
   for (int i = 0; i < 128; i++) {
     st.cc[i] = 0.0;
     st.notes[i] = 0.0;

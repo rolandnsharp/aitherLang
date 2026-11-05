@@ -9,6 +9,7 @@
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
+#include <alsa/asoundlib.h>
 #include <poll.h>
 #include <pthread.h>
 #include <sched.h>
@@ -28,7 +29,7 @@ static pid_t started[32];
 static int nstarted;
 
 static const char* const made[] = {"quiet.aither", "half.aither", "clock.aither", "sw.aither",
-                                   "mp.aither", "sm.aither", "s.sock"};
+                                   "mp.aither", "sm.aither", "cc.aither", "s.sock"};
 
 /* Whatever happens, leave no engine running and no directory behind.
  * Only async-signal-safe calls: the watchdog runs it too. */
@@ -588,6 +589,53 @@ TEST(engine_live) {
     CHECK(ask_has("kill", "OK"), "kill");
     wait_exit(&o, 10000);
     close_all(&o);
+  }
+
+  /* --- 15. AITHER_MIDI names the port to listen to, and a 14-bit
+   * controller arrives whole: a port of our own sends controller 20 as
+   * a pair (coarse 100, fine 37), and the engine started with
+   * AITHER_MIDI set to it plays midi_cc(20) at (100 * 128 + 37) / 16383.
+   * Without an ALSA sequencer (a container) there is nothing to check. */
+  snd_seq_t* seq = NULL;
+  if (snd_seq_open(&seq, "default", SND_SEQ_OPEN_OUTPUT, 0) == 0) {
+    char name[64];
+    snprintf(name, sizeof name, "aither-live-%d", (int)getpid());
+    snd_seq_set_client_name(seq, name);
+    int port = snd_seq_create_simple_port(seq, "out", SND_SEQ_PORT_CAP_READ | SND_SEQ_PORT_CAP_SUBS_READ,
+                                          SND_SEQ_PORT_TYPE_MIDI_GENERIC | SND_SEQ_PORT_TYPE_APPLICATION);
+    MUST(port >= 0, "an ALSA port to send from");
+    write_file("cc.aither", "midi_cc(20)\n");
+    setenv("AITHER_MIDI", name, 1);
+    Proc c = start("cc.aither", NULL);
+    unsetenv("AITHER_MIDI");
+    close_in(&c);
+    wait_up();
+    framed = &c;
+    float l, r;
+    float want = (100 * 128 + 37) / 16383.0f;
+    int heard = 0;
+    for (int i = 0; i < 300 && !heard; i++) {
+      for (int k = 0; k < 2; k++) {               /* sent again each block: the subscription may be new */
+        snd_seq_event_t e;
+        snd_seq_ev_clear(&e);
+        snd_seq_ev_set_source(&e, port);
+        snd_seq_ev_set_subs(&e);
+        snd_seq_ev_set_direct(&e);
+        snd_seq_ev_set_controller(&e, 0, k ? 52 : 20, k ? 37 : 100);
+        snd_seq_event_output_direct(seq, &e);
+      }
+      frame(&l, &r);
+      heard = fabsf(l - want) < 1e-6f;
+    }
+    CHECK(heard, "midi_cc(20) from the named port, 14-bit: %.7g, want %.7g", l, want);
+    CHECK(ask_has("kill", "OK"), "kill");
+    wait_exit(&c, 10000);
+    long n;
+    char* err = read_all(c.err, &n);
+    close_all(&c);
+    CHECK(strstr(err, name) != NULL, "it says what it connected to: %.200s", err);
+    free(err);
+    snd_seq_close(seq);
   }
 
   alarm(0);

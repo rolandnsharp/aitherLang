@@ -150,6 +150,14 @@ void aither_alsa_run(aither_note_on_fn on_on,
       case SND_SEQ_EVENT_CONTROLLER:
         on_cc(ev->data.control.param, ev->data.control.value);
         break;
+      case SND_SEQ_EVENT_CONTROL14:
+        /* ALSA's own 14-bit controller (0..31, 0..16383): the pair it
+         * stands for, coarse then fine. */
+        if (ev->data.control.param < 32) {
+          on_cc(ev->data.control.param, ev->data.control.value >> 7 & 127);
+          on_cc(ev->data.control.param + 32, ev->data.control.value & 127);
+        }
+        break;
       default: break;
     }
   }

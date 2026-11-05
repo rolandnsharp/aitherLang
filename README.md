@@ -183,7 +183,8 @@ aither kill                           shut down
 ## MIDI input
 
 When the engine starts it auto-connects to the first ALSA seq
-input port it finds. The polyphonic front door is `midi_keyboard`:
+input port it finds; `AITHER_MIDI=<port>` names one instead, or
+`AITHER_MIDI=none` none. The polyphonic front door is `midi_keyboard`:
 
 ```
 play piano:
@@ -199,7 +200,7 @@ too, `(freq, gate, vel, key) =>`, for its velocity and MIDI key number.
 For controllers (knobs, sliders, pads) and monophonic synths:
 
 ```
-midi_cc(n)        # knob/slider n — 0..1
+midi_cc(n)        # knob/slider n — 0..1 (0..31 are 14-bit, paired with 32..63)
 midi_freq()       # Hz of most recent note (mono)
 midi_gate()       # 1 while the most recent note is held (mono)
 midi_vel()        # its velocity 0..1, kept after release

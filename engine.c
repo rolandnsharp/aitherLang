@@ -1485,10 +1485,23 @@ static void midi_up(void) {
     fprintf(stderr, "[aither] MIDI unavailable (ALSA seq open failed)\n");
     return;
   }
-  char* who = midi_auto_connect();
-  if (*who) fprintf(stderr, "[aither] connected to MIDI: %s\n", who);
-  else fprintf(stderr, "[aither] MIDI ready, no input port auto-connected\n");
-  free(who);
+  /* AITHER_MIDI says what to listen to: unset, the first port that
+   * offers itself; "none", nothing until `midi connect`; else a port,
+   * by name or number ("yalanji", "Minilab3:0", "28:0"), as `midi
+   * connect` takes it. A program that starts its own engine names its
+   * own port, so a keyboard plugged in doesn't play its game. */
+  const char* want = getenv("AITHER_MIDI");
+  if (want && *want && strcmp(want, "none") != 0) {
+    if (midi_connect(want)) fprintf(stderr, "[aither] connected to MIDI: %s\n", midi_last_connect_info());
+    else fprintf(stderr, "[aither] MIDI ready; couldn't connect to AITHER_MIDI=%s\n", want);
+  } else if (want && strcmp(want, "none") == 0) {
+    fprintf(stderr, "[aither] MIDI ready, connected to nothing (AITHER_MIDI=none)\n");
+  } else {
+    char* who = midi_auto_connect();
+    if (*who) fprintf(stderr, "[aither] connected to MIDI: %s\n", who);
+    else fprintf(stderr, "[aither] MIDI ready, no input port auto-connected\n");
+    free(who);
+  }
   midi_start_thread();
 }
 
