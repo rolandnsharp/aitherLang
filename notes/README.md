@@ -18,6 +18,11 @@ tried and dropped; each doc says so near the top where that's the case.
   [pluck-2026-10-30.md](pluck-2026-10-30.md).
 
 **Directions to chase**
+- [nested-pair-2026-11-05.md](nested-pair-2026-11-05.md) — the design for
+  way 3: a pair may hold pairs (a quaternion, Cayley–Dickson), `turn` and
+  `conj` by the doubling formula, everything else side by side; stops at
+  the third rung by itself. Destructured, read whole. Open questions
+  listed. Nothing built.
 - [spinors-2026-11-05.md](spinors-2026-11-05.md) — a field turned every
   way by spin, not matrices: a direction and a rotation are each two
   pairs, the one gap (no pair of pairs) and three ways through it;
