@@ -572,6 +572,24 @@ TEST(engine_live) {
     free(err);
   }
 
+  /* --- 14. The pipe out holds one block, not Linux's 64 KiB: sized before
+   * the first write to a block or a page, whichever is bigger, so what is
+   * played is heard a block later, not 180 ms. */
+  {
+    Proc o = start("quiet.aither", NULL);
+    close_in(&o);
+    wait_up();
+    long page = sysconf(_SC_PAGESIZE);
+    const char* b = getenv("AITHER_BUFFER");
+    long block = (b ? atol(b) : 512) * 2 * (long)sizeof(float);
+    long want = block > page ? block : page;
+    int size = fcntl(o.out, F_GETPIPE_SZ);
+    CHECK(size >= want && size < want * 2, "the pipe out is %d bytes, one block or page is %ld", size, want);
+    CHECK(ask_has("kill", "OK"), "kill");
+    wait_exit(&o, 10000);
+    close_all(&o);
+  }
+
   alarm(0);
   cleanup();
   for (int i = 0; i < nstarted; i++) waitpid(started[i], NULL, WNOHANG);

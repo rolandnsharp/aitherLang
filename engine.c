@@ -3,6 +3,7 @@
 
 #define _GNU_SOURCE
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <math.h>
 #include <pthread.h>
@@ -1817,6 +1818,18 @@ void engine_run(char** files, int nfiles, double seconds) {
     exit(1);
   }
   signal(SIGPIPE, SIG_IGN);
+  /* The pipe out holds one block. Linux gives a pipe 64 KiB, and the
+   * engine writes until it is full, so before this every sample waited
+   * behind the rest: 180 ms on the way to tools/play at 44.1 kHz. Sized
+   * here, before the first write (a pipe holding more than the new size
+   * can't be shrunk), it is one page or one block, whichever is bigger;
+   * a reader that wants slack asks for a bigger block (AITHER_BUFFER). */
+  struct stat out_st;
+  if (fstat(1, &out_st) == 0 && S_ISFIFO(out_st.st_mode)) {
+    long page = sysconf(_SC_PAGESIZE), want = (long)buffer_frames * 2 * (long)sizeof(float);
+    if (fcntl(1, F_SETPIPE_SZ, (int)(want > page ? want : page)) < 0)
+      fprintf(stderr, "aither: couldn't size the pipe out: %s\n", strerror(errno));
+  }
   /* The workers first: the voices are cut into tasks for them. */
   pool_start();
   if (seconds <= 0.0) start_optimizer();

@@ -1468,6 +1468,16 @@ block of output, and holds nothing back, so a program on both ends
 output) gets a fixed loop delay. A block is `AITHER_BUFFER` frames
 (512).
 
+The pipe out holds one block too. When standard output is a pipe the
+engine sizes it, before its first write, to one block or one memory
+page (4 KiB, 512 frames), whichever is bigger. Left at Linux's 64 KiB
+it filled, and every sample waited behind the rest: 180 ms on the way
+to `tools/play` at 44.1 kHz. Sized, the pipe holds at most 11.6 ms, and
+what you play is heard one block, the pipe and the card's buffer later
+(about 35 ms with `tools/play hw:… 20`). A reader that wants slack
+against a stalled engine (a network stream) asks for it with a bigger
+block: `AITHER_BUFFER=2048` makes the pipe 2048 frames.
+
 An offline run takes its keys and knobs from a script with `--play`:
 
 ```
