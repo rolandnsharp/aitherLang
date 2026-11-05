@@ -11,7 +11,16 @@
 #              octaves go up it, C3 at the lip to C7 near the shoulder
 #   velocity   how fast the striker is moving
 #   CC 20      the striker, hard bronze (0) to a soft wooden mallet (1)
+#   CC 21      further up the bell, added to the key's height (0: none)
+#   CC 22      lighter: the strike's speed brought down (0: as played)
 #   the pitch never changes: it is the bell's
+#
+# On the uConsole's gamepad (tools/pad): A, B, X and Y strike at four
+# places a quarter of the way round, at the lip; hold A and press up and
+# down for the striker, left and right to move up the bell; hold B and
+# press up and down to strike lighter. Each press of A or B is a strike
+# too, as it is a note.
+#   tools/pad & AITHER_MIDI=aither-pad ./aither patches/struck_bell.aither | tools/play hw:rockchipes8388c 20
 #
 # The physics, each a line or two below
 # - The bell's modes, named as founders name them (hum, prime, tierce,
@@ -60,6 +69,8 @@ let split  = [1.0006, 1.0013, 1.0021, 1.0009, 1.0017, 1.0011, 1.0024, 1.0031]
 let phi0   = 0.4                                           # the bell's own asymmetry points here
 
 let soft = slew(midi_cc(20), 0.05)                         # the striker: bronze .. wood
+let higher = midi_cc(21)                                   # further up the bell
+let lighter = 1 - 0.9 * midi_cc(22)                        # the strike's speed, brought down
 
 # Each key is a strike: how long since each slot's latest note-on.
 let ages = array(16, i => since(midi_voice_on(i + 1)))
@@ -84,10 +95,10 @@ play bell:
     # Every strike's push into this mode's pair, while one lasts.
     let push = if hitting < 1 then [0, 0] else sum(16, n =>
       let age = ages[n - 1]
-      let force = if age < 0.01 then contact(age, midi_voice_vel(n), soft) else 0
+      let force = if age < 0.01 then contact(age, midi_voice_vel(n) * lighter, soft) else 0
       let key = midi_voice_key(n)
       let around = TAU * (key mod 12) / 12 - phi0
-      let up = clamp((floor(key / 12) - 4) / 4, 0, 1)
+      let up = clamp((floor(key / 12) - 4) / 4 + higher, 0, 1)
       if force > 0 then rotate([force * height_shape(up, circle[k - 1]), 0], m * around) else [0, 0])
     # A push in force units reaches the mode as its ringing times 2 pi f:
     # divided back, so each rings at its level.
