@@ -1,0 +1,91 @@
+# tumble: a body spun about its middle axis, flipping over and over (the
+# tennis-racket flip, the T-handle Dzhanibekov filmed in orbit), its
+# turning carried as a spinor rotation and drawn on the scope.
+#
+# A body with three different moments of inertia (1, 2, 3 here) spins
+# steadily about its longest and its shortest axis, and not about the
+# middle one: a wobble there grows, the body turns end over end, rights
+# itself, and turns again, every few seconds, for ever. Euler's equations
+# for its spin (in the body), and the body's orientation as a rotation
+# (a, b), two complex numbers (notes/spinors-2026-11-05.md), carried on
+# by the spin each sample:
+#   da = -(i/2) (a w3 + b (w1 + i w2)) dt     db = -(i/2) (a (w1 - i w2) - b w3) dt
+# turns and conjugates only, then (a, b) set back to unit size.
+#
+# Drawn as its three axes, each the Hopf map of a fixed spinor turned by
+# (a, b): the long axis, the middle one it spins about (with a ring on one
+# end, so the flip is seen), and the short one.
+#
+#   ./aither patches/tumble.aither | tools/scope --decay 0.9
+
+# ---------------------------------------------------------------- the spin
+
+let I1 = 1.0
+let I2 = 2.0
+let I3 = 3.0
+$w1 = 0.02                                                 # rad/s about each body axis: almost all
+$w2 = TAU * 0.6                                            # about the middle one, a wobble on the
+$w3 = 0.02                                                 # others
+let dw1 = (I2 - I3) / I1 * $w2 * $w3
+let dw2 = (I3 - I1) / I2 * $w3 * $w1
+let dw3 = (I1 - I2) / I3 * $w1 * $w2
+$w1 = $w1 + dw1 * dt
+$w2 = $w2 + dw2 * dt
+$w3 = $w3 + dw3 * dt
+
+# ---------------------------------------------------------------- the turning
+
+$qa = [1, 0]
+$qb = [0, 0]
+let wc = [$w1, $w2]                                        # w1 + i w2
+let ta = turn($qa, [$w3, 0]) + turn($qb, wc)
+let tb = turn($qa, conj(wc)) - $qb * $w3
+let na = $qa + turn(ta, [0, -0.5]) * dt
+let nb = $qb + turn(tb, [0, -0.5]) * dt
+let size = sqrt(amplitude(na) * amplitude(na) + amplitude(nb) * amplitude(nb))
+$qa = na / size
+$qb = nb / size
+
+# ---------------------------------------------------------------- the axes
+
+# The direction a spinor (p0, p1) points: X + iY and Z.
+def hopf_xy(p0, p1): turn(conj(p0), p1) * 2
+def hopf_z(p0, p1): amplitude(p0) * amplitude(p0) - amplitude(p1) * amplitude(p1)
+
+# The body's axes in the world: the spinors of x, y and z, turned by
+# (a, b). Turned |z> is (a, -conj(b)); |x> and |y> are |z> and its
+# partner mixed half and half, with a quarter turn for y.
+let r2 = sqrt(0.5)
+let zx0 = $qa
+let zx1 = conj($qb) * -1
+let xx0 = ($qa + $qb) * r2
+let xx1 = (conj($qa) - conj($qb)) * r2
+let yx0 = ($qa + turn([0, 1], $qb)) * r2
+let yx1 = (turn([0, 1], conj($qa)) - conj($qb)) * r2
+let ax = hopf_xy(xx0, xx1)
+let az = hopf_z(xx0, xx1)
+let bx = hopf_xy(yx0, yx1)
+let bz = hopf_z(yx0, yx1)
+let cx = hopf_xy(zx0, zx1)
+let cz = hopf_z(zx0, zx1)
+
+# ---------------------------------------------------------------- the beam
+
+# Forty times a second: along the long axis, the middle axis, the short
+# one, then a ring round the middle axis's one end.
+let u = phasor(40)
+let s = if u < 0.3 then u / 0.3 else if u < 0.55 then (u - 0.3) / 0.25 else if u < 0.75 then (u - 0.55) / 0.2 else (u - 0.75) / 0.25
+let along = 2 * s - 1
+let which = if u < 0.3 then 0 else if u < 0.55 then 1 else if u < 0.75 then 2 else 3
+let lx = if which == 0 then ax * 0.8 * along else if which == 1 then bx * 0.55 * along else cx * 0.3 * along
+let lz = if which == 0 then az * 0.8 * along else if which == 1 then bz * 0.55 * along else cz * 0.3 * along
+let ring = rotate([0.06, 0], TAU * s)
+let tipx = bx * 0.55
+let tipz = bz * 0.55
+let px = if which == 3 then tipx[0] + ring[0] else lx[0]      # the ring faces the viewer
+let py = if which == 3 then tipx[1] + ring[1] else lx[1]
+let pz = if which == 3 then tipz else lz
+
+# The view: the spin axis (the world's y) standing upright, seen a
+# little from the side.
+[px * 0.94 + pz * 0.34, py] * 0.9
