@@ -278,7 +278,7 @@ static Node* mknum(Ctx* c, double v, int line, const char* source) {
 }
 
 static const char* const LIBM1[] = {"sin", "cos", "tan", "tanh", "exp", "log",
-                                    "floor", "ceil", "sqrt", NULL};
+                                    "floor", "ceil", "sqrt", "erf", NULL};
 
 /* The two entry points, after every patch's tick1. */
 /* The drivers. Both run the tasks (run_tasks) over a block of
@@ -1101,7 +1101,7 @@ static const char* const MIDI_HELD[] = {"midi_cc", "midi_note", "midi_freq", "mi
                                         "midi_voice_bend", "midi_voice_on", NULL};
 static const char* const PURE_MATH[] = {"sin", "cos", "tan", "tanh", "exp", "log",
                                         "floor", "ceil", "sqrt", "pow", "min", "max", "clamp",
-                                        "abs", "int", NULL};
+                                        "abs", "int", "erf", NULL};
 
 static int is_invariant(Ctx* c, Scope* sc, Node* n);
 
@@ -2680,7 +2680,7 @@ static const char* const KIND_NAMES[] = {
   "nkVar", "nkLet", "nkDef", "nkAssign", "nkArr", "nkIdx", "nkIdxAssign", "nkBlock",
   "nkPlay", "nkLambda", "nkImport", "nkStr", "nkNamedArg"};
 
-static const char* const HOISTED_MATH[] = {"exp", "log", "pow", "sin", "cos", "tan", "tanh", "sqrt", NULL};
+static const char* const HOISTED_MATH[] = {"exp", "log", "pow", "sin", "cos", "tan", "tanh", "sqrt", "erf", NULL};
 static const char* const MIDI_FNS[] = {"midi_cc", "midi_note", "midi_trig", "midi_freq",
                                        "midi_gate", "midi_voice_freq", "midi_voice_gate",
                                        "midi_voice_vel", "midi_voice_key", "midi_vel",
@@ -3902,7 +3902,7 @@ static double node_cost(Ctx* c, Node* n, int depth) {
     Node* d = user_def(c, n->str);
     if (d) v += def_cost(c, d, depth);
     else if (eq(n->str, "sin") || eq(n->str, "cos") || eq(n->str, "exp") || eq(n->str, "log") ||
-             eq(n->str, "tanh") || eq(n->str, "pow") || eq(n->str, "atan2") || eq(n->str, "tan"))
+             eq(n->str, "tanh") || eq(n->str, "pow") || eq(n->str, "atan2") || eq(n->str, "tan") || eq(n->str, "erf"))
       v += 3.0;
     if ((eq(n->str, "sum") || eq(n->str, "each")) && n->nkids == 2) {
       double N;
@@ -3942,7 +3942,7 @@ static double inst_cost(Ctx* c, Node* n, int depth, int inside, double* in_inst)
       for (int i = 0; i < d->nkids; i++) dv += inst_cost(c, d->kids[i], depth + 1, inside, in_inst);
       v += dv;
     } else if (eq(n->str, "sin") || eq(n->str, "cos") || eq(n->str, "exp") || eq(n->str, "log") ||
-               eq(n->str, "tanh") || eq(n->str, "pow") || eq(n->str, "atan2") || eq(n->str, "tan"))
+               eq(n->str, "tanh") || eq(n->str, "pow") || eq(n->str, "atan2") || eq(n->str, "tan") || eq(n->str, "erf"))
       v += 3.0;
     if ((eq(n->str, "sum") || eq(n->str, "each")) && n->nkids == 2) {
       double N;

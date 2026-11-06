@@ -313,12 +313,25 @@ def field_at(f, p):
 # The place nearest p.
 def field_place(p, n): floor((p - floor(p)) * n + 0.5) mod n
 
-# A Gaussian of area 1 round the ring, at u from its centre: no narrower
-# than the places can show.
+# What a stretch 2h long at d holds of a Gaussian of area 1, s being its
+# width times sqrt(2).
+def field_cell(d, h, s): 0.5 * (erf((d + h) / s) - erf((d - h) / s))
+
+# A Gaussian of area 1 wrapped round a ring of n places, at u from its
+# centre: what the place there holds, as a height. A place is a stretch of
+# ring, so it holds the curve's integral over that stretch, and the places
+# sum to 1 at any width: as w goes to 0 it is all in the nearest place. The
+# copies wrapping round come in once the tails reach them; when there are
+# too many to add, the curve is its Fourier series, which by then is short.
 def field_gauss(u, w, n):
   let d = u - floor(u + 0.5)
-  let s = max(w, 0.5 / n)
-  exp(-d * d / (2 * s * s)) / (s * sqrt(TAU))
+  let h = 0.5 / n
+  let sd = max(abs(w), 1e-9)
+  let s = sd * sqrt(2)
+  if sd < 0.09 then field_cell(d, h, s) * n
+  else if sd < 0.25 then (field_cell(d, h, s) + field_cell(d + 1, h, s) + field_cell(d - 1, h, s)) * n
+  else 1 + 2 * sum(5, k =>
+    exp(-2 * PI * PI * k * k * sd * sd) * cos(TAU * k * d) * sin(PI * k / n) / (PI * k / n))
 
 # How much this place stands out from its neighbours: nabla twice, i i = -1
 # giving the sign. Things flow away from it.

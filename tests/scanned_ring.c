@@ -116,6 +116,34 @@ TEST(shaped_strike_lands_whole) {
     CHECK(fabs(peak[k] / peak[1] - 1) < 0.1, "at %d Hz it peaked at %g, at 48000 %g", rates[k], peak[k], peak[1]);
 }
 
+/* The places hold the whole blow, at any width and wherever the centre
+ * falls between them: read once round, their mean is its area. */
+TEST(shaped_source_has_area_one) {
+  const double widths[] = {0, 0.0005, 0.003, 0.022, 0.0899, 0.2, 0.3, 0.5, 2};
+  const double centres[] = {0.4, 0.4031, 0.4047};
+  double worst = 0;
+  for (int w = 0; w < 9; w++)
+    for (int k = 0; k < 3; k++) {
+      char src[512], err[4096];
+      snprintf(src, sizeof src,
+        "$x = ring(period = 1)\n"
+        "$x' = 0\n"
+        "$x'[gauss(%g, %g)] += if t < 0.00051 then 1920 else 0\n"
+        "$x[phasor(1)]\n", centres[k], widths[w]);
+      Rendered r = {0};
+      int rc = render_src(src, 2.0, 48000, &r, err, sizeof err);
+      CHECK(rc == 0, "doesn't render: %s", err);
+      if (rc) return;
+      double area = 0;
+      for (long i = 48000; i < 96000; i++) area += r.left[i];
+      area /= 48000;
+      worst = fmax(worst, fabs(area - 1));
+      CHECK(fabs(area - 1) < 1e-4, "width %g at %g holds %.6f", widths[w], centres[k], area);
+      rendered_free(&r);
+    }
+  printf("  area 1 to within %.2e, widths 0 to 2\n", worst);
+}
+
 TEST(ring_keeps_its_period) {
   const int rates[] = {24000, 48000, 96000};
   const double period = 0.8;

@@ -312,12 +312,36 @@ $x'[gauss(0.5, 0.05)] += if t < 0.001 then 1000 else 0
 $x'[gauss(0.5, 0.05)] -= if t < 0.001 then 1000 else 0
 $x[0.5]
 
-# --- no narrower than the places: width 0 is a point, not a fault
+# --- width 0 is the point: it lands as `$x'[p]` does, off a place as on one
+# expect at 2000: 1
+$x = ring(period = 1)
+$y = ring(period = 1)
+$x' = 0
+$y' = 0
+$x'[gauss(0.503, 0)] += if t < 0.001 then 1000 else 0
+$y'[0.503] += if t < 0.001 then 1000 else 0
+if abs($x[0.5] - $y[0.5]) < 0.000001 and $x[0.5] > 10 then 1 else 0
+
+# --- very wide it is flat all round, with the same blow
 # expect at 2000: 1
 $x = ring(period = 1)
 $x' = 0
-$x'[gauss(0.5, 0)] += if t < 0.001 then 1000 else 0
-if $x[0.5] > 10 then 1 else 0
+$x'[gauss(0.5, 2)] += if t < 0.00051 then 1920 else 0
+if abs($x[0.1] - 1) < 0.0001 and abs($x[0.5] - 1) < 0.0001 then 1 else 0
+
+# --- where the copies give way to the series, nothing shows
+# expect at 2000: 1
+$x = ring(period = 1)
+$y = ring(period = 1)
+$x' = 0
+$y' = 0
+$x'[gauss(0.5, 0.24999)] += if t < 0.001 then 1000 else 0
+$y'[gauss(0.5, 0.25001)] += if t < 0.001 then 1000 else 0
+if abs($x[0.5] - $y[0.5]) < 0.001 then 1 else 0
+
+# --- erf is the integral of a Gaussian
+# expect: 0.8427007922
+erf(1)
 
 # --- which side of the law it stands doesn't matter
 # expect at 2000: 7

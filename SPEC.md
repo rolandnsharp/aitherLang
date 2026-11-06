@@ -769,14 +769,21 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   at the nearest place when the field reaches it, and is sized as a delta
   should be. Sources sum, in any order; `-=` takes away.
 - **`$v'[gauss(p, width)] += force` is a source with a shape**: a Gaussian
-  of area 1 and standard deviation `width`, in rounds, wrapping round the
-  ring. Area 1 means a wider blow is the same blow, spread, and the point is
-  its limit: narrower than the places can show, it is half a place wide, so
-  `width` of 0 is a point and not a fault. The ring reaches a place once a
-  sweep, so the engine keeps the running total of the force and gives each
-  place all that came since it last passed: a blow shorter than a sweep
-  lands whole, at any rate, whichever side of the law the line stands. A
-  centre moving fast against a sweep is smeared. `gauss` means this only in
+  of area 1 and standard deviation `width`, in rounds, wrapped round the
+  ring, its copies summed. A place is a stretch of ring, so each holds the
+  curve's integral over that stretch, and the places sum to 1 at any width
+  and any centre: a wider blow is the same blow, spread, out to flat all
+  round the ring, and as `width` goes to 0 it all falls in the nearest
+  place, so `gauss(p, 0)` lands as `$v'[p]` does. The width you write is the
+  width computed, with no floor; a ring's resolution is a place, 1/N of a
+  round, and a bump narrower than that sits in one place. The ring reaches a
+  place once a sweep, so the engine keeps the running total of the force
+  and gives each place all that came since it last passed: a blow shorter
+  than a sweep lands whole at any rate, whichever side of the law the line
+  stands, **as long as the centre holds still for a sweep after it.** The
+  shape is laid where the centre is at each visit, so a centre that jumps
+  as a blow ends lands most of it at the new place, and one moving fast
+  against a sweep shears the bump and changes its total. `gauss` means this only in
   a source's brackets; anywhere else it is an error, unless the patch has
   its own `gauss`.
 - The rest of `[ ]` on a ring: `$v'[p] = ...` is an
@@ -1105,6 +1112,7 @@ per-mode physics state without delegating to a helper def.
 | `clamp(x, l, h)`| clamp to range  |
 | `int(x)`        | truncate to int |
 | `tanh(x)`       | soft-clip to ±1 (the limiter, when you want one) |
+| `erf(x)`        | the error function: the integral of a Gaussian, 0 at 0, ±1 far out |
 
 ### Oscillators: a clock and a shape
 
