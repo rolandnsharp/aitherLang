@@ -144,7 +144,7 @@ let [[w, _], [_, z]] = lp1(q, 100)
 # --- a def given a pair, giving a pair a side, gives a pair of pairs: a doublet as one value
 # expect until 2000: 0, 0
 let strike = impulse(10)
-let [a, b] = dho(strike, [440, 443], 0.01)
+let (a, b) = dho(strike, [440, 443], 0.01)
 [amplitude(a - dho(strike, 440, 0.01)), amplitude(b - dho(strike, 443, 0.01))]
 
 # --- a def that takes numbers, given a pair of pairs, runs once a number
@@ -252,14 +252,14 @@ if q then 1 else 0
 
 # --- the stdlib has Hamilton's units: i j = k, j k = i, k i = j
 # expect: 1, 1
-let [[_, _], [_, z]] = turn(i, j)
-let [[_, x], [_, _]] = turn(j, k)
+let ((_, _), (_, z)) = i * j
+let ((_, x), (_, _)) = j * k
 [z, x]
 
 # --- ... and k i = j, i j k = -1
 # expect: 1, -1
-let [[_, _], [y, _]] = turn(k, i)
-let [[w, _], [_, _]] = turn(turn(i, j), k)
+let ((_, _), (y, _)) = k * i
+let ((w, _), (_, _)) = i * j * k
 [y, w]
 
 # --- a patch's own i, j or k comes first: a let, state, a lambda's parameter
@@ -273,7 +273,7 @@ $k = 1
 play p:
   let i = 2
   i * 3
-let [[_, _], [_, z]] = turn(i, j)
+let ((_, _), (_, z)) = i * j
 [p[0] + sum(3, k => 0), z]
 
 # --- state in a play is the file's, so it takes the name too
@@ -285,35 +285,35 @@ p[0]
 
 # --- about: a rotation by an angle about a direction; apply turns a direction by it
 # expect: 0.69670670934716539, 0.71735609089952279
-let [[_, x], [y, _]] = apply(about(k, 0.8), i)
+let ((_, x), (y, _)) = apply(about(k, 0.8), i)
 [x, y]
 
 # --- rotations compose right first: a quarter about k (i to j), then a quarter about i (j to k)
 # expect: 0, 1
-let [[_, _], [y, z]] = apply(turn(about(i, PI / 2), about(k, PI / 2)), i)
+let ((_, _), (y, z)) = apply(about(i, PI / 2) * about(k, PI / 2), i)
 [y, z]
 
 # --- ... and the other way round: about i first (i stays), then about k (i to j)
 # expect: 1, 0
-let [[_, _], [y, z]] = apply(turn(about(k, PI / 2), about(i, PI / 2)), i)
+let ((_, _), (y, z)) = apply(about(k, PI / 2) * about(i, PI / 2), i)
 [y, z]
 
 # --- hopf: the way a spinor points, from the pole k; turned a quarter about i, k goes to -j
 # expect: -1, 0
-let [[_, _], [y, z]] = hopf(about(i, PI / 2))
+let ((_, _), (y, z)) = hopf(about(i, PI / 2))
 [y, z]
 
 # --- the double cover: a spinor turned all the way round is negated, and points the same way
 # expect: -1, 1
 let s = about(i, TAU)
-let [[w, _], [_, _]] = s
-let [[_, _], [_, z]] = hopf(s)
+let (w, _) = s
+let ((_, _), (_, z)) = hopf(s)
 [w, z]
 
 # --- the units are constants, so a def sees them, as it sees PI
 # expect: 0.69670670934716539, 0.71735609089952279
 def spun(a): apply(about(k, a), i)
-let [[_, x], [y, _]] = spun(0.8)
+let ((_, x), (y, _)) = spun(0.8)
 [x, y]
 
 # --- a def that takes numbers names the arguments it would run on, and their shapes
@@ -327,9 +327,9 @@ let q = [[1, 2], [3, 4]]
 if q then 1 else 0
 
 # --- the output's error quotes the expression
-# error: the patch ends in a pair of pairs, `turn(q, i) * 0.5`
+# error: the patch ends in a pair of pairs, `(q * i) * 0.5`
 let q = about(k, 0.3)
-turn(q, i) * 0.5
+q * i * 0.5
 
 # --- a sum names the term that doesn't fit
 # error: term 3 (n = 3) is a number

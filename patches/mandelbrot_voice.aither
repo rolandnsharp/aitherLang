@@ -58,12 +58,13 @@ $zr = 0.0
 $zi = 0.0
 
 # Each sample: Z := Z² + C with a magnitude clamp.
-# `turn([zr, zi], [zr, zi])` is Z². Add C. Clamp magnitude to 4 so the
+# `z * z` is Z². Add C. Clamp magnitude to 4 so the
 # orbit can't blow up to NaN — anything that escaped is dead audio
 # anyway, the clamp just keeps the pool clean.
-let zSquared = turn([$zr, $zi], [$zr, $zi])
-let nextR = if resetTrig > 0.5 then 0.0 else zSquared[0] + cReal
-let nextI = if resetTrig > 0.5 then 0.0 else zSquared[1] + cImag
+let z = ($zr, $zi)
+let (sq_x, sq_y) = z * z
+let nextR = if resetTrig > 0.5 then 0.0 else sq_x + cReal
+let nextI = if resetTrig > 0.5 then 0.0 else sq_y + cImag
 
 # Magnitude guard. A tone whose Z has crossed |Z|=2 is in the escaping
 # region; mute it (output 0) until the next reset. This is the standard

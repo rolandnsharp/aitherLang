@@ -35,9 +35,9 @@ $w3 = $w3 + dw3 * dt
 
 # ---------------------------------------------------------------- the turning
 
-$q = [[1, 0], [0, 0]]
-let w = [[0, $w1], [$w2, $w3]]                             # the spin, in the body
-let moved = $q + turn($q, w) * (0.5 * dt)
+$q = ((1, 0), (0, 0))
+let w = ((0, $w1), ($w2, $w3))                             # the spin, in the body
+let moved = $q + $q * w * (0.5 * dt)
 $q = moved / amplitude(moved)
 
 # ---------------------------------------------------------------- the axes
@@ -56,9 +56,9 @@ let s = if u < 0.3 then u / 0.3 else if u < 0.55 then (u - 0.3) / 0.25 else if u
 let along = 2 * s - 1
 let which = if u < 0.3 then 0 else if u < 0.55 then 1 else if u < 0.75 then 2 else 3
 let line = (if which == 0 then long * 0.8 else if which == 1 then middle * 0.55 else short * 0.3) * along
-let [ring_x, ring_y] = rotate([0.06, 0], TAU * s)
-let tip = middle * 0.55 + [[0, ring_x], [ring_y, 0]]       # the ring faces the viewer
-let [[_, px], [py, pz]] = if which == 3 then tip else line
+let (ring_x, ring_y) = rotate((0.06, 0), TAU * s)
+let tip = middle * 0.55 + ((0, ring_x), (ring_y, 0))       # the ring faces the viewer
+let ((_, px), (py, pz)) = if which == 3 then tip else line
 
 # The view: the spin axis (the world's y) standing upright, seen a
 # little from the side.

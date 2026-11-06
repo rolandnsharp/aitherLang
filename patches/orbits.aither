@@ -41,7 +41,7 @@ let den3 = [4, 5, 3, 8]
 # The point of the main cardioid at angle θ, and c: out into that
 # bulb by a little less than its size (about sin(πp/q)/q²) while held,
 # back inside the cardioid halfway through a glide.
-def cardioid(th): rotate([0.5, 0], th) - rotate([0.25, 0], 2 * th)
+def cardioid(th): rotate((0.5, 0), th) - rotate((0.25, 0), 2 * th)
 def seat(n0, d0, n1, d1, u):
   let r0 = n0 / d0
   let r1 = n1 / d1
@@ -65,13 +65,13 @@ let q3 = den3[a] + (den3[b] - den3[a]) * u
 
 def orbit(f, q, c):
   let step = phasor(f * q)
-  $z = [0, 0]
-  $was = [0, 0]
+  $z = (0, 0)
+  $was = (0, 0)
   $last = 0
   let hop = step < $last                             # the phasor wrapped: hop
   $last = step
   $was = if hop then $z else $was
-  $z = if hop then (if amplitude($z) > 2 then [0, 0] else turn($z, $z) + c) else $z
+  $z = if hop then (if amplitude($z) > 2 then (0, 0) else $z * $z + c) else $z
   let s = step * step * (3 - 2 * step)               # glide from where it was to where it is
   $was + ($z - $was) * s
 

@@ -27,18 +27,20 @@ let couple = midi_cc(20) * midi_cc(20) * 29 * dt   # how hard a neighbour pulls,
 let spread = 0.004 + midi_cc(21) * 0.02        # each oscillator's detuning, as a fraction of 220 Hz
 
 # Each oscillator's own turn a sample: 220 Hz, detuned by a fixed amount per place.
-def step(i, spread): rotate([1, 0], TAU * 220 * (1 + spread * sin(i * 2.399)) / sr)
+def step(i, spread): rotate((1, 0), TAU * 220 * (1 + spread * sin(i * 2.399)) / sr)
 
 # The ring's law: turn by its own step, pulled toward its neighbours,
 # then back on the unit circle (a phase oscillator).
 def law(me, left, right, step, couple):
-  let moved = turn(me, step) + (left + right - me * 2) * couple
+  let moved = me * step + (left + right - me * 2) * couple
   moved / amplitude(moved)
 
-$z = array(n, [1, 0])                          # the field: twelve phasors, each starting at [1, 0]
+$z = array(n, (1, 0))                          # the field: twelve phasors, each starting at [1, 0]
 each(n, i => $z[i] = law($z[i], $z[(i + n - 1) mod n], $z[(i + 1) mod n], step(i, spread), couple))
 
 play ring:
-  sum(n, k => pan($z[k - 1][0] * 0.09, (k - 1) / (n - 1) * 1.6 - 0.8))
+  sum(n, k =>
+    let (x, _) = $z[k - 1]
+    pan(x * 0.09, (k - 1) / (n - 1) * 1.6 - 0.8))
 
 ring |> reverb(1.8, 0.15)

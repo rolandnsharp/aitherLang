@@ -47,7 +47,8 @@ def push(trig): (discharge(trig, 1 / 0.001) - discharge(trig, 1 / 0.0003)) / 0.0
 # Returns the mode's position.
 def mode(strike, board, f, n, damp):
   let w = TAU * f * n
-  dho(strike * w * 0.3 / n + board, f * n, damp)[0]
+  let (x_, _) = dho(strike * w * 0.3 / n + board, f * n, damp)
+  x_
 
 $started = 0.0                                  # strike at once when sent, then every 4 s
 let hit   = push(impulse(0.25) + 1 - $started)

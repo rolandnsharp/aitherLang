@@ -294,4 +294,4 @@ def keep(start):
   $z = start
   $z = rotate($z, 0)
   $z
-keep([0.5, 0.25])
+keep((0.5, 0.25))

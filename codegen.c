@@ -1652,7 +1652,9 @@ static V emit_def(Ctx* c, Scope* sc, Node* def, Node* call, Buf* pre) {
   if (split == 4) return vquad(res[0].l, res[1].l, res[2].l, res[3].l);
   if (is_pair(res[0]) || is_pair(res[1])) {        /* a pair a side: a pair of pairs, the left side's first */
     for (int k = 0; k < 2; k++) if (!is_pair(res[k])) res[k] = vpair(res[k].l, res[k].l);
-    return vquad(res[0].l, res[0].r, res[1].l, res[1].r);
+    V q = vquad(res[0].l, res[0].r, res[1].l, res[1].r);
+    q.lad = res[0].lad || res[1].lad;    /* until fields: then this is a field of two */
+    return q;
   }
   return vpair(res[0].l, res[1].l);
 }
@@ -2346,6 +2348,7 @@ typedef struct {
   int* whole;
   int any_pair;                        /* some branch's result is a pair */
   const char* rl; const char* rr;
+  int any_lad;                         /* some branch's result is a value on the ladder */
 } RecLoop;
 
 static Node* self_call_walk(const char* name, Node* n) {
@@ -2516,6 +2519,7 @@ static void emit_tail(Ctx* c, Scope* sc, RecLoop* lp, Node* n, Buf* o) {
   V v = emit(c, sc, n, o);
     no_quad(c, v, "def rec", n);
   if (is_pair(v)) lp->any_pair = 1;
+  if (v.lad) lp->any_lad = 1;
   badd(c, o, "  %s = (%s); %s = (%s); break;\n", lp->rl, v.l, lp->rr, v.r);
 }
 
@@ -2533,12 +2537,13 @@ static V emit_loop_side(Ctx* c, Scope* sc, Node* def, Node* call, V* args, int* 
   for (int i = 0; i < def->nparams; i++) {
     const char* p = def->params[i];
     if (bound[i]) { lp.vl[i] = ""; lp.vr[i] = ""; continue; }
+    if (args[i].lad) lp.whole[i] = 1;    /* a value is always taken whole */
     if (lp.whole[i]) {
       const char* vl = fresh(c, F(c, "rec_%s_l", p));
       const char* vr = fresh(c, F(c, "rec_%s_r", p));
       badd(c, pre, "  double %s = (%s); double %s = (%s);\n", vl, args[i].l, vr, args[i].r);
       Ent* e = lput(c, &inner->stereo, p);
-      e->a = vl; e->b = vr;
+      e->a = vl; e->b = vr; e->lad = args[i].lad;
       lp.vl[i] = vl; lp.vr[i] = vr;
       continue;
     }
@@ -2570,7 +2575,9 @@ static V emit_loop_side(Ctx* c, Scope* sc, Node* def, Node* call, V* args, int* 
   c->deferred = deferred;
   c->def_stack.n--;
   bcat(c, pre, "  }\n");
-  return lp.any_pair ? vpair(lp.rl, lp.rr) : mono(lp.rl);
+  V r = lp.any_pair ? vpair(lp.rl, lp.rr) : mono(lp.rl);
+  r.lad = lp.any_lad;
+  return r;
 }
 
 static V emit_loop(Ctx* c, Scope* sc, Node* def, Node* call, Buf* pre) {
@@ -2588,7 +2595,7 @@ static V emit_loop(Ctx* c, Scope* sc, Node* def, Node* call, Buf* pre) {
     args[i] = emit(c, sc, call->kids[i], &own);
     if (own.n) for (int k = 0; k < i; k++) if (!bound[k]) args[k] = capture(c, pre, args[k]);
     bcat(c, pre, bstr(&own));
-    if (is_pair(args[i]) && !whole[i]) split = 1;
+    if (is_pair(args[i]) && !whole[i] && !args[i].lad) split = 1;
   }
   if (!split) return emit_loop_side(c, names, def, call, args, bound, 0, pre);
   V l = emit_loop_side(c, names, def, call, args, bound, 0, pre);
@@ -2820,6 +2827,11 @@ static V emit_ident_raw(Ctx* c, Scope* sc, Node* n) {
   Ent* cq = hfind(&c->const_quads, s);
   if (cq) {                              /* a constant pair of pairs (Hamilton's i): its numbers */
     Node* q = cq->node;
+    if (q->kids[0]->kind == nkNum) {
+      V z = vpair(num_lit(c, q->kids[0]->num), num_lit(c, q->kids[1]->num));
+      z.lad = 1;
+      return z;
+    }
     V v = vquad(num_lit(c, q->kids[0]->kids[0]->num), num_lit(c, q->kids[0]->kids[1]->num),
                 num_lit(c, q->kids[1]->kids[0]->num), num_lit(c, q->kids[1]->kids[1]->num));
     v.lad = cq->lad;
@@ -3511,7 +3523,9 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
       const char* im = fresh(c, "an_im");
       badd(c, pre, "  double %s = n_hilbert_a((DspState*)s, (long)(%s), %s);\n", re, off_a, a[0]);
       badd(c, pre, "  double %s = -n_hilbert_b((DspState*)s, (long)(%s), %s);\n", im, off_b, a[0]);
-      return vpair(re, im);
+      V z = vpair(re, im);
+      z.lad = 1;
+      return z;
     }
     pair_operands(c, sc, n, pre, 0, "no arguments");     /* input */
     return vpair("aither_in_l", "aither_in_r");
@@ -4711,7 +4725,7 @@ static const char* emit_program(Ctx* c, Node* program) {
         }
       } else {
         V v = emit(c, top, rhs, body);
-        if (is_quad(v) && quad_literal(rhs)) {     /* a constant, as a number is */
+        if ((is_quad(v) && quad_literal(rhs)) || (is_value_lit(rhs) && !is_quad(v) && all_nums(rhs))) {     /* a constant, as a number is */
           Ent* q = hput(c, &c->const_quads, s->str);
           q->node = rhs; q->lad = v.lad;
         }

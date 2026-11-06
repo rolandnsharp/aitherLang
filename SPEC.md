@@ -575,7 +575,7 @@ The initial value may be a rule, a function of the index: `array(n, i
 ```
 let h = array(24, j => max(0, 1 - abs(j - centre)))           # a bump around centre
 let r = array(len(a), j => if j == 0 then 0 else (a[j - 1] - a[j]) / (a[j - 1] + a[j]))
-let z = array(8, k => rotate([1, 0], k * TAU / 8))           # eight directions: pairs
+let z = array(8, k => rotate((1, 0), k * TAU / 8))           # eight directions: pairs
 ```
 
 The index is bound as `each` binds it, a number known when the patch
@@ -751,7 +751,7 @@ read alike wherever they meet: indexing, arithmetic (element
 by element), and `wave`, which reads any array as a table.
 
 `let [a, b] = p` names a pair's two sides where the patch reads
-them, with names of its meaning: `let [pos, vel] = dho(...)`,
+them, with names of its meaning: `let (pos, vel) = dho(...)`,
 `let [l, r] = sig`, `let [i, q] = input()`. `_` names a side not
 wanted; a number gives both names the number; two names, no more.
 
@@ -865,8 +865,22 @@ in one sits inside. In `if` and `sum` the narrower sits inside too. It
 plays as its two numbers, and comparisons take numbers.
 
 A value meeting a `[a, b]` pair is an error that says to choose: `(1, 2)
-+ [3, 4]`. `turn`, `unturn` and `conj` take either, and give a value if
-given one.
++ [3, 4]`. `conj`, and `turn` and `unturn` while they last, take either,
+and give a value if given one.
+
+The stdlib's complex results are values: `spin`, `rotate`, `dho`, `vdp`,
+`freq_shift`, `pixel`, and `analytic`. `pan`, `width`, `haas` and `mono`
+are stereo, and stay `[a, b]`. To hear a value as stereo, or turn stereo:
+
+```
+let (a, b) = z          # a value's two numbers
+let s = [a, b]          # now two sides
+let [l, r] = stereo
+let z = (l, r)          # now one complex number
+```
+
+A def that shapes each number (`drive`) sees a value whole, and its
+arithmetic is the ladder's: give it `[a, b]` if it means each side.
 
 **Errors name shapes.** Where a value's shape is wrong, the error quotes
 each argument as written with its shape (`lp1 is given \`q\`, a pair of
@@ -1368,21 +1382,21 @@ def spin(freq):                           # the unit pair turning at freq Hz
 
 `spin` is the unit pair turning at `freq` Hz: one phase, both sides.
 Turn a pair by it to set it spinning; turning by a spin adds speeds,
-so `turn(spin(220), spin(50))` is `spin(270)` and `turn(p, p)` doubles
+so `spin(220) * spin(50)` is `spin(270)` and `p * p` doubles
 `p`'s speed.
 
 ```
-def rotate(z, angle): turn(z, [cos(angle), sin(angle)])
-def freq_shift(signal, hz): turn(analytic(signal), spin(hz))
+def rotate(z, angle): z * (cos(angle), sin(angle))
+def freq_shift(signal, hz): analytic(signal) * spin(hz)
 ```
 
 ```
-let i = [[0, 1], [0, 0]]                  # Hamilton's units ("Pairs of pairs")
-let j = [[0, 0], [1, 0]]
-let k = [[0, 0], [0, 1]]
-def about(dir, angle): [[cos(angle / 2), 0], [0, 0]] + dir * sin(angle / 2)
-def apply(r, v): turn(turn(r, v), conj(r))
-def hopf(s): turn(turn(s, [[0, 0], [0, 1]]), conj(s))
+let i = (0, 1)                            # Hamilton's units ("Values on the ladder")
+let j = ((0, 0), (1, 0))
+let k = ((0, 0), (0, 1))
+def about(dir, angle): cos(angle / 2) + dir * sin(angle / 2)
+def apply(r, v): r * v * conj(r)
+def hopf(s): s * ((0, 0), (0, 1)) * conj(s)
 ```
 
 `i`, `j` and `k` are Hamilton's units, i j = k and j i = −k; a patch's
@@ -1390,7 +1404,7 @@ own names come first. `about(dir, angle)` is the rotation by `angle`
 about a unit direction, his versor of half the angle (applied, a
 rotation turns by twice its own angle). `apply(r, v)` turns a direction
 v (a pair of pairs with w = 0) by r, his r v r⁻¹; composed rotations
-apply right first, `apply(turn(r2, r1), v)` being r1 then r2.
+apply right first, `apply(r2 * r1, v)` being r1 then r2.
 `hopf(s)` is the way a spinor points, the pole k turned by it: a spinor
 turned all the way round is negated and points the same way.
 
@@ -1436,7 +1450,7 @@ Each sample the phasor turns by `wd · dt` and shrinks by
 `exp(-damp · w · dt)`, then the force pushes it by `force · dt / wd`:
 
 ```
-$z = turn($z, exp(-damp * w * dt) * [cos(wd * dt), sin(wd * dt)]) + [0, -force * dt / wd]
+$z = $z * (exp(-damp * w * dt) * (cos(wd * dt), sin(wd * dt))) + (0, -force * dt / wd)
 ```
 
 That is the spring's motion sampled exactly, not stepped towards, so

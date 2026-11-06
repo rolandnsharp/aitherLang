@@ -33,7 +33,8 @@ let revAmt      = midi_cc(19)
 # of the rotation onto the real axis.
 play pure:
   let p = spin(220)
-  let s = p[0] * 0.15
+  let (p_x, _) = p
+  let s = p_x * 0.15
   let w1 = max(0, 1 - voiceMix * 4)
   [s * w1, s * w1]
 
@@ -51,8 +52,9 @@ play heterodyne:
   let carrier = spin(220)
   let modf = 50 + driveFreq * 150
   let modu = spin(modf)
-  let mixed = turn(carrier, modu)
-  let s = mixed[0] * 0.15
+  let mixed = carrier * modu
+  let (mixed_x, _) = mixed
+  let s = mixed_x * 0.15
   let w2 = max(0, 1 - abs(voiceMix - 0.333) * 4)
   [s * w2, s * w2]
 
@@ -69,7 +71,7 @@ play halo:
   let p = spin(220)
   # p is already a turning pair, so shifting it is one turn: no Hilbert
   # filters needed to rebuild the quarter-turn side freq_shift would make.
-  let shifted = turn(p, spin(shimmerAmt * 100)) * 0.5
+  let shifted = p * spin(shimmerAmt * 100) * 0.5
   let s = shifted * 0.15
   let w3 = max(0, 1 - abs(voiceMix - 0.667) * 4)
   s * w3
@@ -83,9 +85,12 @@ play halo:
 # accumulator.
 play fractal:
   let p = spin(220)
-  let p2 = turn(p, p)      # rotation at 440 Hz
-  let p4 = turn(p2, p2)  # rotation at 880 Hz
-  let s = (p[0] * 0.5 + p2[0] * 0.3 + p4[0] * 0.15) * 0.15
+  let p2 = p * p      # rotation at 440 Hz
+  let p4 = p2 * p2  # rotation at 880 Hz
+  let (p_x, _) = p
+  let (p2_x, _) = p2
+  let (p4_x, _) = p4
+  let s = (p_x * 0.5 + p2_x * 0.3 + p4_x * 0.15) * 0.15
   let w4 = max(0, 1 - abs(voiceMix - 1.000) * 4)
   [s * w4, s * w4]
 

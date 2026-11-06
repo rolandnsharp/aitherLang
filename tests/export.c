@@ -60,8 +60,8 @@ TEST(export_exact) {
       "play fx: input() * (0.3 + k) |> delay(0.013, 0.1)\n"
       "play room: tape(mono(keys), 1, t, t - 0.25, 1) * 0.3\n"
       "play turning:\n"
-      "  let z = turn(spin(220), spin(3))\n"
-      "  z[0] * 0.05\n"
+      "  let (x, _) = spin(220) * spin(3)\n"
+      "  x * 0.05\n"
       "(keys + fx + room + turning) |> reverb(1.2, 0.2)\n");
   put("moves.txt",
       "0.10 note 60 100\n"

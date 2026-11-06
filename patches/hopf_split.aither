@@ -56,16 +56,20 @@ let phi = TAU * (fibre mod per) / per + TAU * t / 37
 # ---------------------------------------------------------------- the tori
 
 # One direction's spinors, turned together by alpha.
-let xi = rotate([cos(theta / 2), 0], alpha)
-let eta = rotate([sin(theta / 2), 0], alpha + phi)
+let xi = rotate((cos(theta / 2), 0), alpha)
+let eta = rotate((sin(theta / 2), 0), alpha + phi)
 
 # Stereographic projection from where eta is i, which lies on the south
 # pole's fibre: that fibre is the axis itself, through infinity.
-let away = 1 - eta[1]
-let turned = rotate([xi[0] / away, xi[1] / away], TAU * t / 31)
-let tipped = rotate([turned[1], eta[0] / away], 1.35)
-let near = amplitude([turned[0], tipped[0]]) * 0.13 < 0.55  # the hourglass's far side, through infinity,
-let tori = if near then [turned[0] * 0.13 + 0.38, tipped[0] * 0.13] else [3, 3]   # off the screen, where the beam blanks
+let (eta_x, eta_y) = eta
+let away = 1 - eta_y
+let (xi_x, xi_y) = xi
+let turned = rotate((xi_x / away, xi_y / away), TAU * t / 31)
+let (turned_x, turned_y) = turned
+let tipped = rotate((turned_y, eta_x / away), 1.35)
+let (tipped_x, _) = tipped
+let near = amplitude([turned_x, tipped_x]) * 0.13 < 0.55  # the hourglass's far side, through infinity,
+let tori = if near then [turned_x * 0.13 + 0.38, tipped_x * 0.13] else [3, 3]   # off the screen, where the beam blanks
 
 # ---------------------------------------------------------------- the sphere
 
@@ -75,9 +79,11 @@ let ring = floor(g)
 let a = TAU * (g mod 1)
 let lat = if ring == 1 then PI / 2 else if ring == 2 then PI * sweep else PI * (1 - sweep)
 let on_rim = [cos(a), sin(a)]                              # ring 0: the outline, flat to the screen
-let round = rotate([sin(lat) * cos(a), sin(lat) * sin(a)], TAU * t / 31)
-let seen = rotate([round[1], cos(lat)], 1.35)
-let dot = if ring == 0 then on_rim else [round[0], seen[0]]
+let round = rotate((sin(lat) * cos(a), sin(lat) * sin(a)), TAU * t / 31)
+let (round_x, round_y) = round
+let seen = rotate((round_y, cos(lat)), 1.35)
+let (seen_x, _) = seen
+let dot = if ring == 0 then on_rim else [round_x, seen_x]
 let sphere = [dot[0] * 0.3 - 0.6, dot[1] * 0.3]
 
 if on_tori then tori else sphere

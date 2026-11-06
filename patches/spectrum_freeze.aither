@@ -17,11 +17,13 @@
 let frame = 512
 let bin = pixel_index(frame, 1)
 
-$held = array(frame, [0, 0], every = frame)
+$held = array(frame, (0, 0), every = frame)
 
 let frozen = midi_cc(20) > 0.5
-let source = if frozen then $held[bin] else input()
+let [in_re, in_im] = input()
+let here = (in_re, in_im)                  # a spectrum's bin: one complex number
+let source = if frozen then $held[bin] else here
 let turned = rotate(source, TAU * noise())
 
 $held[bin] = turned
-if frozen then turned else input()
+if frozen then turned else here

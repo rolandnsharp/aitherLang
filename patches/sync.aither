@@ -55,23 +55,23 @@ $F = 0.0
 $F = $F + dt * (if midi_note(39) > 0 then (TAU * 40 - $F) * 1.5 else -$F * 1.5)
 let lead = spin(f0 * pow(2, 1 / 12))
 
-$z = array(32, [1, 0])                              # every spin, starting together
+$z = array(32, (1, 0))                              # every spin, starting together
 let Z = sum(32, m => $z[m - 1]) / N
-let [Zx, Zy] = Z
-let [Lx, Ly] = lead
+let (Zx, Zy) = Z
+let (Lx, Ly) = lead
 let scatter = midi_trig(38) > 0
 
 each(32, j =>
   let w = TAU * f0 * (1 + spread * (2 * (j + 0.5 + 0.45 * sin(j * 7.3)) / N - 1))   # even, but not quite: an even comb cancels too well
-  let [x, y] = $z[j]
+  let (x, y) = $z[j]
   let pull = $K * (Zy * x - Zx * y) + $F * (Ly * x - Lx * y)   # K r sin(ψ - θ), the conductor's likewise
   let a = (w + pull) * dt
-  let next = turn($z[j], [cos(a), sin(a)])
+  let next = $z[j] * (cos(a), sin(a))
   let r = TAU * noise()
-  $z[j] = if scatter then [cos(r), sin(r)] else next / amplitude(next))
+  $z[j] = if scatter then (cos(r), sin(r)) else next / amplitude(next))
 
 let voices = sum(32, m =>
   let z = $z[m - 1]
-  let z2 = turn(z, z)
-  z + conj(z2) * 0.4 + turn(z2, z2) * 0.12) / N
+  let z2 = z * z
+  z + conj(z2) * 0.4 + z2 * z2 * 0.12) / N
 voices * 0.6 |> tanh

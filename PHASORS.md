@@ -21,7 +21,7 @@ number" type, it adds the operations that read a pair as one
 | operation       | what it does to the point                          |
 |-----------------|----------------------------------------------------|
 | `spin(hz)`      | a unit point turning `hz` times a second           |
-| `turn(z, w)`    | `z` turned by `w`'s angle and scaled by its length |
+| `z * w`         | `z` turned by `w`'s angle and scaled by its length |
 | `conj(z)`       | the same point turning the other way               |
 | `amplitude(z)`  | how far it is from the centre                      |
 | `phase(z)`      | which way it points                                |
@@ -37,7 +37,7 @@ turns, turns this way: `spin`, `analytic`, `rotate`, `dho`, `vdp`; and
 `tv` draws y upward, so on screen it is anticlockwise too.
 
 The one rule worth remembering: **turning by a spin adds its speed.**
-`turn(spin(220), spin(50))` is `spin(270)`, and `turn(p, p)` doubles
+`spin(220) * spin(50)` is `spin(270)`, and `p * p` doubles
 `p`'s speed. A frequency shift, a radio tuned down, single-sideband
 mixing and octave doubling are all this rule.
 
@@ -67,7 +67,7 @@ frequency, at every instant, which is section 4.
 
 ## 3. Moving every frequency: `freq_shift`
 
-`freq_shift(signal, hz)` is `turn(analytic(signal), spin(hz))`: every
+`freq_shift(signal, hz)` is `analytic(signal) * spin(hz)`: every
 spin in the signal turned `hz` faster, so every frequency moves up by
 `hz` Hz, with no mirror image below. This is single-sideband
 modulation by the phasing method, which Ralph Hartley worked out for
@@ -85,8 +85,8 @@ what is wanted from it reads both sides at once:
 | you want                      | read the pair with                              |
 |-------------------------------|-------------------------------------------------|
 | how loud                      | `amplitude(p)`                                  |
-| how fast it turns: frequency  | `phase(turn(p, conj(prev(p)))) / (TAU * dt)`    |
-| move it, shift it, mix it     | `turn(p, w)`                                    |
+| how fast it turns: frequency  | `phase(p * conj(prev(p))) / (TAU * dt)`    |
+| move it, shift it, mix it     | `p * w`                                    |
 | hear it                       | the pair itself                                 |
 
 Length as instantaneous amplitude and turning rate as instantaneous
@@ -144,7 +144,7 @@ each sample the phasor turns by `wd·dt`, shrinks, and the force pushes
 it:
 
 ```
-$z = turn($z, exp(-damp * w * dt) * [cos(wd * dt), sin(wd * dt)]) + [0, -force * dt / wd]
+$z = $z * (exp(-damp * w * dt) * (cos(wd * dt), sin(wd * dt))) + (0, -force * dt / wd)
 ```
 
 This is the "phasor filter" Max Mathews and Julius Smith described for

@@ -38,4 +38,5 @@ let edge    = (if g > 0.5 and prev(g) < 0.5 then 1.0 else 0.0) / dt * 2083
 let sustain = noise() * held * 1500000.0
 let strike  = kickoff + edge + sustain
 
-dho(strike, f, damp)[0] * 0.15
+let (x_, _) = dho(strike, f, damp)
+x_ * 0.15

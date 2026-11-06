@@ -29,7 +29,7 @@ def didge3(mouth, voiceP, lipF, f0, ft1, ft2, zt, modeAmt, turb):
     # velocity takes both sides: v = -(wd q + damp w x), wd = w sqrt(1 -
     # damp^2) the rate it turns. Reading one side would be off by about the
     # damping, 5-9% here (PHASORS.md, "the second side isn't velocity").
-    let [mx, mq] = dho(uS, fj, zj)
+    let (mx, mq) = dho(uS, fj, zj)
     let mv = -(TAU * fj * sqrt(1 - zj * zj) * mq + zj * TAU * fj * mx)   # its velocity
     zt * 2 * zj * TAU * fj * mv), 493.04)
   let wl = TAU * lipF
@@ -40,7 +40,7 @@ def didge3(mouth, voiceP, lipF, f0, ft1, ft2, zt, modeAmt, turb):
   $u  = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp)) * (1 + br * turb)
   let pM = sum(2, k =>
     let fk = f0 * (if k == 1 then 2.65 else 4.35)
-    let [mx, mq] = dho(uS, fk, 0.05)
+    let (mx, mq) = dho(uS, fk, 0.05)
     let mv = -(TAU * fk * sqrt(1 - 0.05 * 0.05) * mq + 0.05 * TAU * fk * mx)   # its velocity
     modeAmt * (if k == 1 then 4.0 else 2.5) * 2 * 0.05 * TAU * fk * mv)
   let pplus = $u * 0.8 + $pm

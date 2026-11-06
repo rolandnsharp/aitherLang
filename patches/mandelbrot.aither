@@ -8,12 +8,12 @@
 let w = 160
 let h = 120
 let k = pixel_index(w, h)
-let c = pixel(w, h) * 1.5 - [0.5, 0]
+let c = pixel(w, h) * 1.5 - (0.5, 0)
 
-$z = array(w * h, [0, 0])              # each pixel's z
-$m = array(w * h, [0, 0])              # ... and what is shown of it
+$z = array(w * h, (0, 0))              # each pixel's z
+$m = array(w * h, (0, 0))              # ... and what is shown of it
 let z = $z[k]
-let next = if amplitude(z) > 2 then z else turn(z, z) + c
+let next = if amplitude(z) > 2 then z else z * z + c
 $z[k] = next
 
 let seen = $m[k] + (next - $m[k]) * 0.05

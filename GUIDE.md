@@ -936,7 +936,8 @@ The damped harmonic oscillator is a universal primitive:
 
 ```
 play tuning_fork:
-  dho(impulse(2) / dt * 2000, 440, 0.0015)[0] * 0.3     # x'' = F - 2 damp w x' - w^2 x, struck twice a second
+  let (x, _) = dho(impulse(2) / dt * 2000, 440, 0.0015)     # x'' = F - 2 damp w x' - w^2 x, struck twice a second
+  x * 0.3
 
 tuning_fork
 ```

@@ -48,7 +48,7 @@ let split = [1.006, 1.0093, 1.0108, 1.0072, 1.0089, 1.0101]
 def bell(push_in, prime, where):
   sum(6, n =>
     let f = prime * ratio[n - 1]
-    let [pa, pb] = rotate([push_in / (TAU * f), 0], winds[n - 1] * where)
+    let (pa, pb) = rotate((push_in / (TAU * f), 0), winds[n - 1] * where)
     let a = resonator(pa, f, 2 / ring[n - 1])
     let b = resonator(pb, f * split[n - 1], 2 / ring[n - 1])
     (a + b) * level[n - 1])
@@ -65,12 +65,12 @@ let speed = 1 + 3 * slew(midi_cc(21), 0.3)
 let step = TAU / 20 * speed * dt
 let axes = [1, 1.5, 1.25]                                  # the rates, as ratios of the one
 let diagonal = (i + j + k) * sqrt(1 / 3)
-$turn1 = [[1, 0], [0, 0]]
-$turn2 = [[1, 0], [0, 0]]
-$turn3 = [[1, 0], [0, 0]]
-let t1 = turn(about(k, step * axes[0]), $turn1)
-let t2 = turn(about(j, step * axes[1]), $turn2)
-let t3 = turn(about(diagonal, step * axes[2]), $turn3)
+$turn1 = ((1, 0), (0, 0))
+$turn2 = ((1, 0), (0, 0))
+$turn3 = ((1, 0), (0, 0))
+let t1 = about(k, step * axes[0]) * $turn1
+let t2 = about(j, step * axes[1]) * $turn2
+let t3 = about(diagonal, step * axes[2]) * $turn3
 $turn1 = t1 / amplitude(t1)
 $turn2 = t2 / amplitude(t2)
 $turn3 = t3 / amplitude(t3)
@@ -97,7 +97,7 @@ let strength = 0.3 + 0.3 * midi_cc(22)
 # two directions Hamilton's product is minus their dot product, then
 # their cross product: the dot product is minus its first number.
 def along(face, v):
-  let [[w, _], [_, _]] = turn(face, v)
+  let ((w, _), (_, _)) = face * v
   -w
 let heard1 = along(face1, field - face1 * $s1) * strength
 let heard2 = along(face2, field - face2 * $s2) * strength

@@ -53,18 +53,18 @@ pick(t, 2)
 
 # --- rotate's angle is a number, so a def passing it on takes one
 # expect until 9600: 0
-def wheel(th): rotate([0.5, 0], th)
-wheel(TAU * t) - rotate([0.5, 0], TAU * t)
+def wheel(th): rotate((0.5, 0), th)
+wheel(TAU * t) - rotate((0.5, 0), TAU * t)
 
 # --- a def parameter used as a pair stays a pair
 # expect until 9600: 0
 def wheel(p, th): rotate(p, th)
-wheel([0.5, 0.2], t) - rotate([0.5, 0.2], t)
+wheel((0.5, 0.2), t) - rotate((0.5, 0.2), t)
 
 # --- a def of two rotates
 # expect until 9600: 0
-def card(th): rotate([0.5, 0], th) - rotate([0.25, 0], 2 * th)
-card(t) * 0.5 - (rotate([0.5, 0], t) - rotate([0.25, 0], 2 * t)) * 0.5
+def card(th): rotate((0.5, 0), th) - rotate((0.25, 0), 2 * th)
+card(t) * 0.5 - (rotate((0.5, 0), t) - rotate((0.25, 0), 2 * t)) * 0.5
 
 # --- a def returns its pair state as it returns a pair let
 # expect until 9600: 0
@@ -111,15 +111,15 @@ turn(turn([3, 2], w), conj(w))
 
 # --- rotation keeps magnitude
 # expect: 1
-amplitude(rotate([1, 0], 0.7)) * amplitude(rotate([1, 0], 2.3)) * amplitude(rotate([1, 0], -1.9))
+amplitude(rotate((1, 0), 0.7)) * amplitude(rotate((1, 0), 2.3)) * amplitude(rotate((1, 0), -1.9))
 
 # --- phase after a rotate is the angle
 # expect: 1.234
-phase(rotate([1, 0], 1.234))
+phase(rotate((1, 0), 1.234))
 
 # --- phase wraps to -pi..pi
 # expect: -0.7
-phase(rotate([1, 0], TAU - 0.7))
+phase(rotate((1, 0), TAU - 0.7))
 
 # --- the amplitude of one number is an error
 # error: amplitude takes one pair
@@ -134,7 +134,7 @@ $ok
 
 # --- freq_shift moves 440 Hz to 640, the old pitch 20 dB down (two Goertzel meters)
 # expect at 23999: 1
-let [y, _] = freq_shift(sin(TAU * phasor(440)) * 0.5, 200)
+let (y, _) = freq_shift(sin(TAU * phasor(440)) * 0.5, 200)
 let on = if t > 0.05 then y else 0
 $at640 = [0, 0]
 $at440 = [0, 0]

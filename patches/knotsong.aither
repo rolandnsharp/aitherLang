@@ -56,8 +56,8 @@ let [x0, y0] = shadow(was, ph) * (1 - m) + shadow(bar, ph) * m
 let z0 = height(was, ph) * (1 - m) + height(bar, ph) * m
 
 # Turning slowly in space, and looked at from in front.
-let [y1, z1] = rotate([y0, z0], 0.31 * t)
-let [z2, x2] = rotate([z1, x0], 0.19 * t)
+let (y1, z1) = rotate((y0, z0), 0.31 * t)
+let (z2, x2) = rotate((z1, x0), 0.19 * t)
 let near = 3 / (4 - z2)
 let shape = [x2, y1] * near
 

@@ -310,7 +310,8 @@ choir |> reverb(3.5, 0.3)
 
 ```
 play tuning_fork:
-  dho(impulse(2) / dt * 2000, 440, 0.0015)[0] * 0.3
+  let (x, _) = dho(impulse(2) / dt * 2000, 440, 0.0015)
+  x * 0.3
 ```
 
 Same equation as a real tuning fork, x'' = F − 2·damp·ω·x' − ω²x.

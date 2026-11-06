@@ -37,8 +37,8 @@ play hum:
 
 def planet(f, orbit):
   let p = spin(f)
-  let octave = turn(p, p)                 # twice as fast: locked to p
-  let twelfth = turn(octave, p)           # three times
+  let octave = p * p                 # twice as fast: locked to p
+  let twelfth = octave * p           # three times
   let glow = 0.5 - 0.5 * cos(TAU * phasor(1 / orbit))   # rises and sets
   (p + octave * 0.35 * glow + twelfth * 0.12 * glow * glow) * glow
 
@@ -72,7 +72,8 @@ play bells:
 
 play halo:
   let shimmer = 0.6 + 0.4 * min(1, amplitude(bells) * 4)
-  turn(planets, spin(haloHz)) * shimmer * (haloHz / 6)
+  let [a, b] = planets
+  (a, b) * spin(haloHz) * shimmer * (haloHz / 6)
 
 # ----------------------------------------------------------------- the room
 

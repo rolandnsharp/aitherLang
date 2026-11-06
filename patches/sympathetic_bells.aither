@@ -56,9 +56,9 @@ let split = [1.006, 1.0093, 1.0108, 1.0072, 1.0089, 1.0101]
 def bell(push_in, prime, where):
   sum(6, k =>
     let f = prime * ratio[k - 1]
-    let p = rotate([push_in / (TAU * f), 0], winds[k - 1] * where)
-    let a = resonator(p[0], f, 2 / ring[k - 1])
-    let b = resonator(p[1], f * split[k - 1], 2 / ring[k - 1])
+    let (pa, pb) = rotate((push_in / (TAU * f), 0), winds[k - 1] * where)
+    let a = resonator(pa, f, 2 / ring[k - 1])
+    let b = resonator(pb, f * split[k - 1], 2 / ring[k - 1])
     (a + b) * level[k - 1])
 
 # A strike: a push of area 1 swelling and dying over a millisecond.
@@ -72,7 +72,7 @@ def push(trig): (discharge(trig, 1 / 0.001) - discharge(trig, 1 / 0.0003)) / 0.0
 let yaw = slew(midi_cc(21), 0.05) * TAU
 let tilt = slew(midi_cc(20), 0.05) * TAU
 let face1 = i
-let face2 = apply(turn(about(j, tilt), about(k, yaw)), i)
+let face2 = apply(about(j, tilt) * about(k, yaw), i)
 
 # ---------------------------------------------------------------- the field
 
@@ -92,7 +92,7 @@ let strength = 0.4 + 0.2 * midi_cc(22)
 # two directions Hamilton's product is minus their dot product, then
 # their cross product: the dot product is minus its first number.
 def along(face, v):
-  let [[w, _], [_, _]] = turn(face, v)
+  let ((w, _), (_, _)) = face * v
   -w
 let heard1 = along(face1, field - face1 * $s1) * strength
 let heard2 = along(face2, field - face2 * $s2) * strength

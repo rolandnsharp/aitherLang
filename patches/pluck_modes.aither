@@ -27,11 +27,13 @@ def share(n): 2 * sin(n * PI * at) / (n * n * PI * PI * at * (1 - at))
 def step(n):
   let f = n * f0 * sqrt(1 + stiff * n * n)
   let life = 3 / (1 + 0.02 * n * n)
-  exp(-dt / life) * [cos(TAU * f * dt), sin(TAU * f * dt)]
+  exp(-dt / life) * (cos(TAU * f * dt), sin(TAU * f * dt))
 
 let pluck = impulse(0.5)         # pulled and let go again every 2 s
 
-$z = array(N, k => [share(k + 1), 0])          # the shape at the start: each mode's share, at rest
-each(N, k => $z[k] = if pluck > 0 then [share(k + 1), 0] else turn($z[k], step(k + 1)))
+$z = array(N, k => (share(k + 1), 0))          # the shape at the start: each mode's share, at rest
+each(N, k => $z[k] = if pluck > 0 then (share(k + 1), 0) else $z[k] * step(k + 1))
 
-sum(N, n => sin(n * PI * pick) * $z[n - 1][0]) * 1.5
+sum(N, n =>
+  let (x, _) = $z[n - 1]
+  sin(n * PI * pick) * x) * 1.5

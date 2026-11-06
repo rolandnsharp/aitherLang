@@ -57,7 +57,7 @@ def bar(force, f1, t60, a2, a3):
 def didge_bore(mouth, lipF, lipD, f0):
   $pm = 0.0                             # wave arriving back at the lips
   $dp = 0.0                             # pressure drop across the lips
-  let lip = dho($dp * 1200000.0, lipF, lipD)[0]
+  let (lip, _) = dho($dp * 1200000.0, lipF, lipD)
   let a   = clamp(0.05 + lip, 0.0, 1.0) # lip opening; 0 = lips shut
   let u   = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp))   # Bernoulli flow
   let pplus = u * 0.8 + $pm             # outgoing wave: injected flow + reflection
@@ -97,7 +97,7 @@ def didge3(mouth, voiceP, lipF, f0, ft1, ft2, zt, modeAmt, turb):
     # velocity takes both sides: v = -(wd q + damp w x), wd = w sqrt(1 -
     # damp^2) the rate it turns. Reading one side would be off by about the
     # damping, 5-9% here (PHASORS.md, "the second side isn't velocity").
-    let [mx, mq] = dho(uS, fj, zj)
+    let (mx, mq) = dho(uS, fj, zj)
     let mv = -(TAU * fj * sqrt(1 - zj * zj) * mq + zj * TAU * fj * mx)   # its velocity
     zt * 2 * zj * TAU * fj * mv), 493.04)
   let wl = TAU * lipF
@@ -108,7 +108,7 @@ def didge3(mouth, voiceP, lipF, f0, ft1, ft2, zt, modeAmt, turb):
   $u  = a * (if $dp >= 0 then sqrt($dp) else -sqrt(-$dp)) * (1 + br * turb)
   let pM = sum(2, k =>
     let fk = f0 * (if k == 1 then 2.65 else 4.35)
-    let [mx, mq] = dho(uS, fk, 0.05)
+    let (mx, mq) = dho(uS, fk, 0.05)
     let mv = -(TAU * fk * sqrt(1 - 0.05 * 0.05) * mq + 0.05 * TAU * fk * mx)   # its velocity
     modeAmt * (if k == 1 then 4.0 else 2.5) * 2 * 0.05 * TAU * fk * mv)
   let pplus = $u * 0.8 + $pm
@@ -153,7 +153,7 @@ let popV  = clamp(fast / (slow * 4 + 0.000001), 0.3, 1)        # how hard: how f
 # Your pitch, for the toot: how fast the fundamental turns (follow.aither).
 let z     = analytic(lp1(lp1(lp1(mic, 200), 200), 200))   # the fundamental alone
 $pitch = 120.0
-$pitch = if g > 0.4 then clamp(phase(turn(z, conj(prev(z)))) / (TAU * dt), 40, 1500) else $pitch
+$pitch = if g > 0.4 then clamp(phase(z * conj(prev(z))) / (TAU * dt), 40, 1500) else $pitch
 let sung  = slew($pitch, 0.05)
 let toot  = slew(if g > 0.4 and sung > 250 then 1 else 0, 0.04)   # whoop up high: overblow
 

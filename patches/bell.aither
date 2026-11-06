@@ -49,7 +49,7 @@ def bell(strike, f, warble):
     let w = TAU * fm
     let damp = 0.0006 * pow(r, 1.3)                 # high modes die first
     let mode = dho(strike * w * 0.3 * pow(r, -0.3), fm, damp)
-    let doublet = (mode + turn(mode, wob)) * 0.5
+    let doublet = (mode + mode * wob) * 0.5
     if fm < 18000 then doublet / sqrt(r) else 0)
 
 # The peal: eight steps, three bells, each struck on its own steps.
@@ -82,7 +82,7 @@ let tick = bpf(noise(), 3500 + hard * 4000, 0.5) * discharge(hit, 400) * (0.25 +
 let ring = amplitude(bells)
 let air  = bpf(noise(), 6000, 0.6) * ring * 0.04
 
-let [x, q] = (bells + air) * 0.5 + tick
+let (x, q) = (bells + (air, air)) * 0.5 + (tick, tick)
 let angle = wide * PI / 2
 let dry = [x, x * cos(angle) + q * sin(angle)]
 dry * (1 - room * 0.5) + (mono(dry) |> reverb(4.5, 0.9)) * room * 0.6

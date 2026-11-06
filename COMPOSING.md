@@ -666,7 +666,7 @@ let hit = impulse(0.5)
 let strike = (discharge(hit, 1 / 0.001) - discharge(hit, 1 / 0.0003)) / 0.0007 * 2765   # a push of area 1, times w
 let bell = dho(strike, 440, 0.005)
 let ring = amplitude(bell)             # how hard it's still ringing: an envelope, at every sample
-let beat = turn(bell, spin(1.5))       # the whole bell 1.5 Hz higher: an even beat against itself
+let beat = bell * spin(1.5)       # the whole bell 1.5 Hz higher: an even beat against itself
 (bell + beat) * 0.5 + noise() * ring * 0.02   # and a breath that dies with it
 
 # Resonant filter — narrow bandpass at 800 Hz, driven by external audio
@@ -690,7 +690,7 @@ rate it turns. Chained physics uses it (a damping force, one
 oscillator's velocity driving another); the didge patches show it,
 with a comment. A pair given where `dho` takes a number makes a pair
 of pairs, a phasor a side (a bell's doublet as one value:
-`let [a, b] = dho(push, [f, f * 1.0013], damp)`); for a stereo pair use
+`let (a, b) = dho(push, [f, f * 1.0013], damp)`); for a stereo pair use
 two, or `resonator`, which returns a number.
 
 **Why this is `f(state)`-native.** In a modular synth you pick a
@@ -796,14 +796,14 @@ aither has no complex-number TYPE, but it has the OPERATIONS that
 make complex algebra useful, all of them one picture: a pair is a
 point that can turn. They take and return ordinary pairs. Use a pair
 whole where you can (the operations below, or played as it is); name
-its sides where a model needs both: `let [x, q] = dho(...)`.
+its sides where a model needs both: `let (x, q) = dho(...)`.
 
 | call                     | does                                                   |
 |--------------------------|--------------------------------------------------------|
 | `spin(hz)`               | the unit pair turning at `hz` Hz: `[cos, sin]` of one phase |
-| `turn(z, w)`             | `z` turned by `w`'s angle, scaled by its size (complex multiplication) |
+| `z * w`                  | `z` turned by `w`'s angle, scaled by its size (complex multiplication) |
 | `conj(z)`                | the same pair turning the other way                    |
-| `unturn(z, w)`           | `z` turned back by `w`'s angle, divided by its size (complex division: an impedance V / I, a transfer function) |
+| `z / w`                  | `z` turned back by `w`'s angle, divided by its size (complex division: an impedance V / I, a transfer function) |
 | `rotate(z, angle)`       | turned by a fixed angle, in radians                    |
 | `amplitude(z)`           | how big                                                |
 | `phase(z)`               | which way it points                                    |
@@ -811,8 +811,8 @@ its sides where a model needs both: `let [x, q] = dho(...)`.
 | `freq_shift(signal, hz)` | the analytic signal turned by a spin: shifted up `hz` Hz, a pair in quadrature |
 
 The rule the name carries: **turning by a spin adds its speed.** A
-frequency shift, a radio tuned down (`turn(iq, conj(spin(f)))`),
-single-sideband mixing and octave doubling (`turn(p, p)`) are all it.
+frequency shift, a radio tuned down (`iq * conj(spin(f))`),
+single-sideband mixing and octave doubling (`p * p`) are all it.
 
 `+`, `-`, `*` and `/` stay side by side: `p * q` multiplies each side
 (`sound * [0.8, 0.6]` is a gain a side), never the complex product. Reach
@@ -830,8 +830,8 @@ operation that reads the whole pair.
 | you want         | read the pair with                                  | instead of                     |
 |------------------|-----------------------------------------------------|--------------------------------|
 | how loud         | `amplitude(p)`                                      | one side, rectified and smoothed |
-| how fast it turns (pitch, FM) | `phase(turn(p, conj(prev(p)))) / (TAU * dt)` | timing zero crossings      |
-| move, shift, mix | `turn(p, w)`                                        | one side times a sine          |
+| how fast it turns (pitch, FM) | `phase(p * conj(prev(p))) / (TAU * dt)` | timing zero crossings      |
+| move, shift, mix | `p * w`                                        | one side times a sine          |
 | hear it          | the pair itself: the sink decides                   | `let [x, _] = p`               |
 
 The crystal radio shows why. A 1906 crystal set has one side, the
@@ -870,12 +870,12 @@ whole and are struck (`bell`, `orrery`) do this.
 In order of preference:
 
 1. **Use the pair whole.** An operation reads both sides for you:
-   `amplitude(p)`, `phase(p)`, `turn(p, w)`, or the pair played as it
+   `amplitude(p)`, `phase(p)`, `p * w`, or the pair played as it
    is. No names, nothing thrown away.
 2. **Destructure with both names** when a formula needs each side on
    its own. A damped mode's velocity is the case (the didge patches):
    ```
-   let [x, q] = dho(force, f, damp)
+   let (x, q) = dho(force, f, damp)
    let v = -(TAU * f * sqrt(1 - damp * damp) * q + damp * TAU * f * x)
    ```
 3. **One side, with `_`,** only where one number is all that fits.
@@ -892,7 +892,7 @@ usually serves. Taking one side is for where only one number fits.
 ### Pair producers — start with `spin`, not `sin(TAU * phasor(…))`
 
 When the next step in your signal chain is a pair operation (`turn`,
-`rotate`, `freq_shift`, or feeding `turn(p, p)` for octave doubling),
+`rotate`, `freq_shift`, or feeding `p * p` for octave doubling),
 **produce the rotation directly with `spin(rate)`** rather than
 building a scalar sine and then converting to analytic. Two reasons:
 
@@ -915,7 +915,7 @@ anything else that needs the angle-as-scalar. Use `spin`
 
 ### `turn` by a spin is a single-sideband mixer
 
-`turn(spin(220), spin(50))` produces a clean tone at
+`spin(220) * spin(50)` produces a clean tone at
 **270 Hz only** — the sum frequency. There is no 170 Hz lower
 sideband, no DC, nothing else of significance. The lower sideband is
 suppressed by construction because both inputs are analytic-signal
@@ -925,8 +925,9 @@ component.
 ```
 let carrier = spin(220)
 let modulator = spin(midi_cc(74) * 200)   # K1 sweeps modulator
-let mixed = turn(carrier, modulator)
-mixed[0] * 0.3
+let mixed = carrier * modulator
+let (x, _) = mixed
+x * 0.3
 ```
 
 Sweep K1 from 0 to 1 and the audible tone slides cleanly from 220 Hz
@@ -936,7 +937,7 @@ DSP it requires explicit Hilbert filters and careful sideband
 cancellation. Here it falls out of the producer-pair × producer-pair
 composition.
 
-### Phase-coherent octave stack via `turn(p, p)`
+### Phase-coherent octave stack via `p * p`
 
 Squaring a `spin` doubles its phase angle by construction —
 `(cos θ + i sin θ)² = cos 2θ + i sin 2θ`. That is, mathematically and
@@ -947,9 +948,12 @@ to each other.
 
 ```
 let p  = spin(220)
-let p2 = turn(p, p)        # 440 Hz, phase-locked
-let p4 = turn(p2, p2)      # 880 Hz, phase-locked
-(p[0] + p2[0] * 0.5 + p4[0] * 0.25) * 0.3
+let p2 = p * p        # 440 Hz, phase-locked
+let p4 = p2 * p2      # 880 Hz, phase-locked
+let (a, _) = p
+let (b, _) = p2
+let (c, _) = p4
+(a + b * 0.5 + c * 0.25) * 0.3
 ```
 
 This is harmonic stacking that no oscillator-bank approach can match —
@@ -986,9 +990,10 @@ inharmonic → enharmonic territory.
 ```
 $zr = 0.0
 $zi = 0.0
-let zsq = turn([$zr, $zi], [$zr, $zi])
-$zr = zsq[0] + cReal
-$zi = zsq[1] + cImag
+let z = ($zr, $zi)
+let (x, y) = z * z
+$zr = x + cReal
+$zi = y + cImag
 $zr      # the audio
 ```
 
@@ -1008,13 +1013,13 @@ a cycle, and glide between the points they land on:
 ```
 def orbit(f, q, c):
   let step = phasor(f * q)
-  $z = [0, 0]
+  $z = (0, 0)
   $was = [0, 0]
   $last = 0
   let hop = step < $last                 # the phasor wrapped: hop
   $last = step
   $was = if hop then $z else $was
-  $z = if hop then (if amplitude($z) > 2 then [0, 0] else turn($z, $z) + c) else $z
+  $z = if hop then (if amplitude($z) > 2 then (0, 0) else $z * $z + c) else $z
   let s = step * step * (3 - 2 * step)   # glide from where it was to where it is
   $was + ($z - $was) * s
 ```
@@ -1031,8 +1036,8 @@ of timbres:
   star is its waveform: left the real part, right the imaginary, so
   `tools/scope` draws the star itself.
 
-The point at angle θ round the cardioid is `rotate([0.5, 0], θ) -
-rotate([0.25, 0], 2 * θ)`. A bulb p/q sits there at θ = 2π·p/q and is
+The point at angle θ round the cardioid is `rotate((0.5, 0), θ) -
+rotate((0.25, 0), 2 * θ)`. A bulb p/q sits there at θ = 2π·p/q and is
 about sin(πp/q)/q² across, so a c a little way out from the edge
 along that direction lands in it. A chord is then a set of pitches
 *and* rotation numbers (1/2, 1/3, 1/4 …). Moving c from one bulb to
@@ -1058,14 +1063,14 @@ spinor. Write a direction as `[[0, x], [y, z]]` (x ahead, y left, z up)
 and a rotation with the stdlib:
 
 ```
-let head = turn(turn(about(k, yaw), about(j, pitch)), about(i, roll))   # right first: roll, pitch, yaw
+let head = about(k, yaw) * about(j, pitch) * about(i, roll)   # right first: roll, pitch, yaw
 let ear  = apply(head, toward_left)                                     # a direction turned by it
-let [[w, _], [_, _]] = turn(ear, field)                                 # minus the dot product
+let ((w, _), (_, _)) = ear * field                                 # minus the dot product
 ```
 
 - Keep rotations and directions whole; destructure only where a formula
   needs a number, as with pairs.
-- A body's turning is one state: `$q = $q + turn($q, spin) * (0.5 * dt)`,
+- A body's turning is one state: `$q = $q + $q * spin * (0.5 * dt)`,
   then `$q = $q / amplitude($q)`, the spin a direction in the body.
 - `dho(push, [f, f * 1.0013], damp)` is a doublet as one value, the two
   modes of a partial: a def given a pair, giving a pair a side, gives a
@@ -1089,9 +1094,11 @@ indexed; every phase is a function of one phasor.
 
 ```
 let field = spin(rate)                                   # the rotating field
-def coil(k): rotate([1, 0], TAU * k / 3)                 # three coils a third of a turn apart
-def seen(field, k): turn(field, conj(coil(k)))           # the field as coil k sees it: phase k
-sum(3, n => seen(field, n - 1)[0])                       # the three drives: always 0
+def coil(k): rotate((1, 0), TAU * k / 3)                 # three coils a third of a turn apart
+def seen(field, k): field * conj(coil(k))           # the field as coil k sees it: phase k
+sum(3, n =>                                              # the three drives: always 0
+  let (x, _) = seen(field, n - 1)
+  x)
 ```
 
 An unbalanced set (one coil stronger, one weaker) is Fortescue's
@@ -1134,8 +1141,8 @@ into one pitch at a coupling of 0.002:
 ```
 $mean = [0, 0]                                     # the field's mean, as the oscillators left it
 let ring = sum(12, k =>
-  $z = [1, 0]
-  let moved = turn($z, step(k)) + $mean * couple
+  $z = (1, 0)
+  let moved = $z * step(k) + $mean * couple
   $z = moved / amplitude(moved)
   $z)
 $mean = ring / 12
@@ -1149,7 +1156,7 @@ the step as `each`, which moves every place from the same moment:
 
 ```
 def law(me, left, right, step, couple):            # what a phasor does, given itself and its neighbours
-  let moved = turn(me, step) + (left + right - me * 2) * couple
+  let moved = me * step + (left + right - me * 2) * couple
   moved / amplitude(moved)
 
 $z = array(n, [1, 0])                              # the field
@@ -1379,7 +1386,7 @@ let kickA    = sin(TAU * phasor(pSweep)) * kEnv
 
 # B — DHO body strike: damp tightens with K2
 let bodyDamp = 0.04 - kickPunch * 0.025
-let [body, _] = dho(kTrig * 50000000.0, 200, bodyDamp)   # one side: the low end stays centred
+let (body, _) = dho(kTrig * 50000000.0, 200, bodyDamp)   # one side: the low end stays centred
 let kickB    = body * 0.5
 
 # C — FM-distorted boom: sine modulating sine, deeper with K2
@@ -1414,18 +1421,18 @@ subterranean-thud territory without changing the recipe.
 # A — Acid: saw → DHO resonant LPF
 let saw   = additive(bFreq, saw_shape, 10)
 let cutA  = 600 + bEnv * 3200 * (0.5 + bAcc * 0.5)
-let [acid, _] = dho(saw * 80000.0, cutA, 0.025)          # one side: bass stays centred
+let (acid, _) = dho(saw * 80000.0, cutA, 0.025)          # one side: bass stays centred
 let bassA = acid * bEnv * (0.4 + bAcc * 0.6)
 
 # B — Bell-bass: struck DHO at the note pitch (force scaled by
 # frequency so peak amplitude stays consistent across notes)
 let bForceB = 22000.0 * bFreq
-let [bellBass, _] = dho(bTrig * bForceB, bFreq, 0.008)
+let (bellBass, _) = dho(bTrig * bForceB, bFreq, 0.008)
 let bassB   = bellBass * bEnv * (0.5 + bAcc * 0.5) * 0.4
 
 # C — Noise-formant: white noise into resonant DHO BPF at 3rd harmonic
 let nAmp  = bEnv * (0.3 + bAcc * 0.7) * 6000000.0
-let [formant, _] = dho(noise() * nAmp, bFreq * 3, 0.025)
+let (formant, _) = dho(noise() * nAmp, bFreq * 3, 0.025)
 let bassC = formant * 6.0
 
 # Same triangular crossfade
@@ -1635,7 +1642,7 @@ play bodhran:
   #    struck, one side so the low end stays centred) and a noise
   #    transient. Every struck-membrane synth is built so.
   let w = TAU * 75
-  let [boom, _] = dho(push(hit) * w * 0.6, 75, 0.12)
+  let (boom, _) = dho(push(hit) * w * 0.6, 75, 0.12)
   let tap = bpf(noise(), 1800, 0.4) * discharge(hit, 60) * 0.5
   (boom + tap) * 0.5
 ```

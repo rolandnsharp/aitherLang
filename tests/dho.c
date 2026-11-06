@@ -44,7 +44,7 @@ TEST(dho) {
     double omega = 2.0 * M_PI * freq;
     double tau_expected = 1.0 / (damp * omega);   /* ≈ 0.0362 s */
     long n = (long)(0.4 * SR);
-    double* buf = render_mono("dho(if t < dt then 100000000 else 0, 440.0, 0.01)[0]", n);
+    double* buf = render_mono("let (x, _) = dho(if t < dt then 100000000 else 0, 440.0, 0.01)\nx", n);
 
     /* Sanity: there must actually be signal to autocorrelate. */
     double sig_energy = 0.0;
@@ -98,7 +98,7 @@ TEST(dho) {
   double x_expected = force / (omega * omega);    /* ≈ 0.02533 */
   {
     long n = (long)(1.0 * SR);
-    double* buf = render_mono("dho(100.0, 10.0, 1.0)[0]", n);
+    double* buf = render_mono("let (x, _) = dho(100.0, 10.0, 1.0)\nx", n);
     double final = buf[n - 1];
     CHECK(fabs(final - x_expected) < x_expected * 0.05, "dho steady-state: got %g, expected %g",
           final, x_expected);
@@ -110,7 +110,7 @@ TEST(dho) {
    * (numerical noise, semi-implicit integration). */
   {
     long n = (long)(0.5 * SR);
-    double* buf = render_mono("dho(100.0, 10.0, 1.0)[0]", n);
+    double* buf = render_mono("let (x, _) = dho(100.0, 10.0, 1.0)\nx", n);
     double prev = buf[0], max_val = buf[0], min_delta = 0.0;
     for (long i = 0; i < n; i++) {
       if (buf[i] > max_val) max_val = buf[i];
@@ -129,8 +129,8 @@ TEST(dho) {
    * sides peak alike. */
   {
     long n = (long)(0.1 * SR);
-    double* x = render_mono("dho(if t < dt then 100000000 else 0, 440, 0.01)[0]", n);
-    double* v = render_mono("dho(if t < dt then 100000000 else 0, 440, 0.01)[1]", n);
+    double* x = render_mono("let (x, _) = dho(if t < dt then 100000000 else 0, 440, 0.01)\nx", n);
+    double* v = render_mono("let (_, q) = dho(if t < dt then 100000000 else 0, 440, 0.01)\nq", n);
     double mx = 0.0, mv = 0.0;
     for (long i = 0; i < n; i++) {
       mx = fmax(mx, fabs(x[i]));

@@ -30,8 +30,8 @@ static int crossings(const double* x, long a, long b) {
 static double* sum_of(const char* k, long* n) {
   char src[512];
   snprintf(src, sizeof src,
-           "$pa = 0.0\n$pb = 0.0\nlet a = vdp(220, push = %s * ($pb - $pa))\n"
-           "let b = vdp(223, push = %s * ($pa - $pb))\n$pa = a[0]\n$pb = b[0]\na[0] + b[0]",
+           "$pa = 0.0\n$pb = 0.0\nlet (a, _) = vdp(220, push = %s * ($pb - $pa))\n"
+           "let (b, _) = vdp(223, push = %s * ($pa - $pb))\n$pa = a\n$pb = b\na + b",
            k, k);
   return left_of(src, 6.0, n);
 }
@@ -52,7 +52,7 @@ static double swing(const double* x, long n) {
 TEST(vdp) {
   /* Alone: a sine at 220 Hz, peak about 1 once grown, from 0.01. */
   long n;
-  double* one = left_of("vdp(220)[0]", 2.0, &n);
+  double* one = left_of("let (x, _) = vdp(220)\nx", 2.0, &n);
   if (n >= 96000) {
     CHECK(fabs(one[0] - 0.01) < 0.001, "starts at %g", one[0]);
     double peak = 0.0;
