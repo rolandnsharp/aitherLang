@@ -34,14 +34,14 @@
 # ---------------------------------------------------------------- the field
 
 let firm = 1 + 8 * midi_cc(20)                             # how stiff, against the ring as it is
-let held = 24 + 1200 * midi_cc(22)                         # how strongly a mass keeps its place
-let loss = 0.41                                            # shrink, a second
+let held = 66 + 3300 * midi_cc(22)                         # how strongly a mass keeps its place
+let loss = 0.68                                            # what it loses, a round
 
-$x = ring(period = 1.66)                                   # where each mass is: a push goes round in 1.66 s
-$v = ring(period = 1.66)                                   # how it is moving
+$x = ring(period = 1.66)                                   # a push goes round in 1.66 s
+$v = ring(period = 1.66)
 
-$v = ($v - concentration($x) * firm * dt - $x * held * dt) * (1 - loss * dt)
-$x = $x + $v * dt
+$v += -concentration($x) * firm - $x * held - $v * loss
+$x += $v
 
 # ---------------------------------------------------------------- the strike
 
@@ -63,7 +63,7 @@ let age = min(narrow, broad)
 let landed = if own < stroke then floor(sweep / 5) * golden else $where
 let width = if broad < narrow then 0.11 else 0.031         # of the way round
 let head = age / stroke * 2 - 1                            # across the stretch, -1 to 1
-$v[landed + head * width * 3] = if age < stroke then 1.62 / stroke * exp(-head * head * 9) else 0
+$v[landed + head * width * 3] = if age < stroke then 4.46 / stroke * exp(-head * head * 9) else 0
 
 # ---------------------------------------------------------------- reading
 

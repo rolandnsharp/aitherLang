@@ -710,8 +710,8 @@ happens at one place, and arithmetic is at each place:
 $x = ring(period = 1.66)                       # a push goes round in 1.66 s
 $v = ring(period = 1.66)
 
-$v = ($v - concentration($x) * dt - $x * held * dt) * (1 - loss * dt)
-$x = $x + $v * dt
+$v += -concentration($x) - $x * held - $v * loss
+$x += $v
 
 $v[where] = force                              # a push, at a point
 let height = $x[phasor(note)]                  # read at a point
@@ -729,9 +729,12 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
 - A bare `$x` is the field at this place, and `$x = ...` stores there. A
   later line at the place sees what was stored; a neighbour sees the last
   step. A number or a value is everywhere.
-- In a line that stores into a ring, `dt` is the ring's step, so the law
-  is in seconds, and `held`, `loss` and the like don't move with the
-  places. Elsewhere it is a sample, as always.
+- **`+=` on a ring says what changes**, and the engine owns how it is
+  stepped: `$x += $v` is the equation x' = v, not a recipe. Rates are **a
+  round**, the ring being its own clock: `loss` of 0.2 is a fifth lost each
+  trip round, and `period` is the only second in the law, so changing it
+  retunes the whole ring together. A ring's line has no `dt` or `t`, and
+  says so, and no `*=`: a loss is a change, `$v += -$v * loss`.
 - A field steps **one place a sample**, as `tv` draws a pixel, so it costs
   one place. Its stepping shows as a buzz at `sr / N`, about 40 dB under
   the note at 128 places. It suits a field that moves slowly against the
@@ -752,14 +755,15 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   * 0.17`, slower by its square root.
 - From outside a field has two touch points. `$x[p]` reads at a point, p
   from 0 to 1 round, between places; `$v[p] = force` adds a push at the
-  nearest place, landing when the field reaches it. On a ring it is a rate
-  per length of ring, so a head sweeping a stretch lands the same whatever
-  the places. This is the one way `[ ]` differs on a field: p is how far
+  nearest place, landing when the field reaches it. On a ring it is a
+  change a round per length of ring, so a head sweeping a stretch lands
+  the same whatever the places. This is the one way `[ ]` differs on a field: p is how far
   round, not a place number.
 
 An array assigned bare (`$x = array(128)`, `$x = $x + ...`) is a field too,
 with the size in the patch: a push then takes `N² / (sqrt(stiff) * sr)`
-seconds to go round, the words carry no speed, and `dt` is a sample. Use
+seconds to go round, the words carry no speed, and `+=` is one step's
+worth. Use
 `ring`, unless a number of places is the point. Fields are at the file's
 level, in its plays too; a def sees none. Not built: ends and sheets, and a
 fast fine field, which needs more than one place a sample: at one, a 1 s

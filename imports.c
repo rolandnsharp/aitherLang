@@ -185,11 +185,11 @@ typedef struct {
   const char* in;                        /* the hidden array of pushes, or NULL */
   const char* now;                       /* the hidden let holding what was just stored */
   Node* period;                          /* ring(period = T): the engine owns its places, else NULL */
-  const char* rate;                      /* the hidden let: its speed squared, places a second */
-  const char* step;                      /* the hidden let: how long its step is */
+  const char* rate;                      /* the hidden let: its speed squared, places a round */
+  const char* step;                      /* the hidden let: a step, in rounds */
 } Field;
 
-typedef struct { Arena* a; Field* f; int n; int made; const char* step; } Fields;
+typedef struct { Arena* a; Field* f; int n; int made; int in_ring; char* err; int errlen; int failed; } Fields;
 
 static Node* fnode(Fields* fs, NodeKind k, const char* str, const Node* at) {
   Node* n = arena_alloc(fs->a, sizeof(Node));
@@ -249,7 +249,12 @@ static Node* at_speed(Fields* fs, Field* f, Node* word, const Node* at) {
 static Node* field_expr(Fields* fs, Node* n) {
   if (!n) return n;
   if (n->kind == nkIdent) {
-    if (fs->step && !strcmp(n->str, "dt")) return fident(fs, fs->step, n);   /* in a ring's line, its step */
+    if (fs->in_ring && (!strcmp(n->str, "dt") || !strcmp(n->str, "t")) && !fs->failed) {
+      fs->failed = 1;
+      snprintf(fs->err, fs->errlen, "`%s` in a ring's line (%s:%d): a field has no time, only what changes. Say "
+               "what changes, `$x += $v`, and its rate in rounds; a second belongs at the edge, in `period`",
+               n->str, n->source, n->line);
+    }
     Field* f = field_named(fs, n->str);
     if (!f) return n;
     return f->now ? fident(fs, f->now, n) : fidx(fs, f->name, fident(fs, f->place, n), n);
@@ -261,8 +266,8 @@ static Node* field_expr(Fields* fs, Node* n) {
     Field* f = bare_field(fs, n->kids[0]);
     Node* at = fcall(fs, "field_place", n, 2, (Node*[]){field_expr(fs, n->kids[1]), f->size});
     Node* push = field_expr(fs, n->kids[2]);
-    if (f->period)                                            /* a rate per length of ring: the grain falls out */
-      push = fbin(fs, "*", push, fbin(fs, "*", f->size, fident(fs, "dt", n), n), n);
+    if (f->period)                                            /* a change a round, per length of ring: the grain falls out */
+      push = fbin(fs, "*", push, fident(fs, f->step, n), n);
     Node* sum = fbin(fs, "+", fidx(fs, f->in, at, n), push, n);
     Node* r = fnode(fs, nkIdxAssign, "", n);
     fkids(fs, r, 3, (Node*[]){fident(fs, f->in, n), at, sum});
@@ -305,12 +310,11 @@ static void field_stmts(Fields* fs, Node** in, int n, Kids* out, int top) {
       fkids(fs, place, 1, (Node*[]){fcall(fs, "pixel_index", s, 2, (Node*[]){f->size, fnum(fs, 1, s)})});
       kid(out, place);
       if (f->period) {
-        Node* rate = fnode(fs, nkLet, f->rate, s);           /* (N / T)^2: a wave goes round in T */
-        Node* speed = fbin(fs, "/", f->size, f->period, s);
-        fkids(fs, rate, 1, (Node*[]){fbin(fs, "*", speed, speed, s)});
+        Node* rate = fnode(fs, nkLet, f->rate, s);           /* N^2: a wave goes round in one round */
+        fkids(fs, rate, 1, (Node*[]){fbin(fs, "*", f->size, f->size, s)});
         kid(out, rate);
-        Node* step = fnode(fs, nkLet, f->step, s);
-        fkids(fs, step, 1, (Node*[]){fbin(fs, "*", f->size, fident(fs, "dt", s), s)});
+        Node* step = fnode(fs, nkLet, f->step, s);           /* a step, in rounds: N samples of T */
+        fkids(fs, step, 1, (Node*[]){fbin(fs, "/", fbin(fs, "*", f->size, fident(fs, "dt", s), s), f->period, s)});
         kid(out, step);
       }
       if (f->in) {
@@ -322,9 +326,19 @@ static void field_stmts(Fields* fs, Node** in, int n, Kids* out, int top) {
       continue;
     }
     if (f) {                                                 /* `$x = e`, at this place */
-      fs->step = f->period ? f->step : NULL;
-      Node* value = field_expr(fs, s->kids[0]);
-      fs->step = NULL;
+      fs->in_ring = f->period != NULL;
+      Node* rhs = s->kids[0];
+      Node* value;
+      if (f->period && rhs->kind == nkBinOp && rhs->num == 1.0) {       /* written `+=`: a change, the engine's to step */
+        if (strcmp(rhs->str, "+") && strcmp(rhs->str, "-") && !fs->failed) {
+          fs->failed = 1;
+          snprintf(fs->err, fs->errlen, "`%s=` on a ring (%s:%d): say what changes, `$v += -$v * loss`", rhs->str,
+                   s->source, s->line);
+        }
+        value = fbin(fs, rhs->str, field_expr(fs, rhs->kids[0]),
+                     fbin(fs, "*", field_expr(fs, rhs->kids[1]), fident(fs, f->step, s), s), s);
+      } else value = field_expr(fs, rhs);
+      fs->in_ring = 0;
       Node* here = fident(fs, f->place, s);
       if (f->in) value = fbin(fs, "+", value, fidx(fs, f->in, here, s), s);
       const char* now = fname(fs, "now", f->name, fs->made++);
@@ -380,8 +394,8 @@ static void find_pushes(Fields* fs, const Node* n) {
   for (int i = 0; i < n->nkids; i++) find_pushes(fs, n->kids[i]);
 }
 
-static void fields_pass(Arena* a, Kids* kids, int from) {
-  Fields fs = {a, NULL, 0, 0};
+static int fields_pass(Arena* a, Kids* kids, int from, char* err, int errlen) {
+  Fields fs = {a, NULL, 0, 0, 0, err, errlen, 0};
   fs.f = arena_alloc(a, (kids->n + 1) * sizeof(Field));
   for (int i = from; i < kids->n; i++) {                     /* arrays at the file's level */
     Node* s = kids->v[i];
@@ -404,13 +418,14 @@ static void fields_pass(Arena* a, Kids* kids, int from) {
   int kept = 0;                                              /* only what is assigned bare is a field */
   for (int i = 0; i < fs.n; i++) if (fs.f[i].place) fs.f[kept++] = fs.f[i];
   fs.n = kept;
-  if (!fs.n) return;
+  if (!fs.n) return 0;
   for (int i = from; i < kids->n; i++) find_pushes(&fs, kids->v[i]);
   Kids out = {0};
   field_stmts(&fs, kids->v + from, kids->n - from, &out, 1);
   kids->n = from;
   for (int i = 0; i < out.n; i++) kid(kids, out.v[i]);
   free(out.v);
+  return fs.failed ? -1 : 0;
 }
 
 Node* build_program(Arena* a, const char* stdlib_src, const char* src, const char* src_tag,
@@ -437,7 +452,8 @@ Node* build_program(Arena* a, const char* stdlib_src, const char* src, const cha
     if (!shadowed(kids.v[i], &kids, std->nkids)) kids.v[kept++] = kids.v[i];
   memmove(kids.v + kept, kids.v + std->nkids, (kids.n - std->nkids) * sizeof(Node*));
   kids.n -= std->nkids - kept;
-  fields_pass(a, &kids, kept);
+  *kind = BUILD_PARSE;
+  if (fields_pass(a, &kids, kept, err, errlen)) { free(kids.v); return NULL; }
   *kind = BUILD_OK;
   Node* prog = arena_alloc(a, sizeof(Node));
   prog->kind = nkBlock; prog->line = 1; prog->str = ""; prog->source = "";

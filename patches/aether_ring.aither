@@ -37,14 +37,14 @@
 
 let squeeze = 1 + 1.4 * midi_cc(20)                        # how stiff to squeeze, against the ring as it is
 let twist = 0.17 + 0.57 * midi_cc(22)                      # how stiff to twist, against squeezing it
-let held = 71                                              # how strongly a mass keeps its place
-let loss = 0.41                                            # shrink, a second
+let held = 28                                              # how strongly a mass keeps its place
+let loss = 0.26                                            # what it loses, a round
 
-$d = ring(period = 0.63, start = ((0, 0), (0, 0)))         # where each mass is: a squeeze goes round in 0.63 s
-$v = ring(period = 0.63, start = ((0, 0), (0, 0)))         # how it is moving
+$d = ring(period = 0.63, start = ((0, 0), (0, 0)))         # a squeeze goes round in 0.63 s
+$v = ring(period = 0.63, start = ((0, 0), (0, 0)))
 
-$v = ($v - slope(convergence($d)) * squeeze * dt - curl(curl($d)) * twist * dt - $d * held * dt) * (1 - loss * dt)
-$d = $d + $v * dt
+$v += -slope(convergence($d)) * squeeze - curl(curl($d)) * twist - $d * held - $v * loss
+$d += $v
 
 # ---------------------------------------------------------------- the strike
 
@@ -68,7 +68,7 @@ let age = min(own, min(age_a, min(age_b, age_x)))
 let way = (if own < stroke then (i + j) * sqrt(0.5) else 0) + (if age_a < stroke then i else 0) + (if age_b < stroke then j else 0) + (if age_x < stroke then k else 0)
 let landed = if own < stroke then floor(sweep / 7) * golden else $where
 let head = age / stroke * 2 - 1                            # across the stretch, -1 to 1
-$v[landed + head * 0.094] = way * (if age < stroke then 1.62 / stroke * exp(-head * head * 9) else 0)
+$v[landed + head * 0.094] = way * (if age < stroke then 0.64 / stroke * exp(-head * head * 9) else 0)
 
 # ---------------------------------------------------------------- reading
 

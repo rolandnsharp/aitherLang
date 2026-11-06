@@ -897,6 +897,7 @@ static Node* parse_stmt(P* p) {
       advance(p);
       Node* rhs = parse_expr(p);
       Node* combined = node2(p, nkBinOp, dup(p->c->a, nx.str, 1), lhs, rhs, t.line);
+      combined->num = 1;                 /* written `+=`: on a ring, a change (imports.c) */
       if (lhs->kind == nkIdent) n = node1(p, nkAssign, lhs->str, combined, t.line);
       else if (lhs->kind == nkIdx) n = node3(p, nkIdxAssign, lhs->kids[0], lhs->kids[1], combined, t.line);
       else { fail(p, "invalid assignment target"); return NULL; }

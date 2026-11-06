@@ -60,9 +60,9 @@ TEST(ring_keeps_its_period) {
   const char* src =
     "$x = ring(period = 0.8)\n"
     "$v = ring(period = 0.8)\n"
-    "$v = $v - concentration($x) * dt\n"
-    "$x = $x + $v * dt\n"
-    "$v[0.1 * (phasor(1000) * 0.2 - 0.1)] = if t < 0.01 then 2000 else 0\n"
+    "$v += -concentration($x)\n"
+    "$x += $v\n"
+    "$v[0.1 * (phasor(1000) * 0.2 - 0.1)] = if t < 0.01 then 1280 else 0\n"
     "$x[0.25]\n";
   double when[3];
   for (int k = 0; k < 3; k++) {

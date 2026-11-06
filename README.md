@@ -98,8 +98,8 @@ the medium does, and the engine works out the rest.
 ```
 $x = ring(period = 1.66)                  # a push goes round in 1.66 s
 $v = ring(period = 1.66)
-$v = ($v - concentration($x) * dt) * (1 - 0.4 * dt)
-$x = $x + $v * dt
+$v += -concentration($x) - $v * 0.7
+$x += $v
 
 $v[where] = force                         # the outside pushes in at a point
 spin(110) * (0.45 + $x[phasor(110)])      # and reads out at a point

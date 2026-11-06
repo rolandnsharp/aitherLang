@@ -1177,15 +1177,15 @@ twentieth of stepping them all every sample.
 ```
 $x = ring(period = 1.66)                       # each line is at each place,
 $v = ring(period = 1.66)                       # as a line on [l, r] is
-$v = ($v - concentration($x) * dt) * (1 - loss * dt)
-$x = $x + $v * dt
+$v += -concentration($x) - $v * loss
+$x += $v
 $v[where] = force                              # a push, at a point
 let height = $x[phasor(note)]                  # read at a point
 ```
 
 Say what the medium does, a push going round in 1.66 s, and the engine
-picks the places; `dt` in those lines is the ring's own step, so the law is
-in seconds.
+picks the places. `+=` says what changes, so those two lines are the
+equations themselves, and rates are a round: the ring is its own clock.
 
 `patches/aether_ring.aither` is the same with a direction at each place,
 so a squeeze and a twist travel at their own speeds, from one product.

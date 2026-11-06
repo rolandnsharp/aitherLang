@@ -25,12 +25,12 @@
 $x = ring(period = 2)
 $v = ring(period = 2)
 
-$v = ($v - concentration($x) * dt) * (1 - (0.1 + $x * $x * 8) * dt)
-$x = $x + $v * dt
+$v += -concentration($x) - $v * (0.2 + $x * $x * 16)
+$x += $v
 
 let drift = (0.5 + 0.5 * cos(TAU * phasor(1 / 60))) * (1 - midi_cc(20))   # the slow turning, 1 to 0 and back
 let hand = phasor(0.5 * pow(3, drift))                     # the ring goes round at 0.5 a second
-let push = 0.1 + 0.2 * midi_cc(22)
+let push = 0.4 + 0.8 * midi_cc(22)
 
 $v[hand] = push
 $v[hand + 0.5] = -push
