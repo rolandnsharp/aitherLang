@@ -1,0 +1,39 @@
+# tuned_ring: resonance, and nothing else. A ring goes round in 2 s; two
+# hands run round it, half a lap apart, one pushing out and one in. When
+# they run at the ring's own speed each push lands on the wave it made last
+# lap, and the wave grows and rides along with them. Away from that speed
+# the ring barely stirs.
+#
+# A slow turning brings the hands' speed down to the match and back, so
+# the piece is the ring answering: a circle, a pure tone, stirring as the
+# hands come near, opening into a turning shape as they match, the tone
+# filling with harmonics, and letting go, a little of it lingering. Nothing
+# is scheduled, and nothing says when the ring should answer: it answers
+# when it is tuned.
+#
+# Measured: a swing of 0.05 with the hands at three times the ring's speed,
+# 0.58 at the match, every 60 s.
+#
+#   ./aither patches/tuned_ring.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
+#
+# The gamepad (tools/pad): hold A and press left and right for the note
+# (CC 21), up and down to hold the hands nearer the match (CC 20), at the
+# top staying on it; hold B and press up and down for how hard they push
+# (CC 22).
+#   tools/pad & AITHER_MIDI=aither-pad ./aither patches/tuned_ring.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
+
+$x = ring(period = 2)
+$v = ring(period = 2)
+
+$v = ($v - concentration($x) * dt) * (1 - (0.1 + $x * $x * 8) * dt)
+$x = $x + $v * dt
+
+let drift = (0.5 + 0.5 * cos(TAU * phasor(1 / 60))) * (1 - midi_cc(20))   # the slow turning, 1 to 0 and back
+let hand = phasor(0.5 * pow(3, drift))                     # the ring goes round at 0.5 a second
+let push = 0.1 + 0.2 * midi_cc(22)
+
+$v[hand] = push
+$v[hand + 0.5] = -push
+
+let note = 110 * pow(2, floor(midi_cc(21) * 25) / 12)
+spin(note) * (0.45 + $x[phasor(note)])
