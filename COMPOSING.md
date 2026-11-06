@@ -1142,7 +1142,7 @@ model, twelve detuned oscillators each pulled toward their mean, locks
 into one pitch at a coupling of 0.002:
 
 ```
-$mean = [0, 0]                                     # the field's mean, as the oscillators left it
+$mean = (0, 0)                                     # the field's mean, as the oscillators left it
 let ring = sum(12, k =>
   $z = (1, 0)
   let moved = $z * step(k) + $mean * couple
@@ -1162,13 +1162,13 @@ def law(me, left, right, step, couple):            # what a phasor does, given i
   let moved = me * step + (left + right - me * 2) * couple
   moved / amplitude(moved)
 
-$z = array(n, [1, 0])                              # the field
+$z = array(n, (1, 0))                              # the field
 each(n, i => $z[i] = law($z[i], $z[(i + n - 1) mod n], $z[(i + 1) mod n], step(i), couple))
 ```
 
 `patches/phasor_ring.aither` is that ring: apart, a swarm; coupled, one
 pitch with a travelling wave of phase round it. A medium with ends needs
-no `mod`: past either end reads `[0, 0]`, which is a string with fixed
+no `mod`: past either end reads 0, which is a string with fixed
 ends.
 
 ## State that holds an array

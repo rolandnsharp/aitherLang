@@ -59,9 +59,63 @@ let w = (0.28, -0.96)
 # expect: 1, 0
 (0.3, 0.2) ^ 0
 
-# --- a fraction isn't built yet, and says so
-# error: `^` on a value takes a whole power
+# --- a fraction is that part of the turn: the square root of a quarter turn is an eighth
+# expect: 0.70710678118654757, 0.70710678118654746
 (0, 1) ^ 0.5
+
+# --- the size takes the power too: (4, 0) ^ 0.5 is 2
+# expect: 2, 0
+(4, 0) ^ 0.5
+
+# --- a root squared comes back
+# expect: 0.6, 0.8
+let r = (0.6, 0.8) ^ 0.5
+r * r
+
+# --- a negative power is the reciprocal
+# expect: 0, -0.5
+(0, 2) ^ -1
+
+# --- the principal root: -1 to a half is i, not -i
+# expect: 0, 1
+(-1, 0) ^ 0.5
+
+# --- the power may change as it plays: at t = 0 it is 1
+# expect: 3, 4
+(3, 4) ^ (1 + t)
+
+# --- a root of a unit value keeps its size: it is the principal root, so not a smooth spin(220)
+# expect until 480: 0, 0
+let (a, b) = spin(440) ^ 0.5
+[a * a + b * b - 1, 0]
+
+# --- 0 to a power is 0, and at power 0 it is 1
+# expect: 0, 1
+let (a, _) = (0, 0) ^ 0.5
+let (b, _) = (0, 0) ^ (t * 0)
+[a, b]
+
+# --- Hamilton's: half a rotation, a rotation by half the angle about the same axis
+# expect: 0.98006657784124163, 0.19866933079506122
+let q = about(k, 0.8) ^ 0.5
+let ((w, _), (_, z)) = q * q * about(k, -0.4)
+[w, z]
+
+# --- slerp: a fraction of the way from one rotation to another
+# expect: 0.70710678118654757, 0.70710678118654746
+let r0 = ((1, 0), (0, 0))
+let r1 = about(k, PI)
+let ((w, _), (_, z)) = r0 * (conj(r0) * r1) ^ 0.5
+[w, z]
+
+# --- a plain negative number on Hamilton's rung turns about k
+# expect: 0, 1
+let ((w, _), (_, z)) = ((-1, 0), (0, 0)) ^ 0.5
+[w, z]
+
+# --- the power is a number
+# error: `^` on a value takes a number for its power
+(1, 2) ^ (0, 1)
 
 # --- Hamilton's: i j = k and j i = -k
 # expect: 1, -1

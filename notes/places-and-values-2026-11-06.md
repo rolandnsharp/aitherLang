@@ -147,9 +147,9 @@ stereo, nothing is silent any more.
 
 ## Open
 
-1. **`^` with a fraction.** `spin(440) ^ 0.5` is half the turn, by the
-   standard definition, the principal root; quaternions the same (slerp,
-   Shoemake 1985). Whole powers are built; a fraction is an error so far.
+1. **`^` with a fraction.** Built (2026-11-06): the size to the power and
+   the angle times it, the principal root; quaternions the same about
+   his axis (slerp, Shoemake 1985).
 2. **What makes stereo.** `pan`, `reverb`, `input()` return fields. Does
    `input()` stay two places for a radio, translated in one line, or does
    a patch say?

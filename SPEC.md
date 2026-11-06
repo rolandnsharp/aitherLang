@@ -747,7 +747,7 @@ zero, and `+ - * / ^` are the ladder's:
 | `z / w`      | `z conj(w)` over the size of `w` squared, 0 where `w` is 0; `z * w / w` is `z` |
 | `z + 1`      | the real part moves: `(a + 1, b)`                           |
 | `z * 2`      | scales all of it                                            |
-| `z ^ 2`      | `z * z`: turned twice. A whole power from 0 to 64 known when the patch compiles; fractions aren't built |
+| `z ^ 2`      | `z * z`: turned twice. Any power: the size to the power and the angle times it (de Moivre), so `(0, 1) ^ 0.5` is an eighth of a turn, the principal root, and `(0, 2) ^ -1` the reciprocal. On Hamilton's numbers about his axis: `r ^ 0.5` is half the rotation, as slerp takes a fraction of one. A whole power from 0 to 64 known when the patch compiles is the products, exactly |
 | `(0, 1) * q` | the narrower sits inside: `((0, 1), (0, 0)) * q`            |
 
 **Multiplying is turning**: a value of size 1 turns what it multiplies
@@ -833,8 +833,7 @@ for, such as a mono mix.
 stops and says so, and the rule can change: a patch or play ending in
 anything else (more than two numbers: say which two), and a function
 given shapes that don't line up number for number. Not built: two places
-of Hamilton's numbers, fields of more than two places, a fractional
-power.
+of Hamilton's numbers, fields of more than two places.
 
 **Errors name shapes.** Where a value's shape is wrong, the error quotes
 each argument as written with its shape: `$z is a complex number, and is

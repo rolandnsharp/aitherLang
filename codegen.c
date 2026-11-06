@@ -2961,6 +2961,29 @@ static V ladder_mul(Ctx* c, V a, V b, int w, Buf* pre) {
   return r;
 }
 
+/* z ^ p for any power: de Moivre's, the size to the power and the angle
+ * times it, the principal root where there are several. On Hamilton's
+ * numbers the angle is his, 0..pi, about his axis (k for a plain number,
+ * as `axis`), as slerp takes a fraction of a rotation. 0 to a power is 0,
+ * and 1 at power 0. */
+static V ladder_power(Ctx* c, V z, const char* power, Buf* pre) {
+  z = capture(c, pre, z);
+  const char* p = once(c, pre, power);
+  const char* v = z.w == 4 ? once(c, pre, F(c, "sqrt(%s * %s + %s * %s + %s * %s)", z.r, z.r, z.l2, z.l2, z.r2, z.r2))
+                           : once(c, pre, F(c, "fabs(%s)", z.r));
+  const char* size = once(c, pre, F(c, "sqrt(%s * %s + %s * %s)", z.l, z.l, v, v));
+  const char* angle = z.w == 4 ? once(c, pre, F(c, "(atan2(%s, %s) * %s)", v, z.l, p))
+                               : once(c, pre, F(c, "(atan2(%s, %s) * %s)", z.r, z.l, p));
+  const char* m = once(c, pre, F(c, "(%s == 0.0 ? (%s == 0.0 ? 1.0 : 0.0) : pow(%s, %s))", size, p, size, p));
+  const char* re = F(c, "(%s * cos(%s))", m, angle);
+  const char* s = once(c, pre, F(c, "(%s * sin(%s))", m, angle));
+  if (z.w == 2) { V r = vpair(re, s); r.lad = 1; return r; }
+  V r = vquad(re, F(c, "(%s == 0.0 ? 0.0 : %s * %s / %s)", v, s, z.r, v), F(c, "(%s == 0.0 ? 0.0 : %s * %s / %s)", v, s, z.l2, v),
+              F(c, "(%s == 0.0 ? %s : %s * %s / %s)", v, s, s, z.r2, v));
+  r.lad = 1;
+  return r;
+}
+
 /* `+ - * / ^` with a value on the ladder (notes/ladder-2026-11-06.md): the
  * narrower sits inside, the rest zero. */
 static V ladder_op(Ctx* c, Scope* sc, Node* n, V a, V b, Buf* pre) {
@@ -2970,14 +2993,16 @@ static V ladder_op(Ctx* c, Scope* sc, Node* n, V a, V b, Buf* pre) {
   int w = a.w > b.w ? a.w : b.w;
   const char* x[4];
   if (eq(op, "^")) {
+    if (b.w != 1)
+      fail(c, "`^` on a value takes a number for its power, and is given %s %s", given(c, n->kids[1], b), err_loc(c, n));
     double p;
-    if (b.w != 1 || !const_value(c, sc, n->kids[1], &p) || p != floor(p) || p < 0 || p > 64)
-      fail(c, "`^` on a value takes a whole power from 0 to 64 known when the patch compiles, and is given %s %s. "
-           "Fractions (half a turn) aren't built yet", given(c, n->kids[1], b), err_loc(c, n));
-    if (p == 0) return embed(mono("1.0"), w);
-    V base = capture(c, pre, a), r = base;
-    for (long k = 1; k < (long)p; k++) r = ladder_mul(c, r, base, w, pre);
-    return r;
+    if (const_value(c, sc, n->kids[1], &p) && p == floor(p) && p >= 0 && p <= 64) {   /* the products, exact */
+      if (p == 0) return embed(mono("1.0"), w);
+      V base = capture(c, pre, a), r = base;
+      for (long k = 1; k < (long)p; k++) r = ladder_mul(c, r, base, w, pre);
+      return r;
+    }
+    return ladder_power(c, a, b.l, pre);
   }
   if (eq(op, "+") || eq(op, "-")) {
     V p = embed(a, w), q = embed(b, w);
