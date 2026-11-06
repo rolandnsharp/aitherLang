@@ -225,7 +225,21 @@ it no squeeze. Found on the way:
 
 ## The abstraction, and the code it replaces
 
-Nothing here is built. It is the proposal, written against real patches so
+**Built (2026-11-06), simpler than proposed here.** The block below,
+`play ring[128]`, was dropped before building: `[128]` read as "place 128",
+the same brackets meaning contents, reading and size. Instead a field is
+just an array assigned bare, the stereo rule at N places, with no block at
+all (Roland: "im liking the array and stereo rule"). See SPEC "Fields". It
+reverses "Arrays are data, not a map" for those arrays, and is candidate V
+of fields-2026-10-29.md, turned down then as a second way of thinking; it
+reads now as stereo already does, which is what changed. Both rings are
+fields: `scanned_ring` 32 lines to 24, `aether_ring` 46 to 31, with the
+measured speeds holding (0.582 and 0.252 against 0.592 and 0.245). They
+cost about 20% more than by hand. Not the same to the bit: a strike
+became a write head sweeping a stretch, within 0.01 of the radius at each
+check. The sketches below are kept as how it got here.
+
+The proposal, written against real patches so
 the simplification can be judged line by line (Roland, 2026-11-06: "we
 should document this simplification and the code it replaces so that we
 can understand the abstraction").

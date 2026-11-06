@@ -166,6 +166,212 @@ static int shadowed(const Node* s, Kids* kids, int from) {
   return 0;
 }
 
+/* ---- fields (notes/nabla-and-medium-2026-11-06.md) ------------------------
+ *
+ * An array assigned bare (`$x = ...`) is a field: the stereo rule at N
+ * places, arithmetic at each place. It is written here as the lines a patch
+ * would write by hand: the field steps one place a sample (every = N, the
+ * place from pixel_index), a bare `$x` reads this sample's place, `$x = e`
+ * stores there, and later lines at that place see e. A patch never holds an
+ * index or a neighbour: the words below are the only reach to one. From
+ * outside, `$x[p]` reads at a point, p 0..1 round, and `$v[p] = push` adds
+ * a push there, which lands as the field reaches that place. */
+
+typedef struct {
+  const char* name;
+  Node* size;
+  Node* init;
+  const char* place;                     /* the hidden let: this sample's place */
+  const char* in;                        /* the hidden array of pushes, or NULL */
+  const char* now;                       /* the hidden let holding what was just stored */
+} Field;
+
+typedef struct { Arena* a; Field* f; int n; int made; } Fields;
+
+static Node* fnode(Fields* fs, NodeKind k, const char* str, const Node* at) {
+  Node* n = arena_alloc(fs->a, sizeof(Node));
+  n->kind = k; n->str = str ? str : ""; n->line = at->line; n->source = at->source;
+  return n;
+}
+static void fkids(Fields* fs, Node* n, int count, Node** kids) {
+  n->kids = arena_alloc(fs->a, (count ? count : 1) * sizeof(Node*));
+  for (int i = 0; i < count; i++) n->kids[i] = kids[i];
+  n->nkids = count;
+}
+static Node* fident(Fields* fs, const char* name, const Node* at) { return fnode(fs, nkIdent, name, at); }
+static Node* fnum(Fields* fs, double v, const Node* at) { Node* n = fnode(fs, nkNum, "", at); n->num = v; return n; }
+static Node* fcall(Fields* fs, const char* name, const Node* at, int count, Node** kids) {
+  Node* n = fnode(fs, nkCall, name, at);
+  fkids(fs, n, count, kids);
+  return n;
+}
+static Node* fidx(Fields* fs, const char* array, Node* index, const Node* at) {
+  Node* n = fnode(fs, nkIdx, "", at);
+  fkids(fs, n, 2, (Node*[]){fident(fs, array, at), index});
+  return n;
+}
+static Node* fbin(Fields* fs, const char* op, Node* l, Node* r, const Node* at) {
+  Node* n = fnode(fs, nkBinOp, op, at);
+  fkids(fs, n, 2, (Node*[]){l, r});
+  return n;
+}
+static const char* fname(Fields* fs, const char* a, const char* b, int k) {
+  char buf[256];
+  snprintf(buf, sizeof buf, k >= 0 ? "__%s_%s_%d" : "__%s_%s", a, b, k);
+  char* r = arena_alloc(fs->a, strlen(buf) + 1);
+  strcpy(r, buf);
+  return r;
+}
+static Field* field_named(Fields* fs, const char* name) {
+  for (int i = 0; i < fs->n; i++) if (!strcmp(fs->f[i].name, name)) return &fs->f[i];
+  return NULL;
+}
+static int make_array(const Node* n) { return n && n->kind == nkCall && !strcmp(n->str, "array"); }
+
+/* A bare field as a word's argument, and the word it needs. */
+static Field* bare_field(Fields* fs, const Node* n) { return n && n->kind == nkIdent ? field_named(fs, n->str) : NULL; }
+
+static Node* field_expr(Fields* fs, Node* n) {
+  if (!n) return n;
+  if (n->kind == nkIdent) {
+    Field* f = field_named(fs, n->str);
+    if (!f) return n;
+    return f->now ? fident(fs, f->now, n) : fidx(fs, f->name, fident(fs, f->place, n), n);
+  }
+  if (n->kind == nkIdx && bare_field(fs, n->kids[0])) {       /* read at a point */
+    return fcall(fs, "field_at", n, 2, (Node*[]){n->kids[0], field_expr(fs, n->kids[1])});
+  }
+  if (n->kind == nkIdxAssign && bare_field(fs, n->kids[0])) { /* a push at a point */
+    Field* f = bare_field(fs, n->kids[0]);
+    Node* at = fcall(fs, "field_place", n, 2, (Node*[]){field_expr(fs, n->kids[1]), f->size});
+    Node* sum = fbin(fs, "+", fidx(fs, f->in, at, n), field_expr(fs, n->kids[2]), n);
+    Node* r = fnode(fs, nkIdxAssign, "", n);
+    fkids(fs, r, 3, (Node*[]){fident(fs, f->in, n), at, sum});
+    return r;
+  }
+  if (n->kind == nkCall) {
+    if (!strcmp(n->str, "len")) return n;
+    Field* f = n->nkids == 1 ? bare_field(fs, n->kids[0]) : NULL;
+    if (f && !strcmp(n->str, "concentration"))
+      return fcall(fs, "concentration", n, 2, (Node*[]){n->kids[0], fident(fs, f->place, n)});
+    Node* in = n->nkids == 1 ? n->kids[0] : NULL;
+    f = in && in->kind == nkCall && in->nkids == 1 ? bare_field(fs, in->kids[0]) : NULL;
+    if (f && !strcmp(n->str, "slope") && !strcmp(in->str, "convergence"))
+      return fcall(fs, "slope_of_convergence", n, 2, (Node*[]){in->kids[0], fident(fs, f->place, n)});
+    if (f && !strcmp(n->str, "curl") && !strcmp(in->str, "curl"))
+      return fcall(fs, "curl_of_curl", n, 2, (Node*[]){in->kids[0], fident(fs, f->place, n)});
+  }
+  for (int i = 0; i < n->nkids; i++) n->kids[i] = field_expr(fs, n->kids[i]);
+  return n;
+}
+
+/* A list of statements, as the lines they stand for. */
+static void field_stmts(Fields* fs, Node** in, int n, Kids* out, int top) {
+  for (int i = 0; i < n; i++) {
+    Node* s = in[i];
+    Field* f = (s->kind == nkVar || s->kind == nkAssign) ? field_named(fs, s->str) : NULL;
+    if (f && make_array(s->kids[0])) {                       /* its declaration */
+      Node* c = s->kids[0];
+      int named = 0;
+      for (int k = 0; k < c->nkids; k++) if (c->kids[k]->kind == nkNamedArg) named = 1;
+      if (!named && c->nkids < 3) {
+        Node* init = c->nkids == 2 ? c->kids[1] : fnum(fs, 0, c);
+        fkids(fs, c, 3, (Node*[]){c->kids[0], init, c->kids[0]});
+      }
+      kid(out, s);
+      Node* place = fnode(fs, nkLet, f->place, s);
+      fkids(fs, place, 1, (Node*[]){fcall(fs, "pixel_index", s, 2, (Node*[]){f->size, fnum(fs, 1, s)})});
+      kid(out, place);
+      if (f->in) {
+        Node* zero = f->init ? fbin(fs, "*", f->init, fnum(fs, 0, s), s) : fnum(fs, 0, s);
+        Node* pushes = fnode(fs, nkVar, f->in, s);
+        fkids(fs, pushes, 1, (Node*[]){fcall(fs, "array", s, 2, (Node*[]){f->size, zero})});
+        kid(out, pushes);
+      }
+      continue;
+    }
+    if (f) {                                                 /* `$x = e`, at this place */
+      Node* value = field_expr(fs, s->kids[0]);
+      Node* here = fident(fs, f->place, s);
+      if (f->in) value = fbin(fs, "+", value, fidx(fs, f->in, here, s), s);
+      const char* now = fname(fs, "now", f->name, fs->made++);
+      Node* let = fnode(fs, nkLet, now, s);
+      fkids(fs, let, 1, (Node*[]){value});
+      kid(out, let);
+      Node* store = fnode(fs, nkIdxAssign, "", s);
+      fkids(fs, store, 3, (Node*[]){fident(fs, f->name, s), here, fident(fs, now, s)});
+      kid(out, store);
+      if (f->in) {
+        Node* clear = fnode(fs, nkIdxAssign, "", s);
+        fkids(fs, clear, 3, (Node*[]){fident(fs, f->in, s), here, fnum(fs, 0, s)});
+        kid(out, clear);
+      }
+      f->now = now;
+      continue;
+    }
+    if (s->kind == nkPlay && s->kids[0] && s->kids[0]->kind == nkBlock) {
+      Node* body = s->kids[0];
+      Kids inner = {0};
+      field_stmts(fs, body->kids, body->nkids, &inner, 0);
+      fkids(fs, body, inner.n, inner.v);
+      free(inner.v);
+      for (int k = 0; k < fs->n; k++) fs->f[k].now = NULL;    /* what a play stored is its own */
+      kid(out, s);
+      continue;
+    }
+    if (s->kind == nkDef) { kid(out, s); continue; }
+    kid(out, field_expr(fs, s));
+  }
+  (void)top;
+}
+
+/* Every array assigned bare, in the top level and the plays. */
+static void find_fields(Fields* fs, Node** in, int n) {
+  for (int i = 0; i < n; i++) {
+    Node* s = in[i];
+    if (s->kind == nkPlay && s->kids[0] && s->kids[0]->kind == nkBlock) find_fields(fs, s->kids[0]->kids, s->kids[0]->nkids);
+    if ((s->kind == nkVar || s->kind == nkAssign) && s->nkids && !make_array(s->kids[0])) {
+      Field* f = field_named(fs, s->str);
+      if (f) f->place = fname(fs, "place", f->name, -1);
+    }
+  }
+}
+/* Whether a store by index reaches a field from outside. */
+static void find_pushes(Fields* fs, const Node* n) {
+  if (!n) return;
+  if (n->kind == nkDef) return;
+  if (n->kind == nkIdxAssign && bare_field(fs, n->kids[0])) {
+    Field* f = bare_field(fs, n->kids[0]);
+    f->in = fname(fs, "pushes", f->name, -1);
+  }
+  for (int i = 0; i < n->nkids; i++) find_pushes(fs, n->kids[i]);
+}
+
+static void fields_pass(Arena* a, Kids* kids, int from) {
+  Fields fs = {a, NULL, 0, 0};
+  fs.f = arena_alloc(a, (kids->n + 1) * sizeof(Field));
+  for (int i = from; i < kids->n; i++) {                     /* arrays at the file's level */
+    Node* s = kids->v[i];
+    if (s->kind == nkVar && make_array(s->kids[0]) && s->kids[0]->nkids >= 1 && !field_named(&fs, s->str)) {
+      Field* f = &fs.f[fs.n++];
+      memset(f, 0, sizeof *f);
+      f->name = s->str; f->size = s->kids[0]->kids[0];
+      f->init = s->kids[0]->nkids >= 2 ? s->kids[0]->kids[1] : NULL;
+    }
+  }
+  find_fields(&fs, kids->v + from, kids->n - from);
+  int kept = 0;                                              /* only what is assigned bare is a field */
+  for (int i = 0; i < fs.n; i++) if (fs.f[i].place) fs.f[kept++] = fs.f[i];
+  fs.n = kept;
+  if (!fs.n) return;
+  for (int i = from; i < kids->n; i++) find_pushes(&fs, kids->v[i]);
+  Kids out = {0};
+  field_stmts(&fs, kids->v + from, kids->n - from, &out, 1);
+  kids->n = from;
+  for (int i = 0; i < out.n; i++) kid(kids, out.v[i]);
+  free(out.v);
+}
+
 Node* build_program(Arena* a, const char* stdlib_src, const char* src, const char* src_tag,
                     int seed_self, int* kind, char* err, int errlen) {
   char perr[1024];
@@ -190,6 +396,7 @@ Node* build_program(Arena* a, const char* stdlib_src, const char* src, const cha
     if (!shadowed(kids.v[i], &kids, std->nkids)) kids.v[kept++] = kids.v[i];
   memmove(kids.v + kept, kids.v + std->nkids, (kids.n - std->nkids) * sizeof(Node*));
   kids.n -= std->nkids - kept;
+  fields_pass(a, &kids, kept);
   *kind = BUILD_OK;
   Node* prog = arena_alloc(a, sizeof(Node));
   prog->kind = nkBlock; prog->line = 1; prog->str = ""; prog->source = "";

@@ -1,0 +1,100 @@
+# Fields (SPEC "Fields"): an array assigned bare is the stereo rule at N
+# places. Each line is at each place, and the field steps one place a
+# sample, so it moves once every N samples.
+
+# --- arithmetic at each place, the field moving once every N samples
+# expect: 0
+# expect at 3: 0
+# expect at 4: 1
+# expect at 8: 2
+$x = array(4)
+$x = $x + 1
+$x[0.25]
+
+# --- a later line at the place sees what was stored
+# expect at 2: 10
+$a = array(2)
+$b = array(2)
+$a = $a + 1
+$b = $a * 10
+$b[0]
+
+# --- a number is everywhere
+# expect at 4: 7
+$x = array(4)
+$x = 7
+$x[0.5]
+
+# --- concentration: how much a place stands out from its neighbours
+# expect at 4: 2, -1
+$x = array(4, i => if i == 1 then 1 else 0)
+$y = array(4)
+$x = $x
+$y = concentration($x)
+[$y[0.25], $y[0]]
+
+# --- read from outside, between places
+# expect: 0.5
+$x = array(4, i => i)
+$x = $x
+$x[0.125]
+
+# --- ... and round past the last
+# expect: 1.5
+$x = array(4, i => i)
+$x = $x
+$x[0.875]
+
+# --- a push from outside lands as the field reaches that place
+# expect: 0
+# expect at 4: 1
+$v = array(4)
+$v = $v
+$v[0.5] = if t < dt then 1 else 0
+$v[0.5]
+
+# --- pushes add
+# expect at 4: 3
+$v = array(4)
+$v = $v
+$v[0.5] = if t < dt then 1 else 0
+$v[0.5] = if t < dt then 2 else 0
+$v[0.5]
+
+# --- a field of values: turned at each place
+# expect at 2: 0, 1
+# expect at 4: -1, 0
+$z = array(2, (1, 0))
+$z = $z * (0, 1)
+$z[0]
+
+# --- squeeze: a bump along the line, the slope of its convergence 2 there, and no twist
+# expect at 4: 2, 0
+$d = array(4, n => if n == 1 then ((0, 1), (0, 0)) else ((0, 0), (0, 0)))
+$p = array(4, ((0, 0), (0, 0)))
+$d = $d
+$p = slope(convergence($d))
+let ((_, along), (across, _)) = $p[0.25]
+[along, across]
+
+# --- twist: a bump across the line, the curl of its curl 2 there, and no squeeze
+# expect at 4: 0, 2
+$d = array(4, n => if n == 1 then ((0, 0), (1, 0)) else ((0, 0), (0, 0)))
+$p = array(4, ((0, 0), (0, 0)))
+$d = $d
+$p = curl(curl($d))
+let ((_, along), (across, _)) = $p[0.25]
+[along, across]
+
+# --- a field in a play is the file's
+# expect at 4: 2
+$x = array(4)
+play a:
+  $x = $x + 2
+  0
+$x[0] + a * 0
+
+# --- an array never assigned bare stays data, indexed by whole places
+# expect: 3
+$f = array(4, n => n)
+$f[3]

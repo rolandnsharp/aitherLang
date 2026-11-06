@@ -701,9 +701,55 @@ sixteenth as much. `every` is `array`'s third parameter, usually named
 (`array(n, 0, 4)` is `array(n, every = 4)`), and only state arrays
 (`$name = array`) take it.
 
+### Fields
+
+**An array assigned bare is a field**: the rule of `[l, r]` at N places.
+Each line is what happens at one place, and arithmetic is at each place.
+A field is the array, and nothing else marks it:
+
+```
+$x = array(128)                                # where each mass is
+$v = array(128)                                # how it is moving
+
+$v = ($v - concentration($x) * stiff - $x * held) * (1 - loss)
+$x = $x + $v
+
+$v[where] = blow                               # a push, at a point
+let height = $x[phasor(note)]                  # read at a point
+```
+
+Inside a field there is no here and no now, only what changes and what
+it touches (notes/nabla-and-medium-2026-11-06.md). No line holds an index:
+
+- A bare `$x` is the field at this place, and `$x = ...` stores there. A
+  later line at the place sees what was stored; a neighbour sees the last
+  step. A number or a value is everywhere.
+- A field steps **one place a sample**, as `tv` draws a pixel, so it moves
+  once every N samples at the cost of one place, however large N is. It
+  suits a field that moves slowly against the sound, read at audio rate:
+  a stepping buzz at `sr / N` sits about 40 dB under the note at N = 128.
+- A neighbour is reached only through these words:
+
+  | Word                          | What it is                               |
+  |-------------------------------|------------------------------------------|
+  | `concentration($x)`           | how much this place stands out from its neighbours: nabla twice, `i * i = -1` giving the sign |
+  | `slope(convergence($d))`      | of a field of directions: the slope of its squeeze, the scalar part of nabla |
+  | `curl(curl($d))`              | ... the curl of its twist, the vector part |
+
+  Along a line nabla is Hamilton's `i` times a difference, a step ahead
+  and a step behind. A field wraps: it is a ring.
+- From outside a field has two touch points. `$x[p]` reads at a point, p
+  from 0 to 1 round, between places; `$v[p] = push` adds a push at the
+  nearest place, landing when the field reaches it. This is the one way
+  `[ ]` differs on a field: p is how far round, not a place number.
+
+Fields are at the file's level, in its plays too; a def sees none. Not
+built: fields with ends, sheets, and a field's own speed (it is always
+one place a sample).
+
 ### Arrays are data, not a map
 
-An array never fans a function out over its elements.
+Unless it is a field, an array never fans a function out over its elements.
 `osc(sin, [220, 330, 440])` is a compile error, not a
 chord. Write the repetition out — that is what `sum` and
 tables are for:

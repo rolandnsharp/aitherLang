@@ -6,9 +6,10 @@
 # speed of a pitch. So what it does is timbre, not pitch: the ring's motion
 # is the sound's change, and the note is how fast the reading goes.
 #
-# The field steps one place a sample, as tv draws a pixel a sample, and
-# `every` lands the places together: the whole field moves once every N
-# samples, at the cost of one place, however large N is.
+# It is a field (SPEC "Fields"): two arrays assigned bare, each line at
+# each place, as a line on [l, r] is. It steps one place a sample, as tv
+# draws a pixel, so the whole field moves once every N samples, at the cost
+# of one place, however large N is.
 #
 # Read round, its displacement is the size of a turning value, so on the
 # scope the ring is drawn as it is: a circle at rest, and a pure tone. A
@@ -34,55 +35,43 @@
 
 let N = 128                                                # masses round the ring
 
-# ---------------------------------------------------------------- the strike
-
-# A strike is a function of its age (COMPOSING, "How long since"). The ring
-# strikes itself every 5 s, the age the clock's own fraction, from the
-# first sample; a pad's age is since() it was pressed. Each lands a golden
-# angle round from the last, so the ring is never struck in the same place.
-let golden = 0.381966 * N
-let own = phasor(1 / 5) * 5
-let pad_a = midi_trig(36)
-let pad_b = midi_trig(37)
-let narrow = min(own, since(pad_a))
-let broad = since(pad_b)
-$where = 0.0
-$where = ($where + (pad_a + pad_b) * golden) mod N
-
-# A blow lasts one step: the law, going one place a sample, passes every
-# mass once in that time, whenever it began.
-let blowing = min(narrow, broad) < N * dt
-let place = if own < N * dt then (floor(sweep / 5) * golden) mod N else $where
-let width = if broad < narrow then 14 else 4
-
 # ---------------------------------------------------------------- the field
 
 let stiff = 0.05 + 0.4 * midi_cc(20)                       # how fast a push goes round
 let held = 0.0002 + 0.01 * midi_cc(22)                     # how strongly a mass keeps its place
 let loss = 0.0012                                          # shrink, a step
 
-$x = array(N, every = N)                                   # where each mass is
-$v = array(N, every = N)                                   # how it is moving
+$x = array(N)                                              # where each mass is
+$v = array(N)                                              # how it is moving
 
-# The law at this place: pushed by its neighbours and its own spring.
-let k = pixel_index(N, 1)
-let me = $x[k]
-let push = ($x[(k + N - 1) mod N] + $x[(k + 1) mod N] - me * 2) * stiff - me * held
-let far = abs(k - place)
-let apart = min(far, N - far)                              # the way round, the shorter way
-let blow = if blowing then 0.1 / width * exp(-apart * apart / (width * width)) else 0
-let moved = ($v[k] + push + blow) * (1 - loss)
-$v[k] = moved
-$x[k] = me + moved
+$v = ($v - concentration($x) * stiff - $x * held) * (1 - loss)
+$x = $x + $v
+
+# ---------------------------------------------------------------- the strike
+
+# A strike is a function of its age (COMPOSING, "How long since"): the
+# ring's own, every 5 s, is the clock's fraction, a pad's is since(). It
+# is a write head sweeping across the ring where it lands, one step long,
+# each a golden angle round from the last.
+let golden = 0.381966
+let own = phasor(1 / 5) * 5
+let pad_a = midi_trig(36)
+let pad_b = midi_trig(37)
+let narrow = min(own, since(pad_a))
+let broad = since(pad_b)
+$where = 0.0
+$where = ($where + (pad_a + pad_b) * golden) mod 1
+let landed = if own < N * dt then floor(sweep / 5) * golden else $where
+
+let age = min(narrow, broad)
+let width = if broad < narrow then 14 else 4
+let head = age / (N * dt) * 2 - 1                          # across the stretch, -1 to 1
+let reach = width * 3
+$v[landed + head * reach / N] = if age < N * dt then 0.2 * reach / (N * width) * exp(-head * head * 9) else 0
 
 # ---------------------------------------------------------------- reading
 
-# Round the ring at the note, between places.
+# Round the ring at the note, its size the ring: a circle, bent where the
+# ring is.
 let note = 110 * pow(2, floor(midi_cc(21) * 25) / 12)
-let round = phasor(note) * N
-let at = floor(round)
-let was = $x[at mod N]
-let height = was + ($x[(at + 1) mod N] - was) * (round - at)
-
-# The turning value, its size the ring: a circle, bent where the ring is.
-spin(note) * (0.45 + height)
+spin(note) * (0.45 + $x[phasor(note)])

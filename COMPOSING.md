@@ -1168,18 +1168,23 @@ each(n, i => $z[i] = law($z[i], $z[(i + n - 1) mod n], $z[(i + 1) mod n], step(i
 
 **A field read at audio rate.** A stored field costs its size every
 sample, unless it moves slower than the sound. Then step one place a
-sample, as `tv` draws a pixel, and let `every` land them together: the
-field costs one place, however large. Read along it at the note
-(scanned synthesis), and what it does is timbre while the reading is
-pitch. `patches/scanned_ring.aither`: 128 masses cost a twentieth of
-stepping them all every sample, and 8192 cost the same as 128.
+sample, as `tv` draws a pixel: the field costs one place, however large.
+That is what an array assigned bare does (SPEC "Fields"). Read along it at
+the note (scanned synthesis), and what it does is timbre while the
+reading is pitch. `patches/scanned_ring.aither`: 128 masses cost a
+twentieth of stepping them all every sample, and 8192 cost the same as 128.
 
 ```
-let k = pixel_index(N, 1)              # this sample's place
-$x = array(N, every = N)               # the field moves once every N samples
-$x[k] = ...                            # the law, at one place
-let height = $x[floor(phasor(note) * N)]
+$x = array(128)                                # each line is at each place,
+$v = array(128)                                # as a line on [l, r] is
+$v = ($v - concentration($x) * stiff) * (1 - loss)
+$x = $x + $v
+$v[where] = blow                               # a push, at a point
+let height = $x[phasor(note)]                  # read at a point
 ```
+
+`patches/aether_ring.aither` is the same with a direction at each place,
+so a squeeze and a twist travel at their own speeds, from one product.
 
 `patches/phasor_ring.aither` is that ring: apart, a swarm; coupled, one
 pitch with a travelling wave of phase round it. A medium with ends needs

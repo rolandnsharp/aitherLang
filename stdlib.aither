@@ -294,6 +294,44 @@ def pixel(w, h):
 # zoom, a morph, which of two state arrays is last frame's).
 def frame_number(w, h): floor(floor(t * sr + 0.5) / (w * h))
 
+# ---------------------------------------------------------------- fields
+# An array assigned bare is a field: arithmetic at each place, as on
+# [l, r] (SPEC "Fields"). A patch reaches a neighbour only through these
+# words, and reads and pushes from outside at a point, p 0..1 round; the
+# compiler fills in the place. Along a line nabla is Hamilton's i times a
+# difference, a step ahead and a step behind, so odd and even places stay
+# together.
+
+# A field read between its places, p 0..1 of the way round.
+def field_at(f, p):
+  let n = len(f)
+  let r = (p - floor(p)) * n
+  let at = floor(r)
+  let was = f[at mod n]
+  was + (f[(at + 1) mod n] - was) * (r - at)
+
+# The place nearest p.
+def field_place(p, n): floor((p - floor(p)) * n + 0.5) mod n
+
+# How much this place stands out from its neighbours: nabla twice, i i = -1
+# giving the sign. Things flow away from it.
+def concentration(f, at): -(f[(at + len(f) - 1) mod len(f)] + f[(at + 1) mod len(f)] - f[at] * 2)
+
+# Hamilton's S and V: the scalar part and the vector part.
+def scalar(q):
+  let ((w, _), (_, _)) = q
+  w
+def vector(q): q - scalar(q)
+
+def nabla_ahead(f, at): (0, 1) * (f[(at + 1) mod len(f)] - f[at])
+def nabla_behind(f, at): (0, 1) * (f[at] - f[(at + len(f) - 1) mod len(f)])
+
+# Of a field of directions along a line: the slope of its convergence, the
+# scalar part of nabla, and the curl of its curl, the vector part. A wave
+# of squeeze and a wave of twist are these two.
+def slope_of_convergence(f, at): (0, 1) * (scalar(nabla_ahead(f, at)) - scalar(nabla_behind(f, at)))
+def curl_of_curl(f, at): (0, 1) * (vector(nabla_ahead(f, at)) - vector(nabla_behind(f, at)))
+
 # ---------------------------------------------------------------- spectrum
 # Timbre construction via sum-of-sines. Every physical resonant system
 # vibrates as a sum of sines (Fourier); additive synthesis writes that
