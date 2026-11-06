@@ -47,7 +47,8 @@ let CARRIER = 440.0
 # tone the ear uses as a reference while the sweeper passes through zero.
 play reference:
   let p = spin(CARRIER)
-  let s = p[0] * 0.18 * refVol
+  let (p_x, _) = p
+  let s = p_x * 0.18 * refVol
   [s, s]
 
 # ===== SWEEPER — heterodyne-shifted via SSB turn =====
@@ -69,9 +70,10 @@ play sweeper:
 
   let carrier = spin(CARRIER)
   let modu = spin(modRate)
-  let mixed = turn(carrier, modu)
+  let mixed = carrier * modu
 
-  let s = mixed[0] * 0.18 * sweepVol
+  let (mixed_x, _) = mixed
+  let s = mixed_x * 0.18 * sweepVol
   [s, s]
 
 # ===== MASTER =====

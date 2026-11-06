@@ -70,16 +70,20 @@ play drone:
   # walks smoothly with the LFO, no companion sidebands.
   let carrier = spin(110.0)
   let modu = spin(modRate)
-  let breathed = turn(carrier, modu)
+  let breathed = carrier * modu
 
   # Coherent harmonic stack via repeated turn. Each layer is exactly
   # 2x the previous in frequency, with phase preserved exactly.
-  let p2 = turn(breathed, breathed)
-  let p3 = turn(p2, breathed)
-  let p4 = turn(p2, p2)
+  let p2 = breathed * breathed
+  let p3 = p2 * breathed
+  let p4 = p2 * p2
 
-  let bass = breathed[0]
-  let stack = (p2[0] * 0.5 + p3[0] * 0.3 + p4[0] * 0.18) * harmStack
+  let (breathed_x, _) = breathed
+  let bass = breathed_x
+  let (p2_x, _) = p2
+  let (p3_x, _) = p3
+  let (p4_x, _) = p4
+  let stack = (p2_x * 0.5 + p3_x * 0.3 + p4_x * 0.18) * harmStack
   let s = (bass * 0.6 + stack) * 0.15
   [s, s]
 
@@ -103,8 +107,10 @@ play melody:
 
   let env = pluck(velTrig, 1.5)
   let p = spin($heldFund)
-  let p2 = turn(p, p)    # phase-locked octave
-  let mix = p[0] + p2[0] * melShimmer * 0.6
+  let p2 = p * p    # phase-locked octave
+  let (p2_x, _) = p2
+  let (p_x, _) = p
+  let mix = p_x + p2_x * melShimmer * 0.6
   let voice = mix * env
 
   let s = voice * melVol * 0.18

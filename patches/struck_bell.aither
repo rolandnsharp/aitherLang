@@ -103,7 +103,7 @@ play bell:
     let f = prime * ratio[k - 1]
     let m = winds[k - 1]
     # Every strike's push into this mode's pair, while one lasts.
-    let push = if hitting < 1 then [0, 0] else sum(16, n =>
+    let push = if hitting < 1 then (0, 0) else sum(16, n =>
       let age = ages[n - 1]
       let key = midi_voice_key(n)
       let dpad = key >= 40 and key <= 43
@@ -111,12 +111,13 @@ play bell:
       let button = key >= 36 and key <= 39
       let around = (if button then 0 else TAU * (key mod 12) / 12) + $side - phi0
       let up = if button then pad_height[key - 36] else clamp((floor(key / 12) - 4) / 4, 0, 1)
-      if force > 0 then rotate([force * height_shape(up, circle[k - 1]), 0], m * around) else [0, 0])
+      if force > 0 then rotate((force * height_shape(up, circle[k - 1]), 0), m * around) else (0, 0))
     # A push in force units reaches the mode as its ringing times 2 pi f:
     # divided back, so each rings at its level.
     let w = TAU * f
-    let a = resonator(push[0] / w, f, 2 / ring[k - 1])
-    let b = resonator(push[1] / w, f * split[k - 1], 2 / ring[k - 1])
+    let (push_x, push_y) = push
+    let a = resonator(push_x / w, f, 2 / ring[k - 1])
+    let b = resonator(push_y / w, f * split[k - 1], 2 / ring[k - 1])
     (a + b) * level[k - 1])                                # the pair together: its beating is the bell's warble
   modes * 0.1
 

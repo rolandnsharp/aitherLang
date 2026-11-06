@@ -58,7 +58,8 @@ play sub:
   $kph = 0.0
   $kph = if trig > 0.5 then 0.0 else ($kph + pSwp * dt) mod 1.0
   let body  = sin(TAU * $kph) * env
-  let dho_b = dho(trig / dt * 1042.0, 55, 0.06)[0] * env * 0.4
+  let (dho_b_x, _) = dho(trig / dt * 1042.0, 55, 0.06)
+  let dho_b = dho_b_x * env * 0.4
   let m     = (body + dho_b) * 0.30
   let amp   = bloomW + shiftW * 0.7 + collapseW * 0.3
   [m * amp, m * amp]
@@ -77,9 +78,9 @@ play sympathy:
   $bus       = $bus * 0.96 + strike * 0.08
 
   let drv = $bus * 0.8
-  let v1  = dho(trig / dt * 167.0 + drv, 220.0,  0.0008)[0]
-  let v2  = dho(                   drv, 277.18, 0.0008)[0]
-  let v3  = dho(                   drv, 329.63, 0.0008)[0]
+  let (v1, _) = dho(trig / dt * 167.0 + drv, 220.0,  0.0008)
+  let (v2, _) = dho(                   drv, 277.18, 0.0008)
+  let (v3, _) = dho(                   drv, 329.63, 0.0008)
 
   let amp = 0.06 * (bloomW + shiftW * 0.8)
   let L   = (v1 * 0.5 + v2) * amp
@@ -93,10 +94,14 @@ play sympathy:
 
 play shimmer:
   let p   = spin(165.0)
-  let p2  = turn(p, p)
-  let p4  = turn(p2, p2)
-  let p8  = turn(p4, p4)
-  let stk = p[0] * 0.30 + p2[0] * 0.50 + p4[0] * 0.30 + p8[0] * 0.18
+  let p2  = p * p
+  let p4  = p2 * p2
+  let p8  = p4 * p4
+  let (p_x, _) = p
+  let (p2_x, _) = p2
+  let (p4_x, _) = p4
+  let (p8_x, _) = p8
+  let stk = p_x * 0.30 + p2_x * 0.50 + p4_x * 0.30 + p8_x * 0.18
   let trem = 0.5 + 0.5 * sin(TAU * loopPh * 3)
   let amp  = 0.08 * (bloomW * 0.4 + shiftW + collapseW * 0.3) * trem
   stk * amp |> pan(lfo1)
@@ -112,8 +117,8 @@ play drone:
   let shHz = lfo1 * 80
   # Left and right are two opposite shifts, one number each: the spectrum
   # pulls apart across the field.
-  let [L, _]    = freq_shift(warm,  shHz)
-  let [R, _]    = freq_shift(warm, -shHz)
+  let (L, _) = freq_shift(warm,  shHz)
+  let (R, _) = freq_shift(warm, -shHz)
   let amp  = 0.13 * (bloomW * 0.25 + shiftW + collapseW * 0.5)
   [L * amp, R * amp]
 
@@ -130,9 +135,10 @@ play mandel:
   let cR = -0.78 + lfo1 * 0.04
   let cI = 0.156 + lfo2 * 0.025
   let resetTrig = impulse(441.0)
-  let zsq = turn([$zr, $zi], [$zr, $zi])
-  let nextR = if resetTrig > 0.5 then 0.0 else zsq[0] + cR
-  let nextI = if resetTrig > 0.5 then 0.0 else zsq[1] + cI
+  let z = ($zr, $zi)
+  let (zsq_x, zsq_y) = z * z
+  let nextR = if resetTrig > 0.5 then 0.0 else zsq_x + cR
+  let nextI = if resetTrig > 0.5 then 0.0 else zsq_y + cI
   let mag   = amplitude(nextR, nextI)
   let alive = if mag < 4.0 then 1.0 else 0.0
   $zr = nextR * alive
@@ -171,7 +177,8 @@ play sparkle:
   let rate = 8.0 / LOOP_SEC
   let trig = impulse(rate)
   let env  = pluck(trig, 0.06)
-  let bell = dho(trig / dt * 4.17, 4400 + lfo4 * 600, 0.0009)[0] * env
+  let (bell_x, _) = dho(trig / dt * 4.17, 4400 + lfo4 * 600, 0.0009)
+  let bell = bell_x * env
   let pos  = sin(TAU * loopPh * 8 + PI / 4)
   let amp  = 0.10 * (bloomW * 0.4 + shiftW * 0.8 + collapseW * 0.6)
   bell * amp |> pan(pos)

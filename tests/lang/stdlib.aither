@@ -23,22 +23,22 @@ freq_shift(x, 100) - turn(analytic(x), spin(100))
 
 # --- spin is cos and sin of one phase
 # expect until 4800: 0
-spin(330) - [cos(TAU * phasor(330)), sin(TAU * phasor(330))]
+spin(330) - (cos(TAU * phasor(330)), sin(TAU * phasor(330)))
 
 # --- dho is a phasor turning: one turn and a push a sample, written out
 # expect until 9600: 0, 0
 let force = if t < dt * 2 then 1e8 else 0
 let w = TAU * 440
 let wd = w * sqrt(1 - 0.01 * 0.01)
-$z = [0, 0]
-$z = turn($z, exp(-0.01 * w * dt) * [cos(wd * dt), sin(wd * dt)]) + [0, -force * dt / wd]
+$z = (0, 0)
+$z = $z * (exp(-0.01 * w * dt) * (cos(wd * dt), sin(wd * dt))) + (0, -force * dt / wd)
 dho(force, 440, 0.01) - $z
 
 # --- a constant force stretches the spring to force / w^2, at any damping below 1
 # expect at 95999: 1, 1
 let w = TAU * 10
-let [a, _] = dho(100, 10, 0.5)
-let [b, _] = dho(100, 10, 0.05)
+let (a, _) = dho(100, 10, 0.5)
+let (b, _) = dho(100, 10, 0.05)
 let ok = abs(a * w * w / 100 - 1) < 0.001
 [if ok then 1 else 0, if abs(b * w * w / 100 - 1) < 0.01 then 1 else 0]
 
@@ -67,7 +67,7 @@ let w = TAU * 300
 let d = 0.2
 $n = 0
 $n = $n + 1
-let [x, q] = dho(if $n == 1 then 1e7 else 0, 300, d)
+let (x, q) = dho(if $n == 1 then 1e7 else 0, 300, d)
 let v = -(w * sqrt(1 - d * d) * q + d * w * x)
 let dx = (x - prev(x)) / dt
 let mid = (v + prev(v)) / 2

@@ -32,36 +32,36 @@ def pulse(freq, width): if phasor(freq) < width then 1 else -1
 # by itself to double its speed (turning by a spin adds speeds).
 def spin(freq):
   let a = TAU * phasor(freq)
-  [cos(a), sin(a)]
+  (cos(a), sin(a))
 
 # A pair turned by a fixed angle, in radians.
-def rotate(z, angle): turn(z, [cos(angle), sin(angle)])
+def rotate(z, angle): z * (cos(angle), sin(angle))
 
 # ---------------------------------------------------------------- pairs of pairs
 # Hamilton's quaternions, a pair whose sides are pairs, [[w, x], [y, z]] =
 # w + x i + y j + z k (SPEC "Pairs of pairs"). His units: i i = j j = k k
 # = i j k = -1, so i j = k, j k = i, k i = j, and j i = -k. A patch's own
 # i, j or k (a let, an `i =>`) comes first.
-let i = [[0, 1], [0, 0]]
-let j = [[0, 0], [1, 0]]
-let k = [[0, 0], [0, 1]]
+let i = (0, 1)
+let j = ((0, 0), (1, 0))
+let k = ((0, 0), (0, 1))
 
 # A rotation by angle (radians) about a unit direction: Hamilton's versor
 # of half the angle, cos(angle / 2) + dir sin(angle / 2), since a
 # rotation applied turns by twice its own angle. about(k, a) turns the
 # plane of i and j by a, as rotate does a pair.
-def about(dir, angle): [[cos(angle / 2), 0], [0, 0]] + dir * sin(angle / 2)
+def about(dir, angle): cos(angle / 2) + dir * sin(angle / 2)
 
 # A rotation applied to a direction (a pair of pairs whose first number
 # is 0): Hamilton's r v r^-1, for a unit r. Composed rotations apply
 # right first: apply(turn(r2, r1), v) is r1, then r2.
-def apply(r, v): turn(turn(r, v), conj(r))
+def apply(r, v): r * v * conj(r)
 
 # The direction a spinor points (the Hopf map): the pole, k, turned by
 # it. A spinor turned by r points apply(r, ...) of where it pointed, and
 # one turned all the way round, negated, points the same way.
 # (Written out, not through apply, so a patch's own apply can't change it.)
-def hopf(s): turn(turn(s, [[0, 0], [0, 1]]), conj(s))
+def hopf(s): s * ((0, 0), (0, 1)) * conj(s)
 
 # Single-sideband frequency shift: every frequency in the signal moves
 # up by hz Hz (down if negative), with no mirror image, unlike a ring
@@ -70,7 +70,7 @@ def hopf(s): turn(turn(s, [[0, 0], [0, 1]]), conj(s))
 # a pair in quadrature, so what hears it decides (played, the sides are
 # the shifted sound a quarter turn apart).
 # Clean above about 30 Hz, where the Hilbert pair holds its quarter turn.
-def freq_shift(signal, hz): turn(analytic(signal), spin(hz))
+def freq_shift(signal, hz): analytic(signal) * spin(hz)
 
 # The damped harmonic oscillator, the spring every resonance is:
 #   x'' = force - 2 damp w x' - w^2 x,   w = TAU freq
@@ -94,12 +94,12 @@ def freq_shift(signal, hz): turn(analytic(signal), spin(hz))
 # The velocity, if a model needs it, takes both sides:
 #   v = -(wd q + damp w x)
 def dho(force, freq, damp):
-  $z = [0, 0]
+  $z = (0, 0)
   let w = TAU * freq
   let d = clamp(damp, 0, 0.999)
   let wd = w * sqrt(1 - d * d)
-  let step = exp(-d * w * dt) * [cos(wd * dt), sin(wd * dt)]
-  $z = turn($z, step) + [0, -force * dt / wd]
+  let step = exp(-d * w * dt) * (cos(wd * dt), sin(wd * dt))
+  $z = $z * step + (0, -force * dt / wd)
   $z
 
 # A signal through a resonance at freq Hz: a dho driven by it, scaled so
@@ -107,7 +107,8 @@ def dho(force, freq, damp):
 # rate per second (2 damp w): higher, shorter ring.
 def resonator(signal, freq, decay):
   let w = TAU * freq
-  dho(signal * w * w, freq, decay / (2 * w))[0]
+  let (x, _) = dho(signal * w * w, freq, decay / (2 * w))
+  x
 
 # An oscillator that keeps itself alive (Van der Pol), as a bow, a reed
 # or lips do: it feeds energy in while it is small and takes it out
@@ -128,7 +129,7 @@ def vdp(freq, mu = 0.1, push = 0, start = 0.01):
   $on = 1
   $v = $v + (mu * w * (1 - 4 * $x * $x) * $v - w * w * ($x - push)) * dt
   $x = $x + $v * dt
-  [$x, -$v / w]
+  ($x, -$v / w)
 
 # ---------------------------------------------------------------- helpers
 
@@ -164,7 +165,7 @@ def since(x):
 # Each call site gets its own 1-sample buffer via call-site state,
 # so `prev(a) + prev(b)` are independent.
 def prev(signal):
-  $last = 0.0
+  $last = signal - signal                  # 0, in the signal's shape
   let out = $last
   $last = signal
   out
@@ -287,7 +288,7 @@ def pixel(w, h):
   let k = pixel_index(w, h)
   let col = k mod w
   let row = floor(k / w)
-  [(2 * col + 1) / w - 1, (h - 2 * row - 1) / w]
+  ((2 * col + 1) / w - 1, (h - 2 * row - 1) / w)
 
 # Which frame the sample is in, from 0: for what changes once a frame (a
 # zoom, a morph, which of two state arrays is last frame's).

@@ -36,7 +36,7 @@
 let w3 = slew(midi_cc(21), 0.05) * TAU                    # about S3
 let w1 = slew(midi_cc(20), 0.05) * TAU                    # about S1
 let w2 = slew(midi_cc(22), 0.05) * TAU                    # about S2
-let r = turn(turn(about(j, -w3), about(i, -w1)), about(k, -w2))   # the whole turn
+let r = about(j, -w3) * about(i, -w1) * about(k, -w2)      # the whole turn
 
 # ---------------------------------------------------------------- a sound
 
@@ -59,6 +59,6 @@ let src = body + tone + breath
 # for his product to turn: L + (-conj(R)) j, so its second half is
 # -conj(R), and the turned R is minus the real part of the second half.
 let side = analytic(src)
-let [[l, _], [minus_r, _]] = turn(r, [side, conj(side) * -1])
+let ((l, _), (minus_r, _)) = r * (side, conj(side) * -1)
 
 [l, -minus_r] |> reverb(1.4, 0.1)

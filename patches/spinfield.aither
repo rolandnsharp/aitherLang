@@ -29,12 +29,12 @@
 # ---------------------------------------------------------------- directions
 
 # A direction: theta from straight up, phi round from ahead.
-def toward(theta, phi): [[0, sin(theta) * cos(phi)], [sin(theta) * sin(phi), cos(theta)]]
+def toward(theta, phi): ((0, sin(theta) * cos(phi)), (sin(theta) * sin(phi), cos(theta)))
 
 # Two directions' dot product: minus the first number of Hamilton's
 # product of them (the rest is their cross product).
 def dot(a, b):
-  let [[w, _], [_, _]] = turn(a, b)
+  let ((w, _), (_, _)) = a * b
   -w
 
 # ---------------------------------------------------------------- the head
@@ -44,7 +44,7 @@ def dot(a, b):
 let yaw   = (midi_cc(21) - 0.5) * TAU
 let pitch = (midi_cc(22) - 0.5) * PI
 let roll  = (midi_cc(20) - 0.5) * PI
-let head = turn(turn(about(k, yaw), about(j, pitch)), about(i, roll))
+let head = about(k, yaw) * about(j, pitch) * about(i, roll)
 
 # ---------------------------------------------------------------- sounds
 

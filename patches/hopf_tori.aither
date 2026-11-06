@@ -34,19 +34,23 @@ let theta = PI * lats[floor(fibre / per)]                  # the latitude
 let phi = TAU * (fibre mod per) / per + TAU * t / 37       # where round it, creeping
 
 # The spinor: one direction's spinors, turned together by alpha.
-let xi = rotate([cos(theta / 2), 0], alpha)
-let eta = rotate([sin(theta / 2), 0], alpha + phi)
+let xi = rotate((cos(theta / 2), 0), alpha)
+let eta = rotate((sin(theta / 2), 0), alpha + phi)
 
 # Stereographic projection of the four numbers into ordinary space, from
 # the point where eta is i: the circle through it would reach infinity.
-let away = 1 - eta[1]
-let px = xi[0] / away
-let py = xi[1] / away
-let pz = eta[0] / away
+let (eta_x, eta_y) = eta
+let away = 1 - eta_y
+let (xi_x, xi_y) = xi
+let px = xi_x / away
+let py = xi_y / away
+let pz = eta_x / away
 
 # The view: turning slowly about the vertical, tipped well forward so the
 # tori are seen from the side.
-let turned = rotate([px, py], TAU * t / 29)
+let turned = rotate((px, py), TAU * t / 29)
 let tip = 1.1
-let tipped = rotate([turned[1], pz], tip)
-[turned[0], tipped[0]] * 0.22
+let (turned_x, turned_y) = turned
+let tipped = rotate((turned_y, pz), tip)
+let (tipped_x, _) = tipped
+[turned_x, tipped_x] * 0.22

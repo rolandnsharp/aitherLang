@@ -60,7 +60,7 @@ def push(strike): (discharge(strike, 1 / 0.001) - discharge(strike, 1 / 0.0003))
 play bodhran:
   let hit = euclid(5, 12, pulse, bar) * accent
   let w = TAU * 75
-  let [boom, _] = dho(push(hit) * w * 0.6, 75, 0.12)      # one side: the low end stays centred
+  let (boom, _) = dho(push(hit) * w * 0.6, 75, 0.12)      # one side: the low end stays centred
   let tap = bpf(noise(), 1800, 0.4) * discharge(hit, 60) * 0.5
   (boom + tap) * 0.5
 

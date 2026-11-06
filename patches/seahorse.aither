@@ -9,14 +9,16 @@
 let w = 128
 let h = 96
 let depth = 0.5 - 0.5 * cos(TAU * phasor(1 / 20))
-let c = [-0.743643887, 0.131825904] + pixel(w, h) * (1.5 * pow(1 / 60, depth))
+let c = (-0.743643887, 0.131825904) + pixel(w, h) * (1.5 * pow(1 / 60, depth))
 
 # z -> z^2 + c until it leaves or n runs out: the steps left, and |z|^2.
 # |z|^2 > 4 rather than amplitude(z) > 2: no square root every step.
 def rec escape(z, c, n):
-  if n == 0 or z[0] * z[0] + z[1] * z[1] > 4 then [n, z[0] * z[0] + z[1] * z[1]]
-  else escape(turn(z, z) + c, c, n - 1)
+  let (x, y) = z
+  let size = x * x + y * y
+  if n == 0 or size > 4 then [n, size]
+  else escape(z * z + c, c, n - 1)
 
-let e = escape([0, 0], c, 64)
+let e = escape((0, 0), c, 64)
 let smooth = 64 - e[0] + 1 - log(max(log(e[1]) / 2, 0.0001), 2)
-if e[0] == 0 then [0, 0] else rotate([0.9, 0], TAU * smooth / 16)
+if e[0] == 0 then (0, 0) else rotate((0.9, 0), TAU * smooth / 16)

@@ -50,7 +50,7 @@ let shifted = freq_shift(mono, shiftHz)      # a turning pair: the shifted pad i
 # analytic signal), so turning it by itself doubles every phase: the
 # frequency-doubled, phase-locked version (and intermod sidebands for
 # chord input). No second Hilbert pair needed.
-let squared = turn(shifted, shifted)
+let squared = shifted * shifted
 
 # Crossfade dry vs squared. Clamp the squared term — chord magnitudes
 # can spike higher than unit, and we want a controlled blend rather
@@ -59,6 +59,7 @@ let sqSafe  = clamp(squared, -1.5, 1.5)
 let blended = shifted * (1 - squareAmt * 0.5) + sqSafe * squareAmt * 0.5
 
 # Master FX
-let driven = drive(blended, driveAmt)
+let (side_a, side_b) = blended                     # the value, heard as two sides
+let driven = drive([side_a, side_b], driveAmt)
 let wet    = mono(driven) |> reverb(2.5, 0.4)     # one reverb for both sides
 (driven + wet * revWet) * 0.55

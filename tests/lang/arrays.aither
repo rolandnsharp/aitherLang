@@ -308,7 +308,7 @@ r[0] + r[1] + r[2]
 
 # --- a rule of pairs makes an array of pairs
 # expect: 0, 0.5
-let z = array(3, k => rotate([1, 0], k * PI / 2))
+let z = array(3, k => rotate((1, 0), k * PI / 2))
 z[1] * 0.5
 
 # --- a state array's rule is its starting shape: taken once, then the array keeps its own values

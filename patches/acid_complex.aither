@@ -101,7 +101,8 @@ play acid:
   let kickA    = sin(TAU * phasor(pSweep)) * kEnv
 
   let bodyDamp = 0.04 - kickPunch * 0.025
-  let kickB    = dho(kTrig / dt * 1042.0, 200, bodyDamp)[0] * 0.5
+  let (kickB_x, _) = dho(kTrig / dt * 1042.0, 200, bodyDamp)
+  let kickB    = kickB_x * 0.5
 
   let fmDepth  = 0.5 + kickPunch * 4.0
   let modSig   = sin(TAU * phasor(pSweep * 1.5)) * fmDepth
@@ -114,19 +115,22 @@ play acid:
   let kwC = max(0, (kickParadigm - 0.5) * 2)
   let kickClick = noise() * discharge(kTrig, 200) * 0.3
   let kickRaw   = kickA * kwA + kickB * kwB + kickC * kwC + kickClick
-  let [kickShifted, _] = freq_shift(kickRaw, kickShift)   # one side: the low end stays centred
+  let (kickShifted, _) = freq_shift(kickRaw, kickShift)   # one side: the low end stays centred
   let kickSig     = kickShifted * kickVol * 0.5
 
   # ===== BASS =====
   let saw   = additive(bFreq, saw_shape, 10)
   let cutA  = 600 + bEnv * 3200 * (0.5 + bAcc * 0.5)
-  let bassA = dho(saw * 80000.0, cutA, 0.025)[0] * bEnv * (0.4 + bAcc * 0.6)
+  let (bassA_x, _) = dho(saw * 80000.0, cutA, 0.025)
+  let bassA = bassA_x * bEnv * (0.4 + bAcc * 0.6)
 
   let bForceB = 0.458 * bFreq / dt
-  let bassB   = dho(bTrig * bForceB, bFreq, 0.008)[0] * bEnv * (0.5 + bAcc * 0.5) * 0.4
+  let (bassB_x, _) = dho(bTrig * bForceB, bFreq, 0.008)
+  let bassB   = bassB_x * bEnv * (0.5 + bAcc * 0.5) * 0.4
 
   let nAmp  = bEnv * (0.3 + bAcc * 0.7) * 6000000.0
-  let bassC = dho(noise() * nAmp, bFreq * 3, 0.025)[0] * 6.0
+  let (bassC_x, _) = dho(noise() * nAmp, bFreq * 3, 0.025)
+  let bassC = bassC_x * 6.0
 
   let bwA = max(0, 1 - bassParadigm * 2)
   let bwB = (if bassParadigm < 0.5
@@ -146,7 +150,7 @@ play acid:
                + h_oct * w_oct * 0.36
                + h_fth * w_fth * 0.30
                + h_7th * w_7th * 0.26)
-  let [bassShifted, _] = freq_shift(bassStack, bassShift) # one side: the low end stays centred
+  let (bassShifted, _) = freq_shift(bassStack, bassShift) # one side: the low end stays centred
   let bassSig     = bassShifted * bassVol * 0.5
 
   # ===== DIDGERIDOO =====
@@ -255,7 +259,8 @@ play flute:
     # without this it sounds like pure synthesis. Same trick as
     # cello_max's body BPFs, applied to the flute's signature
     # resonance frequency.
-    let body = dho(voice * 6000.0, 1400, 0.12)[0] * 0.18
+    let (body_x, _) = dho(voice * 6000.0, 1400, 0.12)
+    let body = body_x * 0.18
 
     (voice * 0.18 + breath + body + chiff) * env * fluteVol)
 
@@ -300,11 +305,15 @@ def handPan(trig, fund):
   let d2 = 1 + 0.0008 * sin(t * 1.13 + 1.7)
   let d3 = 1 + 0.0012 * sin(t * 1.39 + 2.4)
   let d4 = 1 + 0.0015 * sin(t * 1.91 + 0.9)
-  let body = dho(trig / dt * 0.0833 * fund,  fund * 0.5,         0.0035)[0] * 0.22
-  let f1   = dho(force,                 fund * d1,           0.00020)[0]
-  let f2   = dho(force * 0.55,          fund * 1.998 * d2,   0.00050)[0] * 0.55
-  let f3   = dho(force * 0.32,          fund * 3.0 * d3,     0.00170)[0] * 0.40
-  let f4   = dho(force * 0.16,          fund * 4.0 * d4,     0.00500)[0] * 0.22
+  let (body_x, _) = dho(trig / dt * 0.0833 * fund,  fund * 0.5,         0.0035)
+  let body = body_x * 0.22
+  let (f1, _) = dho(force,                 fund * d1,           0.00020)
+  let (f2_x, _) = dho(force * 0.55,          fund * 1.998 * d2,   0.00050)
+  let f2   = f2_x * 0.55
+  let (f3_x, _) = dho(force * 0.32,          fund * 3.0 * d3,     0.00170)
+  let f3   = f3_x * 0.40
+  let (f4_x, _) = dho(force * 0.16,          fund * 4.0 * d4,     0.00500)
+  let f4   = f4_x * 0.22
   # Mallet attack — brief inharmonic chirp via additive sines at
   # phi-spaced ratios well above the fundamental. Metallic "ping"
   # that decays in ~40ms, leaving the tongue's ring to take over.
@@ -332,7 +341,8 @@ play pads:
   # 5-up A's overtones, etc.), this resonator picks up the energy
   # and rings, creating the "wash of sympathetic vibration" you hear
   # from a real expensive hand pan when neighbouring tongues vibrate.
-  let halo = dho(mix * 25.0, 146.83, 0.0006)[0] * 0.5
+  let (halo_x, _) = dho(mix * 25.0, 146.83, 0.0006)
+  let halo = halo_x * 0.5
   let out  = mix + halo
   [out, out]
 

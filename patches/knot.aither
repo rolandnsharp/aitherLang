@@ -76,7 +76,7 @@ $spin = $spin + speed(midi_note(38), TAU * 12, 0, 3) * dt   # up to 12 turns a s
 # Tip (turn y and z), turn sideways (z and x), then look from in front:
 # nearer is bigger, which shows which way round it is.
 let [x, y] = xy
-let [y1, z1] = rotate([y, z], $tip)
-let [z2, x2] = rotate([z1, x], $side)
+let (y1, z1) = rotate((y, z), $tip)
+let (z2, x2) = rotate((z1, x), $side)
 let near = 3 / (4 - z2)
-rotate([x2, y1] * near, $spin) * 0.36
+rotate((x2, y1) * near, $spin) * 0.36

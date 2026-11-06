@@ -66,7 +66,7 @@ let m = $mix * $mix * (3 - 2 * $mix)
 # One clock for every interval: it runs 120 laps of f before it wraps,
 # and 120 is a whole number of laps of every q, so every curve closes.
 let ph = TAU * 120 * phasor(f / 120)
-def second(k, ph): [cos(ph * ps[k] / qs[k]), sin(ph * ps[k] / qs[k])]
+def second(k, ph): (cos(ph * ps[k] / qs[k]), sin(ph * ps[k] / qs[k]))
 
 # How fast each turn goes, radians a second: a held button speeds it
 # up, and let go it slows to a stop. Unheld, the rings drift.
@@ -83,21 +83,21 @@ $b = $b + speed(midi_note(37), 1.5, 0.06, 0.7) * dt
 $slide = $slide + speed(midi_note(38), TAU * 15, 0, 3) * dt   # up to 15 Hz
 
 # The point on the 3-sphere, slid along its ring.
-let z1 = rotate([cos(ph), sin(ph)], $slide)
+let z1 = rotate((cos(ph), sin(ph)), $slide)
 let w2 = second($from, ph) * (1 - m) + second($to, ph) * m
 let z2 = rotate(w2 / amplitude(w2), $slide)          # back onto the sphere mid-morph
-let [x1, y1] = z1 * 0.7071
-let [x2, y2] = z2 * 0.7071
+let (x1, y1) = z1 * 0.7071
+let (x2, y2) = z2 * 0.7071
 
 # Turned through the fourth dimension.
-let [xa, xb] = rotate([x1, x2], $a)
-let [ya, yb] = rotate([y1, y2], $b)
+let (xa, xb) = rotate((x1, x2), $a)
+let (ya, yb) = rotate((y1, y2), $b)
 
 # Stereographic projection from the pole (0, 0, 0, 1) into our space,
 # then seen from a little above, and the far-flung parts drawn in so
 # the beam stays on the screen.
 let s = 1 / max(1 - yb, 0.01)
-let [Y, Z] = rotate([ya * s, xb * s], 0.9)
+let (Y, Z) = rotate((ya * s, xb * s), 0.9)
 let p = [xa * s, Y]
 let r = amplitude(p)
 p * tanh(0.45 * r) / max(r, 0.0001) * 0.95

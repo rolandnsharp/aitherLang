@@ -44,12 +44,12 @@ let ly = 2.0
 let wall = 0.7
 
 # e^{imθ}: a source at θ, in mode m.
-def toward(m, theta): rotate([1, 0], m * theta)
+def toward(m, theta): rotate((1, 0), m * theta)
 
 # The same from the unit pair pointing at θ, by turning it by itself m
 # times, for orders up to 3 (m is known when the patch compiles, so this
 # is m - 1 turns and no trigonometry).
-def wound(u, m): if m == 0 then [1, 0] else if m == 1 then u else if m == 2 then turn(u, u) else turn(turn(u, u), u)
+def wound(u, m): if m == 0 then (1, 0) else if m == 1 then u else if m == 2 then u * u else u * u * u
 
 # The field heard from direction phi: each mode turned back by m·phi and
 # its real side taken, weighted so the beam has no side lobes (max-rE).
@@ -57,7 +57,7 @@ def heard(a, phi):
   let n = len(a)
   sum(n, k =>
     let m = k - 1
-    let [re, _] = turn(a[m], toward(-m, phi))
+    let (re, _) = a[m] * toward(-m, phi)
     re * (if m == 0 then 1 else 2 * cos(m * PI / (2 * n)))) / K
 
 # A round head, one ear: theta is the angle between the sound and the
@@ -112,7 +112,7 @@ let ss = [shaker, bell, drone]
 let paths = 7
 let arrivals = 3 * paths
 let heard_s = array(arrivals)
-let bearing = array(arrivals, [0, 0])    # each arrival's direction, as a unit pair
+let bearing = array(arrivals, (0, 0))    # each arrival's direction, as a unit pair
 each(arrivals, k =>
   let i = int(k / paths)
   let w = k mod paths
@@ -120,7 +120,7 @@ each(arrivals, k =>
   let y = image_y(sy[i], w) - ly
   let r = sqrt(x * x + y * y + image_up(w) ^ 2)
   heard_s[k] = delay(ss[i], r / c, 0.1) * (if w == 0 then 1 else wall) / max(r, 0.5) * 2
-  bearing[k] = [x, y] / max(sqrt(x * x + y * y), 0.01))
+  bearing[k] = (x, y) / max(sqrt(x * x + y * y), 0.01))
 
 let yaw = -TAU * midi_cc(21)          # the head turned anticlockwise by yaw: d-pad right turns it right
 

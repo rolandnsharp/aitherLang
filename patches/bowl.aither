@@ -91,7 +91,7 @@ let hit   = abs(dy) * 127 / 6 + (if $started == 0 then 1 else 0)
 let hitZ  = if dy < 0 then 0.4 else 0
 $started = 1
 
-$z = array(10, [0, 0])                                   # each mode's phasor [x, q]
+$z = array(10, (0, 0))                                   # each mode's phasor [x, q]
 let w   = array(10)
 let d   = array(10)
 let vel = array(10)
@@ -99,7 +99,8 @@ each(10, j =>
   let k = floor(j / 2)
   w[j] = TAU * f2 * ratio[k] * (1 + (j mod 2) * split[k])
   d[j] = 6.91 / (ring[k] * (1 - 0.4 * fill) * w[j])
-  vel[j] = -(w[j] * sqrt(1 - d[j] * d[j]) * $z[j][1] + d[j] * w[j] * $z[j][0]))
+  let (x, q) = $z[j]
+  vel[j] = -(w[j] * sqrt(1 - d[j] * d[j]) * q + d[j] * w[j] * x))
 
 # Each contact's drag: the puja at the rim, the three hands down the wall.
 let fPuja = if turns > 0 then friction(pujaV - rim(vel, puja, 0), press) else 0
@@ -114,7 +115,7 @@ each(10, j =>
                   + fMid * depth(j, 0.25) * shape(j, hand(25))
                   + fLow * depth(j, 0.5) * shape(j, hand(27)))
             + hit / dt * 0.2 * depth(j, hitZ) * shape(j, 0.3) * exp(-0.5 * floor(j / 2))
-  $z[j] = turn($z[j], exp(-d[j] * w[j] * dt) * [cos(wd * dt), sin(wd * dt)]) + [0, -force * dt / wd])
+  $z[j] = $z[j] * (exp(-d[j] * w[j] * dt) * (cos(wd * dt), sin(wd * dt))) + (0, -force * dt / wd))
 
 # Two microphones, a little way round the bowl.
 let left  = sum(10, m => vel[m - 1] * shape(m - 1, 0))

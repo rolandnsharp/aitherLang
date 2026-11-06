@@ -6,7 +6,7 @@
 # indexed; every phase is a function of one phasor.
 #
 #   field     = spin(rate)                      the rotating field
-#   coil k    = rotate([1, 0], TAU * k / 3)     three coils a third of a turn apart
+#   coil k    = rotate((1, 0), TAU * k / 3)     three coils a third of a turn apart
 #   drive k   = the field seen by coil k        turn(field, conj(coil k)), its first side
 #
 # Each coil sounds one note of the chord while the field faces it, so the
@@ -32,17 +32,17 @@ let rate  = 0.1 + midi_cc(20) * 1.9
 let imb   = midi_cc(21) * 0.8
 let field = spin(rate)
 
-def coil(k): rotate([1, 0], TAU * k / 3)
+def coil(k): rotate((1, 0), TAU * k / 3)
 def gain(k, imb): if k == 1 then 1 + imb else if k == 2 then 1 - imb else 1
 
 # Coil k's phasor: the field as coil k sees it, scaled by the coil's
 # strength. Its first side is the coil's drive.
-def seen(field, k, imb): turn(field, conj(coil(k))) * gain(k, imb)
+def seen(field, k, imb): field * conj(coil(k)) * gain(k, imb)
 
 let notes = [220, 277.18, 329.63]              # A, C#, E
 play chord:
   sum(3, n =>
-    let d = seen(field, n - 1, imb)[0]
+    let (d, _) = seen(field, n - 1, imb)
     let loud = max(0, d) * max(0, d)           # the half-turn this coil faces the field
     additive(notes[n - 1], warm_shape, 8) * loud * 0.12)
 

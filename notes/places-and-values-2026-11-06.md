@@ -1,9 +1,10 @@
 # Places and values: what aither is, as a field language
 
-**Status (2026-11-06): steps 2 and 3 of the order of work built** (the
+**Status (2026-11-06): steps 2 to 4 of the order of work built** (the
 compiler's values are width-generic; `( , )` works on the ladder beside
-today's `[a, b]`, with whole powers only, SPEC "Values on the ladder").
-The rest is a design note. Agreed with Roland in discussion, as the
+today's `[a, b]`, with whole powers only, SPEC "Values on the ladder";
+the stdlib, all tracked patches and the tests are migrated, and no patch
+calls `turn` or `unturn`). Steps 5 and 6 and `∇` are still a design. Agreed with Roland in discussion, as the
 destination. It takes the ladder
 ([ladder-2026-11-06.md](ladder-2026-11-06.md)) for what a value is, and
 replaces that note's answer for stereo (`both`, and the dotted operators

@@ -73,7 +73,8 @@ def harpstring(u, f0, d, p, bright):
   let fs = clamp(0.2 * u / d, 20, 4000)        # the shedding frequency
   let w = TAU * fs
   let wake = vdp(fs, 0.3, 0.5 * $acc / (w * w))   # pushed by the string's acceleration
-  let e = 0.001 * u * u * wake[0] / (1 + pow($swing * 50, 4))   # lift grows as U², and falls once the swing is big
+  let (wake_x, _) = wake
+  let e = 0.001 * u * u * wake_x / (1 + pow($swing * 50, 4))   # lift grows as U², and falls once the swing is big
   let aIn = -delay($outB, 2 * p * T - dt, 0.05) * 0.998
   let bIn = -lp1(delay($outN, 2 * (1 - p) * T - dt, 0.05), bright) * 0.995
   $outN = aIn + e
