@@ -1,0 +1,90 @@
+# scanned_ring: a ring of masses, read round at pitch, drawn as it rings
+# (notes/nabla-and-medium-2026-11-06.md, "Scanning answers cost").
+#
+# Scanned synthesis (Verplank, Mathews and Shaw): a field of masses and
+# springs moves at the speed of a hand, and is read round and round at the
+# speed of a pitch. So what it does is timbre, not pitch: the ring's motion
+# is the sound's change, and the note is how fast the reading goes.
+#
+# The field steps one place a sample, as tv draws a pixel a sample, and
+# `every` lands the places together: the whole field moves once every N
+# samples, at the cost of one place, however large N is.
+#
+# Read round, its displacement is the size of a turning value, so on the
+# scope the ring is drawn as it is: a circle at rest, and a pure tone. A
+# strike is a bump on the circle that travels round both ways, spreads and
+# dies, and is heard as the sound's harmonics moving.
+#
+# Measured on the uConsole (10 s of sound, the compiler's quick build):
+# stepped one place a sample, 128 masses take 0.5 s and 8192 take 0.44 s;
+# stepped every place every sample, 32 take 2.3 s and 128 take 10.6 s, no
+# longer real time. Struck, the radius moves between about 0.2 and 0.8 and
+# the harmonics over 20 to 30 dB; the field's stepping shows as a buzz at
+# sr / N, about 40 dB under the note. Never struck, the radius is 0.45
+# exactly.
+#
+#   ./aither patches/scanned_ring.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
+#
+# The gamepad (tools/pad): A strikes the ring, narrowly, B broadly; hold A
+# and press left and right for the note (CC 21), up and down for how fast
+# a push goes round (CC 20); hold B and press up and down for how strongly
+# each mass is held to its place (CC 22): loose, a bump travels; held, it
+# breaks into ripples.
+#   tools/pad & AITHER_MIDI=aither-pad ./aither patches/scanned_ring.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
+
+let N = 128                                                # masses round the ring
+
+# ---------------------------------------------------------------- the strike
+
+# The first sample, then every 5 s, a strike by itself, each a golden
+# angle round from the last, so the ring is never struck in the same place.
+$begun = 0
+let auto = impulse(1 / 5) + (1 - $begun)
+$begun = 1
+let narrow = auto + midi_trig(36)
+let broad = midi_trig(37)
+$turned = 0.0
+$turned = ($turned + (if narrow + broad > 0 then 0.381966 else 0)) mod 1
+$where = 0.0
+$width = 4.0
+$where = if narrow + broad > 0 then $turned * N else $where
+$width = if narrow > 0 then 4 else if broad > 0 then 14 else $width
+
+# A strike waits for the step to begin, and lasts one step.
+let k = pixel_index(N, 1)
+$waiting = 0
+$waiting = if narrow + broad > 0 then 1 else $waiting
+$striking = 0
+$striking = if k == 0 then $waiting else $striking
+$waiting = if k == 0 then 0 else $waiting
+
+# ---------------------------------------------------------------- the field
+
+let stiff = 0.05 + 0.4 * midi_cc(20)                       # how fast a push goes round
+let held = 0.0002 + 0.01 * midi_cc(22)                     # how strongly a mass keeps its place
+let loss = 0.0012                                          # shrink, a step
+
+$x = array(N, every = N)                                   # where each mass is
+$v = array(N, every = N)                                   # how it is moving
+
+# The law at this place: pushed by its neighbours and its own spring.
+let me = $x[k]
+let push = ($x[(k + N - 1) mod N] + $x[(k + 1) mod N] - me * 2) * stiff - me * held
+let far = abs(k - $where)
+let apart = min(far, N - far)                              # the way round, the shorter way
+let blow = if $striking > 0 then 0.1 / $width * exp(-apart * apart / ($width * $width)) else 0
+let moved = ($v[k] + push + blow) * (1 - loss)
+$v[k] = moved
+$x[k] = me + moved
+
+# ---------------------------------------------------------------- reading
+
+# Round the ring at the note, between places.
+let note = 110 * pow(2, floor(midi_cc(21) * 25) / 12)
+let round = phasor(note) * N
+let at = floor(round)
+let was = $x[at mod N]
+let height = was + ($x[(at + 1) mod N] - was) * (round - at)
+
+# The turning value, its size the ring: a circle, bent where the ring is.
+spin(note) * (0.45 + height)
