@@ -61,7 +61,7 @@ TEST(laws_have_no_order) {
     "$x = ring(period = 0.5)\n"
     "$v = ring(period = 0.5)\n";
   const char* tail =
-    "$v[0.3] = if t < 0.01 then 10 else 0\n"
+    "$v'[0.3] += if t < 0.01 then 10 else 0\n"
     "$x[0.5]\n";
   const char* laws[2] = {"$v' = -concentration($x) - $x * 60\n$x' = $v\n",
                          "$x' = $v\n$v' = -concentration($x) - $x * 60\n"};
@@ -96,7 +96,7 @@ TEST(ring_keeps_its_period) {
     "$v = ring(period = 0.8)\n"
     "$v' = -concentration($x)\n"
     "$x' = $v\n"
-    "$v[0.1 * (phasor(1000) * 0.2 - 0.1)] = if t < 0.01 then 1280 else 0\n"
+    "$v'[0.1 * (phasor(1000) * 0.2 - 0.1)] += if t < 0.01 then 1280 else 0\n"
     "$x[0.25]\n";
   double when[3];
   for (int k = 0; k < 3; k++) {

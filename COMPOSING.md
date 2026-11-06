@@ -1179,7 +1179,7 @@ $x = ring(period = 1.66)                       # each line is at each place,
 $v = ring(period = 1.66)                       # as a line on [l, r] is
 $v' = -concentration($x) - $v * loss
 $x' = $v
-$v[where] = force                              # a push, at a point
+$v'[where] += force                            # a source, at a point
 let height = $x[phasor(note)]                  # read at a point
 ```
 

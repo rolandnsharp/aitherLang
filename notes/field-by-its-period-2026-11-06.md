@@ -15,7 +15,11 @@ laws are one system: they step together, whatever their order, and a field
 whose neighbours a law reads goes last, force before motion. x and v read
 each other, so reads alone can't order them; it is the neighbours that
 tell which is which. A pair both read through neighbours, as E and B
-would be, falls back on the order declared, and is untested;
+would be, falls back on the order declared, and is untested. A push is
+`$v'[p] += force`, a source: it was always a rate at a point, sized as a
+delta function, and `$v[p] = force` hid that. An `at(p)` term inside the
+law was turned down: it puts a where in the law, and only works by being
+lifted back out, as the ring reaches a place once a round;
 3, one period and a ratio; 5, `ring` for now. `scanned_ring`'s sound
 matched at every check. Still open: a fast fine field, which needs more
 than one place a sample, and whether the engine's step should be better

@@ -174,8 +174,9 @@ static int shadowed(const Node* s, Kids* kids, int from) {
  * place from pixel_index), a bare `$x` reads this sample's place, `$x = e`
  * stores there, and later lines at that place see e. A patch never holds an
  * index or a neighbour: the words below are the only reach to one. From
- * outside, `$x[p]` reads at a point, p 0..1 round, and `$v[p] = push` adds
- * a push there, which lands as the field reaches that place. */
+ * outside, `$x[p]` reads at a point, p 0..1 round, and `$v'[p] += push`
+ * adds to a ring's rate there (`$v[p] += push`, an array's value), landing
+ * as the field reaches that place. */
 
 typedef struct {
   const char* name;
@@ -187,9 +188,12 @@ typedef struct {
   Node* period;                          /* ring(period = T): the engine owns its places, else NULL */
   const char* rate;                      /* the hidden let: its speed squared, places a round */
   const char* step;                      /* the hidden let: a step, in rounds */
+  int law;                               /* it has a law */
+  int stored;                            /* it has a line `$x = e` */
+  const Node* pushed;                    /* where it was first pushed, or NULL */
 } Field;
 
-typedef struct { Arena* a; Field* f; int n; int made; int in_ring; char* err; int errlen; int failed; } Fields;
+typedef struct { Arena* a; Field* f; int n; int made; int in_ring; char* err; int errlen; int failed; int in_def; } Fields;
 
 static Node* fnode(Fields* fs, NodeKind k, const char* str, const Node* at) {
   Node* n = arena_alloc(fs->a, sizeof(Node));
@@ -241,6 +245,27 @@ static Node* ring_arg(const Node* c, const char* name, int at) {
 /* A bare field as a word's argument, and the word it needs. */
 static Field* bare_field(Fields* fs, const Node* n) { return n && n->kind == nkIdent ? field_named(fs, n->str) : NULL; }
 
+/* `$x'`, a rate: whether a name is one, and its field, which must be a ring's. */
+static int primed(const char* name) {
+  size_t n = strlen(name);
+  return n && name[n - 1] == '\'';
+}
+static Field* rate_of(Fields* fs, const char* name) {
+  char plain[256];
+  snprintf(plain, sizeof plain, "%.*s", (int)strlen(name) - 1, name);
+  Field* f = field_named(fs, plain);
+  return f && f->period ? f : NULL;
+}
+static Field* pushed_field(Fields* fs, const Node* target) {
+  if (target->kind != nkIdent) return NULL;
+  return primed(target->str) ? rate_of(fs, target->str) : field_named(fs, target->str);
+}
+static void field_fail(Fields* fs, const Node* n, const char* said) {
+  if (fs->failed) return;
+  fs->failed = 1;
+  snprintf(fs->err, fs->errlen, "%s (%s:%d)", said, n->source, n->line);
+}
+
 /* A neighbour word on a ring carries the ring's speed. */
 static Node* at_speed(Fields* fs, Field* f, Node* word, const Node* at) {
   return f->period ? fbin(fs, "*", word, fident(fs, f->rate, at), at) : word;
@@ -262,13 +287,25 @@ static Node* field_expr(Fields* fs, Node* n) {
   if (n->kind == nkIdx && bare_field(fs, n->kids[0])) {       /* read at a point */
     return fcall(fs, "field_at", n, 2, (Node*[]){n->kids[0], field_expr(fs, n->kids[1])});
   }
-  if (n->kind == nkIdxAssign && bare_field(fs, n->kids[0])) { /* a push at a point */
-    Field* f = bare_field(fs, n->kids[0]);
+  if (n->kind == nkIdxAssign && pushed_field(fs, n->kids[0])) { /* a push at a point */
+    Field* f = pushed_field(fs, n->kids[0]);
+    Node* said = n->kids[2];
+    int adds = said->kind == nkBinOp && said->num == 1.0 && (!strcmp(said->str, "+") || !strcmp(said->str, "-"));
+    int rate = primed(n->kids[0]->str);
+    char why[200];
+    if (f->period && !rate) {
+      snprintf(why, sizeof why, "a push on a ring is a change to its rate: `$%s'[p] += ...`", f->name);
+      field_fail(fs, n, why);
+    } else if (!adds) {
+      snprintf(why, sizeof why, "a push adds: `$%s%s[p] += ...`", f->name, rate ? "'" : "");
+      field_fail(fs, n, why);
+    }
+    if (fs->failed) return n;
     Node* at = fcall(fs, "field_place", n, 2, (Node*[]){field_expr(fs, n->kids[1]), f->size});
-    Node* push = field_expr(fs, n->kids[2]);
+    Node* push = field_expr(fs, said->kids[1]);
     if (f->period)                                            /* a change a round, per length of ring: the grain falls out */
       push = fbin(fs, "*", push, fident(fs, f->step, n), n);
-    Node* sum = fbin(fs, "+", fidx(fs, f->in, at, n), push, n);
+    Node* sum = fbin(fs, said->str, fidx(fs, f->in, at, n), push, n);
     Node* r = fnode(fs, nkIdxAssign, "", n);
     fkids(fs, r, 3, (Node*[]){fident(fs, f->in, n), at, sum});
     return r;
@@ -309,17 +346,8 @@ static void field_store(Fields* fs, Field* f, const Node* s, Node* value, Kids* 
 }
 
 /* `$x' = e`: a law. Its name less the prime is its field. */
-static int is_law(const Node* s) {
-  if (s->kind != nkVar && s->kind != nkAssign) return 0;
-  size_t n = strlen(s->str);
-  return n && s->str[n - 1] == '\'';
-}
-static Field* law_field(Fields* fs, const Node* s) {
-  char name[256];
-  snprintf(name, sizeof name, "%.*s", (int)strlen(s->str) - 1, s->str);
-  Field* f = field_named(fs, name);
-  return f && f->period ? f : NULL;
-}
+static int is_law(const Node* s) { return (s->kind == nkVar || s->kind == nkAssign) && primed(s->str); }
+static Field* law_field(Fields* fs, const Node* s) { return rate_of(fs, s->str); }
 /* Fields whose neighbours a law reads: `reached[k]` for the k-th. */
 static void find_reached(Fields* fs, const Node* n, char* reached) {
   if (!n) return;
@@ -429,7 +457,7 @@ static void find_fields(Fields* fs, Node** in, int n) {
     if (s->kind == nkPlay && s->kids[0] && s->kids[0]->kind == nkBlock) find_fields(fs, s->kids[0]->kids, s->kids[0]->nkids);
     if ((s->kind == nkVar || s->kind == nkAssign) && s->nkids && !make_array(s->kids[0])) {
       Field* f = field_named(fs, s->str);
-      if (f) f->place = fname(fs, "place", f->name, -1);
+      if (f) { f->place = fname(fs, "place", f->name, -1); f->stored = 1; }
     }
   }
 }
@@ -437,9 +465,10 @@ static void find_fields(Fields* fs, Node** in, int n) {
 static void find_pushes(Fields* fs, const Node* n) {
   if (!n) return;
   if (n->kind == nkDef) return;
-  if (n->kind == nkIdxAssign && bare_field(fs, n->kids[0])) {
-    Field* f = bare_field(fs, n->kids[0]);
+  if (n->kind == nkIdxAssign && pushed_field(fs, n->kids[0])) {
+    Field* f = pushed_field(fs, n->kids[0]);
     f->in = fname(fs, "pushes", f->name, -1);
+    if (!f->pushed) f->pushed = n;
   }
   for (int i = 0; i < n->nkids; i++) find_pushes(fs, n->kids[i]);
 }
@@ -458,6 +487,17 @@ static void check_laws(Fields* fs, Node* n, int stands, char* said) {
       return;
     }
     said[f - fs->f] = 1;
+    f->law = 1;
+  }
+  if (n->kind == nkIdxAssign && n->kids[0]->kind == nkIdent && primed(n->kids[0]->str)) {
+    if (!rate_of(fs, n->kids[0]->str)) field_fail(fs, n, "a rate is of a ring's field: `$x = ring(period = 1)`");
+    else if (fs->in_def) field_fail(fs, n, "a source belongs in the file's lines or a play's, not in a def");
+  }
+  if (n->kind == nkDef) {
+    fs->in_def++;
+    for (int i = 0; i < n->nkids; i++) check_laws(fs, n->kids[i], 0, said);
+    fs->in_def--;
+    return;
   }
   if (n->kind == nkPlay && n->kids[0] && n->kids[0]->kind == nkBlock) {
     char* own = arena_alloc(fs->a, fs->n + 1);
@@ -498,6 +538,13 @@ static int fields_pass(Arena* a, Kids* kids, int from, char* err, int errlen) {
   if (fs.failed) return -1;
   if (!fs.n) return 0;
   for (int i = from; i < kids->n; i++) find_pushes(&fs, kids->v[i]);
+  for (int i = 0; i < fs.n; i++)
+    if (fs.f[i].period && fs.f[i].pushed && !fs.f[i].law && !fs.f[i].stored) {
+      char why[200];
+      snprintf(why, sizeof why, "`$%s` has no law for a push to land in: `$%s' = ...`", fs.f[i].name, fs.f[i].name);
+      field_fail(&fs, fs.f[i].pushed, why);
+    }
+  if (fs.failed) return -1;
   Kids out = {0};
   field_stmts(&fs, kids->v + from, kids->n - from, &out, 1);
   kids->n = from;

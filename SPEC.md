@@ -713,7 +713,7 @@ $v = ring(period = 1.66)
 $v' = -concentration($x) - $x * held - $v * loss
 $x' = $v
 
-$v[where] = force                              # a push, at a point
+$v'[where] += force                            # a source, at a point
 let height = $x[phasor(note)]                  # read at a point
 ```
 
@@ -763,16 +763,22 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   and a step behind. Two speeds are one period and a ratio: `curl(curl($d))
   * 0.17`, slower by its square root.
 - From outside a field has two touch points. `$x[p]` reads at a point, p
-  from 0 to 1 round, between places; `$v[p] = force` adds a push at the
-  nearest place, landing when the field reaches it. On a ring it is a
-  change a round per length of ring, so a head sweeping a stretch lands
-  the same whatever the places. This is the one way `[ ]` differs on a field: p is how far
+  from 0 to 1 round, between places. **`$v'[p] += force` is a source**: it
+  adds to v's rate at that point, the term F δ(s − p) on the end of the
+  equation, kept out of the law as a where belongs at the edge. It lands
+  at the nearest place when the field reaches it, and is sized as a delta
+  should be, so a head sweeping a stretch lands the same whatever the
+  places. Sources sum, in any order; `-=` takes away. `$v'[p] = ...` is an
+  error, as it would claim to replace the law there, and so are `$v[p] =
+  ...` and `$v[p] += ...` on a ring, a source on a field with no law, and
+  reading one. This is the one way `[ ]` differs on a field: p is how far
   round, not a place number.
 
 An array assigned bare (`$x = array(128)`, `$x = $x + ...`) is a field too,
 with the size in the patch: a push then takes `N² / (sqrt(stiff) * sr)`
 seconds to go round, the words carry no speed, and `+=` is plain, a
-step's worth, with the order its lines are in. Use
+step's worth, with the order its lines are in. A push on one has no rate
+to join, so it is an amount, `$v[p] += e`, each sample. Use
 `ring`, unless a number of places is the point. Fields are at the file's
 level, in its plays too; a def sees none. Not built: ends and sheets, and a
 fast fine field, which needs more than one place a sample: at one, a 1 s

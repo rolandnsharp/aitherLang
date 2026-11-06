@@ -63,7 +63,7 @@ let age = min(narrow, broad)
 let landed = if own < stroke then floor(sweep / 5) * golden else $where
 let width = if broad < narrow then 0.11 else 0.031         # of the way round
 let head = age / stroke * 2 - 1                            # across the stretch, -1 to 1
-$v[landed + head * width * 3] = if age < stroke then 4.46 / stroke * exp(-head * head * 9) else 0
+$v'[landed + head * width * 3] += if age < stroke then 4.46 / stroke * exp(-head * head * 9) else 0
 
 # ---------------------------------------------------------------- reading
 

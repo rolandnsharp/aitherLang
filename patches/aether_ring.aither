@@ -68,7 +68,7 @@ let age = min(own, min(age_a, min(age_b, age_x)))
 let way = (if own < stroke then (i + j) * sqrt(0.5) else 0) + (if age_a < stroke then i else 0) + (if age_b < stroke then j else 0) + (if age_x < stroke then k else 0)
 let landed = if own < stroke then floor(sweep / 7) * golden else $where
 let head = age / stroke * 2 - 1                            # across the stretch, -1 to 1
-$v[landed + head * 0.094] = way * (if age < stroke then 0.64 / stroke * exp(-head * head * 9) else 0)
+$v'[landed + head * 0.094] += way * (if age < stroke then 0.64 / stroke * exp(-head * head * 9) else 0)
 
 # ---------------------------------------------------------------- reading
 

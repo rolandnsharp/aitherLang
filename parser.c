@@ -290,6 +290,7 @@ typedef struct {
   Scope scopes[256];
   int nscopes;
   int body_depth;        /* def/play bodies we're in: `import` only at 0 */
+  int rate_target;                     /* the next `$x'` opens `$x'[p] += ...` */
   Vec top;               /* the program's statements so far */
   Vec extra;             /* bindings a `let [a, b] =` adds after its own */
   const char* pats[1024]; /* each destructuring's first name, to name its hidden let */
@@ -556,7 +557,10 @@ static Node* parse_lambda_body(P* p, int line, Vec* params) {
       if ((nx.kind == tkAssign || nx.kind == tkAugAssign) && lhs->kind == nkIdx) {
         advance(p);
         Node* rhs = parse_expr(p);
-        if (nx.kind == tkAugAssign) rhs = node2(p, nkBinOp, dup(p->c->a, nx.str, 1), lhs, rhs, sl);
+        if (nx.kind == tkAugAssign) {
+          rhs = node2(p, nkBinOp, dup(p->c->a, nx.str, 1), lhs, rhs, sl);
+          rhs->num = 1;
+        }
         push(&stmts, node3(p, nkIdxAssign, lhs->kids[0], lhs->kids[1], rhs, sl));
         while (peek(p).kind == tkSemi) advance(p);
       } else if (nx.kind == tkAssign || nx.kind == tkAugAssign) {
@@ -663,7 +667,8 @@ static Node* parse_primary(P* p) {
     /* `$x` reads the state named x: a plain name to the compiler; the `$`
      * is for the reader. */
     advance(p);
-    if (t.str[strlen(t.str) - 1] == '\'') {
+    if (t.str[strlen(t.str) - 1] == '\'' && p->rate_target) p->rate_target = 0;
+    else if (t.str[strlen(t.str) - 1] == '\'') {
       char m[200];
       snprintf(m, sizeof m, "`$%s` is a law's left side: a rate is said, `$%s = ...`, not read", t.str, t.str);
       fail(p, m);
@@ -894,8 +899,16 @@ static Node* parse_stmt(P* p) {
     n = node(p, nkImport, t.line);
     n->str = expect(p, tkStr, "a quoted path after import").str;
   } else {
+    int rate = t.kind == tkStateIdent && t.str[strlen(t.str) - 1] == '\'' &&
+               p->idx + 1 < p->ts.n && p->ts.t[p->idx + 1].kind == tkLBracket;
+    p->rate_target = rate;
     Node* lhs = parse_expr(p);
     Token nx = peek(p);
+    if (rate && (lhs->kind != nkIdx || (nx.kind != tkAssign && nx.kind != tkAugAssign))) {
+      char m[200];
+      snprintf(m, sizeof m, "`$%s[p]` is a source: said, `$%s[p] += ...`, not read", t.str, t.str);
+      fail(p, m);
+    }
     if (nx.kind == tkAssign) {
       advance(p);
       Node* rhs = parse_expr(p);
@@ -906,7 +919,7 @@ static Node* parse_stmt(P* p) {
       advance(p);
       Node* rhs = parse_expr(p);
       Node* combined = node2(p, nkBinOp, dup(p->c->a, nx.str, 1), lhs, rhs, t.line);
-      combined->num = 1;                 /* written `+=`: a ring says its rate instead (imports.c) */
+      combined->num = 1;                 /* written `+=`: on a field it isn't a store (imports.c) */
       if (lhs->kind == nkIdent) n = node1(p, nkAssign, lhs->str, combined, t.line);
       else if (lhs->kind == nkIdx) n = node3(p, nkIdxAssign, lhs->kids[0], lhs->kids[1], combined, t.line);
       else { fail(p, "invalid assignment target"); return NULL; }

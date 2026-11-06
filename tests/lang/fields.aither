@@ -50,15 +50,15 @@ $x[0.875]
 # expect at 4: 1
 $v = array(4)
 $v = $v
-$v[0.5] = if t < dt then 1 else 0
+$v[0.5] += if t < dt then 1 else 0
 $v[0.5]
 
 # --- pushes add
 # expect at 4: 3
 $v = array(4)
 $v = $v
-$v[0.5] = if t < dt then 1 else 0
-$v[0.5] = if t < dt then 2 else 0
+$v[0.5] += if t < dt then 1 else 0
+$v[0.5] += if t < dt then 2 else 0
 $v[0.5]
 
 # --- a field of values: turned at each place
@@ -197,3 +197,81 @@ $x[0]
 $z = ring(period = 1, start = (3, 4))
 $z = $z
 $z[0]
+
+# --- a source is added to a ring's rate at a point
+# expect at 47999: 1
+$x = ring(period = 1)
+$x' = 0
+$x'[0.5] += if t < 0.5 then 2 else 0
+ceil(max(0, $x[0.5]) * 0.0001)
+
+# --- ... and a source is taken away the same way
+# expect at 47999: 0
+$x = ring(period = 1)
+$x' = 0
+$x'[0.5] += if t < 0.5 then 2 else 0
+$x'[0.5] -= if t < 0.5 then 2 else 0
+$x[0.5]
+
+# --- a push on a ring is a change to its rate
+# error: a push on a ring is a change to its rate
+$x = ring(period = 1)
+$x' = 0
+$x[0.5] += 1
+$x[0]
+
+# --- ... whichever way it's said
+# error: a push on a ring is a change to its rate
+$x = ring(period = 1)
+$x' = 0
+$x[0.5] = 1
+$x[0]
+
+# --- a source adds: it doesn't replace the law there
+# error: a push adds
+$x = ring(period = 1)
+$x' = 0
+$x'[0.5] = 1
+$x[0]
+
+# --- ... nor scale it
+# error: a push adds
+$x = ring(period = 1)
+$x' = 0
+$x'[0.5] *= 2
+$x[0]
+
+# --- a push on an array's field adds too
+# error: a push adds
+$x = array(4)
+$x = $x
+$x[0.5] = 1
+$x[0]
+
+# --- a source is said, not read
+# error: is a source
+$x = ring(period = 1)
+$x' = 0
+$x'[0.5]
+
+# --- a ring with no law has nowhere for a push to land
+# error: has no law
+$x = ring(period = 1)
+$x'[0.5] += 1
+$x[0]
+
+# --- a source is a ring's
+# error: a rate is of a ring's field
+$x = array(4)
+$x = $x
+$x'[0.5] += 1
+$x[0]
+
+# --- a source belongs in the file's lines
+# error: not in a def
+$x = ring(period = 1)
+$x' = 0
+def f(a):
+  $x'[0.5] += a
+  a
+f(1)
