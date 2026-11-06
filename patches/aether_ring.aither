@@ -1,0 +1,109 @@
+# aether_ring: a ring whose masses move every way, carrying compression
+# and twist at their own speeds, from one product
+# (notes/nabla-and-medium-2026-11-06.md; scanned_ring is its plainer sister).
+#
+# Each mass's displacement is a direction, one of Hamilton's numbers: i
+# along the ring, j out from its centre, k up from its plane. Hamilton's
+# nabla along the ring is his unit i times a difference, and it is his
+# product, so what it gives has two parts, his S and V:
+#
+#   the scalar part   how the ring is squeezed there: compression
+#   the vector part   how it is twisted there: curl
+#
+# The law takes each part back through nabla with its own stiffness. So
+# one strike, leaning along and across the ring at once, splits in two: a
+# fast squeeze and a slow twist, leaving together and drawing apart.
+#
+# Heard and drawn from one value: the ring is read round at the note, a
+# squeeze moves a mass along the ring, so the reading runs ahead and behind
+# (heard as frequency, drawn as the beam bunching and thinning), and a twist
+# moves it out from the circle (heard as size, drawn as a bump). Up from the
+# plane shows through a slight tilt.
+#
+# Measured: a mass 32 places from the strike hears the squeeze at 0.157 s
+# and the twist at 0.366 s, speeds of 0.593 and 0.254 places a step against
+# sqrt(stiffness), 0.592 and 0.245. A strike along the ring makes no twist
+# and one across it no squeeze, to the last digit: S and V keep them apart.
+#
+#   ./aither patches/aether_ring.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
+#
+# The gamepad (tools/pad): A strikes along the ring, B out across it, X up
+# from its plane; hold A and press left and right for the note (CC 21), up
+# and down for how stiff it is to squeeze (CC 20); hold B and press up and
+# down for how stiff it is to twist (CC 22).
+#   tools/pad & AITHER_MIDI=aither-pad ./aither patches/aether_ring.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
+
+let N = 128                                                # masses round the ring
+
+# ---------------------------------------------------------------- the strike
+
+# A strike is a function of its age (COMPOSING, "How long since"). The ring
+# strikes itself every 7 s, leaning along and across at once, so both waves
+# start; a pad strikes one way. Each lands a golden angle round.
+let golden = 0.381966 * N
+let own = phasor(1 / 7) * 7
+let pad_a = midi_trig(36)
+let pad_b = midi_trig(37)
+let pad_x = midi_trig(38)
+let age_a = since(pad_a)
+let age_b = since(pad_b)
+let age_x = since(pad_x)
+$where = 0.0
+$where = ($where + (pad_a + pad_b + pad_x) * golden) mod N
+
+# A blow lasts one step: the law, going one place a sample, passes every
+# mass once in that time, whenever it began.
+let stroke = N * dt
+let lean = if own < stroke then (i + j) * sqrt(0.5) else 0
+let blow_dir = lean + (if age_a < stroke then i else 0) + (if age_b < stroke then j else 0) + (if age_x < stroke then k else 0)
+let place = if own < stroke then (floor(sweep / 7) * golden) mod N else $where
+
+# ---------------------------------------------------------------- nabla
+
+# Along the ring, a step ahead of a place and a step behind it.
+def ahead(f, n): i * (f[(n + 1) mod len(f)] - f[n])
+def behind(f, n): i * (f[n] - f[(n + len(f) - 1) mod len(f)])
+
+# Hamilton's S and V: the scalar part and the vector part.
+def S(q):
+  let ((w, _), (_, _)) = q
+  w
+def V(q): q - S(q)
+
+# ---------------------------------------------------------------- the field
+
+let squeeze = 0.35 + 0.5 * midi_cc(20)                     # how stiff to squeeze: a fast wave
+let twist = 0.06 + 0.2 * midi_cc(22)                       # how stiff to twist: a slow one
+let held = 0.0006                                          # how strongly a mass keeps its place
+let loss = 0.0012                                          # shrink, a step
+
+$d = array(N, ((0, 0), (0, 0)), every = N)                 # where each mass is, from its rest
+$v = array(N, ((0, 0), (0, 0)), every = N)                 # how it is moving
+
+# The law at this place. The push is nabla of each part, each with its
+# stiffness; i i = -1 gives the sign, so a place pushes back as it should.
+let n = pixel_index(N, 1)
+let up = ahead($d, n)
+let down = behind($d, n)
+let push = -(i * ((S(up) - S(down)) * squeeze + (V(up) - V(down)) * twist))
+let far = abs(n - place)
+let apart = min(far, N - far)
+let blow = blow_dir * (if own < stroke or min(age_a, min(age_b, age_x)) < stroke then 0.025 * exp(-apart * apart / 16) else 0)
+let moved = ($v[n] + push - $d[n] * held + blow) * (1 - loss)
+$v[n] = moved
+$d[n] = $d[n] + moved
+
+# ---------------------------------------------------------------- reading
+
+# Round the ring at the note, between places.
+let note = 110 * pow(2, floor(midi_cc(21) * 25) / 12)
+let round = phasor(note) * N
+let at = floor(round)
+let was = $d[at mod N]
+let ((_, along), (out, height)) = was + ($d[(at + 1) mod N] - was) * (round - at)
+
+# Each point of the ring where it has gone, seen a little from the side.
+let (x, y) = rotate((0.45 + out, 0), TAU * round / N + along * 3)
+let seen = apply(about(i, 0.4), ((0, x), (y, height)))
+let ((_, sx), (sy, _)) = seen
+(sx, sy)
