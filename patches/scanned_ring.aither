@@ -40,8 +40,8 @@ let loss = 0.68                                            # what it loses, a ro
 $x = ring(period = 1.66)                                   # a push goes round in 1.66 s
 $v = ring(period = 1.66)
 
-$v += -concentration($x) * firm - $x * held - $v * loss
-$x += $v
+$v' = -concentration($x) * firm - $x * held - $v * loss
+$x' = $v
 
 # ---------------------------------------------------------------- the strike
 

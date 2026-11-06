@@ -5,9 +5,17 @@ Both rings use it. From 59 to 123 places, across rates, `aether_ring`'s
 squeeze reaches a quarter round at 0.160 to 0.163 s and its twist at 0.370
 to 0.375 s. Settled from "Open" below: 1, the engine picks the grain, a
 quarter of a place a step, so a knob can go four times faster; 2 and 4,
-`+=` on a ring says what changes and the engine owns the stepping, with
-rates a round, the ring its own clock, and no `dt` or `t` in its lines
-(Roland: "there is a dt in the patch when there is no t in field theory");
+a law, `$x' = $v`, says what changes and the engine owns the stepping,
+with rates a round, the ring its own clock, and no `dt` or `t` in its lines
+(Roland: "there is a dt in the patch when there is no t in field theory").
+First built as `+=`, which left the stepping in the patch: the order of
+the two lines was the method, and on a ring with no loss, 32 s long, one
+order held at 0.05 and the other passed +18 dBFS inside 4 s. So a block's
+laws are one system: they step together, whatever their order, and a field
+whose neighbours a law reads goes last, force before motion. x and v read
+each other, so reads alone can't order them; it is the neighbours that
+tell which is which. A pair both read through neighbours, as E and B
+would be, falls back on the order declared, and is untested;
 3, one period and a ratio; 5, `ring` for now. `scanned_ring`'s sound
 matched at every check. Still open: a fast fine field, which needs more
 than one place a sample, and whether the engine's step should be better

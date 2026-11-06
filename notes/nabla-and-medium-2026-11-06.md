@@ -236,7 +236,7 @@ reads now as stereo already does, which is what changed. Both rings are
 fields: `scanned_ring` 32 lines to 24, `aether_ring` 46 to 31, with the
 measured speeds holding (0.582 and 0.252 against 0.592 and 0.245). They
 cost about 20% more than by hand. Since then `ring(period = T)` took the
-size out of the patch and `+=` the stepping out of the law
+size out of the patch and a law, `$x' = $v`, the stepping out of the patch
 (field-by-its-period-2026-11-06.md): the open question "the law apart from
 its stepping" is answered for a ring. Not the same to the bit: a strike
 became a write head sweeping a stretch, within 0.01 of the radius at each

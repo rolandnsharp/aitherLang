@@ -237,6 +237,10 @@ static Toks tokenize(Ctx* c, const char* src) {
         fail_at(c, "`$` must be followed immediately by an identifier (no space) at %d:%d", dl, dc);
       long st = i;
       while (i < n && is_word(src[i])) { i++; col++; }
+      if (i < n && src[i] == '\'') {                   /* `$x'`: its rate, a law's left side */
+        i++; col++;
+        if (i < n && src[i] == '\'') fail_at(c, "one prime at %d:%d: name the rate, `$x' = $v`, `$v' = ...`", dl, dc);
+      }
       add_tok(&ts, (Token){tkStateIdent, dup(c->a, src + st, i - st), 0, dl, dc});
     } else if (ch == '=') {
       if (i + 1 < n && src[i + 1] == '>') { EMIT(tkOp, "=>", 0); i += 2; col += 2; }
@@ -659,6 +663,11 @@ static Node* parse_primary(P* p) {
     /* `$x` reads the state named x: a plain name to the compiler; the `$`
      * is for the reader. */
     advance(p);
+    if (t.str[strlen(t.str) - 1] == '\'') {
+      char m[200];
+      snprintf(m, sizeof m, "`$%s` is a law's left side: a rate is said, `$%s = ...`, not read", t.str, t.str);
+      fail(p, m);
+    }
     Node* n = node(p, nkIdent, t.line);
     n->str = t.str;
     return n;
@@ -897,7 +906,7 @@ static Node* parse_stmt(P* p) {
       advance(p);
       Node* rhs = parse_expr(p);
       Node* combined = node2(p, nkBinOp, dup(p->c->a, nx.str, 1), lhs, rhs, t.line);
-      combined->num = 1;                 /* written `+=`: on a ring, a change (imports.c) */
+      combined->num = 1;                 /* written `+=`: a ring says its rate instead (imports.c) */
       if (lhs->kind == nkIdent) n = node1(p, nkAssign, lhs->str, combined, t.line);
       else if (lhs->kind == nkIdx) n = node3(p, nkIdxAssign, lhs->kids[0], lhs->kids[1], combined, t.line);
       else { fail(p, "invalid assignment target"); return NULL; }

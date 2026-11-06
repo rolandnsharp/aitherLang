@@ -111,35 +111,80 @@ $x = ring(period = 1 + t)
 $x = $x
 $x[0]
 
-# --- `+=` on a ring is a change, a round: 1 a round is 1 after a round, whatever its places
+# --- `$x'` is its rate, a round: 1 a round is 1 after a round, whatever its places
 # expect at 47999: 1
 $x = ring(period = 1)
-$x += 1
+$x' = 1
 floor($x[0] + 0.02)
 
 # --- ... so on a ring of twice the period, a second is half a round
 # expect at 47999: 0
 $x = ring(period = 2)
-$x += 1
+$x' = 1
 floor($x[0] + 0.02)
 
 # --- a ring's line has no time: dt
 # error: `dt` in a ring's line
 $x = ring(period = 1)
-$x = $x + dt
+$x' = dt
 $x[0]
 
 # --- ... nor t
 # error: `t` in a ring's line
 $x = ring(period = 1)
-$x += sin(t)
+$x' = sin(t)
 $x[0]
 
-# --- `*=` isn't a change: say what changes
+# --- `+=` on a ring is its rate, said as one
+# error: `+=` on a ring
+$x = ring(period = 1)
+$x += 1
+$x[0]
+
+# --- ... and so is `*=`
 # error: `*=` on a ring
 $x = ring(period = 1)
 $x *= 0.9
 $x[0]
+
+# --- a rate is said, not read
+# error: is a law's left side
+$x = ring(period = 1)
+$x' = 1
+$x'
+
+# --- one prime
+# error: one prime
+$x = ring(period = 1)
+$x'' = 1
+$x[0]
+
+# --- a rate is of a ring's field: not an array's
+# error: a rate is of a ring's field
+$x = array(4)
+$x' = 1
+$x[0]
+
+# --- ... nor a state's
+# error: a rate is of a ring's field
+$x = 0
+$x' = 1
+$x
+
+# --- one law a field
+# error: one law a field
+$x = ring(period = 1)
+$x' = 1
+$x' = 2
+$x[0]
+
+# --- a law belongs in the file's lines
+# error: not in a def
+$x = ring(period = 1)
+def f(a):
+  $x' = a
+  a
+f(1)
 
 # --- on an array assigned bare, `+=` is a step's worth, as the size is in the patch
 # expect at 4: 1

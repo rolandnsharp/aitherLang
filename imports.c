@@ -252,7 +252,7 @@ static Node* field_expr(Fields* fs, Node* n) {
     if (fs->in_ring && (!strcmp(n->str, "dt") || !strcmp(n->str, "t")) && !fs->failed) {
       fs->failed = 1;
       snprintf(fs->err, fs->errlen, "`%s` in a ring's line (%s:%d): a field has no time, only what changes. Say "
-               "what changes, `$x += $v`, and its rate in rounds; a second belongs at the edge, in `period`",
+               "what changes, `$x' = $v`, and its rate in rounds; a second belongs at the edge, in `period`",
                n->str, n->source, n->line);
     }
     Field* f = field_named(fs, n->str);
@@ -289,10 +289,78 @@ static Node* field_expr(Fields* fs, Node* n) {
   return n;
 }
 
+/* The line that stores `value` at this place, with whatever pushes landed. */
+static void field_store(Fields* fs, Field* f, const Node* s, Node* value, Kids* out) {
+  Node* here = fident(fs, f->place, s);
+  if (f->in) value = fbin(fs, "+", value, fidx(fs, f->in, here, s), s);
+  const char* now = fname(fs, "now", f->name, fs->made++);
+  Node* let = fnode(fs, nkLet, now, s);
+  fkids(fs, let, 1, (Node*[]){value});
+  kid(out, let);
+  Node* store = fnode(fs, nkIdxAssign, "", s);
+  fkids(fs, store, 3, (Node*[]){fident(fs, f->name, s), here, fident(fs, now, s)});
+  kid(out, store);
+  if (f->in) {
+    Node* clear = fnode(fs, nkIdxAssign, "", s);
+    fkids(fs, clear, 3, (Node*[]){fident(fs, f->in, s), here, fnum(fs, 0, s)});
+    kid(out, clear);
+  }
+  f->now = now;
+}
+
+/* `$x' = e`: a law. Its name less the prime is its field. */
+static int is_law(const Node* s) {
+  if (s->kind != nkVar && s->kind != nkAssign) return 0;
+  size_t n = strlen(s->str);
+  return n && s->str[n - 1] == '\'';
+}
+static Field* law_field(Fields* fs, const Node* s) {
+  char name[256];
+  snprintf(name, sizeof name, "%.*s", (int)strlen(s->str) - 1, s->str);
+  Field* f = field_named(fs, name);
+  return f && f->period ? f : NULL;
+}
+/* Fields whose neighbours a law reads: `reached[k]` for the k-th. */
+static void find_reached(Fields* fs, const Node* n, char* reached) {
+  if (!n) return;
+  if (n->kind == nkCall && n->nkids == 1 && bare_field(fs, n->kids[0]) &&
+      (!strcmp(n->str, "concentration") || !strcmp(n->str, "convergence") || !strcmp(n->str, "curl")))
+    reached[bare_field(fs, n->kids[0]) - fs->f] = 1;
+  for (int i = 0; i < n->nkids; i++) find_reached(fs, n->kids[i], reached);
+}
+/* A block's laws are one system, so the order they're written in means
+ * nothing: they are stepped together, where the last of them stands. What
+ * moves on what its neighbours do is stepped last, on the rates just found,
+ * as force comes before motion; the rest in the order they were declared. */
+static void step_laws(Fields* fs, Node** in, int n, Kids* out) {
+  char* reached = arena_alloc(fs->a, fs->n + 1);
+  memset(reached, 0, fs->n + 1);
+  for (int i = 0; i < n; i++) if (is_law(in[i])) find_reached(fs, in[i]->kids[0], reached);
+  for (int last = 0; last < 2; last++)
+    for (int k = 0; k < fs->n; k++) {
+      if (reached[k] != last) continue;
+      Field* f = &fs->f[k];
+      for (int i = 0; i < n; i++) {
+        if (!is_law(in[i]) || law_field(fs, in[i]) != f) continue;
+        Node* s = in[i];
+        fs->in_ring = 1;
+        Node* change = fbin(fs, "*", field_expr(fs, s->kids[0]), fident(fs, f->step, s), s);
+        fs->in_ring = 0;
+        field_store(fs, f, s, fbin(fs, "+", field_expr(fs, fident(fs, f->name, s)), change, s), out);
+      }
+    }
+}
+
 /* A list of statements, as the lines they stand for. */
 static void field_stmts(Fields* fs, Node** in, int n, Kids* out, int top) {
+  int laws_end = -1;
+  for (int i = 0; i < n; i++) if (is_law(in[i])) laws_end = i;
   for (int i = 0; i < n; i++) {
     Node* s = in[i];
+    if (is_law(s)) {
+      if (i == laws_end) step_laws(fs, in, n, out);
+      continue;
+    }
     Field* f = (s->kind == nkVar || s->kind == nkAssign) ? field_named(fs, s->str) : NULL;
     if (f && make_array(s->kids[0])) {                       /* its declaration */
       Node* c = s->kids[0];
@@ -328,32 +396,14 @@ static void field_stmts(Fields* fs, Node** in, int n, Kids* out, int top) {
     if (f) {                                                 /* `$x = e`, at this place */
       fs->in_ring = f->period != NULL;
       Node* rhs = s->kids[0];
-      Node* value;
-      if (f->period && rhs->kind == nkBinOp && rhs->num == 1.0) {       /* written `+=`: a change, the engine's to step */
-        if (strcmp(rhs->str, "+") && strcmp(rhs->str, "-") && !fs->failed) {
-          fs->failed = 1;
-          snprintf(fs->err, fs->errlen, "`%s=` on a ring (%s:%d): say what changes, `$v += -$v * loss`", rhs->str,
-                   s->source, s->line);
-        }
-        value = fbin(fs, rhs->str, field_expr(fs, rhs->kids[0]),
-                     fbin(fs, "*", field_expr(fs, rhs->kids[1]), fident(fs, f->step, s), s), s);
-      } else value = field_expr(fs, rhs);
-      fs->in_ring = 0;
-      Node* here = fident(fs, f->place, s);
-      if (f->in) value = fbin(fs, "+", value, fidx(fs, f->in, here, s), s);
-      const char* now = fname(fs, "now", f->name, fs->made++);
-      Node* let = fnode(fs, nkLet, now, s);
-      fkids(fs, let, 1, (Node*[]){value});
-      kid(out, let);
-      Node* store = fnode(fs, nkIdxAssign, "", s);
-      fkids(fs, store, 3, (Node*[]){fident(fs, f->name, s), here, fident(fs, now, s)});
-      kid(out, store);
-      if (f->in) {
-        Node* clear = fnode(fs, nkIdxAssign, "", s);
-        fkids(fs, clear, 3, (Node*[]){fident(fs, f->in, s), here, fnum(fs, 0, s)});
-        kid(out, clear);
+      if (f->period && rhs->kind == nkBinOp && rhs->num == 1.0 && !fs->failed) {        /* written `+=` */
+        fs->failed = 1;
+        snprintf(fs->err, fs->errlen, "`%s=` on a ring (%s:%d): say what changes, as its rate: `$%s' = ...`", rhs->str,
+                 s->source, s->line, f->name);
       }
-      f->now = now;
+      Node* value = field_expr(fs, rhs);
+      fs->in_ring = 0;
+      field_store(fs, f, s, value, out);
       continue;
     }
     if (s->kind == nkPlay && s->kids[0] && s->kids[0]->kind == nkBlock) {
@@ -394,6 +444,30 @@ static void find_pushes(Fields* fs, const Node* n) {
   for (int i = 0; i < n->nkids; i++) find_pushes(fs, n->kids[i]);
 }
 
+/* A law stands in a file's or a play's lines, once a field, for a ring. */
+static void check_laws(Fields* fs, Node* n, int stands, char* said) {
+  if (!n || fs->failed) return;
+  if (is_law(n)) {
+    Field* f = law_field(fs, n);
+    const char* wrong = !stands ? "a law belongs in the file's lines or a play's, not in a def" :
+                        !f ? "a rate is of a ring's field: `$x = ring(period = 1)`" :
+                        said[f - fs->f] ? "one law a field: say all that changes it in one line" : NULL;
+    if (wrong) {
+      fs->failed = 1;
+      snprintf(fs->err, fs->errlen, "`$%s` (%s:%d): %s", n->str, n->source, n->line, wrong);
+      return;
+    }
+    said[f - fs->f] = 1;
+  }
+  if (n->kind == nkPlay && n->kids[0] && n->kids[0]->kind == nkBlock) {
+    char* own = arena_alloc(fs->a, fs->n + 1);
+    memset(own, 0, fs->n + 1);
+    for (int i = 0; i < n->kids[0]->nkids; i++) check_laws(fs, n->kids[0]->kids[i], 1, own);
+    return;
+  }
+  for (int i = 0; i < n->nkids; i++) check_laws(fs, n->kids[i], 0, said);
+}
+
 static int fields_pass(Arena* a, Kids* kids, int from, char* err, int errlen) {
   Fields fs = {a, NULL, 0, 0, 0, err, errlen, 0};
   fs.f = arena_alloc(a, (kids->n + 1) * sizeof(Field));
@@ -418,6 +492,10 @@ static int fields_pass(Arena* a, Kids* kids, int from, char* err, int errlen) {
   int kept = 0;                                              /* only what is assigned bare is a field */
   for (int i = 0; i < fs.n; i++) if (fs.f[i].place) fs.f[kept++] = fs.f[i];
   fs.n = kept;
+  char* said = arena_alloc(a, fs.n + 1);
+  memset(said, 0, fs.n + 1);
+  for (int i = from; i < kids->n; i++) check_laws(&fs, kids->v[i], 1, said);
+  if (fs.failed) return -1;
   if (!fs.n) return 0;
   for (int i = from; i < kids->n; i++) find_pushes(&fs, kids->v[i]);
   Kids out = {0};

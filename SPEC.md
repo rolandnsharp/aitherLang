@@ -710,8 +710,8 @@ happens at one place, and arithmetic is at each place:
 $x = ring(period = 1.66)                       # a push goes round in 1.66 s
 $v = ring(period = 1.66)
 
-$v += -concentration($x) - $x * held - $v * loss
-$x += $v
+$v' = -concentration($x) - $x * held - $v * loss
+$x' = $v
 
 $v[where] = force                              # a push, at a point
 let height = $x[phasor(note)]                  # read at a point
@@ -729,12 +729,21 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
 - A bare `$x` is the field at this place, and `$x = ...` stores there. A
   later line at the place sees what was stored; a neighbour sees the last
   step. A number or a value is everywhere.
-- **`+=` on a ring says what changes**, and the engine owns how it is
-  stepped: `$x += $v` is the equation x' = v, not a recipe. Rates are **a
-  round**, the ring being its own clock: `loss` of 0.2 is a fifth lost each
-  trip round, and `period` is the only second in the law, so changing it
-  retunes the whole ring together. A ring's line has no `dt` or `t`, and
-  says so, and no `*=`: a loss is a change, `$v += -$v * loss`.
+- **`$x' = ...` is a law: the field's rate of change, the equation
+  itself.** Rates are **a round**, the ring being its own clock: `loss` of
+  0.2 is a fifth lost each trip round, and `period` is the only second in
+  the law, so changing it retunes the whole ring together. A ring's line
+  has no `dt` or `t`, and says so. `+=` and `*=` on a ring are errors that
+  point here, and a rate is said, never read. A field has one law, in the
+  file's lines or a play's, and only a ring has one.
+- **A block's laws are one system, so the order they're written in means
+  nothing.** They are stepped together where the last of them stands, so a
+  line before it reads the fields as they were and a line after it reads
+  them stepped. The engine steps a field whose neighbours a law reads
+  last, on the rates just found: force before motion. By hand one order
+  of a wave's two lines rings and the other blows up; a law can't get this
+  wrong. Fields it can't tell apart, both read through their neighbours,
+  go in the order they were declared.
 - A field steps **one place a sample**, as `tv` draws a pixel, so it costs
   one place. Its stepping shows as a buzz at `sr / N`, about 40 dB under
   the note at 128 places. It suits a field that moves slowly against the
@@ -762,8 +771,8 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
 
 An array assigned bare (`$x = array(128)`, `$x = $x + ...`) is a field too,
 with the size in the patch: a push then takes `N² / (sqrt(stiff) * sr)`
-seconds to go round, the words carry no speed, and `+=` is one step's
-worth. Use
+seconds to go round, the words carry no speed, and `+=` is plain, a
+step's worth, with the order its lines are in. Use
 `ring`, unless a number of places is the point. Fields are at the file's
 level, in its plays too; a def sees none. Not built: ends and sheets, and a
 fast fine field, which needs more than one place a sample: at one, a 1 s

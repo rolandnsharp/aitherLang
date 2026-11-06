@@ -54,14 +54,48 @@ TEST(scanned_ring_pads) {
 
 /* A ring's period is what it does: the engine picks other places at another
  * rate, and a push still gets a quarter of the way round in a quarter of it. */
+/* A law is one system: written either way round it is the same ring, and
+ * one with no loss stays bounded. */
+TEST(laws_have_no_order) {
+  const char* head =
+    "$x = ring(period = 0.5)\n"
+    "$v = ring(period = 0.5)\n";
+  const char* tail =
+    "$v[0.3] = if t < 0.01 then 10 else 0\n"
+    "$x[0.5]\n";
+  const char* laws[2] = {"$v' = -concentration($x) - $x * 60\n$x' = $v\n",
+                         "$x' = $v\n$v' = -concentration($x) - $x * 60\n"};
+  Rendered r[2] = {{0}, {0}};
+  for (int k = 0; k < 2; k++) {
+    char src[512], err[4096];
+    snprintf(src, sizeof src, "%s%s%s", head, laws[k], tail);
+    int rc = render_src(src, 8.0, 48000, &r[k], err, sizeof err);
+    CHECK(rc == 0, "doesn't render: %s", err);
+    if (rc) return;
+  }
+  CHECK(r[0].n == r[1].n, "%ld samples against %ld", r[0].n, r[1].n);
+  double peak = 0, late = 0;
+  for (long i = 0; i < r[0].n; i++) {
+    CHECK(r[0].left[i] == r[1].left[i], "the order of the laws showed at sample %ld", i);
+    if (r[0].left[i] != r[1].left[i]) break;
+    peak = fmax(peak, fabs(r[0].left[i]));
+    if (i > r[0].n / 2) late = fmax(late, fabs(r[0].left[i]));
+  }
+  printf("  either way round, peak %.4f, %.4f in the second half\n", peak, late);
+  CHECK(peak > 0 && peak < 1, "peak %g", peak);
+  CHECK(late < 2 * peak, "it grew: %g after %g", late, peak);
+  rendered_free(&r[0]);
+  rendered_free(&r[1]);
+}
+
 TEST(ring_keeps_its_period) {
   const int rates[] = {24000, 48000, 96000};
   const double period = 0.8;
   const char* src =
     "$x = ring(period = 0.8)\n"
     "$v = ring(period = 0.8)\n"
-    "$v += -concentration($x)\n"
-    "$x += $v\n"
+    "$v' = -concentration($x)\n"
+    "$x' = $v\n"
     "$v[0.1 * (phasor(1000) * 0.2 - 0.1)] = if t < 0.01 then 1280 else 0\n"
     "$x[0.25]\n";
   double when[3];

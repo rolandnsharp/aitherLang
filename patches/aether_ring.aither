@@ -43,8 +43,8 @@ let loss = 0.26                                            # what it loses, a ro
 $d = ring(period = 0.63, start = ((0, 0), (0, 0)))         # a squeeze goes round in 0.63 s
 $v = ring(period = 0.63, start = ((0, 0), (0, 0)))
 
-$v += -slope(convergence($d)) * squeeze - curl(curl($d)) * twist - $d * held - $v * loss
-$d += $v
+$v' = -slope(convergence($d)) * squeeze - curl(curl($d)) * twist - $d * held - $v * loss
+$d' = $v
 
 # ---------------------------------------------------------------- the strike
 
