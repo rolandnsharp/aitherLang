@@ -120,3 +120,55 @@ TEST(cayley_dickson_turn) {
     voice_dispose(v);
   }
 }
+
+/* The same rule through `*` and `/` on values written (a, b): the ladder's
+ * product is turn, and the laws hold with a number or a narrower value
+ * sitting inside. */
+TEST(cayley_dickson_ladder) {
+  enum { TRIALS = 40, OUTS = 10 };
+  for (int trial = 0; trial < TRIALS; trial++) {
+    double p[4], q[4], r[4], Z[2];
+    for (int k = 0; k < 4; k++) { p[k] = rnd(); q[k] = rnd(); r[k] = rnd(); }
+    for (int k = 0; k < 2; k++) Z[k] = rnd();
+    char src[4096];
+    snprintf(src, sizeof src,
+      "let p = ((%.17g, %.17g), (%.17g, %.17g))\n"
+      "let q = ((%.17g, %.17g), (%.17g, %.17g))\n"
+      "let r = ((%.17g, %.17g), (%.17g, %.17g))\n"
+      "let z = (%.17g, %.17g)\n"
+      "let ((a0, a1), (a2, a3)) = p * q\n"
+      "let ((u0, u1), (u2, u3)) = p / q\n"
+      "let ((d0, d1), (d2, d3)) = p * (q + r) - (p * q + p * r)\n"
+      "let ((n0, n1), (n2, n3)) = p * (q + 1) - (p * q + p)\n"
+      "let ((e0, e1), (e2, e3)) = z * q - ((z, 0) * q)\n"
+      "let n = floor(t * sr + 0.5)\n"
+      "if n == 0 then [a0, a1] else if n == 1 then [a2, a3]\n"
+      "else if n == 2 then [u0, u1] else if n == 3 then [u2, u3]\n"
+      "else if n == 4 then [d0, d1] else if n == 5 then [d2, d3]\n"
+      "else if n == 6 then [n0, n1] else if n == 7 then [n2, n3]\n"
+      "else if n == 8 then [e0, e1] else [e2, e3]\n",
+      p[0], p[1], p[2], p[3], q[0], q[1], q[2], q[3], r[0], r[1], r[2], r[3], Z[0], Z[1]);
+    Voice* v = must_load(src, 48000.0);
+    if (!v) return;
+    double got[OUTS][2];
+    for (int s = 0; s < OUTS; s++) tick_at(v, s / 48000.0, &got[s][0], &got[s][1]);
+    double pq[4], cq[4], u[4];
+    cd_mul(4, p, q, pq);
+    cd_conj(4, q, cq);
+    cd_mul(4, p, cq, u);
+    double d = cd_size2(4, q);
+    for (int k = 0; k < 4; k++) u[k] /= d;
+    const double want[OUTS][2] = {{pq[0], pq[1]}, {pq[2], pq[3]}, {u[0], u[1]}, {u[2], u[3]},
+                                  {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}};
+    const char* what[OUTS] = {"p * q, w x", "p * q, y z", "p / q, w x", "p / q, y z",
+                              "p(q + r) - (pq + pr), w x", "... y z", "p(q + 1) - (pq + p), w x", "... y z",
+                              "z q - (z, 0) q, w x", "... y z"};
+    for (int s = 0; s < OUTS; s++)
+      for (int side = 0; side < 2; side++) {
+        double w = want[s][side], g = got[s][side];
+        CHECK(fabs(g - w) <= 1e-12 * fmax(s >= 4 ? 64.0 : 1.0, fabs(w)),
+              "trial %d, %s, side %d: %.17g, the rule gives %.17g", trial, what[s], side, g, w);
+      }
+    voice_dispose(v);
+  }
+}

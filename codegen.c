@@ -35,6 +35,7 @@ struct Ent {
   long wo;            /* sarrays: where stores go */
   int wd;             /* sarrays, larrays: numbers an element (0: one); xbufs: rows */
   int edged;          /* larrays made by array(): 0 past the ends, not cycling */
+  int lad;            /* stereo, sarrays, larrays: values on the ladder, (a, b) */
   double v;           /* numlits */
   Node* node;         /* lambdas, invs; userDefs; arrays: the table's literal */
   Scope* sc;          /* invs */
@@ -99,6 +100,7 @@ struct Ctx {
   int loop_nv;         /* inside a looped sum (poly's voices): its count; else 0 */
   Map pair_vars;
   Map quad_vars;                       /* file-level $vars that are pairs of pairs (in pair_vars too) */
+  Map lad_vars, lad_lets;              /* file-level $vars and lets that are values on the ladder */
   Map const_quads;                     /* file-level lets of a pair of pairs of number literals: node, the literal */
   Node** var_decls; int nvar_decls, cap_var_decls;
   Map pair_param_cache;     /* p = int* flags, n = count */
@@ -849,6 +851,8 @@ typedef struct {
     const char* x[4];                    /* each number's C text */
     struct { const char *l, *r, *l2, *r2; };
   };
+  int lad;                               /* written (a, b): on the ladder (notes/ladder-2026-11-06.md).
+                                            Until [a, b] becomes places, the old pair sits beside it */
 } V;
 static int is_pair(V v) { return v.w > 1; }
 static int is_quad(V v) { return v.w == 4; }
@@ -864,7 +868,11 @@ static V vpair(const char* l, const char* r) { return (V){2, {{l, r, NULL, NULL}
 static V vquad(const char* a, const char* b, const char* c2, const char* d) {
   return (V){4, {{a, b, c2, d}}};
 }
-static V half_of(V v, int k) { return k ? vpair(v.l2, v.r2) : vpair(v.l, v.r); }
+static V half_of(V v, int k) {
+  V h = k ? vpair(v.l2, v.r2) : vpair(v.l, v.r);
+  h.lad = v.lad;
+  return h;
+}
 
 /* Where a pair of pairs isn't handled yet the compiler says so, and says
  * the rule is a stand-in: these are new, and what they should do in each
@@ -873,7 +881,10 @@ static V half_of(V v, int k) { return k ? vpair(v.l2, v.r2) : vpair(v.l, v.r); }
   "(notes/nested-pair-2026-11-05.md); if you expected something here, say what, and the rule can change."
 /* ---- shapes in errors: what a value is, and what it was written as ---- */
 
-static const char* shape_of(V v) { return is_quad(v) ? "a pair of pairs" : is_pair(v) ? "a pair" : "a number"; }
+static const char* shape_of(V v) {
+  if (v.lad) return is_quad(v) ? "one of Hamilton's numbers" : "a complex number";
+  return is_quad(v) ? "a pair of pairs" : is_pair(v) ? "a pair" : "a number";
+}
 
 /* An expression as the patch wrote it, near enough to recognise (its
  * spacing normalised, the inside of a long one elided). */
@@ -894,12 +905,14 @@ static void text_of(Ctx* c, Buf* b, Node* n, int depth) {
       if (paren) bcat(c, b, ")");
     }
     return;
-  case nkCall: case nkArr:
+  case nkCall: case nkArr: {
+    int round = n->kind == nkCall || n->str[0] == '(';
     if (n->kind == nkCall) bcat(c, b, n->str);
-    bcat(c, b, n->kind == nkCall ? "(" : "[");
+    bcat(c, b, round ? "(" : "[");
     for (int i = 0; i < n->nkids; i++) { if (i) bcat(c, b, ", "); text_of(c, b, n->kids[i], depth + 1); }
-    bcat(c, b, n->kind == nkCall ? ")" : "]");
+    bcat(c, b, round ? ")" : "]");
     return;
+  }
   case nkIdx: text_of(c, b, n->kids[0], depth + 1); bcat(c, b, "["); text_of(c, b, n->kids[1], depth + 1); bcat(c, b, "]"); return;
   case nkNamedArg: badd(c, b, "%s = ", n->str); text_of(c, b, n->kids[0], depth + 1); return;
   case nkIf: bcat(c, b, "if "); text_of(c, b, n->kids[0], depth + 1); bcat(c, b, " then ..."); return;
@@ -934,6 +947,28 @@ static int ew(Ent* e) { return e->wd > 1 ? e->wd : 1; }
 static V vwide(int w, const char** x) {
   return w == 4 ? vquad(x[0], x[1], x[2], x[3]) : w == 2 ? vpair(x[0], x[1]) : mono(x[0]);
 }
+/* An array's element, from its w numbers. */
+static V elem_value(Ent* e, int w, const char** x) {
+  V v = vwide(w, x);
+  v.lad = e->lad && w > 1;
+  return v;
+}
+/* The same, as `proto` is: on the ladder or not. */
+static V vlike(V proto, int w, const char** x) {
+  V r = vwide(w, x);
+  r.lad = proto.lad && w > 1;
+  return r;
+}
+/* On the ladder at width w: what is narrower sits inside, the rest zero. */
+static V embed(V v, int w) {
+  const char* x[4];
+  for (int k = 0; k < w; k++) x[k] = k < v.w ? v.x[k] : "0.0";
+  V r = vwide(w, x);
+  r.lad = w > 1;
+  return r;
+}
+/* `(a, b)` as written. */
+static int is_value_lit(Node* n) { return n->kind == nkArr && n->str && n->str[0] == '('; }
 /* `[[a, b], [c, d]]` of number literals. */
 static int quad_literal(Node* n) {
   if (n->kind != nkArr || n->nkids != 2) return 0;
@@ -977,7 +1012,7 @@ static const char* once(Ctx* c, Buf* pre, const char* s) {
 static V capture(Ctx* c, Buf* pre, V v) {
   const char* x[4];
   for (int k = 0; k < v.w; k++) x[k] = once(c, pre, v.x[k]);
-  return vwide(v.w, x);
+  return vlike(v, v.w, x);
 }
 
 /* Operands left to right, as written: when one needs statements, the
@@ -1433,12 +1468,12 @@ static int bind_by_name(Ctx* c, Scope* sc, Scope* inner, const char* p, Node* a,
     Ent* e;
     if ((e = lookup_sarray(c, sc, a->str))) {
       Ent* d = lput(c, &inner->sarrays, p);
-      d->a = e->a; d->n = e->n; d->wo = e->wo; d->wd = e->wd;
+      d->a = e->a; d->n = e->n; d->wo = e->wo; d->wd = e->wd; d->lad = e->lad;
       return 1;
     }
     if ((e = lookup_larray(c, sc, a->str))) {
       Ent* d = lput(c, &inner->larrays, p);
-      d->a = e->a; d->n = e->n; d->wd = e->wd; d->edged = e->edged;
+      d->a = e->a; d->n = e->n; d->wd = e->wd; d->edged = e->edged; d->lad = e->lad;
       return 1;
     }
     if ((e = lookup_array(c, sc, a->str))) {
@@ -1509,28 +1544,34 @@ static V file_var(Ctx* c, const char* name) {
   const char* x[4];
   int w = has(&c->quad_vars, name) ? 4 : 2;
   for (int k = 0; k < w; k++) x[k] = pair_var_ref(c, name, k);
-  return vwide(w, x);
+  V v = vwide(w, x);
+  v.lad = has(&c->lad_vars, name);
+  return v;
 }
 
 /* A name for a pair or a pair of pairs in a scope, and its value back. */
 static void bind_wide(Ctx* c, Scope* sc, const char* name, V v) {
   Ent* e = lput(c, &sc->stereo, name);
-  e->a = v.l; e->b = v.r; e->c2 = v.l2; e->d2 = v.r2; e->n = v.w;
+  e->a = v.l; e->b = v.r; e->c2 = v.l2; e->d2 = v.r2; e->n = v.w; e->lad = v.lad;
 }
-static V wide_value(Ent* e) { return e->n == 4 ? vquad(e->a, e->b, e->c2, e->d2) : vpair(e->a, e->b); }
+static V wide_value(Ent* e) {
+  V v = e->n == 4 ? vquad(e->a, e->b, e->c2, e->d2) : vpair(e->a, e->b);
+  v.lad = e->lad;
+  return v;
+}
 
 /* Bind a value to a parameter: a pair as two temporaries, a pair of
  * pairs as four, a number as one, with its compile-time value or
  * invariance noted. */
 static void bind_value(Ctx* c, Scope* inner, const char* p, V v, int whole, Node* arg, Scope* sc, Buf* pre) {
-  if (is_quad(v) || whole) {
+  if (is_quad(v) || whole || v.lad) {    /* a value is always taken whole */
     int w = is_quad(v) ? 4 : 2;
     const char* t[4];
     for (int k = 0; k < w; k++) {
       t[k] = fresh(c, F(c, "p_%s_%d", p, k));
       badd(c, pre, "  double %s = (%s);\n", t[k], at(v, k));
     }
-    bind_wide(c, inner, p, vwide(w, t));
+    bind_wide(c, inner, p, vlike(v, w, t));
     return;
   }
   const char* t = fresh(c, F(c, "p_%s", p));
@@ -1560,12 +1601,12 @@ static V emit_def(Ctx* c, Scope* sc, Node* def, Node* call, Buf* pre) {
     args[i] = emit(c, sc, call->kids[i], &own);
     if (own.n) for (int k = 0; k < i; k++) if (!bound[k]) args[k] = capture(c, pre, args[k]);
     bcat(c, pre, bstr(&own));
-    if (is_pair(args[i]) && !whole[i]) split = is_quad(args[i]) ? (split == 2 ? -1 : 4) : (split == 4 ? -1 : 2);
+    if (is_pair(args[i]) && !whole[i] && !args[i].lad) split = is_quad(args[i]) ? (split == 2 ? -1 : 4) : (split == 4 ? -1 : 2);
   }
   if (split < 0) {
     Buf b = {0};                         /* the arguments it would run on, side by side */
     for (int i = 0, first = 1; i < np; i++)
-      if (!bound[i] && is_pair(args[i]) && !whole[i]) {
+      if (!bound[i] && is_pair(args[i]) && !whole[i] && !args[i].lad) {
         badd(c, &b, "%s%s = %s", first ? "" : ", and ", def->params[i], given(c, call->kids[i], args[i]));
         first = 0;
       }
@@ -1594,7 +1635,7 @@ static V emit_def(Ctx* c, Scope* sc, Node* def, Node* call, Buf* pre) {
     Scope* inner = push(c, names);
     for (int i = 0; i < np; i++) {
       if (bound[i]) continue;
-      int keep = whole[i] || (split == 2 && is_quad(args[i]));
+      int keep = whole[i] || args[i].lad || (split == 2 && is_quad(args[i]));
       V a = keep ? args[i] : mono(split == 4 ? at(args[i], k) : at(args[i], k));
       bind_value(c, inner, def->params[i], a, keep, is_pair(args[i]) ? NULL : call->kids[i], sc, pre);
     }
@@ -1646,6 +1687,15 @@ static const char** pair_operands(Ctx* c, Scope* sc, Node* n, Buf* pre, int want
 static const char* assign_wide(Ctx* c, Scope* sc, const char* name, V target, Node* rhs) {
   Buf pre = {0};
   V v = emit(c, sc, rhs, &pre);
+  if (target.lad || v.lad) {
+    if (target.lad != v.lad && is_pair(v))
+      fail(c, "$%s is %s, and is given %s %s: `[a, b]` is becoming two places, so write what is one number as "
+           "(a, b)", name, shape_of(target), given(c, rhs, v), err_loc(c, rhs));
+    if (v.w > target.w)
+      fail(c, "$%s is %s, and is given %s %s: a state keeps the shape of its first value", name, shape_of(target),
+           given(c, rhs, v), err_loc(c, rhs));
+    v = embed(v, target.w);
+  }
   if (is_quad(v) && target.w == 2)
     fail(c, "this state is a pair, and is given a pair of pairs, `%s` %s: a state keeps the shape of its first "
          "value, so start it as one ([[w, x], [y, z]]) or say which pair to keep. " QUAD_STANDIN,
@@ -1670,6 +1720,9 @@ static const char* assign_pair_side(Ctx* c, Scope* sc, Node* st) {
     int k = (int)idx->num;
     const char* target = "";
     Ent* pair = lookup_stereo(sc, base->str);
+    if ((pair && pair->lad) || has(&c->lad_vars, base->str))
+      fail(c, "$%s is a value, and a value has no places to assign %s: assign the whole, $%s = (a, b)",
+           base->str, err_loc(c, st), base->str);
     if ((pair && pair->n == 4) || has(&c->quad_vars, base->str))
       fail(c, "$%s is a pair of pairs, and one half of it can't be assigned by index yet %s: assign the "
            "whole, $%s = [[w, x], [y, z]]. " QUAD_STANDIN, base->str, err_loc(c, st), base->str);
@@ -1720,12 +1773,19 @@ static V emit_rule_element(Ctx* c, Scope* sc, Node* rule, long k, Buf* pre) {
 
 /* Every element of a rule, its code into `pre`; its width in `w`: 1, 2
  * if any is a pair, 4 if any is a pair of pairs (a number fills them). */
-static V* emit_rule(Ctx* c, Scope* sc, Node* rule, int n, Buf* pre, int* w) {
+static V* emit_rule(Ctx* c, Scope* sc, Node* rule, int n, Buf* pre, int* w, int* lad) {
   V* vs = al(c, (n + 1) * sizeof(V));
   int pair = 0, quad = 0;
+  *lad = 0;
   for (int k = 0; k < n; k++) {
     vs[k] = emit_rule_element(c, sc, rule, k, pre);
     if (is_quad(vs[k])) quad = 1; else if (is_pair(vs[k])) pair = 1;
+    *lad |= vs[k].lad;
+  }
+  if (*lad) {
+    *w = quad ? 4 : 2;
+    for (int k = 0; k < n; k++) vs[k] = embed(vs[k], *w);
+    return vs;
   }
   if (quad && pair)
     fail(c, "array: the rule makes pairs and pairs of pairs %s: an array's elements are one shape, and a "
@@ -1757,23 +1817,25 @@ static void declare_state_array(Ctx* c, Scope* sc, Node* st, Buf* pre, int top_l
   V* rv = NULL;
   int w = 1;
   V iv = mono("0.0");
-  if (rule) rv = emit_rule(c, sc, rule, n, &init_pre, &w);
+  int lad = 0;
+  if (rule) rv = emit_rule(c, sc, rule, n, &init_pre, &w, &lad);
   else {
     if (args.npos == 2) iv = emit(c, sc, args.pos[1], &init_pre);
     w = iv.w;
+    lad = iv.lad;
   }
   const char* off = register_region(c, w == 4 ? "sarr4" : w == 2 ? "sarr2" : "sarr", 1 + gens * n * w, st->str);
   long wo = every > 0 ? (long)n * w : 0;
   const char* base;
   if (top_level) {
     Ent* e = hput(c, &c->top_sarrays, st->str);
-    e->a = off; e->n = n; e->wo = wo; e->wd = w;
+    e->a = off; e->n = n; e->wo = wo; e->wd = w; e->lad = lad;
     base = off;
   } else {
     const char* b = fresh(c, "sa");
     badd(c, pre, "  long %s = %s;\n", b, off);
     Ent* e = lput(c, &sc->sarrays, st->str);
-    e->a = b; e->n = n; e->wo = wo; e->wd = w;
+    e->a = b; e->n = n; e->wo = wo; e->wd = w; e->lad = lad;
     base = b;
   }
   if (rule) {
@@ -1815,13 +1877,13 @@ static void declare_local_array(Ctx* c, Scope* sc, const char* name, Node* rhs, 
            name, err_loc(c, rhs));
     int n = array_make_size(c, sc, rhs);
     if (args.npos == 2 && is_rule(args.pos[1])) {
-      int w;
-      V* rv = emit_rule(c, sc, args.pos[1], n, pre, &w);
+      int w, lad;
+      V* rv = emit_rule(c, sc, args.pos[1], n, pre, &w, &lad);
       badd(c, pre, "  double %s[%d];\n", sym, w * n);
       for (int k = 0; k < n; k++)
         for (int j = 0; j < w; j++) badd(c, pre, "  %s[%d] = (%s);\n", sym, w * k + j, at(rv[k], j));
       Ent* e = top_level ? hput(c, &c->top_larrays, name) : lput(c, &sc->larrays, name);
-      e->a = sym; e->n = n; e->wd = w; e->edged = 1;
+      e->a = sym; e->n = n; e->wd = w; e->edged = 1; e->lad = lad;
       return;
     }
     V iv = args.npos == 2 ? emit(c, sc, args.pos[1], pre) : mono("0.0");
@@ -1831,19 +1893,30 @@ static void declare_local_array(Ctx* c, Scope* sc, const char* name, Node* rhs, 
          "for (int _j = 0; _j < %d; ++_j) %s[%d * _k + _j] = _q[_j]; }\n",
          sym, iv.w * n, iv.w, bstr(&first), n, iv.w, sym, iv.w);
     Ent* e = top_level ? hput(c, &c->top_larrays, name) : lput(c, &sc->larrays, name);
-    e->a = sym; e->n = n; e->wd = iv.w; e->edged = 1;
+    e->a = sym; e->n = n; e->wd = iv.w; e->edged = 1; e->lad = iv.lad;
   }
 }
 
 /* What goes into an element w numbers wide: a number fills it; a pair
  * of pairs into pairs, or a pair into pairs of pairs, is a stand-in error. */
-static void elem_shape(Ctx* c, V v, int w, const char* name, Node* at) {
+static V elem_fit(Ctx* c, V v, Ent* e, const char* name, Node* at) {
+  int w = ew(e);
+  if (e->lad || v.lad) {
+    if (e->lad != v.lad && is_pair(v))
+      fail(c, "%s holds %s, and is given %s %s: `[a, b]` is becoming two places, so write what is one number as "
+           "(a, b)", name, e->lad ? "values" : "pairs", given(c, at->kids[2], v), err_loc(c, at));
+    if (v.w > w)
+      fail(c, "%s holds values of %d numbers, and is given %s %s: an array keeps its first value's shape", name, w,
+           given(c, at->kids[2], v), err_loc(c, at));
+    return embed(v, w);
+  }
   if (is_quad(v) && w == 2)
     fail(c, "%s holds pairs, and is given a pair of pairs, `%s` %s: an array keeps its first value's shape, so "
          "start it as pairs of pairs, or say which pair to keep. " QUAD_STANDIN, name, written(c, at->kids[2]), err_loc(c, at));
   if (is_pair(v) && !is_quad(v) && w == 4)
     fail(c, "%s holds pairs of pairs, and is given a pair, `%s` %s: it could be either half, or the first with "
          "the second 0, so write the pair of pairs. " QUAD_STANDIN, name, written(c, at->kids[2]), err_loc(c, at));
+  return v;
 }
 
 /* `name[i] = v`: an element store. */
@@ -1858,8 +1931,7 @@ static const char* emit_idx_assign(Ctx* c, Scope* sc, Node* st) {
       const char* store;
       int w = ew(sa);
       if (w > 1) {                         /* every number of the element; a number fills them */
-        V v = emit(c, sc, st->kids[2], &pre);
-        elem_shape(c, v, w, base->str, st);
+        V v = elem_fit(c, emit(c, sc, st->kids[2], &pre), sa, base->str, st);
         badd(c, &pre, "  long %s = (long)(%s);\n", it, ix);
         Buf put = {0};
         for (int j = 0; j < w; j++) {
@@ -1885,8 +1957,7 @@ static const char* emit_idx_assign(Ctx* c, Scope* sc, Node* st) {
       const char* ix = emit1(c, sc, st->kids[1], &pre, "an index");
       int w = ew(la);
       if (w > 1) {
-        V v = emit(c, sc, st->kids[2], &pre);
-        elem_shape(c, v, w, base->str, st);
+        V v = elem_fit(c, emit(c, sc, st->kids[2], &pre), la, base->str, st);
         Buf q = {0};
         for (int j = 0; j < w; j++) badd(c, &q, "%s(%s)", j ? ", " : "", at(v, j));
         badd(c, &pre, "  { long _i = (long)(%s); double _q[%d] = {%s}; if (_i >= 0 && _i < %ld) "
@@ -1903,8 +1974,7 @@ static const char* emit_idx_assign(Ctx* c, Scope* sc, Node* st) {
       const char* ix = emit1(c, sc, st->kids[1], &pre, "an index");
       int w = ew(la);
       if (w > 1) {
-        V v = emit(c, sc, st->kids[2], &pre);
-        elem_shape(c, v, w, base->str, st);
+        V v = elem_fit(c, emit(c, sc, st->kids[2], &pre), la, base->str, st);
         Buf q = {0};
         for (int j = 0; j < w; j++) badd(c, &q, "%s(%s)", j ? ", " : "", at(v, j));
         badd(c, &pre, "  { long _i = (long)(%s) %% %ld; if (_i < 0) _i += %ld; double _q[%d] = {%s}; "
@@ -2134,7 +2204,7 @@ static Ent* find_turner(Ctx* c, Scope* sc, const char* name) {
 }
 
 static void emit_let(Ctx* c, Scope* sc, const char* name, Node* rhs, Buf* pre, const char* cname) {
-  int numeric = rhs->kind == nkArr && rhs->nkids > 0 && all_nums(rhs);
+  int numeric = rhs->kind == nkArr && rhs->nkids > 0 && all_nums(rhs) && !is_value_lit(rhs);
   if ((rhs->kind == nkArr && rhs->nkids != 2 && rhs->nkids > 0 && !numeric) || is_array_make(rhs)) {
     declare_local_array(c, sc, name, rhs, pre, 0);
     return;
@@ -2183,7 +2253,7 @@ static void emit_let(Ctx* c, Scope* sc, const char* name, Node* rhs, Buf* pre, c
       t[k] = cname ? F(c, "%s_%s", cname, suffix[k]) : fresh(c, F(c, "l_%s_%s", name, suffix[k]));
       badd(c, pre, "  double %s = (%s);\n", t[k], v.x[k]);
     }
-    bind_wide(c, sc, name, vwide(v.w, t));
+    bind_wide(c, sc, name, vlike(v, v.w, t));
     return;
   }
   const char* t = cname ? cname : fresh(c, F(c, "l_%s", name));
@@ -2233,7 +2303,7 @@ static void emit_local_stmt(Ctx* c, Scope* sc, Node* st, Buf* pre) {
     const char* cell[4];
     for (int k = 0; k < v.w; k++) cell[k] = F(c, "s->pool[%s + %d]", flag, k + 1);
     if (v.w == 1) lput(c, &sc->names, st->str)->a = cell[0];
-    else bind_wide(c, sc, st->str, vwide(v.w, cell));
+    else bind_wide(c, sc, st->str, vlike(v, v.w, cell));
     break;
   }
   case nkAssign: {
@@ -2604,6 +2674,12 @@ static V* emit_args(Ctx* c, Scope* sc, Node* n, Buf* pre, int* any_pair) {
   return a;
 }
 
+/* The first of `a` on the ladder, if any: a function on a value gives a value. */
+static V lad_among(V* a, int n) {
+  for (int i = 0; i < n; i++) if (a[i].lad) return a[i];
+  return mono("");
+}
+
 /* How many times a function given `a` runs side by side: once for
  * numbers, twice for a pair, four times for a pair of pairs. A pair beside
  * a pair of pairs is a stand-in error: which halves would the pair meet? */
@@ -2639,7 +2715,7 @@ static V map_pure(Ctx* c, const char* name, V* a, int n, int any_pair, Build bui
     if (!is_pair(a[i])) a[i] = mono(once(c, pre, a[i].l));
   const char* x[4];
   for (int k = 0; k < wd; k++) x[k] = build(c, name, sides(c, a, n, k), n);
-  return vwide(wd, x);
+  return vlike(lad_among(a, n), wd, x);
 }
 
 static const char* b_fn1(Ctx* c, const char* name, const char** x, int n) { (void)n; return F(c, "%s(%s)", name, x[0]); }
@@ -2673,7 +2749,7 @@ static V per_side(Ctx* c, Scope* sc, Node* n, V* a, int any_pair, Stateful call,
     if (is_quad(a[i])) a[i] = capture(c, pre, a[i]);
   const char* x[4];
   for (int k = 0; k < wd; k++) x[k] = call(c, sc, n, sides(c, a, n->nkids, k), pre, ud);
-  return vwide(wd, x);
+  return vlike(lad_among(a, n->nkids), wd, x);
 }
 
 static const char* s_phasor(Ctx* c, Scope* sc, Node* n, const char** x, Buf* pre, void* ud) {
@@ -2744,8 +2820,10 @@ static V emit_ident_raw(Ctx* c, Scope* sc, Node* n) {
   Ent* cq = hfind(&c->const_quads, s);
   if (cq) {                              /* a constant pair of pairs (Hamilton's i): its numbers */
     Node* q = cq->node;
-    return vquad(num_lit(c, q->kids[0]->kids[0]->num), num_lit(c, q->kids[0]->kids[1]->num),
-                 num_lit(c, q->kids[1]->kids[0]->num), num_lit(c, q->kids[1]->kids[1]->num));
+    V v = vquad(num_lit(c, q->kids[0]->kids[0]->num), num_lit(c, q->kids[0]->kids[1]->num),
+                num_lit(c, q->kids[1]->kids[0]->num), num_lit(c, q->kids[1]->kids[1]->num));
+    v.lad = cq->lad;
+    return v;
   }
   /* A def sees the file's constants (numbers and tables known when it
    * compiles), never its signals: those it is given. */
@@ -2755,8 +2833,12 @@ static V emit_ident_raw(Ctx* c, Scope* sc, Node* n) {
          c->def_stack.n ? c->def_stack.v[c->def_stack.n - 1] : "a def", s,
          hfind(&c->top_larrays, s) ? "an array of this sample's values" : "a signal", err_loc(c, n));
   Ent* table = lookup_array(c, sc, s);
-  if (has(&c->quad_lets, s)) return vquad(F(c, "l_%s_l", s), F(c, "l_%s_r", s), F(c, "l_%s_l2", s), F(c, "l_%s_r2", s));
-  if (has(&c->stereo_lets, s)) return vpair(F(c, "l_%s_l", s), F(c, "l_%s_r", s));
+  if (has(&c->stereo_lets, s)) {
+    V v = has(&c->quad_lets, s) ? vquad(F(c, "l_%s_l", s), F(c, "l_%s_r", s), F(c, "l_%s_l2", s), F(c, "l_%s_r2", s))
+                                : vpair(F(c, "l_%s_l", s), F(c, "l_%s_r", s));
+    v.lad = has(&c->lad_lets, s);
+    return v;
+  }
   if (table) fail(c, "%s is a table of %ld numbers, but one number is needed here — index it (%s[i]) "
                   "or hand it to wave %s", s, table->n, s, err_loc(c, n));
   if ((lookup_larray(c, sc, s) || lookup_sarray(c, sc, s)))
@@ -2808,7 +2890,16 @@ static V emit_if(Ctx* c, Scope* sc, Node* n, Buf* pre) {
   Buf pt = {0}, pe = {0};
   V t = emit(c, sc, n->kids[1], &pt);
   V e = n->kids[2] ? emit(c, sc, n->kids[2], &pe) : mono("0.0");
-  if (is_quad(t) || is_quad(e)) {
+  if (t.lad || e.lad) {                  /* the narrower sits inside */
+    if ((is_pair(t) && !t.lad) || (is_pair(e) && !e.lad))
+      fail(c, "an `if` between a value and a [a, b] pair (then %s, else %s) %s: `[a, b]` is becoming two places, so "
+           "write what is one number as (a, b)", given(c, n->kids[1], t),
+           n->kids[2] ? given(c, n->kids[2], e) : "nothing", err_loc(c, n));
+    int lw = t.w > e.w ? t.w : e.w;
+    t = embed(t, lw);
+    e = embed(e, lw);
+  }
+  if ((is_quad(t) || is_quad(e)) && !t.lad) {
     if (!(is_quad(t) && is_quad(e)))
       fail(c, "an `if` with a pair of pairs on one branch and not the other (then %s, else %s) %s: give both "
            "branches pairs of pairs. " QUAD_STANDIN, given(c, n->kids[1], t),
@@ -2819,7 +2910,7 @@ static V emit_if(Ctx* c, Scope* sc, Node* n, Buf* pre) {
   if (!pt.n && !pe.n) {
     const char* ct = w > 1 ? once(c, pre, cond) : cond;
     for (int k = 0; k < w; k++) v[k] = F(c, "((%s) != 0.0 ? (%s) : (%s))", ct, at(t, k), at(e, k));
-    return vwide(w, v);
+    return vlike(t, w, v);
   }
   for (int k = 0; k < w; k++) {
     v[k] = fresh(c, "ifv");
@@ -2830,7 +2921,7 @@ static V emit_if(Ctx* c, Scope* sc, Node* n, Buf* pre) {
   badd(c, pre, "  } else {\n%s", bstr(&pe));
   for (int k = 0; k < w; k++) badd(c, pre, "  %s = (%s);\n", v[k], at(e, k));
   bcat(c, pre, "  }\n");
-  return vwide(w, v);
+  return vlike(t, w, v);
 }
 
 /* x ^ k for a whole k from 0 to 4 known now: the products, so x^2 is x * x
@@ -2849,10 +2940,74 @@ static const char* power_of(Ctx* c, const char* x, long k) {
   return r;
 }
 
+static V hamilton(Ctx* c, V p, V q);
+
+/* The product at width w, the operands fixed first: a complex product, or
+ * Hamilton's. */
+static V ladder_mul(Ctx* c, V a, V b, int w, Buf* pre) {
+  a = capture(c, pre, embed(a, w));
+  b = capture(c, pre, embed(b, w));
+  V r = w == 4 ? hamilton(c, a, b)
+               : vpair(F(c, "(%s * %s - %s * %s)", a.l, b.l, a.r, b.r), F(c, "(%s * %s + %s * %s)", a.l, b.r, a.r, b.l));
+  r.lad = 1;
+  return r;
+}
+
+/* `+ - * / ^` with a value on the ladder (notes/ladder-2026-11-06.md): the
+ * narrower sits inside, the rest zero. */
+static V ladder_op(Ctx* c, Scope* sc, Node* n, V a, V b, Buf* pre) {
+  const char* op = n->str;
+  if (!(eq(op, "+") || eq(op, "-") || eq(op, "*") || eq(op, "/") || eq(op, "^")))
+    fail(c, "`%s` takes numbers, and is given %s %s", op, givens(c, n->kids, (V[]){a, b}, 2), err_loc(c, n));
+  if ((is_pair(a) && !a.lad) || (is_pair(b) && !b.lad))
+    fail(c, "`%s` between %s %s: `[a, b]` is becoming two places, so write what is one number as (a, b), or name "
+         "the sides", op, givens(c, n->kids, (V[]){a, b}, 2), err_loc(c, n));
+  int w = a.w > b.w ? a.w : b.w;
+  const char* x[4];
+  if (eq(op, "^")) {
+    double p;
+    if (b.w != 1 || !const_value(c, sc, n->kids[1], &p) || p != floor(p) || p < 0 || p > 64)
+      fail(c, "`^` on a value takes a whole power from 0 to 64 known when the patch compiles, and is given %s %s. "
+           "Fractions (half a turn) aren't built yet", given(c, n->kids[1], b), err_loc(c, n));
+    if (p == 0) return embed(mono("1.0"), w);
+    V base = capture(c, pre, a), r = base;
+    for (long k = 1; k < (long)p; k++) r = ladder_mul(c, r, base, w, pre);
+    return r;
+  }
+  if (eq(op, "+") || eq(op, "-")) {
+    V p = embed(a, w), q = embed(b, w);
+    for (int k = 0; k < w; k++) x[k] = F(c, "((%s) %s (%s))", p.x[k], op, q.x[k]);
+    return vlike(p, w, x);
+  }
+  if (eq(op, "*") && (a.w == 1 || b.w == 1)) {             /* a number scales, as it sits inside */
+    V num = mono(once(c, pre, a.w == 1 ? a.l : b.l)), val = a.w == 1 ? b : a;
+    for (int k = 0; k < w; k++) x[k] = a.w == 1 ? F(c, "((%s) * (%s))", num.l, val.x[k]) : F(c, "((%s) * (%s))", val.x[k], num.l);
+    return vlike(val, w, x);
+  }
+  if (eq(op, "*")) return ladder_mul(c, a, b, w, pre);
+  if (b.w == 1) {                                          /* over a number: x / 0 is 0, as everywhere */
+    const char* d = once(c, pre, b.l);
+    for (int k = 0; k < w; k++) x[k] = F(c, "((%s) == 0.0 ? 0.0 : (%s) / (%s))", d, a.x[k], d);
+    return vlike(a, w, x);
+  }
+  /* a over b: a conj(b) over the size of b squared, 0 where b is 0 */
+  V q = capture(c, pre, embed(b, w));
+  const char* cj[4];
+  cj[0] = q.l;
+  for (int k = 1; k < w; k++) cj[k] = F(c, "(-(%s))", q.x[k]);
+  Buf size = {0};
+  for (int k = 0; k < w; k++) badd(c, &size, "%s%s * %s", k ? " + " : "", q.x[k], q.x[k]);
+  const char* d = once(c, pre, F(c, "(%s)", bstr(&size)));
+  V top = ladder_mul(c, a, vwide(w, cj), w, pre);
+  for (int k = 0; k < w; k++) x[k] = F(c, "((%s) == 0.0 ? 0.0 : (%s) / (%s))", d, top.x[k], d);
+  return vlike(top, w, x);
+}
+
 static V emit_binop(Ctx* c, Scope* sc, Node* n, Buf* pre) {
   V ab[2];
   emit_seq(c, sc, n->kids, 2, ab, pre);
   V a = ab[0], b = ab[1];
+  if (a.lad || b.lad) return ladder_op(c, sc, n, a, b, pre);
   const char* op = n->str;
   const char* fmt = NULL;
   if (eq(op, "^")) {
@@ -2912,8 +3067,9 @@ static V emit(Ctx* c, Scope* sc, Node* n, Buf* pre) {
     else { fail(c, "bad unary: %s %s", n->str, err_loc(c, n)); return mono(""); }
     if (!eq(n->str, "-")) no_quad(c, v, "`not`", n);
     const char* x[4];
+    if (v.lad && !eq(n->str, "-")) fail(c, "`not` takes a number, and is given %s %s", given(c, n->kids[0], v), err_loc(c, n));
     for (int k = 0; k < v.w; k++) x[k] = F(c, fmt, v.x[k]);
-    return vwide(v.w, x);
+    return vlike(v, v.w, x);
   }
   case nkBinOp: return emit_binop(c, sc, n, pre);
   case nkIf: return emit_if(c, sc, n, pre);
@@ -2922,6 +3078,16 @@ static V emit(Ctx* c, Scope* sc, Node* n, Buf* pre) {
     if (n->nkids == 2) {
       V lr[2];
       emit_seq(c, sc, n->kids, 2, lr, pre);
+      if (is_value_lit(n) && !is_quad(lr[0]) && !is_quad(lr[1])) {
+        if (!is_pair(lr[0]) && !is_pair(lr[1])) { V z = vpair(lr[0].l, lr[1].l); z.lad = 1; return z; }
+        V a = embed(lr[0], 2), b = embed(lr[1], 2);      /* a number sits inside as (r, 0) */
+        V q = vquad(a.l, a.r, b.l, b.r);
+        q.lad = 1;
+        return q;
+      }
+      if (!is_value_lit(n) && (lr[0].lad || lr[1].lad))
+        fail(c, "[a, b] of values %s: fields of values aren't built yet; for one of Hamilton's numbers write "
+             "((w, x), (y, z))", err_loc(c, n));
       if (is_quad(lr[0]) || is_quad(lr[1]))
         fail(c, "a pair of pairs of pairs %s: one more doubling would be the octonions, whose product "
              "doesn't associate, so rotations made of them wouldn't compose. Pairs nest once", err_loc(c, n));
@@ -2958,7 +3124,7 @@ static V emit(Ctx* c, Scope* sc, Node* n, Buf* pre) {
         int w = ew(sa);
         for (int j = 0; j < w; j++)
           x[j] = k < 0 || k >= sa->n ? "0.0" : F(c, "s->pool[%s + %ld]", sa->a, 1 + w * k + j);
-        return vwide(w, x);
+        return elem_value(sa, w, x);
       }
       if (sa) {
         const char* ix = emit1(c, sc, i, pre, "an index");
@@ -2968,7 +3134,7 @@ static V emit(Ctx* c, Scope* sc, Node* n, Buf* pre) {
         for (int j = 0; j < w; j++)
           x[j] = w == 1 ? F(c, "((%s >= 0 && %s < %ld) ? s->pool[%s + 1 + %s] : 0.0)", t, t, sa->n, sa->a, t)
                         : F(c, "((%s >= 0 && %s < %ld) ? s->pool[%s + %d + %d * %s] : 0.0)", t, t, sa->n, sa->a, 1 + j, w, t);
-        return vwide(w, x);
+        return elem_value(sa, w, x);
       }
       Ent* la = lookup_larray(c, sc, a->str);
       Ent* found = la ? la : lookup_array(c, sc, a->str);
@@ -2976,7 +3142,7 @@ static V emit(Ctx* c, Scope* sc, Node* n, Buf* pre) {
         long k = (long)kv;           /* made by array(): past either end, 0 */
         int w = ew(found);
         for (int j = 0; j < w; j++) x[j] = k < 0 || k >= found->n ? "0.0" : F(c, "%s[%ld]", found->a, w * k + j);
-        return vwide(w, x);
+        return elem_value(found, w, x);
       }
       if (found && found->edged) {
         const char* ix = emit1(c, sc, i, pre, "an index");
@@ -2986,14 +3152,14 @@ static V emit(Ctx* c, Scope* sc, Node* n, Buf* pre) {
         for (int j = 0; j < w; j++)
           x[j] = w == 1 ? F(c, "((%s >= 0 && %s < %ld) ? %s[%s] : 0.0)", t, t, found->n, found->a, t)
                         : F(c, "((%s >= 0 && %s < %ld) ? %s[%d * %s + %d] : 0.0)", t, t, found->n, found->a, w, t, j);
-        return vwide(w, x);
+        return elem_value(found, w, x);
       }
       if (found && found->n > 0 && const_value(c, sc, i, &kv)) {
         long k = (long)kv % found->n;
         if (k < 0) k += found->n;
         int w = ew(found);
         for (int j = 0; j < w; j++) x[j] = F(c, "%s[%ld]", found->a, w * k + j);
-        return vwide(w, x);
+        return elem_value(found, w, x);
       }
       if (found) {     /* local arrays and tables wrap round, as a table should */
         const char* ix = emit1(c, sc, i, pre, "an index");
@@ -3001,12 +3167,15 @@ static V emit(Ctx* c, Scope* sc, Node* n, Buf* pre) {
         badd(c, pre, "  long %s = (long)(%s) %% %ld; if (%s < 0) %s += %ld;\n", t, ix, found->n, t, t, found->n);
         int w = ew(found);
         for (int j = 0; j < w; j++) x[j] = w == 1 ? F(c, "%s[%s]", found->a, t) : F(c, "%s[%d * %s + %d]", found->a, w, t, j);
-        return vwide(w, x);
+        return elem_value(found, w, x);
       }
     }
     /* A pair indexes like a two-entry table: the left side for even i,
      * the right for odd. A pair of pairs gives its halves, each a pair. */
     V v = emit(c, sc, a, pre);
+    if (v.lad && !eq(n->str, "()"))
+      fail(c, "`%s` is %s, and a value has no places to index %s: name its parts, let (a, b) = %s",
+           written(c, a), shape_of(v), err_loc(c, n), written(c, a));
     if (is_quad(v)) {
       double kv;
       if (const_value(c, sc, i, &kv)) {
@@ -3094,6 +3263,16 @@ static const char** flatten_operands(Ctx* c, Node* n, V* v, int want, const char
  *   conj(a, b) = (conj(a), -b)
  * Every argument is a pair of pairs: a pair or a number here is an
  * error, as `turn` takes two pairs and not a pair and a number. */
+/* Hamilton's product of two quaternions (a, b)(c, d), the doubling formula
+ * written out. Each operand must be one word: it is read several times. */
+static V hamilton(Ctx* c, V p, V q) {
+  const char *w1 = p.l, *x1 = p.r, *y1 = p.l2, *z1 = p.r2, *w2 = q.l, *x2 = q.r, *y2 = q.l2, *z2 = q.r2;
+  return vquad(F(c, "(%s * %s - %s * %s - %s * %s - %s * %s)", w1, w2, x1, x2, y1, y2, z1, z2),
+               F(c, "(%s * %s + %s * %s + %s * %s - %s * %s)", w1, x2, x1, w2, y1, z2, z1, y2),
+               F(c, "(%s * %s - %s * %s + %s * %s + %s * %s)", w1, y2, x1, z2, y1, w2, z1, x2),
+               F(c, "(%s * %s + %s * %s - %s * %s + %s * %s)", w1, z2, x1, y2, y1, x2, z1, w2));
+}
+
 static V emit_quad_op(Ctx* c, Node* n, V* q, Buf* pre) {
   const char* f = n->str;
   int want = (eq(f, "turn") || eq(f, "unturn")) ? 2 : 1;
@@ -3124,18 +3303,42 @@ static V emit_quad_op(Ctx* c, Node* n, V* q, Buf* pre) {
     const char* d = fresh(c, "unturn_q");
     badd(c, pre, "  double %s = %s * %s + %s * %s + %s * %s + %s * %s;\n", d, w2, w2, x2, x2, y2, y2, z2, z2);
     const char* inv = F(c, "(%s == 0.0 ? 0.0 : 1.0 / %s)", d, d);
-    x2 = F(c, "(-(%s))", x2); y2 = F(c, "(-(%s))", y2); z2 = F(c, "(-(%s))", z2);
-    const char* W = F(c, "(%s * %s - %s * %s - %s * %s - %s * %s)", w1, w2, x1, x2, y1, y2, z1, z2);
-    const char* X = F(c, "(%s * %s + %s * %s + %s * %s - %s * %s)", w1, x2, x1, w2, y1, z2, z1, y2);
-    const char* Y = F(c, "(%s * %s - %s * %s + %s * %s + %s * %s)", w1, y2, x1, z2, y1, w2, z1, x2);
-    const char* Z = F(c, "(%s * %s + %s * %s - %s * %s + %s * %s)", w1, z2, x1, y2, y1, x2, z1, w2);
-    return vquad(F(c, "(%s * %s)", W, inv), F(c, "(%s * %s)", X, inv), F(c, "(%s * %s)", Y, inv), F(c, "(%s * %s)", Z, inv));
+    V r = hamilton(c, q[0], vquad(w2, F(c, "(-(%s))", x2), F(c, "(-(%s))", y2), F(c, "(-(%s))", z2)));
+    return vquad(F(c, "(%s * %s)", r.l, inv), F(c, "(%s * %s)", r.r, inv), F(c, "(%s * %s)", r.l2, inv), F(c, "(%s * %s)", r.r2, inv));
   }
-  /* turn: Hamilton's product, written out (the doubling formula expanded) */
-  return vquad(F(c, "(%s * %s - %s * %s - %s * %s - %s * %s)", w1, w2, x1, x2, y1, y2, z1, z2),
-               F(c, "(%s * %s + %s * %s + %s * %s - %s * %s)", w1, x2, x1, w2, y1, z2, z1, y2),
-               F(c, "(%s * %s - %s * %s + %s * %s + %s * %s)", w1, y2, x1, z2, y1, w2, z1, x2),
-               F(c, "(%s * %s + %s * %s - %s * %s + %s * %s)", w1, z2, x1, y2, y1, x2, z1, w2));
+  return hamilton(c, q[0], q[1]);
+}
+
+/* turn, unturn, conj and the readers, on operands emitted once. */
+static V turning_op(Ctx* c, Node* n, const char* name, V* ops, int anyq, Buf* pre) {
+  if (anyq) return emit_quad_op(c, n, ops, pre);
+  if (eq(name, "axis"))
+    fail(c, "axis(q) is a pair of pairs' axis (Hamilton's Ax q), and this is %s %s",
+         n->nkids == 1 ? F(c, "given %s", given(c, n->kids[0], ops[0])) : "the wrong number of arguments", err_loc(c, n));
+  /* turn and unturn are strict: two arguments, both pairs (both pairs of
+   * pairs above). Nothing is read as a pair that wasn't written as one. */
+  if ((eq(name, "turn") || eq(name, "unturn")) && (n->nkids != 2 || !is_pair(ops[0]) || !is_pair(ops[1])))
+    fail(c, "%s takes two pairs, `%s(z, w)` (or two pairs of pairs), and is given %s %s", name, name,
+         n->nkids ? givens(c, n->kids, ops, n->nkids) : "nothing", err_loc(c, n));
+  if (eq(name, "turn")) {
+    const char** a = flatten_operands(c, n, ops, 4, "two pairs");
+    return vpair(F(c, "(%s * %s - %s * %s)", a[0], a[2], a[1], a[3]),
+                 F(c, "(%s * %s + %s * %s)", a[0], a[3], a[1], a[2]));
+  }
+  if (eq(name, "unturn")) {              /* z turned back by w's angle, divided by its size */
+    const char** a = flatten_operands(c, n, ops, 4, "two pairs");
+    const char* d = fresh(c, "unturn_d");
+    badd(c, pre, "  double %s = %s * %s + %s * %s;\n", d, a[2], a[2], a[3], a[3]);
+    return vpair(F(c, "(%s == 0.0 ? 0.0 : (%s * %s + %s * %s) / %s)", d, a[0], a[2], a[1], a[3], d),
+                 F(c, "(%s == 0.0 ? 0.0 : (%s * %s - %s * %s) / %s)", d, a[1], a[2], a[0], a[3], d));
+  }
+  if (eq(name, "conj")) {
+    const char** a = flatten_operands(c, n, ops, 2, "one pair (or two numbers)");
+    return vpair(a[0], F(c, "(-(%s))", a[1]));
+  }
+  const char** a = flatten_operands(c, n, ops, 2, "one pair (or two numbers)");
+  if (eq(name, "amplitude")) return mono(F(c, "sqrt(%s * %s + %s * %s)", a[0], a[0], a[1], a[1]));
+  return mono(F(c, "atan2(%s, %s)", a[1], a[0]));
 }
 
 static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
@@ -3211,9 +3414,16 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
       if (own.n) for (long j = 0; j < k - 1; j++) terms[j] = capture(c, pre, terms[j]);
       bcat(c, pre, bstr(&own));
     }
-    int w = 1, quads = 0;
-    for (long k = 0; k < N; k++) { if (terms[k].w > w) w = terms[k].w; quads += is_quad(terms[k]); }
-    if (quads && quads != N) {
+    int w = 1, quads = 0, lad = 0;
+    for (long k = 0; k < N; k++) { if (terms[k].w > w) w = terms[k].w; quads += is_quad(terms[k]); lad |= terms[k].lad; }
+    if (lad)                             /* the narrower sits inside */
+      for (long k = 0; k < N; k++) {
+        if (is_pair(terms[k]) && !terms[k].lad)
+          fail(c, "sum of values and [a, b] pairs %s: `[a, b]` is becoming two places, so write what is one number "
+               "as (a, b)", err_loc(c, n));
+        terms[k] = embed(terms[k], w);
+      }
+    if (!lad && quads && quads != N) {
       long odd = 0;
       while (odd < N && is_quad(terms[odd])) odd++;
       fail(c, "sum of pairs of pairs and other values %s: term %ld (%s = %ld) is %s, where the others are "
@@ -3231,7 +3441,9 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
     }
     const char* x[4];
     for (int m = 0; m < w; m++) x[m] = F(c, "(%s)", bstr(&q[m]));
-    return vwide(w, x);
+    V total = vwide(w, x);
+    total.lad = lad && w > 1;
+    return total;
   }
   if (eq(name, "each")) {
     if (n->nkids != 2 || n->kids[1]->kind != nkLambda || n->kids[1]->nparams != 1)
@@ -3285,34 +3497,9 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
     /* Emitted once; a pair of pairs among them takes Hamilton's formula. */
     int anyq;
     V* ops = emit_operands(c, sc, n, pre, &anyq);
-    if (anyq) return emit_quad_op(c, n, ops, pre);
-    if (eq(name, "axis"))
-      fail(c, "axis(q) is a pair of pairs' axis (Hamilton's Ax q), and this is %s %s",
-           n->nkids == 1 ? F(c, "given %s", given(c, n->kids[0], ops[0])) : "the wrong number of arguments", err_loc(c, n));
-    /* turn and unturn are strict: two arguments, both pairs (both pairs of
-     * pairs above). Nothing is read as a pair that wasn't written as one. */
-    if ((eq(name, "turn") || eq(name, "unturn")) && (n->nkids != 2 || !is_pair(ops[0]) || !is_pair(ops[1])))
-      fail(c, "%s takes two pairs, `%s(z, w)` (or two pairs of pairs), and is given %s %s", name, name,
-           n->nkids ? givens(c, n->kids, ops, n->nkids) : "nothing", err_loc(c, n));
-    if (eq(name, "turn")) {
-      const char** a = flatten_operands(c, n, ops, 4, "two pairs");
-      return vpair(F(c, "(%s * %s - %s * %s)", a[0], a[2], a[1], a[3]),
-                   F(c, "(%s * %s + %s * %s)", a[0], a[3], a[1], a[2]));
-    }
-    if (eq(name, "unturn")) {              /* z turned back by w's angle, divided by its size */
-      const char** a = flatten_operands(c, n, ops, 4, "two pairs");
-      const char* d = fresh(c, "unturn_d");
-      badd(c, pre, "  double %s = %s * %s + %s * %s;\n", d, a[2], a[2], a[3], a[3]);
-      return vpair(F(c, "(%s == 0.0 ? 0.0 : (%s * %s + %s * %s) / %s)", d, a[0], a[2], a[1], a[3], d),
-                   F(c, "(%s == 0.0 ? 0.0 : (%s * %s - %s * %s) / %s)", d, a[1], a[2], a[0], a[3], d));
-    }
-    if (eq(name, "conj")) {
-      const char** a = flatten_operands(c, n, ops, 2, "one pair (or two numbers)");
-      return vpair(a[0], F(c, "(-(%s))", a[1]));
-    }
-    const char** a = flatten_operands(c, n, ops, 2, "one pair (or two numbers)");
-    if (eq(name, "amplitude")) return mono(F(c, "sqrt(%s * %s + %s * %s)", a[0], a[0], a[1], a[1]));
-    return mono(F(c, "atan2(%s, %s)", a[1], a[0]));
+    V r = turning_op(c, n, name, ops, anyq, pre);
+    for (int i = 0; i < n->nkids; i++) if (ops[i].lad && r.w > 1) r.lad = 1;
+    return r;
   }
   if (in(name, PAIR_CALLS)) {          /* turn, unturn and conj are above */
     const char* f = name;
@@ -3507,6 +3694,7 @@ static void decide_var(Ctx* c, Node* st) {
   int w = (v->kind == nkArr && v->nkids == 2) || (v->kind == nkCall && in(v->str, PAIR_CALLS)) ? 2 : 1;
   if (v->kind == nkArr && v->nkids == 2 && v->kids[0]->kind == nkArr && v->kids[1]->kind == nkArr) w = 4;
   make_var(c, st->str, w);
+  if (is_value_lit(v)) incl(c, &c->lad_vars, st->str);
 }
 
 /* A file-level `$x = init`, where its first declaration is: a struct
@@ -3522,7 +3710,10 @@ static const char* var_init(Ctx* c, Scope* sc, Node* st) {
   }
   V v = emit(c, sc, st->kids[0], &init_pre);
   int decided = has(&c->pair_vars, st->str) || has(&c->top_var_set, st->str);
-  if (!decided) make_var(c, st->str, v.w);
+  if (!decided) {
+    make_var(c, st->str, v.w);
+    if (v.lad) incl(c, &c->lad_vars, st->str);
+  }
   else if (has(&c->quad_vars, st->str) != is_quad(v))
     fail(c, "$%s is read above as %s, but its first value here is %s: write it the same way there, "
          "or declare it before it is read %s", st->str, is_quad(v) ? "less than a pair of pairs" : "a pair of pairs",
@@ -4325,7 +4516,7 @@ static V cross_read(Ctx* c, const char* key, V v) {
   const char* idx = late ? "aither_i" : "aither_i + 1";
   const char* x[4];
   for (int k = 0; k < v.w; k++) x[k] = xb(c, b + k, idx);
-  return vwide(v.w, x);
+  return vlike(v, v.w, x);
 }
 
 static V emit_ident_raw(Ctx* c, Scope* sc, Node* n);
@@ -4505,7 +4696,7 @@ static const char* emit_program(Ctx* c, Node* program) {
     case nkVar: bcat(c, body, var_init(c, top, s)); break;
     case nkLet: {
       Node* rhs = s->kids[0];
-      int numeric = rhs->kind == nkArr && all_nums(rhs);
+      int numeric = rhs->kind == nkArr && all_nums(rhs) && !is_value_lit(rhs);
       if ((rhs->kind == nkArr && rhs->nkids != 2 && rhs->nkids > 0 && !numeric) || is_array_make(rhs)) {
         declare_local_array(c, top, s->str, rhs, body, 1);
       } else if (numeric) {
@@ -4520,7 +4711,11 @@ static const char* emit_program(Ctx* c, Node* program) {
         }
       } else {
         V v = emit(c, top, rhs, body);
-        if (is_quad(v) && quad_literal(rhs)) hput(c, &c->const_quads, s->str)->node = rhs;   /* a constant, as a number is */
+        if (is_quad(v) && quad_literal(rhs)) {     /* a constant, as a number is */
+          Ent* q = hput(c, &c->const_quads, s->str);
+          q->node = rhs; q->lad = v.lad;
+        }
+        if (v.lad) incl(c, &c->lad_lets, s->str);
         if (is_pair(v)) {
           static const char* const suffix[4] = {"l", "r", "l2", "r2"};
           for (int k = 0; k < v.w; k++) badd(c, body, "  double l_%s_%s = (%s);\n", s->str, suffix[k], v.x[k]);

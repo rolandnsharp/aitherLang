@@ -1,7 +1,10 @@
 # Places and values: what aither is, as a field language
 
-**Status (2026-11-06): a design note, nothing built.** Agreed with Roland
-in discussion, as the destination. It takes the ladder
+**Status (2026-11-06): steps 2 and 3 of the order of work built** (the
+compiler's values are width-generic; `( , )` works on the ladder beside
+today's `[a, b]`, with whole powers only, SPEC "Values on the ladder").
+The rest is a design note. Agreed with Roland in discussion, as the
+destination. It takes the ladder
 ([ladder-2026-11-06.md](ladder-2026-11-06.md)) for what a value is, and
 replaces that note's answer for stereo (`both`, and the dotted operators
 considered after it). Past patches don't decide this; they are changed
@@ -142,7 +145,7 @@ stereo, nothing is silent any more.
 
 1. **`^` with a fraction.** `spin(440) ^ 0.5` is half the turn, by the
    standard definition, the principal root; quaternions the same (slerp,
-   Shoemake 1985). Whole powers first?
+   Shoemake 1985). Whole powers are built; a fraction is an error so far.
 2. **What makes stereo.** `pan`, `reverb`, `input()` return fields. Does
    `input()` stay two places for a radio, translated in one line, or does
    a patch say?

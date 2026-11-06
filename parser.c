@@ -361,24 +361,26 @@ static Node* parse_expr(P* p);
 
 /* A destructuring pattern: a name, or `[p, q]` of two patterns, so a
  * pair of pairs unfolds as `let [[w, x], [y, z]] = q`. */
-typedef struct Pat { const char* name; struct Pat* sub[2]; } Pat;
+typedef struct Pat { const char* name; struct Pat* sub[2]; int value; } Pat;
 
 static Pat* parse_pat(P* p) {
   Pat* pt = arena_alloc(p->c->a, sizeof(Pat));
-  if (peek(p).kind != tkLBracket) {
+  if (peek(p).kind != tkLBracket && peek(p).kind != tkLParen) {
     pt->name = expect(p, tkIdent, "a name for a side").str;
     return pt;
   }
+  pt->value = peek(p).kind == tkLParen;
+  const char* say = pt->value ? "let (a, b) names a value's two parts: two names" : "let [a, b] names a pair's two sides: two names";
   advance(p);
   for (int k = 0; k < 2; k++) {
     if (k) {
-      if (peek(p).kind != tkComma) fail(p, "let [a, b] names a pair's two sides: two names");
+      if (peek(p).kind != tkComma) fail(p, say);
       advance(p);
     }
     pt->sub[k] = parse_pat(p);
   }
-  if (peek(p).kind == tkComma) fail(p, "let [a, b] names a pair's two sides: two names");
-  expect(p, tkRBracket, NULL);
+  if (peek(p).kind == tkComma) fail(p, say);
+  expect(p, pt->value ? tkRParen : tkRBracket, NULL);
   return pt;
 }
 
@@ -392,7 +394,7 @@ static void bind_pat(P* p, Pat* pt, const char* src, int line, int depth) {
     id->str = src;
     Node* ix = node(p, nkNum, line);
     ix->num = k;
-    Node* part = node2(p, nkIdx, "", id, ix, line);
+    Node* part = node2(p, nkIdx, pt->value ? "()" : "", id, ix, line);
     if (sp->name) {
       if (eq(sp->name, "_")) continue;
       push(&p->extra, node1(p, nkLet, sp->name, part, line));
@@ -411,7 +413,7 @@ static void bind_pat(P* p, Pat* pt, const char* src, int line, int depth) {
  * (queued in p->extra; `_` names a side not wanted). Each side may be a
  * pattern of its own, for a pair of pairs: `let [[w, x], [y, z]] = q`. */
 static Node* parse_let_rest(P* p, int line) {
-  if (peek(p).kind != tkLBracket) {
+  if (peek(p).kind != tkLBracket && peek(p).kind != tkLParen) {
     const char* name = expect(p, tkIdent, "binding name").str;
     expect(p, tkAssign, NULL);
     return node1(p, nkLet, name, parse_expr(p), line);
@@ -602,6 +604,13 @@ static Node* parse_primary(P* p) {
     if (lam) return lam;
     advance(p);
     Node* e = parse_expr(p);
+    if (peek(p).kind == tkComma) {       /* (a, b): a value on the ladder, an array node marked "()" */
+      advance(p);
+      Node* v = node2(p, nkArr, "()", e, parse_expr(p), t.line);
+      if (peek(p).kind == tkComma) fail(p, "(a, b) is one value of two parts: a third needs a pair of pairs, ((w, x), (y, z))");
+      expect(p, tkRParen, NULL);
+      return v;
+    }
     expect(p, tkRParen, NULL);
     return e;
   }

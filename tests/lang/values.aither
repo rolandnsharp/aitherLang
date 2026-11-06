@@ -1,0 +1,181 @@
+# Values on the ladder (notes/ladder-2026-11-06.md,
+# notes/places-and-values-2026-11-06.md): round brackets are one value.
+# A number, (a, b) and ((w, x), (y, z)) are real, complex and Hamilton's
+# numbers; the narrower sits inside the wider, the rest zero, and + - * /
+# ^ are the algebra's. Today's [a, b] pair sits beside them until it
+# becomes two places.
+
+# --- a complex number plays as its two numbers
+# expect: 0.6, 0.8
+(0.6, 0.8)
+
+# --- * is turn: a complex product
+# expect: -1, 0
+let i = (0, 1)
+i * i
+
+# --- ... the same as turn
+# expect: 0, 0
+let z = (0.6, 0.8)
+let w = (0.28, -0.96)
+let (a, b) = z * w
+let [c, d] = turn([0.6, 0.8], [0.28, -0.96])
+[a - c, b - d]
+
+# --- + is the algebra's: a number moves the real part only
+# expect: 3, 2
+(2, 2) + 1
+
+# --- ... from either side
+# expect: 2, 3
+let (a, b) = 1 - (-1, -3)
+[a, b]
+
+# --- a number scales
+# expect: 1, 2
+(2, 4) * 0.5
+
+# --- ... and from the left
+# expect: 3, 4
+1 * (3, 4)
+
+# --- over a number
+# expect: 1, 2
+(2, 4) / 2
+
+# --- / is unturn: undoing a turn
+# expect: 0.6, 0.8
+let w = (0.28, -0.96)
+(0.6, 0.8) * w / w
+
+# --- a number over a value: the reciprocal
+# expect: 0, -1
+1 / (0, 1)
+
+# --- x / 0 is 0, as everywhere
+# expect: 0, 0
+(1, 2) / (0, 0)
+
+# --- ^ turns again: a quarter turn squared is a half turn
+# expect: -1, 0
+(0, 1) ^ 2
+
+# --- the fourth power comes round
+# expect: 1, 0
+(0, 1) ^ 4
+
+# --- ... the zeroth is 1
+# expect: 1, 0
+(0.3, 0.2) ^ 0
+
+# --- a fraction isn't built yet, and says so
+# error: `^` on a value takes a whole power
+(0, 1) ^ 0.5
+
+# --- Hamilton's: i j = k and j i = -k
+# expect: 1, -1
+let i = ((0, 1), (0, 0))
+let j = ((0, 0), (1, 0))
+let ((_, _), (_, z)) = i * j
+let ((_, _), (_, y)) = j * i
+[z, y]
+
+# --- the narrower sits inside the wider: complex i is Hamilton's i
+# expect: 1, 0
+let j = ((0, 0), (1, 0))
+let ((_, _), (_, z)) = (0, 1) * j
+[z, 0]
+
+# --- order matters: (z, 0) on the right turns the second half the other way
+# expect: -1, 0
+let q = ((0, 0), (1, 0))
+let ((_, _), (y, z)) = q * (0, 1) * (0, 1)
+[y, z]
+
+# --- Hamilton's formula as written: cos + dir sin is a rotation
+# expect: 0.69670670934716539, 0.71735609089952279
+let k = ((0, 0), (0, 1))
+let i = ((0, 1), (0, 0))
+let r = cos(0.4) + k * sin(0.4)
+let ((_, x), (y, _)) = r * i * conj(r)
+[x, y]
+
+# --- a number sits inside a value's half
+# expect: 7, 0
+let ((w, x), (_, _)) = (7, (1, 2))
+[w, x]
+
+# --- a def takes a value whole, whatever it does with it
+# expect: 3, 4
+def same(v): v + 0
+same((3, 4))
+
+# --- a function on a value runs once a number and gives a value
+# expect: 0.25, 0
+let v = abs((-0.5, 0)) * (0.5, 0)
+v
+
+# --- state keeps a value; a number put in it sits inside
+# expect: 5, 0
+$z = (1, 2)
+$z = 5
+$z
+
+# --- state at a def, turned each sample
+# expect: 0, 1
+# expect at 1: -1, 0
+def go(step):
+  $z = (1, 0)
+  $z = $z * step
+  $z
+go((0, 1))
+
+# --- an if with a number on one branch: it sits inside
+# expect: 2, 0
+if t > 1 then (1, 1) else 2
+
+# --- sum: a number term sits inside
+# expect: 7, 2
+sum(3, n => if n == 2 then (1, 2) else n * 1.5)
+
+# --- an array of values, stored and read whole
+# expect: 3, 4
+let a = array(2, (0, 0))
+a[1] = (3, 4)
+a[1]
+
+# --- a value has no places: [] won't read it
+# error: a value has no places to index
+let z = (1, 2)
+z[0] * 1
+
+# --- ... nor a [a, b] pattern
+# error: a value has no places to index
+let [a, b] = (1, 2)
+a
+
+# --- a value and today's pair don't mix: the error is the migration's guide
+# error: `[a, b]` is becoming two places
+(1, 2) + [3, 4]
+
+# --- ... in state
+# error: `[a, b]` is becoming two places
+$z = (1, 2)
+$z = [3, 4]
+$z
+
+# --- comparing takes numbers
+# error: `<` takes numbers
+if (1, 2) < 3 then 1 else 0
+
+# --- (a, b, c) isn't a value
+# error: a third needs a pair of pairs
+(1, 2, 3)
+
+# --- three deep is the octonions
+# error: a pair of pairs of pairs
+(((1, 2), (3, 4)), ((1, 2), (3, 4)))
+
+# --- old pairs stay as they are beside all this
+# expect: 2, 3
+[1, 2] + 1

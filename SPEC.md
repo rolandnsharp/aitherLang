@@ -834,6 +834,40 @@ steps them. An array keeps its first value's shape: a number stored
 fills an element, a pair into pairs of pairs (or the other way) is a
 stand-in error.
 
+### Values on the ladder
+
+Being built (notes/places-and-values-2026-11-06.md): `(a, b)` is one
+value, a complex number, and `((w, x), (y, z))` one of Hamilton's. With a
+number they are the ladder's rungs: **the narrower sits inside the
+wider, the rest zero, and `+ - * / ^` are the algebra's.** Today's
+`[a, b]` pair stays beside them, side by side as above, until it becomes
+two places.
+
+| Written      | Means                                                       |
+|--------------|-------------------------------------------------------------|
+| `z * w`      | turning: the complex product, Hamilton's for pairs of pairs, order mattering (`i * j` is `k`, `j * i` is `-k`) |
+| `z / w`      | `z conj(w)` over the size of `w` squared, 0 where `w` is 0; `z * w / w` is `z` |
+| `z + 1`      | the real part moves: `(a + 1, b)`                           |
+| `z * 2`      | scales all of it                                            |
+| `z ^ 2`      | `z * z`: turned twice. A whole power from 0 to 64 known when the patch compiles; fractions aren't built |
+| `(0, 1) * q` | the narrower sits inside: `((0, 1), (0, 0)) * q`            |
+
+**Multiplying is turning**: a value of size 1 turns what it multiplies
+by its angle, and any other size scales it too. So `cos(a) + dir *
+sin(a)` is Hamilton's formula for a rotation, as he wrote it.
+
+`let (a, b) = z` and `let ((w, x), (y, z)) = q` name the parts. That is
+the only way to read a part: `[]` is for places, so `z[0]` and `let [a,
+b] = z` are errors. A value is taken whole by a def, never run once a
+side. A function runs once a number on it and gives a value. State and
+arrays keep values (`$z = (1, 0)`, `array(N, (1, 0))`); a number stored
+in one sits inside. In `if` and `sum` the narrower sits inside too. It
+plays as its two numbers, and comparisons take numbers.
+
+A value meeting a `[a, b]` pair is an error that says to choose: `(1, 2)
++ [3, 4]`. `turn`, `unturn` and `conj` take either, and give a value if
+given one.
+
 **Errors name shapes.** Where a value's shape is wrong, the error quotes
 each argument as written with its shape (`lp1 is given \`q\`, a pair of
 pairs, and \`[100, 200]\`, a pair`), and a def that takes numbers names
