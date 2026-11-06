@@ -51,3 +51,36 @@ TEST(scanned_ring_pads) {
   CHECK(apart > 0.02, "narrow and broad are the same: %g", apart);
   for (long i = 0; i < N; i++) CHECK(a[i] < 1.0 && b[i] < 1.0, "radius %g at %ld", fmax(a[i], b[i]), i);
 }
+
+/* A ring's period is what it does: the engine picks other places at another
+ * rate, and a push still gets a quarter of the way round in a quarter of it. */
+TEST(ring_keeps_its_period) {
+  const int rates[] = {24000, 48000, 96000};
+  const double period = 0.8;
+  const char* src =
+    "$x = ring(period = 0.8)\n"
+    "$v = ring(period = 0.8)\n"
+    "$v = $v - concentration($x) * dt\n"
+    "$x = $x + $v * dt\n"
+    "$v[0.1 * (phasor(1000) * 0.2 - 0.1)] = if t < 0.01 then 2000 else 0\n"
+    "$x[0.25]\n";
+  double when[3];
+  for (int k = 0; k < 3; k++) {
+    Rendered r = {0};
+    char err[4096];
+    int rc = render_src(src, 0.6, rates[k], &r, err, sizeof err);
+    CHECK(rc == 0, "doesn't render at %d: %s", rates[k], err);
+    if (rc) return;
+    double peak = 0;
+    for (long i = 0; i < r.n; i++) peak = fmax(peak, fabs(r.left[i]));
+    when[k] = 0;
+    for (long i = 0; i < r.n; i++)
+      if (fabs(r.left[i]) > 0.5 * peak) { when[k] = (double)i / rates[k]; break; }
+    printf("  at %d Hz a push reaches a quarter round at %.3f s\n", rates[k], when[k]);
+    CHECK(peak > 0, "nothing arrived at %d", rates[k]);
+    rendered_free(&r);
+  }
+  for (int k = 0; k < 3; k++)
+    CHECK(fabs(when[k] - when[1]) < 0.03 * period, "at %d Hz it took %g s, at 48000 %g s", rates[k], when[k], when[1]);
+  CHECK(fabs(when[1] - period / 4) < 0.05 * period, "a quarter round took %g s of %g", when[1], period);
+}

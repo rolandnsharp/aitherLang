@@ -1172,19 +1172,20 @@ sample, as `tv` draws a pixel: the field costs one place, whatever its size.
 That is what an array assigned bare does (SPEC "Fields"). Read along it at
 the note (scanned synthesis), and what it does is timbre while the
 reading is pitch. `patches/scanned_ring.aither`: 128 masses cost a
-twentieth of stepping them all every sample. Size isn't free, though: it
-sets the speed. A push takes `N² / (sqrt(stiff) * sr)` seconds to go round,
-so choose N for how the ring should move: at the same stiffness 128 masses
-go round in 1.7 s, 1024 in 106 s.
+twentieth of stepping them all every sample.
 
 ```
-$x = array(128)                                # each line is at each place,
-$v = array(128)                                # as a line on [l, r] is
-$v = ($v - concentration($x) * stiff) * (1 - loss)
-$x = $x + $v
-$v[where] = blow                               # a push, at a point
+$x = ring(period = 1.66)                       # each line is at each place,
+$v = ring(period = 1.66)                       # as a line on [l, r] is
+$v = ($v - concentration($x) * dt) * (1 - loss * dt)
+$x = $x + $v * dt
+$v[where] = force                              # a push, at a point
 let height = $x[phasor(note)]                  # read at a point
 ```
+
+Say what the medium does, a push going round in 1.66 s, and the engine
+picks the places; `dt` in those lines is the ring's own step, so the law is
+in seconds.
 
 `patches/aether_ring.aither` is the same with a direction at each place,
 so a squeeze and a twist travel at their own speeds, from one product.

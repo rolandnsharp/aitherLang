@@ -184,9 +184,12 @@ typedef struct {
   const char* place;                     /* the hidden let: this sample's place */
   const char* in;                        /* the hidden array of pushes, or NULL */
   const char* now;                       /* the hidden let holding what was just stored */
+  Node* period;                          /* ring(period = T): the engine owns its places, else NULL */
+  const char* rate;                      /* the hidden let: its speed squared, places a second */
+  const char* step;                      /* the hidden let: how long its step is */
 } Field;
 
-typedef struct { Arena* a; Field* f; int n; int made; } Fields;
+typedef struct { Arena* a; Field* f; int n; int made; const char* step; } Fields;
 
 static Node* fnode(Fields* fs, NodeKind k, const char* str, const Node* at) {
   Node* n = arena_alloc(fs->a, sizeof(Node));
@@ -226,14 +229,27 @@ static Field* field_named(Fields* fs, const char* name) {
   for (int i = 0; i < fs->n; i++) if (!strcmp(fs->f[i].name, name)) return &fs->f[i];
   return NULL;
 }
-static int make_array(const Node* n) { return n && n->kind == nkCall && !strcmp(n->str, "array"); }
+static int make_ring(const Node* n) { return n && n->kind == nkCall && !strcmp(n->str, "ring"); }
+static int make_array(const Node* n) { return n && n->kind == nkCall && (!strcmp(n->str, "array") || make_ring(n)); }
+/* A ring's named argument, or its positional one. */
+static Node* ring_arg(const Node* c, const char* name, int at) {
+  for (int k = 0; k < c->nkids; k++)
+    if (c->kids[k]->kind == nkNamedArg && !strcmp(c->kids[k]->str, name)) return c->kids[k]->kids[0];
+  return at < c->nkids && c->kids[at]->kind != nkNamedArg ? c->kids[at] : NULL;
+}
 
 /* A bare field as a word's argument, and the word it needs. */
 static Field* bare_field(Fields* fs, const Node* n) { return n && n->kind == nkIdent ? field_named(fs, n->str) : NULL; }
 
+/* A neighbour word on a ring carries the ring's speed. */
+static Node* at_speed(Fields* fs, Field* f, Node* word, const Node* at) {
+  return f->period ? fbin(fs, "*", word, fident(fs, f->rate, at), at) : word;
+}
+
 static Node* field_expr(Fields* fs, Node* n) {
   if (!n) return n;
   if (n->kind == nkIdent) {
+    if (fs->step && !strcmp(n->str, "dt")) return fident(fs, fs->step, n);   /* in a ring's line, its step */
     Field* f = field_named(fs, n->str);
     if (!f) return n;
     return f->now ? fident(fs, f->now, n) : fidx(fs, f->name, fident(fs, f->place, n), n);
@@ -244,7 +260,10 @@ static Node* field_expr(Fields* fs, Node* n) {
   if (n->kind == nkIdxAssign && bare_field(fs, n->kids[0])) { /* a push at a point */
     Field* f = bare_field(fs, n->kids[0]);
     Node* at = fcall(fs, "field_place", n, 2, (Node*[]){field_expr(fs, n->kids[1]), f->size});
-    Node* sum = fbin(fs, "+", fidx(fs, f->in, at, n), field_expr(fs, n->kids[2]), n);
+    Node* push = field_expr(fs, n->kids[2]);
+    if (f->period)                                            /* a rate per length of ring: the grain falls out */
+      push = fbin(fs, "*", push, fbin(fs, "*", f->size, fident(fs, "dt", n), n), n);
+    Node* sum = fbin(fs, "+", fidx(fs, f->in, at, n), push, n);
     Node* r = fnode(fs, nkIdxAssign, "", n);
     fkids(fs, r, 3, (Node*[]){fident(fs, f->in, n), at, sum});
     return r;
@@ -253,13 +272,13 @@ static Node* field_expr(Fields* fs, Node* n) {
     if (!strcmp(n->str, "len")) return n;
     Field* f = n->nkids == 1 ? bare_field(fs, n->kids[0]) : NULL;
     if (f && !strcmp(n->str, "concentration"))
-      return fcall(fs, "concentration", n, 2, (Node*[]){n->kids[0], fident(fs, f->place, n)});
+      return at_speed(fs, f, fcall(fs, "concentration", n, 2, (Node*[]){n->kids[0], fident(fs, f->place, n)}), n);
     Node* in = n->nkids == 1 ? n->kids[0] : NULL;
     f = in && in->kind == nkCall && in->nkids == 1 ? bare_field(fs, in->kids[0]) : NULL;
     if (f && !strcmp(n->str, "slope") && !strcmp(in->str, "convergence"))
-      return fcall(fs, "slope_of_convergence", n, 2, (Node*[]){in->kids[0], fident(fs, f->place, n)});
+      return at_speed(fs, f, fcall(fs, "slope_of_convergence", n, 2, (Node*[]){in->kids[0], fident(fs, f->place, n)}), n);
     if (f && !strcmp(n->str, "curl") && !strcmp(in->str, "curl"))
-      return fcall(fs, "curl_of_curl", n, 2, (Node*[]){in->kids[0], fident(fs, f->place, n)});
+      return at_speed(fs, f, fcall(fs, "curl_of_curl", n, 2, (Node*[]){in->kids[0], fident(fs, f->place, n)}), n);
   }
   for (int i = 0; i < n->nkids; i++) n->kids[i] = field_expr(fs, n->kids[i]);
   return n;
@@ -274,7 +293,10 @@ static void field_stmts(Fields* fs, Node** in, int n, Kids* out, int top) {
       Node* c = s->kids[0];
       int named = 0;
       for (int k = 0; k < c->nkids; k++) if (c->kids[k]->kind == nkNamedArg) named = 1;
-      if (!named && c->nkids < 3) {
+      if (f->period) {                                       /* the engine's places, stepped once through */
+        c->str = "array";
+        fkids(fs, c, 3, (Node*[]){f->size, f->init ? f->init : fnum(fs, 0, c), f->size});
+      } else if (!named && c->nkids < 3) {
         Node* init = c->nkids == 2 ? c->kids[1] : fnum(fs, 0, c);
         fkids(fs, c, 3, (Node*[]){c->kids[0], init, c->kids[0]});
       }
@@ -282,6 +304,15 @@ static void field_stmts(Fields* fs, Node** in, int n, Kids* out, int top) {
       Node* place = fnode(fs, nkLet, f->place, s);
       fkids(fs, place, 1, (Node*[]){fcall(fs, "pixel_index", s, 2, (Node*[]){f->size, fnum(fs, 1, s)})});
       kid(out, place);
+      if (f->period) {
+        Node* rate = fnode(fs, nkLet, f->rate, s);           /* (N / T)^2: a wave goes round in T */
+        Node* speed = fbin(fs, "/", f->size, f->period, s);
+        fkids(fs, rate, 1, (Node*[]){fbin(fs, "*", speed, speed, s)});
+        kid(out, rate);
+        Node* step = fnode(fs, nkLet, f->step, s);
+        fkids(fs, step, 1, (Node*[]){fbin(fs, "*", f->size, fident(fs, "dt", s), s)});
+        kid(out, step);
+      }
       if (f->in) {
         Node* zero = f->init ? fbin(fs, "*", f->init, fnum(fs, 0, s), s) : fnum(fs, 0, s);
         Node* pushes = fnode(fs, nkVar, f->in, s);
@@ -291,7 +322,9 @@ static void field_stmts(Fields* fs, Node** in, int n, Kids* out, int top) {
       continue;
     }
     if (f) {                                                 /* `$x = e`, at this place */
+      fs->step = f->period ? f->step : NULL;
       Node* value = field_expr(fs, s->kids[0]);
+      fs->step = NULL;
       Node* here = fident(fs, f->place, s);
       if (f->in) value = fbin(fs, "+", value, fidx(fs, f->in, here, s), s);
       const char* now = fname(fs, "now", f->name, fs->made++);
@@ -357,6 +390,14 @@ static void fields_pass(Arena* a, Kids* kids, int from) {
       memset(f, 0, sizeof *f);
       f->name = s->str; f->size = s->kids[0]->kids[0];
       f->init = s->kids[0]->nkids >= 2 ? s->kids[0]->kids[1] : NULL;
+      if (make_ring(s->kids[0])) {
+        f->period = ring_arg(s->kids[0], "period", 0);
+        f->init = ring_arg(s->kids[0], "start", 1);
+        f->size = fcall(&fs, "field_places", s, 1, (Node*[]){f->period});
+        f->place = fname(&fs, "place", f->name, -1);
+        f->rate = fname(&fs, "rate", f->name, -1);
+        f->step = fname(&fs, "step", f->name, -1);
+      }
     }
   }
   find_fields(&fs, kids->v + from, kids->n - from);

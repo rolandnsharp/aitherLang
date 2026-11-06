@@ -20,10 +20,10 @@
 # moves it out from the circle (heard as size, drawn as a bump). Up from the
 # plane shows through a slight tilt.
 #
-# Measured: a mass 32 places from the strike hears the squeeze at 0.157 s
-# and the twist at 0.366 s, speeds of 0.593 and 0.254 places a step against
-# sqrt(stiffness), 0.592 and 0.245. A strike along the ring makes no twist
-# and one across it no squeeze, to the last digit: S and V keep them apart.
+# Measured: a quarter of the way round from a strike the squeeze arrives
+# at about 0.16 s and the twist at about 0.37 s, as a 0.63 s ring and sqrt
+# of twist's 0.17 say. A strike along the ring makes no twist and one across
+# it no squeeze, to the last digit: the two parts stay apart.
 #
 #   ./aither patches/aether_ring.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
 #
@@ -33,27 +33,25 @@
 # down for how stiff it is to twist (CC 22).
 #   tools/pad & AITHER_MIDI=aither-pad ./aither patches/aether_ring.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
 
-let N = 128                                                # masses round the ring
-
 # ---------------------------------------------------------------- the field
 
-let squeeze = 0.35 + 0.5 * midi_cc(20)                     # how stiff to squeeze: a fast wave
-let twist = 0.06 + 0.2 * midi_cc(22)                       # how stiff to twist: a slow one
-let held = 0.0006                                          # how strongly a mass keeps its place
-let loss = 0.0012                                          # shrink, a step
+let squeeze = 1 + 1.4 * midi_cc(20)                        # how stiff to squeeze, against the ring as it is
+let twist = 0.17 + 0.57 * midi_cc(22)                      # how stiff to twist, against squeezing it
+let held = 71                                              # how strongly a mass keeps its place
+let loss = 0.41                                            # shrink, a second
 
-$d = array(N, ((0, 0), (0, 0)))                            # where each mass is, from its rest
-$v = array(N, ((0, 0), (0, 0)))                            # how it is moving
+$d = ring(period = 0.63, start = ((0, 0), (0, 0)))         # where each mass is: a squeeze goes round in 0.63 s
+$v = ring(period = 0.63, start = ((0, 0), (0, 0)))         # how it is moving
 
-$v = ($v - slope(convergence($d)) * squeeze - curl(curl($d)) * twist - $d * held) * (1 - loss)
-$d = $d + $v
+$v = ($v - slope(convergence($d)) * squeeze * dt - curl(curl($d)) * twist * dt - $d * held * dt) * (1 - loss * dt)
+$d = $d + $v * dt
 
 # ---------------------------------------------------------------- the strike
 
 # A strike is a function of its age (COMPOSING, "How long since"). The ring
 # strikes itself every 7 s, leaning along and across at once, so both waves
 # start; a pad strikes one way. It is a write head sweeping across the ring
-# where it lands, one step long, each a golden angle round from the last.
+# where it lands, each a golden angle round from the last.
 let golden = 0.381966
 let own = phasor(1 / 7) * 7
 let pad_a = midi_trig(36)
@@ -65,12 +63,12 @@ let age_x = since(pad_x)
 $where = 0.0
 $where = ($where + (pad_a + pad_b + pad_x) * golden) mod 1
 
-let stroke = N * dt
+let stroke = 0.003                                         # how long a blow takes
 let age = min(own, min(age_a, min(age_b, age_x)))
 let way = (if own < stroke then (i + j) * sqrt(0.5) else 0) + (if age_a < stroke then i else 0) + (if age_b < stroke then j else 0) + (if age_x < stroke then k else 0)
 let landed = if own < stroke then floor(sweep / 7) * golden else $where
 let head = age / stroke * 2 - 1                            # across the stretch, -1 to 1
-$v[landed + head * 12 / N] = way * (if age < stroke then 0.025 * 24 / N * exp(-head * head * 9) else 0)
+$v[landed + head * 0.094] = way * (if age < stroke then 1.62 / stroke * exp(-head * head * 9) else 0)
 
 # ---------------------------------------------------------------- reading
 

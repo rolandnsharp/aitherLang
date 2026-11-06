@@ -1,6 +1,14 @@
 # A field by what it does: the size is the engine's job
 
-**Status (2026-11-06): a proposal, nothing built.** From a conversation in
+**Status (2026-11-06): built, as `ring(period = T)`** (SPEC "Fields").
+Both rings use it. From 59 to 123 places, across rates, `aether_ring`'s
+squeeze reaches a quarter round at 0.160 to 0.163 s and its twist at 0.370
+to 0.375 s. Settled from "Open" below: 1, the engine picks the grain, a
+quarter of a place a step, so a knob can go four times faster; 2, `dt` in a
+ring's line is its step, so `held` and `loss` are per second; 3, one period
+and a ratio; 5, `ring` for now. `scanned_ring`'s sound matched at every
+check. Still open: 4 in full, and a fast fine field, which needs more than
+one place a sample. From a conversation in
 a forked session, for the main one. It follows
 [nabla-and-medium-2026-11-06.md](nabla-and-medium-2026-11-06.md) and SPEC
 "Fields" (`cfbff97`). Roland: "love the idea that it can be worked out

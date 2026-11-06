@@ -6,25 +6,21 @@
 # speed of a pitch. So what it does is timbre, not pitch: the ring's motion
 # is the sound's change, and the note is how fast the reading goes.
 #
-# It is a field (SPEC "Fields"): two arrays assigned bare, each line at
-# each place, as a line on [l, r] is. It steps one place a sample, as tv
-# draws a pixel, so the whole field moves once every N samples, at the cost
-# of one place, whatever N is. N sets how fast it moves, too: a push takes
-# N^2 / (sqrt(stiff) sr) seconds to go round.
+# It is a field (SPEC "Fields"): each line at each place, as a line on
+# [l, r] is. The patch says what the medium does, a push going round in
+# 1.66 s; the engine picks the places, and steps one a sample, as tv draws
+# a pixel, so the field costs one place.
 #
 # Read round, its displacement is the size of a turning value, so on the
 # scope the ring is drawn as it is: a circle at rest, and a pure tone. A
 # strike is a bump on the circle that travels round both ways, spreads and
 # dies, and is heard as the sound's harmonics moving.
 #
-# Measured on the uConsole (10 s of sound, the compiler's quick build):
-# stepped one place a sample, 128 masses take 0.5 s and 8192 take 0.44 s
-# (though 8192 would take hours to go round, at this stiffness);
-# stepped every place every sample, 32 take 2.3 s and 128 take 10.6 s, no
-# longer real time. Struck, the radius moves between about 0.2 and 0.8 and
-# the harmonics over 20 to 30 dB; the field's stepping shows as a buzz at
-# sr / N, about 40 dB under the note. Never struck, the radius is 0.45
-# exactly.
+# Measured on the uConsole: stepped one place a sample, 10 s of sound takes
+# about 0.6 s; every place every sample, 128 masses take 10.6 s, no longer
+# real time. Struck, the radius moves between about 0.2 and 0.8 and the
+# harmonics over 20 to 30 dB; the field's stepping shows as a buzz about
+# 40 dB under the note. Never struck, the radius is 0.45 exactly.
 #
 #   ./aither patches/scanned_ring.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
 #
@@ -35,26 +31,24 @@
 # breaks into ripples.
 #   tools/pad & AITHER_MIDI=aither-pad ./aither patches/scanned_ring.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
 
-let N = 128                                                # masses round the ring
-
 # ---------------------------------------------------------------- the field
 
-let stiff = 0.05 + 0.4 * midi_cc(20)                       # how fast a push goes round
-let held = 0.0002 + 0.01 * midi_cc(22)                     # how strongly a mass keeps its place
-let loss = 0.0012                                          # shrink, a step
+let firm = 1 + 8 * midi_cc(20)                             # how stiff, against the ring as it is
+let held = 24 + 1200 * midi_cc(22)                         # how strongly a mass keeps its place
+let loss = 0.41                                            # shrink, a second
 
-$x = array(N)                                              # where each mass is
-$v = array(N)                                              # how it is moving
+$x = ring(period = 1.66)                                   # where each mass is: a push goes round in 1.66 s
+$v = ring(period = 1.66)                                   # how it is moving
 
-$v = ($v - concentration($x) * stiff - $x * held) * (1 - loss)
-$x = $x + $v
+$v = ($v - concentration($x) * firm * dt - $x * held * dt) * (1 - loss * dt)
+$x = $x + $v * dt
 
 # ---------------------------------------------------------------- the strike
 
 # A strike is a function of its age (COMPOSING, "How long since"): the
 # ring's own, every 5 s, is the clock's fraction, a pad's is since(). It
-# is a write head sweeping across the ring where it lands, one step long,
-# each a golden angle round from the last.
+# is a write head sweeping across the ring where it lands, each a golden
+# angle round from the last.
 let golden = 0.381966
 let own = phasor(1 / 5) * 5
 let pad_a = midi_trig(36)
@@ -63,13 +57,13 @@ let narrow = min(own, since(pad_a))
 let broad = since(pad_b)
 $where = 0.0
 $where = ($where + (pad_a + pad_b) * golden) mod 1
-let landed = if own < N * dt then floor(sweep / 5) * golden else $where
 
+let stroke = 0.003                                         # how long a blow takes
 let age = min(narrow, broad)
-let width = if broad < narrow then 14 else 4
-let head = age / (N * dt) * 2 - 1                          # across the stretch, -1 to 1
-let reach = width * 3
-$v[landed + head * reach / N] = if age < N * dt then 0.2 * reach / (N * width) * exp(-head * head * 9) else 0
+let landed = if own < stroke then floor(sweep / 5) * golden else $where
+let width = if broad < narrow then 0.11 else 0.031         # of the way round
+let head = age / stroke * 2 - 1                            # across the stretch, -1 to 1
+$v[landed + head * width * 3] = if age < stroke then 1.62 / stroke * exp(-head * head * 9) else 0
 
 # ---------------------------------------------------------------- reading
 

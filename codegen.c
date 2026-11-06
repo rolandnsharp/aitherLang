@@ -518,6 +518,12 @@ static Ent* lookup_larray(Ctx* c, Scope* sc, const char* name) {
 
 /* A compile-time number: a literal, a name bound to one, len(array), or
  * arithmetic over those. */
+/* How far a push goes in a field's step, in places, at its period: a
+ * quarter, so a knob can take it four times faster before the step goes
+ * unstable at one place a step. A ring of period T has sqrt(this T sr)
+ * places. */
+#define FIELD_STEP 0.25
+
 static int const_value(Ctx* c, Scope* sc, Node* n, double* v) {
   if (!n) return 0;
   switch (n->kind) {
@@ -536,6 +542,12 @@ static int const_value(Ctx* c, Scope* sc, Node* n, double* v) {
     return 1;
   }
   case nkCall:
+    if (eq(n->str, "field_places") && n->nkids == 1) {   /* the engine's choice for a period, at this rate */
+      double period;
+      if (!const_value(c, sc, n->kids[0], &period)) return 0;
+      *v = fmax(4.0, floor(sqrt(FIELD_STEP * period * c->sr) + 0.5));
+      return 1;
+    }
     if (eq(n->str, "len") && n->nkids == 1 && n->kids[0]->kind == nkIdent) {
       const char* a = n->kids[0]->str;
       Ent* e;
@@ -1756,8 +1768,12 @@ static const char* assign_pair_side(Ctx* c, Scope* sc, Node* st) {
 static int array_make_size(Ctx* c, Scope* sc, Node* call) {
   Node* narg = call->kids[0];
   double v;
-  if (!const_value(c, sc, narg, &v))
+  if (!const_value(c, sc, narg, &v)) {
+    if (narg->kind == nkCall && eq(narg->str, "field_places"))
+      fail(c, "a ring's period has to be known when the patch compiles, as its places are, and is given `%s` %s",
+           written(c, narg->kids[0]), err_loc(c, narg));
     fail(c, "array: the size must be a compile-time integer %s", err_loc(c, narg));
+  }
   long n = (long)v;
   if ((double)n != v || n < 1 || n > 1000000)
     fail(c, "array: the size must be a whole number from 1 to 1000000, got %s %s",
@@ -3453,6 +3469,13 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
   if (eq(name, "array"))
     fail(c, "array(N) declares an array: `$f = array(N)` for state that lasts, `let a = array(N)` "
          "for this sample's scratch %s", err_loc(c, n));
+  if (eq(name, "field_places")) {
+    double v;
+    if (!const_value(c, sc, n, &v))
+      fail(c, "a ring's period has to be known when the patch compiles, as its places are, and is given `%s` %s",
+           n->nkids ? written(c, n->kids[0]) : "nothing", err_loc(c, n));
+    return mono(num_lit(c, v));
+  }
   if (eq(name, "noise")) return mono(emit_noise(c, pre));
   if ((eq(name, "turn") || eq(name, "unturn")) && !user_def(c, name))
     fail(c, "%s is `%s` now %s: multiplying is turning, on values written (a, b)", name, eq(name, "turn") ? "*" : "/",

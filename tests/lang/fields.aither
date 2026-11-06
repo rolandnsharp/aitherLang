@@ -98,3 +98,33 @@ $x[0] + a * 0
 # expect: 3
 $f = array(4, n => n)
 $f[3]
+
+# --- a ring: the engine picks its places from its period, the patch never says
+# expect: 110
+$x = ring(period = 1)
+$x = $x
+len($x)
+
+# --- a ring's period has to be known when the patch compiles
+# error: a ring's period has to be known
+$x = ring(period = 1 + t)
+$x = $x
+$x[0]
+
+# --- dt in a ring's line is its step: a second of change is a second, whatever its places
+# expect at 47999: 1
+$x = ring(period = 1)
+$x = $x + dt
+floor($x[0] + 0.02)
+
+# --- ... and outside a ring's line dt is a sample
+# expect: 1
+$x = ring(period = 1)
+$x = $x
+dt * 48000
+
+# --- a ring of values starts as it says
+# expect: 3, 4
+$z = ring(period = 1, start = (3, 4))
+$z = $z
+$z[0]

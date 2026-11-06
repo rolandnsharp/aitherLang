@@ -703,36 +703,43 @@ sixteenth as much. `every` is `array`'s third parameter, usually named
 
 ### Fields
 
-**An array assigned bare is a field**: the rule of `[l, r]` at N places.
-Each line is what happens at one place, and arithmetic is at each place.
-A field is the array, and nothing else marks it:
+**A field is the rule of `[l, r]` at many places.** Each line is what
+happens at one place, and arithmetic is at each place:
 
 ```
-$x = array(128)                                # where each mass is
-$v = array(128)                                # how it is moving
+$x = ring(period = 1.66)                       # a push goes round in 1.66 s
+$v = ring(period = 1.66)
 
-$v = ($v - concentration($x) * stiff - $x * held) * (1 - loss)
-$x = $x + $v
+$v = ($v - concentration($x) * dt - $x * held * dt) * (1 - loss * dt)
+$x = $x + $v * dt
 
-$v[where] = blow                               # a push, at a point
+$v[where] = force                              # a push, at a point
 let height = $x[phasor(note)]                  # read at a point
 ```
 
 Inside a field there is no here and no now, only what changes and what
-it touches (notes/nabla-and-medium-2026-11-06.md). No line holds an index:
+it touches (notes/nabla-and-medium-2026-11-06.md). **The patch says what
+the medium does; the engine owns the places, the wrap, the stepping and
+the grain** (notes/field-by-its-period-2026-11-06.md).
 
+- `ring(period = T)` is a field a push goes round in T seconds, known when
+  the patch compiles. `start =` is its first value at every place: a
+  number, by default 0, or a value. The engine picks `sqrt(T * sr / 4)`
+  places, so the same patch has the same motion at any rate.
 - A bare `$x` is the field at this place, and `$x = ...` stores there. A
   later line at the place sees what was stored; a neighbour sees the last
   step. A number or a value is everywhere.
-- A field steps **one place a sample**, as `tv` draws a pixel, so it moves
-  once every N samples at the cost of one place, whatever N is. N also
-  sets the physics: a push takes `N² / (sqrt(stiff) * sr)` seconds to go
-  round, so at the same stiffness 128 places take 1.7 s and 1024 take
-  106 s, and a 1 s ring can't have more than about 210 places
-  (notes/field-by-its-period-2026-11-06.md). It
-  suits a field that moves slowly against the sound, read at audio rate:
-  a stepping buzz at `sr / N` sits about 40 dB under the note at N = 128.
-- A neighbour is reached only through these words:
+- In a line that stores into a ring, `dt` is the ring's step, so the law
+  is in seconds, and `held`, `loss` and the like don't move with the
+  places. Elsewhere it is a sample, as always.
+- A field steps **one place a sample**, as `tv` draws a pixel, so it costs
+  one place. Its stepping shows as a buzz at `sr / N`, about 40 dB under
+  the note at 128 places. It suits a field that moves slowly against the
+  sound, read at audio rate. A push goes a quarter of a place a step at
+  the ring's period, and one place a step is the limit, so stiffer than
+  sixteen times, a law multiplying the word by more than 16, is unstable.
+- A neighbour is reached only through these words, which on a ring carry
+  its speed:
 
   | Word                          | What it is                               |
   |-------------------------------|------------------------------------------|
@@ -741,15 +748,22 @@ it touches (notes/nabla-and-medium-2026-11-06.md). No line holds an index:
   | `curl(curl($d))`              | ... the curl of its twist, the vector part |
 
   Along a line nabla is Hamilton's `i` times a difference, a step ahead
-  and a step behind. A field wraps: it is a ring.
+  and a step behind. Two speeds are one period and a ratio: `curl(curl($d))
+  * 0.17`, slower by its square root.
 - From outside a field has two touch points. `$x[p]` reads at a point, p
-  from 0 to 1 round, between places; `$v[p] = push` adds a push at the
-  nearest place, landing when the field reaches it. This is the one way
-  `[ ]` differs on a field: p is how far round, not a place number.
+  from 0 to 1 round, between places; `$v[p] = force` adds a push at the
+  nearest place, landing when the field reaches it. On a ring it is a rate
+  per length of ring, so a head sweeping a stretch lands the same whatever
+  the places. This is the one way `[ ]` differs on a field: p is how far
+  round, not a place number.
 
-Fields are at the file's level, in its plays too; a def sees none. Not
-built: fields with ends, sheets, and a field's own speed (it is always
-one place a sample).
+An array assigned bare (`$x = array(128)`, `$x = $x + ...`) is a field too,
+with the size in the patch: a push then takes `N² / (sqrt(stiff) * sr)`
+seconds to go round, the words carry no speed, and `dt` is a sample. Use
+`ring`, unless a number of places is the point. Fields are at the file's
+level, in its plays too; a def sees none. Not built: ends and sheets, and a
+fast fine field, which needs more than one place a sample: at one, a 1 s
+ring can't have more than about 210 places.
 
 ### Arrays are data, not a map
 
