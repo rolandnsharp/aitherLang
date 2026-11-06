@@ -1168,11 +1168,14 @@ each(n, i => $z[i] = law($z[i], $z[(i + n - 1) mod n], $z[(i + 1) mod n], step(i
 
 **A field read at audio rate.** A stored field costs its size every
 sample, unless it moves slower than the sound. Then step one place a
-sample, as `tv` draws a pixel: the field costs one place, however large.
+sample, as `tv` draws a pixel: the field costs one place, whatever its size.
 That is what an array assigned bare does (SPEC "Fields"). Read along it at
 the note (scanned synthesis), and what it does is timbre while the
 reading is pitch. `patches/scanned_ring.aither`: 128 masses cost a
-twentieth of stepping them all every sample, and 8192 cost the same as 128.
+twentieth of stepping them all every sample. Size isn't free, though: it
+sets the speed. A push takes `N² / (sqrt(stiff) * sr)` seconds to go round,
+so choose N for how the ring should move: at the same stiffness 128 masses
+go round in 1.7 s, 1024 in 106 s.
 
 ```
 $x = array(128)                                # each line is at each place,

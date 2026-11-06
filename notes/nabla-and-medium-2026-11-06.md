@@ -435,7 +435,10 @@ the bit, and clearly fewer ideas on the page.
    (2026-11-06, `patches/scanned_ring.aither`), with no new language:
    `every = N` and `pixel_index(N, 1)` step one place a sample, as `tv`
    draws a pixel. 10 s of sound took 0.5 s at 128 masses and 0.44 s at
-   8192, against 10.6 s for 128 stepped every place every sample. So the
+   8192, against 10.6 s for 128 stepped every place every sample (but N
+   sets the speed as N²: at that stiffness 8192 places take hours to go
+   round, so that figure measured a medium nobody could hear move; see
+   field-by-its-period-2026-11-06.md). So the
    cost no longer grows with the field, at a price: the field moves only
    every N samples (344 times a second at N = 128), and that shows as a
    buzz at sr / N, about 40 dB under the note, worse as N grows. It suits

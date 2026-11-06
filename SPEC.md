@@ -725,7 +725,11 @@ it touches (notes/nabla-and-medium-2026-11-06.md). No line holds an index:
   later line at the place sees what was stored; a neighbour sees the last
   step. A number or a value is everywhere.
 - A field steps **one place a sample**, as `tv` draws a pixel, so it moves
-  once every N samples at the cost of one place, however large N is. It
+  once every N samples at the cost of one place, whatever N is. N also
+  sets the physics: a push takes `N² / (sqrt(stiff) * sr)` seconds to go
+  round, so at the same stiffness 128 places take 1.7 s and 1024 take
+  106 s, and a 1 s ring can't have more than about 210 places
+  (notes/field-by-its-period-2026-11-06.md). It
   suits a field that moves slowly against the sound, read at audio rate:
   a stepping buzz at `sr / N` sits about 40 dB under the note at N = 128.
 - A neighbour is reached only through these words:

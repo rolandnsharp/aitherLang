@@ -9,7 +9,8 @@
 # It is a field (SPEC "Fields"): two arrays assigned bare, each line at
 # each place, as a line on [l, r] is. It steps one place a sample, as tv
 # draws a pixel, so the whole field moves once every N samples, at the cost
-# of one place, however large N is.
+# of one place, whatever N is. N sets how fast it moves, too: a push takes
+# N^2 / (sqrt(stiff) sr) seconds to go round.
 #
 # Read round, its displacement is the size of a turning value, so on the
 # scope the ring is drawn as it is: a circle at rest, and a pure tone. A
@@ -17,7 +18,8 @@
 # dies, and is heard as the sound's harmonics moving.
 #
 # Measured on the uConsole (10 s of sound, the compiler's quick build):
-# stepped one place a sample, 128 masses take 0.5 s and 8192 take 0.44 s;
+# stepped one place a sample, 128 masses take 0.5 s and 8192 take 0.44 s
+# (though 8192 would take hours to go round, at this stiffness);
 # stepped every place every sample, 32 take 2.3 s and 128 take 10.6 s, no
 # longer real time. Struck, the radius moves between about 0.2 and 0.8 and
 # the harmonics over 20 to 30 dB; the field's stepping shows as a buzz at
