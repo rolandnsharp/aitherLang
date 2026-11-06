@@ -19,7 +19,7 @@ additive(10000, saw_shape, 3) - (sin(TAU * phasor(10000)) + sin(TAU * phasor(200
 # --- freq_shift is the analytic signal turned by a spin: a pair in quadrature
 # expect until 4800: 0, 0
 let x = sin(TAU * phasor(330)) * 0.5
-freq_shift(x, 100) - turn(analytic(x), spin(100))
+freq_shift(x, 100) - analytic(x) * spin(100)
 
 # --- spin is cos and sin of one phase
 # expect until 4800: 0
@@ -47,7 +47,7 @@ let ok = abs(a * w * w / 100 - 1) < 0.001
 $n = 0
 $n = $n + 1
 let p = dho(if $n == 1 then 1e8 else 0, 440, 0.01)
-let rate = phase(turn(p, conj(prev(p)))) / (TAU * dt)
+let rate = phase(p * conj(prev(p))) / (TAU * dt)
 if abs(rate - 440 * sqrt(1 - 0.01 * 0.01)) < 0.5 then 1 else 0
 
 # --- its phasor stays a circle near Nyquist: driven at 18 kHz, its length holds
@@ -123,7 +123,7 @@ prev($n)
 # --- everything that turns, turns anticlockwise, the way spin does: vdp too
 # expect at 47999: 1
 let p = vdp(220)
-let rate = phase(turn(p, conj(prev(p)))) / (TAU * dt)
+let rate = phase(p * conj(prev(p))) / (TAU * dt)
 if rate > 150 and rate < 250 then 1 else 0
 
 # --- since(x): seconds since x last changed; long ago before it ever has

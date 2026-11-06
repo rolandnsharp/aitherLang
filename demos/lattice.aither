@@ -46,7 +46,7 @@ let inBeat = (s mod frame) / frame              # 0..1 down the screen
 # count exactly and its picture stands still.
 def tone(n, m, amp, s, frame, h = 112):
   let ph = TAU * (((n * h + m) * s) mod frame) / frame
-  [cos(ph), sin(ph)] * amp
+  (cos(ph), sin(ph)) * amp
 
 # The drone: A3 and A4, the one-rainbow sweep everything else sits on.
 let drone = tone(1, 0, 0.2, s, frame) + tone(2, 0, 0.08, s, frame)

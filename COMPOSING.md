@@ -688,10 +688,10 @@ turns, so the velocity takes both sides,
 `v = -(wd * q + damp * w * x)` with `wd = w * sqrt(1 - damp^2)`, the
 rate it turns. Chained physics uses it (a damping force, one
 oscillator's velocity driving another); the didge patches show it,
-with a comment. A pair given where `dho` takes a number makes a pair
-of pairs, a phasor a side (a bell's doublet as one value:
-`let (a, b) = dho(push, [f, f * 1.0013], damp)`); for a stereo pair use
-two, or `resonator`, which returns a number.
+with a comment. Two places given where `dho` takes a number make two
+places of values, a phasor a side (a bell's doublet:
+`let [a, b] = dho(push, [f, f * 1.0013], damp)`); for a stereo sound use
+`resonator`, which returns a number at each.
 
 **Why this is `f(state)`-native.** In a modular synth you pick a
 "filter module" or an "FM module"; the paradigm is baked into
@@ -790,19 +790,23 @@ changed nothing, because no string's motion reached another. The
 difference is who writes: a cell is a medium only when the voices write
 back into it.
 
-## Pair operations — turning
+## Turning: complex values
 
-aither has no complex-number TYPE, but it has the OPERATIONS that
-make complex algebra useful, all of them one picture: a pair is a
-point that can turn. They take and return ordinary pairs. Use a pair
-whole where you can (the operations below, or played as it is); name
-its sides where a model needs both: `let (x, q) = dho(...)`.
+`(a, b)` is a complex number, one value at one place, and everything
+below is one picture: a value is a point that can turn, and **multiplying
+is turning**, so `z * w` is what other languages call complex
+multiplication and what aither called `turn`. Use a value whole where
+you can (the operations below, or played as it is); name its parts where
+a model needs both: `let (x, q) = dho(...)`. `[l, r]` is something else,
+two places: `stereo * [0.8, 0.6]` is a gain a side, `stereo + voice` puts
+voice on both, and `let (a, b) = z` then `[a, b]` hears a value as sides
+(SPEC, "Places and values").
 
 | call                     | does                                                   |
 |--------------------------|--------------------------------------------------------|
-| `spin(hz)`               | the unit pair turning at `hz` Hz: `[cos, sin]` of one phase |
+| `spin(hz)`               | the unit value turning at `hz` Hz: `(cos, sin)` of one phase |
 | `z * w`                  | `z` turned by `w`'s angle, scaled by its size (complex multiplication) |
-| `conj(z)`                | the same pair turning the other way                    |
+| `conj(z)`                | the same value turning the other way                   |
 | `z / w`                  | `z` turned back by `w`'s angle, divided by its size (complex division: an impedance V / I, a transfer function) |
 | `rotate(z, angle)`       | turned by a fixed angle, in radians                    |
 | `amplitude(z)`           | how big                                                |
@@ -1053,13 +1057,12 @@ locks into the next one: a change of chord heard as mode-locking.
   one or two voices; don't put one inside a `sum(N, …)` over many
   partials.
 
-## Pairs of pairs: turning every way round
+## Hamilton's numbers: turning every way round
 
-A pair turns in a plane; a pair of pairs, `[[w, x], [y, z]]`, is
-Hamilton's quaternion and turns every way round (SPEC "Pairs of
-pairs"). Reach for it when something has a direction: a sound's place
+A complex number turns in a plane; `((w, x), (y, z))` is Hamilton's
+quaternion and turns every way round (SPEC "Places and values"). Reach for it when something has a direction: a sound's place
 round a listener, a body's facing, a bell's axis, the stereo image as a
-spinor. Write a direction as `[[0, x], [y, z]]` (x ahead, y left, z up)
+spinor. Write a direction as `((0, x), (y, z))` (x ahead, y left, z up)
 and a rotation with the stdlib:
 
 ```
@@ -1069,15 +1072,15 @@ let ((w, _), (_, _)) = ear * field                                 # minus the d
 ```
 
 - Keep rotations and directions whole; destructure only where a formula
-  needs a number, as with pairs.
+  needs a number.
 - A body's turning is one state: `$q = $q + $q * spin * (0.5 * dt)`,
   then `$q = $q / amplitude($q)`, the spin a direction in the body.
-- `dho(push, [f, f * 1.0013], damp)` is a doublet as one value, the two
-  modes of a partial: a def given a pair, giving a pair a side, gives a
-  pair of pairs. Filters run once a number on them.
-- Where the meaning isn't settled (a pair meeting one, one reaching the
-  output) the compiler stops and says so: it is a stand-in, and the
-  rule can change if you expected something else.
+- `dho(push, [f, f * 1.0013], damp)` is a doublet, the two modes of a
+  partial: a def given two places, giving a value at each, gives two
+  places of values. Filters run once a number.
+- Where the meaning isn't settled (more than two numbers reaching the
+  output) the compiler stops and says so: it is a stand-in, and the rule
+  can change if you expected something else.
 
 The four demos are written this way, each the same to the sample as its
 plain version of halves: `sympathetic_bells`, `tumble`, `spinfield`,

@@ -13,16 +13,18 @@ output.
 |----------|----------------------------|
 | float    | `440.0`, `0.5`, `-1.0`, `1e-3` |
 | function | `sin`, `saw`, `my_shape`   |
+| value    | `(0.6, 0.8)`, `((w, x), (y, z))` |
+| places   | `[l, r]`                   |
 | array    | `[220, 330, 440]`          |
 
-Float is the default, and a float is a pair whose two sides
-are equal: every value is a pair (see "Pairs"), and a number is
-the pair computed once. Function values exist so a shape can
+Float is the default. Round brackets are one value, square brackets
+many places (see "Places and values"); a number with one place is
+everywhere, so a number and two places mix freely. Function values exist so a shape can
 be passed to a def (`osc(shape, freq)`, `sum(N, fn)`).
 Arrays hold data: lookup tables, `wave` note lists,
 delay/reverb/wavetable buffers, per-sample scratch
 (`let a = array(N)`), persistent fields (`$f = array(N)`,
-see "State arrays"), and a returned `[L, R]` stereo pair.
+see "State arrays").
 Nothing maps over an array — a function that wants a float
 gets a float.
 
@@ -120,16 +122,19 @@ Arithmetic (precedence high to low):
 `-x^2` is `-(x^2)`, and grouping to the right, so `2^3^2` is `2^9`. A
 whole power from 0 to 4 that is known when the patch is compiled is
 the products (`x^2` is `x * x` to the bit, and costs what it does);
-any other is `pow(x, y)`. On a pair it takes each side. There is no
-bitwise xor, so `^` means nothing else.
+any other is `pow(x, y)`. On a value it is the ladder's, `z ^ 2` being
+`z * z`, and at each place on places. There is no bitwise xor, so `^`
+means nothing else.
 
-Arithmetic is polymorphic for length-2 arrays (stereo pairs):
+Arithmetic is at each place, and a value with one place is everywhere
+("Places and values"):
 
 - `float + float → float`
-- `float + [L, R] → [float+L, float+R]` (broadcast)
-- `[L, R] + [L, R] → [L+L, R+R]` (element-wise)
-- Any other array in arithmetic is a compile error: index it, or
-  hand it to `wave`
+- `float + [L, R] → [float+L, float+R]`
+- `[L, R] + [L, R] → [L+L, R+R]`
+- `(a, b) + 1 → (a + 1, b)`, `(a, b) * (c, d)` the complex product
+- Any array of other than two in arithmetic is a compile error: index
+  it, or hand it to `wave`
 
 Same for `-`, `*`, `/`, `^`.
 
@@ -301,11 +306,10 @@ tube(glottis, mouth)               # a table or array declared outside
 ```
 
 Writes to the parameter land in the caller's array. Two
-numbers at a call are a pair, and a pair indexes like a
-two-entry table (see Stereo below), so a def that indexes its
-parameter takes `[220, 330]` as it takes `[220, 330, 440]`.
-Defs don't return arrays; the pair is the only multi-value
-return. What a def gives an array is its rule: a def of the index,
+numbers at a call are two places, and places index like a
+two-entry table, so a def that indexes its parameter takes
+`[220, 330]` as it takes `[220, 330, 440]`. Defs don't return
+arrays; places and values are the only multi-value returns. What a def gives an array is its rule: a def of the index,
 tabulated by `array(n, i => …)` (see "Local arrays"), or, for several
 arrays filled from shared work, the caller's arrays filled in place,
 since a def's writes land in them:
@@ -315,18 +319,11 @@ def reflection(a, j): if j == 0 then 0 else (a[j - 1] - a[j]) / (a[j - 1] + a[j]
 let r = array(len(areas), j => reflection(areas, j))
 ```
 
-A def uses a parameter as a pair when it indexes it (`p[0]`),
-hands it to a pair operation where that takes a pair (`turn(p, q)`,
-`amplitude(p)`; `analytic`'s signal is a number),
-passes it to a def that takes a pair there, or does
-arithmetic with it and a pair (`turn(z, z) + c`), or names its sides
-(`let [a, b] = p`); a `def rec`
-that passes itself a pair there counts too. Such a parameter
-takes a pair whole, and a number passed to it fills both
-sides. A def returns a pair when its result is one: a literal
-`[a, b]`, a pair call, a pair parameter, a `let` bound to a
-pair, pair state (`$z = [0, 0]`), or arithmetic on one
-(`def norm(z): z / amplitude(z)`).
+A def takes a parameter's places together when it indexes it (`p[0]`),
+names them (`let [a, b] = p`), passes it to a def that does, or does
+arithmetic with it and places; a `def rec` that passes itself places
+there counts too. A number passed to such a parameter is at both. Else
+it runs once a place. A value is always taken whole.
 
 `sum`, `each` and `array(N)` accept any compile-time number:
 a literal, a name bound to one, `len(array)`, or arithmetic
@@ -564,7 +561,7 @@ Indexes are truncated to `int`. The edge is how the array was made:
   table's (`p[-1]` is the last element), so a melody or a set of roots
   indexed by a counter goes round.
 - **`array(N)`** is a field or a buffer: past either end it reads 0
-  (`[0, 0]` for pairs) and a store there is dropped, as a state array's
+  (`[0, 0]` for places) and a store there is dropped, as a state array's
   does. Beyond the end of a tube there is nothing, whether the tube
   keeps its values or not.
 
@@ -720,132 +717,33 @@ So a two-element array means the same thing everywhere it
 can legally appear: a table of two, or a stereo pair when
 it is returned (below).
 
-### Pairs
+### Places and values
 
-Every value is a pair, its two sides; a number is a pair whose
-sides are equal, worked out once. So anything takes a pair:
-**a function given a pair where it takes a number runs once per
-side, each side with its own state.**
+> **Round brackets are one value. Square brackets are many places.**
+
+A **value** is a number, `(a, b)`, a complex number, or `((w, x), (y, z))`,
+one of Hamilton's: each rung is the one below doubled (Cayley–Dickson),
+and one more doubling, the octonions, is an error, as their product
+doesn't associate. **Places** are `[l, r]`: two numbers, as stereo is, or
+`[z1, z2]`, a complex number at each.
 
 ```
-osc(saw, [55, 55.3])               # a detuned stereo saw: two phasors
-lpf(stereo, 800, 0.5)              # two filters, one a side
-resonator(strike, [440, 442], 0.5) # a bell whose sides beat
-phasor([1, 1.01])                  # two LFOs drifting apart
+let z = (0.6, 0.8)                    # one complex number
+let q = ((w, x), (y, z))              # one of Hamilton's
+let stereo = [left, right]            # two places
+stereo * [0.8, 0.6]                   # a gain at each place
+stereo + voice                        # one place: everywhere, so both sides
+z * w                                 # turning
+stereo * spin(50)                     # each side turned: two places of complex
 ```
 
-A number given to the same call runs it once and both sides
-read it. A def's own pair parameters (see "Array parameters":
-`p[0]`, `turn(p, q)`, arithmetic with a pair) take a pair whole
-instead, so `mono(x)` and `turn(z, z)` see both sides. A def that
-makes a pair from a number (`pan`, `dho`) given a pair on that number
-makes a pair of pairs, the left side's pair first ("Pairs of pairs"). A condition is one
-number; an `if` runs only the branch it takes.
-
-A pair indexes like a two-entry table: `p[i]` truncates `i`
-and wraps at 2, so `p[0]` is the left side, `p[1]` the right,
-`p[-1]` the right and `p[2]` the left, whether `i` is a
-constant or worked out as it runs (`a[int(phasor(2) * 2)]`
-alternates a part's sides). So a pair and a two-entry table
-read alike wherever they meet: indexing, arithmetic (element
-by element), and `wave`, which reads any array as a table.
-
-`let [a, b] = p` names a pair's two sides where the patch reads
-them, with names of its meaning: `let (pos, vel) = dho(...)`,
-`let [l, r] = sig`, `let [i, q] = input()`. `_` names a side not
-wanted; a number gives both names the number; two names, no more.
-
-Operators work side by side: `+`, `-`, `*` and `/` on two pairs
-act on each side (`sig * [0.8, 0.6]` is a gain a side). A pair is
-read as a complex number only by the operations that turn it
-(PHILOSOPHY, "Complex numbers as operations, not types"):
-
-| Function        | Description                                         |
-|-----------------|-----------------------------------------------------|
-| `turn(z, w)`    | `z` turned by `w`'s angle and scaled by its size (complex multiplication); turning by a spin adds its speed |
-| `conj(z)`       | the same pair turning the other way                 |
-| `unturn(z, w)`  | `z` turned back by `w`'s angle and divided by its size (complex division); `unturn(turn(z, w), w)` is `z`, and by `[0, 0]` it is `[0, 0]`, as `x / 0` is 0 |
-| `amplitude(z)`  | how big: `sqrt(z0² + z1²)`                          |
-| `phase(z)`      | which way it points, -π..π                          |
-| `analytic(x)`   | a signal as spins: `x` and its Hilbert transform, a quarter turn behind at every frequency |
-
-Undoing a turn by a unit pair is turning by its conjugate:
-`turn(turn(z, w), conj(w))` is `z`.
-
-`turn` and `unturn` are strict: two arguments, both pairs (or both pairs
-of pairs). Numbers aren't gathered into pairs, so `turn([1, 2], 3, 4)`
-and `turn(1, 2, 3, 4)` are errors that name what was given.
-
-**Read the whole pair.** A pair from an oscillator, `analytic` or
-`spin` is a phasor: two sides a quarter turn apart. Most of what is
-wanted from it reads both sides at once, exactly and at every sample:
-how loud is `amplitude(p)` (no rectifying and smoothing, which is how
-one side has to get it); how fast it turns, its frequency, is
-`phase(turn(p, conj(prev(p)))) / (TAU * dt)`; moving or mixing it is
-`turn`; hearing it is the pair itself, its sides played a quarter turn
-apart. Taking one side (`let [x, _] = p`) throws the other away, and is
-for where one number is all there is room for, such as a mono mix.
-
-### Pairs of pairs
-
-A pair may hold pairs: `[[w, x], [y, z]]` is Hamilton's quaternion
-w + x i + y j + z k (Cayley–Dickson: a pair of complex numbers, the
-first half a + the second half times j). Pairs nest once: a pair of
-pairs of pairs is an error, by design, as one more doubling would be
-the octonions, whose product doesn't associate, so rotations made of
-them wouldn't compose (notes/nested-pair-2026-11-05.md).
-
-Destructuring nests: `let [[w, x], [y, z]] = q`, `let [xi, eta] = s`
-(each half a pair), `_` for what isn't wanted. `q[0]` and `q[1]` are the
-halves, as a pair's sides.
-
-| Function        | On pairs of pairs (Hamilton)                        |
-|-----------------|-----------------------------------------------------|
-| `turn(p, q)`    | his product, (a, b)(c, d) = (ac − b conj(d), ad + b conj(c)); the one product in aither where order matters (ij = k, ji = −k) |
-| `conj(q)`       | his conjugate K q: the vector part negated          |
-| `unturn(p, q)`  | `turn(p, conj(q))` over the size of q squared; `unturn(turn(p, q), q)` is p |
-| `amplitude(q)`  | his tensor T q: the size, all four numbers          |
-| `phase(q)`      | his angle, 0..π, in q = T q (cos θ + ε sin θ); a pair's phase is the same in its plane, signed |
-| `axis(q)`       | his axis ε, a unit vector `[[0, x], [y, z]]`        |
-
-A rotation applies to a vector v (a pair of pairs with w = 0) as
-`turn(turn(q, v), conj(q))`, Hamilton's q v q⁻¹ for a unit q, and
-turns it by twice q's angle about q's axis. `+`, `-`, `*`, `/`, `mod` and
-`^` work side by side on the four numbers, and a number scales all four.
-Lets, def arguments and returns, lambdas, `if` and `sum` carry them
-whole. A file-level let of number literals, `let k = [[0, 0], [0, 1]]`,
-is a constant, as a number is: a def sees it.
-
-Functions run once a number on them, as they run once a side on a pair,
-each run its own state: `lp1(q, 100)` is four filters, and a def that
-takes numbers (`resonator`) given one runs four times. A def that makes
-a pair from a number, given a pair, makes a pair of pairs, the left
-side's first: `dho(push, [f1, f2], damp)` is two phasors in one value.
-Given a pair of pairs it would make a pair of pairs of pairs, and stops.
-
-`$q = [[1, 0], [0, 0]]` is state of four numbers, in a def or at the
-file's level; it keeps that shape, so a number put in it fills all
-four, and a pair put in it is a stand-in error (which half?).
-
-Arrays hold them as they hold pairs: `$f = array(N, [[1, 0], [0, 0]])`
-is a field of N rotations (four numbers an element), and `array(N, i =>
-...)` a rule making them; `$f[i]` reads and stores one whole, `each`
-steps them. An array keeps its first value's shape: a number stored
-fills an element, a pair into pairs of pairs (or the other way) is a
-stand-in error.
-
-### Values on the ladder
-
-Being built (notes/places-and-values-2026-11-06.md): `(a, b)` is one
-value, a complex number, and `((w, x), (y, z))` one of Hamilton's. With a
-number they are the ladder's rungs: **the narrower sits inside the
-wider, the rest zero, and `+ - * / ^` are the algebra's.** Today's
-`[a, b]` pair stays beside them, side by side as above, until it becomes
-two places.
+**Arithmetic is the algebra at each place, and a value with one place is
+everywhere.** At a place the narrower sits inside the wider, the rest
+zero, and `+ - * / ^` are the ladder's:
 
 | Written      | Means                                                       |
 |--------------|-------------------------------------------------------------|
-| `z * w`      | turning: the complex product, Hamilton's for pairs of pairs, order mattering (`i * j` is `k`, `j * i` is `-k`) |
+| `z * w`      | turning: the complex product, Hamilton's on his numbers, order mattering (`i * j` is `k`, `j * i` is `-k`) |
 | `z / w`      | `z conj(w)` over the size of `w` squared, 0 where `w` is 0; `z * w / w` is `z` |
 | `z + 1`      | the real part moves: `(a + 1, b)`                           |
 | `z * 2`      | scales all of it                                            |
@@ -853,68 +751,94 @@ two places.
 | `(0, 1) * q` | the narrower sits inside: `((0, 1), (0, 0)) * q`            |
 
 **Multiplying is turning**: a value of size 1 turns what it multiplies
-by its angle, and any other size scales it too. So `cos(a) + dir *
-sin(a)` is Hamilton's formula for a rotation, as he wrote it.
+by its angle, and any other size scales it too. Multiplying spins adds
+their speeds, and `cos(a) + dir * sin(a)` is Hamilton's formula for a
+rotation, as he wrote it. This is why aither has no `turn`: `*` is it.
+Comparisons take numbers.
 
-`let (a, b) = z` and `let ((w, x), (y, z)) = q` name the parts. That is
-the only way to read a part: `[]` is for places, so `z[0]` and `let [a,
-b] = z` are errors. A value is taken whole by a def, never run once a
-side. A function runs once a number on it and gives a value. State and
-arrays keep values (`$z = (1, 0)`, `array(N, (1, 0))`); a number stored
-in one sits inside. In `if` and `sum` the narrower sits inside too. It
-plays as its two numbers, and comparisons take numbers.
+| Reader          | On a value                                           |
+|-----------------|------------------------------------------------------|
+| `conj(z)`       | the same value turning the other way: Hamilton's K q, the vector part negated |
+| `amplitude(z)`  | how big: Hamilton's tensor T q                       |
+| `phase(z)`      | which way it points, -π..π; his angle, 0..π, on his numbers |
+| `axis(q)`       | his axis, a unit direction `((0, x), (y, z))`        |
+| `analytic(x)`   | makes one: `x` and its Hilbert transform, a quarter turn behind at every frequency |
 
-A value meeting a `[a, b]` pair is an error that says to choose: `(1, 2)
-+ [3, 4]`. `conj`, and `turn` and `unturn` while they last, take either,
-and give a value if given one.
+These read a value: given `[l, r]`, they say to name the sides, as two
+places aren't one number.
 
-The stdlib's complex results are values: `spin`, `rotate`, `dho`, `vdp`,
-`freq_shift`, `pixel`, and `analytic`. `pan`, `width`, `haas` and `mono`
-are stereo, and stay `[a, b]`. To hear a value as stereo, or turn stereo:
+A rotation applies to a direction v (a value with w = 0) as `r * v *
+conj(r)`, Hamilton's r v r⁻¹ for a unit r, turning it by twice r's angle
+about r's axis (`apply`, in the stdlib).
+
+**Reading parts.** `let (a, b) = z` and `let ((w, x), (y, z)) = q` name a
+value's parts, `_` for what isn't wanted. That is the only way: a value
+has no places, so `z[0]` and `let [a, b] = z` are errors, and so is
+assigning part of one. `let [l, r] = stereo` names places, and `s[i]`
+reads one: `i` truncates and wraps at 2, whether a constant or worked out
+as it runs, so `s[int(phasor(2) * 2)]` alternates a part's sides. A
+number gives both names the number.
+
+**Functions** run at each place, and within a value once a number, each
+run its own state:
+
+```
+osc(saw, [55, 55.3])               # a detuned stereo saw: two phasors
+lpf(stereo, 800, 0.5)              # two filters
+lp1(stereo, [100, 200])            # a cutoff a side
+resonator(strike, [440, 442], 0.5) # a bell whose sides beat
+```
+
+**A def** given places runs once a place, each run its own state, unless
+it reads the places themselves (`signal[0]`, `let [l, r] = signal`) or
+meets places in its arithmetic: `mono`, `pan`, `width` and `haas` take
+them together ("Array parameters"). If it gives a value at each place the
+result is two places of values: `dho(push, [f, f * 1.0013], damp)` is a
+doublet, the two modes of a partial. A value is always taken whole, so a
+def that shapes each number (`drive`) sees it whole and its arithmetic is
+the ladder's: give it `[a, b]` if it means each side.
+
+**State, arrays, `if` and `sum`** keep the shape: `$z = (1, 0)`,
+`array(N, (1, 0))`, `[(0, 0), (0, 0)]`. A state or an array keeps its
+first value's shape; a number or a value goes everywhere in places, and
+the narrower sits inside a value. In `if` and `sum` the widest shape wins.
+An `if` runs only the branch it takes, and its condition is one number.
+
+**Translating** is one line each way, the numbers unchanged:
 
 ```
 let (a, b) = z          # a value's two numbers
 let s = [a, b]          # now two sides
 let [l, r] = stereo
-let z = (l, r)          # now one complex number
+let z = (l, r)          # now one complex number, ready to turn
 ```
 
-A def that shapes each number (`drive`) sees a value whole, and its
-arithmetic is the ladder's: give it `[a, b]` if it means each side.
+**At the edge** the pipe carries two numbers. Two places of numbers are
+left and right; a complex value its two numbers, so `spin(220)` is a
+circle on the scope and a sound in the ears, and I and Q on a radio; a
+number is everywhere, so both speakers. A play's result, read by another,
+is two places.
+
+**Read the whole value.** A value from an oscillator, `analytic` or
+`spin` is a phasor: two numbers a quarter turn apart. Most of what is
+wanted from it reads both at once, exactly and at every sample: how loud
+is `amplitude(p)` (no rectifying and smoothing, which is how one number
+has to get it); how fast it turns, its frequency, is
+`phase(p * conj(prev(p))) / (TAU * dt)`; moving or mixing it is `*`;
+hearing it is the value itself. Taking one part (`let (x, _) = p`)
+throws the other away, and is for where one number is all there is room
+for, such as a mono mix.
+
+**Stand-ins, not decisions.** Where a meaning isn't settled the compiler
+stops and says so, and the rule can change: a patch or play ending in
+anything else (more than two numbers: say which two), and a function
+given shapes that don't line up number for number. Not built: two places
+of Hamilton's numbers, fields of more than two places, a fractional
+power.
 
 **Errors name shapes.** Where a value's shape is wrong, the error quotes
-each argument as written with its shape (`lp1 is given \`q\`, a pair of
-pairs, and \`[100, 200]\`, a pair`), and a def that takes numbers names
-the parameters it would run on (notes/shapes-and-match-2026-11-05.md,
-part 1, its first step).
-
-**Stand-ins, not decisions.** Pairs of pairs are new, and where a
-meaning isn't settled the compiler stops and says so, naming the choices
-and that the rule can change: a pair meeting a pair of pairs in an
-operation (`+`, `turn`: the pair on both halves, or as a complex number
-with its second half 0?), and a patch or play ending in one (the pipe
-carries a pair: which pair?), a function given a pair of pairs and a
-pair, and a half of one assigned by index (`$q[0] = ...`). Not yet
-built, and refused the same way: the voice loop and `def rec`. A literal
-list `[a, b, c]` holds numbers only, as for pairs: make them with
-`array`.
-
-Return `[L, R]` for stereo. Plays and the final expression
-may return a float (mono, mirrored to both channels) or a
-two-element array (stereo).
-
-```
-osc(sin, 440) |> pan(0.3)    # returns [L, R]
-```
-
-A mono part should return its float, not `[s, s]`: the
-engine mirrors it, and the two spellings render
-identically. Reserve the brackets for the moment the
-channels actually differ.
-
-Binary ops on length-2 arrays are element-wise (see
-Operators). Mixing a stereo play with a mono play in the
-final expression broadcasts the mono to both channels.
+each argument as written with its shape: `$z is a complex number, and is
+given `[3, 4]`, two places`.
 
 ## Comments
 
@@ -1375,13 +1299,13 @@ every user patch. Source: `stdlib.aither`.
 ```
 def osc(shape, freq):  shape(TAU * phasor(freq))
 def pulse(freq, width): if phasor(freq) < width then 1 else -1
-def spin(freq):                           # the unit pair turning at freq Hz
+def spin(freq):                           # the unit value turning at freq Hz
   let a = TAU * phasor(freq)
   [cos(a), sin(a)]
 ```
 
-`spin` is the unit pair turning at `freq` Hz: one phase, both sides.
-Turn a pair by it to set it spinning; turning by a spin adds speeds,
+`spin` is the unit value turning at `freq` Hz: one phase, both parts.
+Multiply by it to set a value spinning; turning by a spin adds speeds,
 so `spin(220) * spin(50)` is `spin(270)` and `p * p` doubles
 `p`'s speed.
 
@@ -1403,16 +1327,16 @@ def hopf(s): s * ((0, 0), (0, 1)) * conj(s)
 own names come first. `about(dir, angle)` is the rotation by `angle`
 about a unit direction, his versor of half the angle (applied, a
 rotation turns by twice its own angle). `apply(r, v)` turns a direction
-v (a pair of pairs with w = 0) by r, his r v r⁻¹; composed rotations
+v (one of his numbers with w = 0) by r, his r v r⁻¹; composed rotations
 apply right first, `apply(r2 * r1, v)` being r1 then r2.
 `hopf(s)` is the way a spinor points, the pole k turned by it: a spinor
 turned all the way round is negated and points the same way.
 
-`rotate` turns a pair by a fixed angle, in radians. `freq_shift` moves
+`rotate` turns a value by a fixed angle, in radians. `freq_shift` moves
 every frequency in a signal up by `hz` Hz (down if negative), with no
 mirror image, unlike a ring modulator: the analytic signal turned by a
 spin. Hz are added, not multiplied, so harmonics stop being harmonic.
-It returns the pair, the shifted signal in quadrature, and what hears
+It returns a value, the shifted signal in quadrature, and what hears
 it decides: played, its sides are the shifted sound a quarter turn
 apart, and summed to mono it doesn't cancel; an SDR takes it as IQ.
 Clean above about 30 Hz at 48 kHz, where the Hilbert pair holds its
@@ -1441,10 +1365,10 @@ audio frequencies; see "Physics" above), and a constant force stretches it to ab
 (within 0.03% below 500 Hz; short of it towards Nyquist, since each
 sample's force is a strike at that instant, which keeps a strike and the
 resonance itself exact: PHASORS.md, "The push"). It returns
-its phasor, the pair `[x, q]`: `x` is the position, the sound; `q` the
-position a quarter turn behind. The pair turns the way `spin` does, at
+its phasor, the value `(x, q)`: `x` is the position, the sound; `q` the
+position a quarter turn behind. It turns the way `spin` does, at
 `wd = w · sqrt(1 - damp²)`, its length is how far it swings, and
-`amplitude` and `phase` read it whole (see "Read the whole pair").
+`amplitude` and `phase` read it whole (see "Read the whole value").
 
 Each sample the phasor turns by `wd · dt` and shrinks by
 `exp(-damp · w · dt)`, then the force pushes it by `force · dt / wd`:
@@ -1461,7 +1385,7 @@ and `swell` or `slew` is that tool. `q` is the velocity only when
 undamped; the velocity takes both sides, `v = -(wd · q + damp · w · x)`.
 Given a pair where it takes a number it makes a pair of pairs, one
 phasor a side: `dho(push, [f, f * 1.0013], damp)` is a doublet, the two
-modes of one partial, as one value ("Pairs of pairs"). Two of them, or
+modes of one partial, as one value ("Places and values"). Two of them, or
 `resonator`, make a stereo pair.
 
 `resonator` is a `dho` driven by a signal and scaled so a steady signal

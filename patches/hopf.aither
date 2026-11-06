@@ -98,6 +98,6 @@ let (ya, yb) = rotate((y1, y2), $b)
 # the beam stays on the screen.
 let s = 1 / max(1 - yb, 0.01)
 let (Y, Z) = rotate((ya * s, xb * s), 0.9)
-let p = [xa * s, Y]
+let p = (xa * s, Y)
 let r = amplitude(p)
 p * tanh(0.45 * r) / max(r, 0.0001) * 0.95

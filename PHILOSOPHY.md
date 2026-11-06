@@ -301,41 +301,38 @@ evaluated in a loop, producing samples.
 
 One interface. Five paradigms. Infinite expression.
 
-## Complex numbers as operations, not types
+## Round brackets are one value, square brackets are many places
 
-Two-dimensional numbers — what mathematicians call complex
-numbers — are the natural language of the frequency domain.
-Without them, frequency shifting, pole-zero filter design,
-phase-coherent effects, and the entire spectral side of audio
-all require multi-step real-arithmetic workarounds.
+Two-dimensional numbers, what mathematicians call complex numbers, are
+the natural language of turning. Without them, frequency shifting,
+pole-zero filter design, phase-coherent effects and the whole spectral
+side of audio need multi-step workarounds. Hamilton's numbers do the
+same in every direction.
 
-We add the operations without adding the type.
+aither used to refuse to say what a pair was. Two cells became a complex
+number when an operation read them as one, a stereo pair when another
+read them differently; "the cells don't care; the operations do". That
+was simple until values could turn every way round. Then arithmetic had
+to guess: is `z + 1` the real part, or both sides? Every rule tried was
+a way round the guess (notes/places-and-values-2026-11-06.md).
 
-A "complex number" in aither is just two scalars in a state
-vector. What we add is the algebra: `turn`, `conj`, `amplitude`,
-`phase`, `analytic`, and over them `spin`, `rotate`, `freq_shift`.
-Each one operates
-on pairs of floats and returns pairs of floats. There is no
-new type, no value coercion, no commitment to which of the
-several inequivalent mathematical structures of ℂ we mean
-(analytic, rigid, algebraic — they're not the same thing,
-and choosing one is a position we don't need to take).
+The answer was that the pair was two things that looked alike, because
+both are two numbers. **A complex number is one place holding two
+numbers. Stereo is two places holding a number each.** Told apart, there
+is nothing to guess. So aither now takes a position: `(a, b)` is one
+value, on Hamilton's ladder, and `[l, r]` is two places.
 
-This is the same discipline as everything else in the
-language. A signal is a number. A state is a vector of
-numbers. Meaning lives in the operations, not in the types.
-Two cells become a "complex number" precisely when an
-operation reads them as one. They become a stereo pair when
-a different operation reads them differently. They become
-a (pitch, gate) tuple when MIDI reads them. The cells don't
-care; the operations do.
+- A value's arithmetic is the algebra, the same laws at every rung, and
+  **multiplying is turning**, so there is no `turn`: `*` is it.
+- Arithmetic is at each place, and a value with one place is everywhere,
+  so mono goes to both sides of a stereo sound by the same rule that
+  makes a constant field constant.
+- Hearing is still only a reading. Any two numbers reach the speakers,
+  the scope's x and y or a radio's I and Q alike, so a phasor is a circle
+  and a sound at once. That was never what needed to be ambiguous.
 
-The frequency domain becomes available without the language
-having to know it exists.
-
-The same move applies elsewhere. Three cells aren't a
-"3D vector" — they're three numbers an operation might choose
-to interpret spatially. An array of partial amplitudes isn't
-an "additive synth" — it's an array of numbers an operation
-chooses to sum into a sample. Refusing to name the types
-keeps the operations honest about what they actually do.
+The refusal to name more than this still stands. Three cells aren't a
+"3D vector": they are three numbers an operation might read spatially.
+An array of partial amplitudes isn't an "additive synth". There is no
+type system here, only shapes the compiler sees: value or places, and
+how wide.

@@ -68,7 +68,7 @@ let turned = rotate((xi_x / away, xi_y / away), TAU * t / 31)
 let (turned_x, turned_y) = turned
 let tipped = rotate((turned_y, eta_x / away), 1.35)
 let (tipped_x, _) = tipped
-let near = amplitude([turned_x, tipped_x]) * 0.13 < 0.55  # the hourglass's far side, through infinity,
+let near = amplitude((turned_x, tipped_x)) * 0.13 < 0.55  # the hourglass's far side, through infinity,
 let tori = if near then [turned_x * 0.13 + 0.38, tipped_x * 0.13] else [3, 3]   # off the screen, where the beam blanks
 
 # ---------------------------------------------------------------- the sphere

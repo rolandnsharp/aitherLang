@@ -139,7 +139,7 @@ play mandel:
   let (zsq_x, zsq_y) = z * z
   let nextR = if resetTrig > 0.5 then 0.0 else zsq_x + cR
   let nextI = if resetTrig > 0.5 then 0.0 else zsq_y + cI
-  let mag   = amplitude(nextR, nextI)
+  let mag   = amplitude((nextR, nextI))
   let alive = if mag < 4.0 then 1.0 else 0.0
   $zr = nextR * alive
   $zi = nextI * alive

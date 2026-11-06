@@ -168,7 +168,7 @@ TEST(transparent_helpers_polymorphic) {
 
   /* 6. pan refuses stereo input with a clear error. (haas takes a pair
    * since 2026-10-12: see tests/stereo_haas_reverb.) */
-  should_fail("let s = [sin(t), cos(t)]\ns |> pan(0)\n", "a pair of pairs");
+  should_fail("let s = [sin(t), cos(t)]\ns |> pan(0)\n", "places of places");
 
   /* 7. Migration identity preserved across mono to mono reload. A patch
    * that uses a transparent helper on mono input must still match its

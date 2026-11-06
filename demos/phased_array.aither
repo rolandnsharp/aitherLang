@@ -63,6 +63,6 @@ $v[k] = c
 # The phasor: the field and its rate of change over ω. Brightness goes as
 # its square, the power a receiver there would pick up, so the beam shines
 # and the nulls go dark; full brightness is clipped near the antennas.
-let z = [next, (next - c) / omega]
+let z = (next, (next - c) / omega)
 let shown = z * amplitude(z) * 8
 shown / max(1, amplitude(shown))

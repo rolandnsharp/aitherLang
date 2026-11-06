@@ -27,19 +27,19 @@ def osc(shape, freq): shape(TAU * phasor(freq))
 # Pulse with adjustable width (0..1).
 def pulse(freq, width): if phasor(freq) < width then 1 else -1
 
-# The unit pair turning at freq Hz: [cos, sin], one phase for both: the
-# plainest rotating thing. turn a pair by it to set it spinning, turn it
-# by itself to double its speed (turning by a spin adds speeds).
+# The unit value turning at freq Hz: (cos, sin), one phase for both: the
+# plainest rotating thing. Multiply by it to set a value spinning, or by
+# itself to double its speed (turning by a spin adds speeds).
 def spin(freq):
   let a = TAU * phasor(freq)
   (cos(a), sin(a))
 
-# A pair turned by a fixed angle, in radians.
+# A value turned by a fixed angle, in radians.
 def rotate(z, angle): z * (cos(angle), sin(angle))
 
-# ---------------------------------------------------------------- pairs of pairs
-# Hamilton's quaternions, a pair whose sides are pairs, [[w, x], [y, z]] =
-# w + x i + y j + z k (SPEC "Pairs of pairs"). His units: i i = j j = k k
+# ---------------------------------------------------------------- Hamilton's numbers
+# Hamilton's quaternions, ((w, x), (y, z)) = w + x i + y j + z k (SPEC
+# "Places and values"). His units: i i = j j = k k
 # = i j k = -1, so i j = k, j k = i, k i = j, and j i = -k. A patch's own
 # i, j or k (a let, an `i =>`) comes first.
 let i = (0, 1)

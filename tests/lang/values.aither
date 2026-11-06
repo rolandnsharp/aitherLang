@@ -2,8 +2,7 @@
 # notes/places-and-values-2026-11-06.md): round brackets are one value.
 # A number, (a, b) and ((w, x), (y, z)) are real, complex and Hamilton's
 # numbers; the narrower sits inside the wider, the rest zero, and + - * /
-# ^ are the algebra's. Today's [a, b] pair sits beside them until it
-# becomes two places.
+# ^ are the algebra's. [a, b] is two places: tests/lang/places.aither.
 
 # --- a complex number plays as its two numbers
 # expect: 0.6, 0.8
@@ -13,14 +12,6 @@
 # expect: -1, 0
 let i = (0, 1)
 i * i
-
-# --- ... the same as turn
-# expect: 0, 0
-let z = (0.6, 0.8)
-let w = (0.28, -0.96)
-let (a, b) = z * w
-let [c, d] = turn([0.6, 0.8], [0.28, -0.96])
-[a - c, b - d]
 
 # --- + is the algebra's: a number moves the real part only
 # expect: 3, 2
@@ -154,16 +145,6 @@ z[0] * 1
 let [a, b] = (1, 2)
 a
 
-# --- a value and today's pair don't mix: the error is the migration's guide
-# error: `[a, b]` is becoming two places
-(1, 2) + [3, 4]
-
-# --- ... in state
-# error: `[a, b]` is becoming two places
-$z = (1, 2)
-$z = [3, 4]
-$z
-
 # --- comparing takes numbers
 # error: `<` takes numbers
 if (1, 2) < 3 then 1 else 0
@@ -176,6 +157,3 @@ if (1, 2) < 3 then 1 else 0
 # error: a pair of pairs of pairs
 (((1, 2), (3, 4)), ((1, 2), (3, 4)))
 
-# --- old pairs stay as they are beside all this
-# expect: 2, 3
-[1, 2] + 1

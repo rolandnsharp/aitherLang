@@ -4,7 +4,7 @@
 compiler's values are width-generic; `( , )` works on the ladder beside
 today's `[a, b]`, with whole powers only, SPEC "Values on the ladder";
 the stdlib, all tracked patches and the tests are migrated, and no patch
-calls `turn` or `unturn`). Steps 5 and 6 and `∇` are still a design. Agreed with Roland in discussion, as the
+calls `turn` or `unturn`). Steps 5 and 6 are being built; `∇` is still a design. Agreed with Roland in discussion, as the
 destination. It takes the ladder
 ([ladder-2026-11-06.md](ladder-2026-11-06.md)) for what a value is, and
 replaces that note's answer for stereo (`both`, and the dotted operators
@@ -125,11 +125,14 @@ run its own state. Parameters follow the place rule, so `lp1(stereo,
 [100, 200])` is a cutoff a side and `lp1(stereo, 100)` the same on both.
 A filter given a pair of pairs and a complex parameter stays an error.
 
-**The split goes away.** Today the compiler infers whether a def reads a
-pair whole (`pair_params`) and otherwise runs it once a side. On places
-and values: a def given a field runs once a place, and a value is always
-taken whole. So the inference that decides how many copies of state exist
-can go, and `aither check` needs nothing for it.
+**The split gets simpler, and stays.** A value is always taken whole. A
+def given a field runs once a place, unless it reads the places
+themselves: `mono` needs `signal[0]` and `signal[1]` together, and so do
+`pan`, `width` and `haas`. So a def that names a field's places, or meets
+a field in its arithmetic, takes it whole, as `pair_params` works it out
+today. An earlier version of this note said the inference could go. It
+can't, though what it decides is now only ever about places, never about
+what a value means.
 
 `dho(push, [f, f * 1.0013], damp)` is then two places of complex: a
 bell's doublet, a field of two. The nested-pair note made this a pair of
@@ -150,9 +153,18 @@ stereo, nothing is silent any more.
 2. **What makes stereo.** `pan`, `reverb`, `input()` return fields. Does
    `input()` stay two places for a radio, translated in one line, or does
    a patch say?
-3. **Whole-field arithmetic at size.** Two places unroll. `$f + $g` over
-   a million elements has to loop; `each` is that loop today.
-4. **`mono`** becomes reducing a field; is `sum` over places that word?
+3. **Fields of more than two places.** Step 5 builds two places, as
+   stereo needs. Arrays stay as they are: tables, and `each` for stepping.
+   Giving them the same rule is later, and on a condition from
+   [nabla-and-medium-2026-11-06.md](nabla-and-medium-2026-11-06.md): every
+   line must still read as what happens at one place, so `$f + $g` means
+   "at each place", never one big object a patch holds. Whole-field
+   operations were how the same idea was turned down on 2026-10-29, as "a
+   second way of thinking". Neighbours are reached only by `∇` and its
+   relatives. And cost isn't answered: two places unroll, a raster
+   doesn't.
+4. **`mono`** is a reduction: the way from many places back to one, as
+   `sum` is, the only way there should be.
 5. **A number or a pair put in state** (`$z = 1`), an `if` with a value
    on one branch and a field on the other: by the rule, but to check.
 
@@ -183,8 +195,10 @@ Each step keeps the corpus unchanged.
 4. Migrate complex uses to `()`, stdlib first, then a few patches
    (`sympathetic_bells`, `stereo_spin`, `turning_bells`) to judge how it
    reads, before the rest.
-5. When no complex `[a, b]` is left, `[a, b]` becomes two places; fields
-   gain arithmetic; the def split goes.
+5. When no complex `[a, b]` is left, `[a, b]` is two places: arithmetic
+   at each place, a value or a number everywhere, `[z1, z2]` two places
+   of complex numbers. `[[a, b], [c, d]]` goes, and `turn` and `unturn`
+   with it. Two places of Hamilton's numbers wait, as nothing needs them.
 6. SPEC, COMPOSING, PHILOSOPHY and tests in the same commits, with the
    sentence at the top of this note. PHILOSOPHY's "Complex numbers as
    operations, not types" is rewritten: values are now told from places.

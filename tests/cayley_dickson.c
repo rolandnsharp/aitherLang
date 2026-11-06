@@ -1,4 +1,4 @@
-/* turn, unturn and conj against the doubling rule they come from.
+/* `*`, `/` and conj against the doubling rule they come from.
  *
  * A pair is a complex number and a pair of pairs Hamilton's quaternion,
  * each the one below doubled (Cayley–Dickson): (a, b)(c, d) =
@@ -6,7 +6,7 @@
  * number its own conjugate (notes/nested-pair-2026-11-05.md). codegen
  * writes the products out by hand; here the reference is the rule itself,
  * applied recursively to 1, 2 or 4 numbers, and compiled patches are
- * checked against it on random values: turn, unturn and conj; turn
+ * checked against it on random values: `*`, `/` and conj; `*`
  * associating and sizes multiplying; and a complex turn sitting inside the
  * quaternions as their first halves. The reference is checked first on
  * Hamilton's units (i j = k, j i = −k), so it is the note's convention. */
@@ -68,19 +68,19 @@ TEST(cayley_dickson_turn) {
     for (int k = 0; k < 2; k++) { P[k] = rnd(); Q[k] = rnd(); }
     char src[4096];
     snprintf(src, sizeof src,
-      "let p = [[%.17g, %.17g], [%.17g, %.17g]]\n"
-      "let q = [[%.17g, %.17g], [%.17g, %.17g]]\n"
-      "let r = [[%.17g, %.17g], [%.17g, %.17g]]\n"
-      "let zp = [%.17g, %.17g]\n"
-      "let zq = [%.17g, %.17g]\n"
-      "let [[a0, a1], [a2, a3]] = turn(p, q)\n"
-      "let [[u0, u1], [u2, u3]] = unturn(p, q)\n"
-      "let [[c0, c1], [c2, c3]] = conj(p)\n"
-      "let [[l0, l1], [l2, l3]] = turn(turn(p, q), r)\n"
-      "let [[m0, m1], [m2, m3]] = turn(p, turn(q, r))\n"
-      "let [z0, z1] = turn(zp, zq)\n"
-      "let [[e0, e1], [e2, e3]] = turn([zp, [0, 0]], [zq, [0, 0]])\n"
-      "let size = amplitude(turn(p, q)) - amplitude(p) * amplitude(q)\n"
+      "let p = ((%.17g, %.17g), (%.17g, %.17g))\n"
+      "let q = ((%.17g, %.17g), (%.17g, %.17g))\n"
+      "let r = ((%.17g, %.17g), (%.17g, %.17g))\n"
+      "let zp = (%.17g, %.17g)\n"
+      "let zq = (%.17g, %.17g)\n"
+      "let ((a0, a1), (a2, a3)) = p * q\n"
+      "let ((u0, u1), (u2, u3)) = p / q\n"
+      "let ((c0, c1), (c2, c3)) = conj(p)\n"
+      "let ((l0, l1), (l2, l3)) = (p * q) * r\n"
+      "let ((m0, m1), (m2, m3)) = p * (q * r)\n"
+      "let (z0, z1) = zp * zq\n"
+      "let ((e0, e1), (e2, e3)) = (zp, (0, 0)) * (zq, (0, 0))\n"
+      "let size = amplitude(p * q) - amplitude(p) * amplitude(q)\n"
       "let n = floor(t * sr + 0.5)\n"
       "if n == 0 then [a0, a1] else if n == 1 then [a2, a3]\n"
       "else if n == 2 then [u0, u1] else if n == 3 then [u2, u3]\n"

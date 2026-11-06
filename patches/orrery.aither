@@ -71,7 +71,8 @@ play bells:
 # ----------------------------------------------------------------- the halo
 
 play halo:
-  let shimmer = 0.6 + 0.4 * min(1, amplitude(bells) * 4)
+  let [bell_l, bell_r] = bells
+  let shimmer = 0.6 + 0.4 * min(1, amplitude((bell_l, bell_r)) * 4)
   let [a, b] = planets
   (a, b) * spin(haloHz) * shimmer * (haloHz / 6)
 

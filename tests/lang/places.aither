@@ -1,0 +1,120 @@
+# Places (notes/places-and-values-2026-11-06.md): square brackets are many
+# places, round brackets one value. Arithmetic is the algebra at each
+# place, and a value with one place is everywhere.
+
+# --- a gain at each place
+# expect: 0.8, 0.3
+[1, 0.5] * [0.8, 0.6]
+
+# --- a number is everywhere: mono into stereo, on both sides
+# expect: 2, 3
+[1, 2] + 1
+
+# --- so is a value, and each place holds it
+# expect: 2, 2
+let [(a, _), (_, b)] = [1, 1] + (1, 2)
+[a, b]
+
+# --- each side turned: two places of complex numbers
+# expect: -1, 0
+let [p, q] = [1, 0] * (0, 1) * (0, 1)
+let (x, y) = p
+[x, y]
+
+# --- two places of values, written, read by place
+# expect: 3, 4
+let s = [(1, 2), (3, 4)]
+let (x, y) = s[1]
+[x, y]
+
+# --- arithmetic at each place: the complex product, place by place
+# expect: -1, 0
+let s = [(0, 1), (1, 0)] * [(0, 1), (1, 0)]
+let (x, y) = s[0]
+[x, y]
+
+# --- a function runs at each place: two filters
+# expect until 2000: 0, 0
+let s = [sin(TAU * 300 * t), sin(TAU * 50 * t)]
+let [l, r] = lp1(s, [100, 200])
+[l - lp1(sin(TAU * 300 * t), 100), r - lp1(sin(TAU * 50 * t), 200)]
+
+# --- a def runs once a place, each place its own state
+# expect until 2000: 0, 0
+let strike = impulse(10)
+let [l, r] = resonator([strike, strike * 2], 300, 4)
+[l - resonator(strike, 300, 4), r - resonator(strike * 2, 300, 4)]
+
+# --- a def that names the places takes them together
+# expect: 2, 2
+mono([1, 3]) + [0, 0]
+
+# --- a doublet: a def given two places, giving a value at each
+# expect until 2000: 0, 0
+let strike = impulse(10)
+let [a, b] = dho(strike, [440, 443], 0.01)
+[amplitude(a - dho(strike, 440, 0.01)), amplitude(b - dho(strike, 443, 0.01))]
+
+# --- translating: a value's numbers as two places, and back
+# expect: 0.6, 0.8
+let z = (0.6, 0.8)
+let (a, b) = z
+let [l, r] = [a, b]
+(l, r)
+
+# --- a state of two places keeps them; a number goes everywhere
+# expect: 5, 5
+$s = [1, 2]
+$s = 5
+$s
+
+# --- two places of values in state; a value goes everywhere
+# expect: 1, 2
+$s = [(0, 0), (0, 0)]
+$s = (1, 2)
+let (x, y) = $s[1]
+[x, y]
+
+# --- an if with places on one branch: a number on the other goes everywhere
+# expect: 2, 2
+if t > 1 then [1, 3] else 2
+
+# --- sum of a value and places: each place gets it
+# expect: 5, 4
+let s = sum(2, n => if n == 1 then [1, 2] else (2, 1))
+let (x, y) = s[1]
+[x + 1, y + 3]
+
+# --- two places of complex numbers can't reach the pipe yet: say which two
+# error: the patch ends in two places of complex numbers
+[(1, 2), (3, 4)]
+
+# --- a play neither
+# error: play p ends in two places of complex numbers
+play p:
+  [(1, 2), (3, 4)]
+p
+
+# --- a value of places isn't a shape
+# error: (a, b) of two places
+([1, 2], 3)
+
+# --- places of places aren't either
+# error: [a, b] of [a, b]
+[[1, 2], [3, 4]]
+
+# --- two places of Hamilton's numbers wait
+# error: two places of Hamilton's numbers aren't built yet
+[((1, 2), (3, 4)), 0]
+
+# --- turn is * now
+# error: turn is `*` now
+turn((1, 0), (0, 1))
+
+# --- unturn is / now
+# error: unturn is `/` now
+unturn((1, 0), (0, 1))
+
+# --- amplitude reads a value, not two places
+# error: two places aren't a value
+amplitude([3, 4])

@@ -90,24 +90,24 @@ phasor([1, 2])
 
 # --- a quarter turn twice is a half turn: [0, 1] turned by itself is [-1, 0]
 # expect: -1, 0
-turn([0, 1], [0, 1])
+(0, 1) * (0, 1)
 
 # --- turning by [1, 0] leaves a pair as it is
 # expect: 0.7, -0.4
-turn([0.7, -0.4], [1, 0])
+(0.7, -0.4) * (1, 0)
 
 # --- turning scales by the turner's size and adds its angle
 # expect: 5.3, 1.8
-turn([3, 2], [1.5, -0.4])
+(3, 2) * (1.5, -0.4)
 
 # --- turning by a spin adds speeds: 220 and 50 Hz make 270
 # expect until 4800: 0, 0
-turn(spin(220), spin(50)) - spin(270)
+spin(220) * spin(50) - spin(270)
 
 # --- turning back by the conjugate undoes a turn by a unit pair
 # expect: 3, 2
-let w = [cos(0.7), sin(0.7)]
-turn(turn([3, 2], w), conj(w))
+let w = (cos(0.7), sin(0.7))
+(3, 2) * w * conj(w)
 
 # --- rotation keeps magnitude
 # expect: 1
@@ -122,7 +122,7 @@ phase(rotate((1, 0), 1.234))
 phase(rotate((1, 0), TAU - 0.7))
 
 # --- the amplitude of one number is an error
-# error: amplitude takes one pair
+# error: amplitude reads one value
 amplitude(1)
 
 # --- analytic's magnitude is the envelope: a steady sine's stays near its level
@@ -136,10 +136,10 @@ $ok
 # expect at 23999: 1
 let (y, _) = freq_shift(sin(TAU * phasor(440)) * 0.5, 200)
 let on = if t > 0.05 then y else 0
-$at640 = [0, 0]
-$at440 = [0, 0]
-$at640 = $at640 + on * [cos(TAU * 640 * t), sin(TAU * 640 * t)]
-$at440 = $at440 + on * [cos(TAU * 440 * t), sin(TAU * 440 * t)]
+$at640 = (0, 0)
+$at440 = (0, 0)
+$at640 = $at640 + on * (cos(TAU * 640 * t), sin(TAU * 640 * t))
+$at440 = $at440 + on * (cos(TAU * 440 * t), sin(TAU * 440 * t))
 if amplitude($at640) > 10 * amplitude($at440) then 1 else 0
 
 # --- a two-entry wave is a table, not a pair
@@ -199,7 +199,7 @@ y[0] - y[1]
 # --- how fast a phasor turns is its frequency: the angle since last sample over TAU dt
 # expect at 100: 440
 let p = spin(440)
-phase(turn(p, conj(prev(p)))) / (TAU * dt)
+phase(p * conj(prev(p))) / (TAU * dt)
 
 # --- a tuned circuit driven at its frequency: its phasor's length is the drive's amplitude
 # expect at 47999: 1
@@ -209,23 +209,23 @@ if abs(amplitude(ring) - 0.5) < 0.02 then 1 else 0
 
 # --- unturn undoes turn
 # expect: 0
-let z = [0.3, -0.7]
-let w = [1.7, 0.4]
-let d = unturn(turn(z, w), w) - z
+let z = (0.3, -0.7)
+let w = (1.7, 0.4)
+let d = z * w / w - z
 if amplitude(d) < 1e-12 then 0 else 1
 
 # --- unturn divides: [1, 0] by [0, 2] is [0, -0.5]
 # expect: 0, -0.5
-unturn([1, 0], [0, 2])
+(1, 0) / (0, 2)
 
 # --- unturn by nothing is nothing, as x / 0 is 0
 # expect: 0, 0
-unturn([1, 2], [0, 0])
+(1, 2) / (0, 0)
 
 # --- a parameter in arithmetic inside turn is a pair
 # expect: 0, 0.2
-def f(a): turn(a * 0.2, [0, 1])
-f([1, 0])
+def f(a): a * 0.2 * (0, 1)
+f((1, 0))
 
 # --- a turning let read only through cos and sin
 # expect at 11999: 0, 1
@@ -234,14 +234,3 @@ def g(freq):
   [cos(a), sin(a)]
 g(1)
 
-# --- turn is strict: two pairs, nothing read as a pair that wasn't written as one
-# error: turn takes two pairs, `turn(z, w)` (or two pairs of pairs), and is given `[1, 2]`, a pair; `3`, a number, and `4`, a number
-turn([1, 2], 3, 4)
-
-# --- ... nor four numbers
-# error: turn takes two pairs
-turn(1, 2, 3, 4)
-
-# --- ... nor a pair and a number
-# error: unturn takes two pairs
-unturn([1, 2], 3)
