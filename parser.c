@@ -288,6 +288,8 @@ typedef struct {
   int body_depth;        /* def/play bodies we're in: `import` only at 0 */
   Vec top;               /* the program's statements so far */
   Vec extra;             /* bindings a `let [a, b] =` adds after its own */
+  const char* pats[1024]; /* each destructuring's first name, to name its hidden let */
+  int npats;
 } P;
 
 static Token peek_at(P* p, int off) {
@@ -412,6 +414,16 @@ static void bind_pat(P* p, Pat* pt, const char* src, int line, int depth) {
  * two sides: a hidden let of the pair, and `a`, `b` as its [0] and [1]
  * (queued in p->extra; `_` names a side not wanted). Each side may be a
  * pattern of its own, for a pair of pairs: `let [[w, x], [y, z]] = q`. */
+/* The first name a pattern binds, or `_`. */
+static const char* pat_first(Pat* pt) {
+  if (pt->name) return pt->name;
+  for (int k = 0; k < 2; k++) {
+    const char* n = pat_first(pt->sub[k]);
+    if (!eq(n, "_")) return n;
+  }
+  return "_";
+}
+
 static Node* parse_let_rest(P* p, int line) {
   if (peek(p).kind != tkLBracket && peek(p).kind != tkLParen) {
     const char* name = expect(p, tkIdent, "binding name").str;
@@ -420,9 +432,15 @@ static Node* parse_let_rest(P* p, int line) {
   }
   Pat* pt = parse_pat(p);
   expect(p, tkAssign, NULL);
-  static int made;                     /* each destructuring its own hidden name */
+  /* Each destructuring its own hidden name, from what it names and how many
+   * before it name the same, and nothing else: noise() is seeded by where
+   * it is, and that mustn't move with the stdlib, a line above, or a reload. */
+  const char* first = pat_first(pt);
+  int same = 0;
+  for (int k = 0; k < p->npats; k++) if (eq(p->pats[k], first)) same++;
+  if (p->npats < (int)(sizeof p->pats / sizeof *p->pats)) p->pats[p->npats++] = first;
   char buf[256];
-  snprintf(buf, sizeof buf, "__pair_%d_%d", line, made++);
+  snprintf(buf, sizeof buf, "__pair_%s_%d", first, same);
   const char* tmp = dup(p->c->a, buf, strlen(buf));
   Node* whole = node1(p, nkLet, tmp, parse_expr(p), line);
   bind_pat(p, pt, tmp, line, 0);
