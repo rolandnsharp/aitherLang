@@ -39,7 +39,7 @@ play pure:
   [s * w1, s * w1]
 
 # ===== VOICE 2 — HETERODYNE VIA turn =====
-# turn(spin_a, spin_b) is a TRUE single-sideband mixer:
+# spin_a * spin_b is a TRUE single-sideband mixer:
 # the result rotates at (rate_a + rate_b), with the lower sideband
 # suppressed by construction (because the analytic-signal nature of
 # both phasor pairs cancels it). This is what radio engineers call
@@ -77,7 +77,7 @@ play halo:
   s * w3
 
 # ===== VOICE 4 — PHASE-FRACTAL OCTAVE =====
-# Squaring a spin via turn(p, p) doubles its phase angle —
+# Squaring a spin via p * p doubles its phase angle —
 # mathematically (not via pitch detection) producing an octave-up
 # version of the source. The doubling is exact and phase-coherent;
 # add it back to the original and you get a perfectly-locked octave

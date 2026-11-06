@@ -85,6 +85,33 @@ $x_pos = 0.0; $y_pos = 0.0
 The engine doesn't know which paradigm you picked. It calls your
 function and plays the result. Use any. Mix any. Invent new ones.
 
+## Values, places and fields
+
+**Round brackets are one value. Square brackets are many places.** A
+number, a complex number `(a, b)` and one of Hamilton's `((w, x), (y, z))`
+are one ladder, and multiplying is turning: `spin(220) * spin(50)` is
+`spin(270)`. Stereo is two places, `[l, r]`: arithmetic happens at each
+place, and a value with one place is everywhere, so `stereo + voice` puts
+voice on both sides. A field is the same rule at many places: say what
+the medium does, and the engine works out the rest.
+
+```
+$x = ring(period = 1.66)                  # a push goes round in 1.66 s
+$v = ring(period = 1.66)
+$v = ($v - concentration($x) * dt) * (1 - 0.4 * dt)
+$x = $x + $v * dt
+
+$v[where] = force                         # the outside pushes in at a point
+spin(110) * (0.45 + $x[phasor(110)])      # and reads out at a point
+```
+
+That is a whole instrument: a ring of masses read round at pitch, heard
+as a note whose harmonics move, and on a scope a circle a strike bends.
+There is no index and no time in the law, only what changes and what it
+touches. `patches/scanned_ring.aither` is that, with a gamepad;
+`patches/aether_ring.aither` carries squeeze and twist at their own speeds,
+from one Hamilton product.
+
 ## Build
 
 ```
@@ -408,8 +435,8 @@ high-quality reverb tails simultaneously, use a DAW.
 - [PHILOSOPHY.md](PHILOSOPHY.md) — the contract, the five paradigms,
   why composition over graphs
 - [SPEC.md](SPEC.md) — complete language reference
-- [PHASORS.md](PHASORS.md) — why aither turns pairs: phasors, `turn` and
-  `spin`, reading the whole pair, the turning `dho`; the research and
+- [PHASORS.md](PHASORS.md) — why multiplying is turning: phasors and
+  `spin`, reading the whole value, the turning `dho`; the research and
   measurements behind them, with references
 - [COMPOSING.md](COMPOSING.md) — composition idioms, common patterns,
   what to reach for and when

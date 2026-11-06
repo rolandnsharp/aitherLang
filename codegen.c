@@ -890,8 +890,8 @@ static V half_of(V v, int k) {
 /* Where a pair of pairs isn't handled yet the compiler says so, and says
  * the rule is a stand-in: these are new, and what they should do in each
  * place is learnt from patches that use them. */
-#define QUAD_STANDIN "This is a stand-in, not a decision: pairs of pairs are new " \
-  "(notes/nested-pair-2026-11-05.md); if you expected something here, say what, and the rule can change."
+#define QUAD_STANDIN "This is a stand-in, not a decision: if you expected something here, say what, and " \
+  "the rule can change (notes/places-and-values-2026-11-06.md)."
 /* ---- shapes in errors: what a value is, and what it was written as ---- */
 
 static const char* shape_of(V v) {
@@ -949,7 +949,7 @@ static const char* givens(Ctx* c, Node** kids, V* a, int n) {
 
 static void no_quad(Ctx* c, V v, const char* what, Node* at) {
   if (is_quad(v))
-    fail(c, "%s doesn't take a pair of pairs yet, and is given %s %s. " QUAD_STANDIN, what,
+    fail(c, "%s doesn't take four numbers yet, and is given %s %s. " QUAD_STANDIN, what,
          at ? given(c, at, v) : "one", at ? err_loc(c, at) : "");
 }
 /* Number k of a value: a number is every one. */
@@ -1086,11 +1086,10 @@ static void emit_seq(Ctx* c, Scope* sc, Node** kids, int n, V* out, Buf* pre) {
 static const char* emit1(Ctx* c, Scope* sc, Node* n, Buf* pre, const char* what) {
   V v = emit(c, sc, n, pre);
   if (is_quad(v))
-    fail(c, "%s needs one number but gets a pair of pairs, `%s` — name the number it means, "
-         "let [[w, x], [y, z]] = ... %s", what, written(c, n), err_loc(c, n));
+    fail(c, "%s needs one number but gets %s, `%s` — name the number it means %s", what, shape_of(v), written(c, n), err_loc(c, n));
   if (is_pair(v))
-    fail(c, "%s needs one number but gets a pair, `%s` — pick a side with [0] / [1], or make it "
-         "pair state: $x = [0, 0] %s", what, written(c, n), err_loc(c, n));
+    fail(c, "%s needs one number but gets %s, `%s` — name the part it means: %s %s", what, shape_of(v), written(c, n),
+         v.lad ? "let (a, b) = ..." : "let [l, r] = ...", err_loc(c, n));
   return v.l;
 }
 
@@ -1748,8 +1747,8 @@ static const char* assign_pair_side(Ctx* c, Scope* sc, Node* st) {
       fail(c, "$%s is a value, and a value has no places to assign %s: assign the whole, $%s = (a, b)",
            base->str, err_loc(c, st), base->str);
     if ((pair && pair->n == 4) || has(&c->quad_vars, base->str))
-      fail(c, "$%s is a pair of pairs, and one half of it can't be assigned by index yet %s: assign the "
-           "whole, $%s = [[w, x], [y, z]]. " QUAD_STANDIN, base->str, err_loc(c, st), base->str);
+      fail(c, "$%s holds two places of values, and one can't be assigned by index yet %s: assign the whole. "
+           QUAD_STANDIN, base->str, err_loc(c, st));
     if (pair) target = k == 0 ? pair->a : pair->b;
     else if (has(&c->pair_vars, base->str)) target = pair_var_ref(c, base->str, k);
     if (target[0]) {
@@ -1759,7 +1758,7 @@ static const char* assign_pair_side(Ctx* c, Scope* sc, Node* st) {
       return sdup(c, bstr(&pre));
     }
   }
-  fail(c, "only one side of pair state can be assigned by index ($z[0] = ... or $z[1] = ...) %s",
+  fail(c, "only one of two places can be assigned by index ($s[0] = ... or $s[1] = ...) %s",
        err_loc(c, st));
   return NULL;
 }
@@ -1816,8 +1815,8 @@ static V* emit_rule(Ctx* c, Scope* sc, Node* rule, int n, Buf* pre, int* w, int*
     return vs;
   }
   if (quad && pair)
-    fail(c, "array: the rule makes pairs and pairs of pairs %s: an array's elements are one shape, and a "
-         "pair among pairs of pairs could be either half. " QUAD_STANDIN, err_loc(c, rule));
+    fail(c, "array: the rule makes elements of two widths %s: an array's elements are one shape. " QUAD_STANDIN,
+         err_loc(c, rule));
   *w = quad ? 4 : pair ? 2 : 1;
   return vs;
 }
@@ -2618,7 +2617,7 @@ static V emit_loop(Ctx* c, Scope* sc, Node* def, Node* call, Buf* pre) {
   V l = emit_loop_side(c, names, def, call, args, bound, 0, pre);
   V r = emit_loop_side(c, names, def, call, args, bound, 1, pre);
   if (is_pair(l) || is_pair(r))
-    fail(c, "%s returns a pair, and given a pair it runs once per side: a pair of pairs %s",
+    fail(c, "%s gives more than a number, and given places it repeats once a place, which isn't built %s",
          def->str, err_loc(c, call));
   return vpair(l.l, r.l);
 }
@@ -3143,7 +3142,7 @@ static V emit(Ctx* c, Scope* sc, Node* n, Buf* pre) {
              "((w, x), (y, z))", err_loc(c, n));
       return two_places(c, lr[0], lr[1], n);
     }
-    fail(c, "an array of %d can't be a value here %s — a pair is [L, R]; a table goes in a let, or to wave",
+    fail(c, "an array of %d can't be a value here %s — two places are [l, r], a value (a, b); a table goes in a let, or to wave",
          n->nkids, err_loc(c, n));
     return mono("");
   }

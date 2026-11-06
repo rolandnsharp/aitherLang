@@ -54,7 +54,7 @@ def about(dir, angle): cos(angle / 2) + dir * sin(angle / 2)
 
 # A rotation applied to a direction (a pair of pairs whose first number
 # is 0): Hamilton's r v r^-1, for a unit r. Composed rotations apply
-# right first: apply(turn(r2, r1), v) is r1, then r2.
+# right first: apply(r2 * r1, v) is r1, then r2.
 def apply(r, v): r * v * conj(r)
 
 # The direction a spinor points (the Hopf map): the pole, k, turned by

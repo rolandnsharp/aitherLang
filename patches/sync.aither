@@ -24,7 +24,7 @@
 # spread of ±Δ.
 #
 # The pair you hear is the pair you see: the crowd's mean, Z, with
-# each voice's harmonics made by turning its spin by itself: turn(z, z)
+# each voice's harmonics made by turning its spin by itself: z * z
 # goes twice as fast, and its conj turns the other way, so the second
 # harmonic runs backwards and the figure in step has three lobes.
 #

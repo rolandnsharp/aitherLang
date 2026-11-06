@@ -7,7 +7,7 @@
 #
 #   field     = spin(rate)                      the rotating field
 #   coil k    = rotate((1, 0), TAU * k / 3)     three coils a third of a turn apart
-#   drive k   = the field seen by coil k        turn(field, conj(coil k)), its first side
+#   drive k   = the field seen by coil k        field * conj(coil k), its first side
 #
 # Each coil sounds one note of the chord while the field faces it, so the
 # chord turns, A to C# to E and round, and its stereo place follows the

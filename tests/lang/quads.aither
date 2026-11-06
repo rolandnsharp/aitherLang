@@ -200,7 +200,7 @@ let ((w, _), (_, _)) = $f[0]
 [w, w]
 
 # --- where one number is needed, a pair of pairs says so
-# error: needs one number but gets a pair of pairs
+# error: needs one number but gets one of Hamilton's numbers
 let q = ((1, 2), (3, 4))
 if q then 1 else 0
 
@@ -271,7 +271,7 @@ let ((_, x), (y, _)) = spun(0.8)
 [x, y]
 
 # --- where one number is needed, the error quotes what it got
-# error: the condition needs one number but gets a pair of pairs, `q`
+# error: the condition needs one number but gets one of Hamilton's numbers, `q`
 let q = ((1, 2), (3, 4))
 if q then 1 else 0
 

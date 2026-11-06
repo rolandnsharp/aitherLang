@@ -95,9 +95,9 @@ orbit. The language's complex operations do the work; the parameter is
 the player's breath.
 
 ```
-$z = [0, 0]
-let c = [breath * 0.6 - 0.4, lip_pressure * 0.5]
-$z = if amplitude($z) > 2 then [0, 0] else turn($z, $z) + c
+$z = (0, 0)
+let c = (breath * 0.6 - 0.4, lip_pressure * 0.5)
+$z = if amplitude($z) > 2 then (0, 0) else $z * $z + c
 $z
 ```
 

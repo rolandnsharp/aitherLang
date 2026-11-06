@@ -14,7 +14,7 @@
 #                                   (not ratio), walking from
 #                                   harmonic → inharmonic territory.
 #
-#   K2 (CC 71) — SPECTRAL SQUARE   blend in turn(analytic, analytic).
+#   K2 (CC 71) — SPECTRAL SQUARE   blend in analytic * analytic.
 #                                   For a pure sine at f, this is a
 #                                   sine at 2f (complex squaring
 #                                   doubles the phase angle). For

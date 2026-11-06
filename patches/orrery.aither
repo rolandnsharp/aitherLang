@@ -5,11 +5,11 @@
 #
 # - The hum: a low D, centred as a bass should be.
 # - Three planets, D4, A4 and F5: each a spin, with its octave and its
-#   twelfth made by turning it by itself (turn(p, p)), so its harmonics
+#   twelfth made by turning it by itself (p * p), so its harmonics
 #   are locked to it. Each rises and sets on its own slow orbit (23, 31
 #   and 37 s) and is played as a whole pair, so it is naturally wide.
 # - The halo: the planets are already turning pairs, so shifting every
-#   frequency in them is one turn, turn(planets, spin(hz)), with no
+#   frequency in them is one turn, planets * spin(hz), with no
 #   Hilbert filters. In the middle of the piece they drift up to 6 Hz
 #   from themselves and back: a slow, even shimmer.
 # - Bells: small modal bells, turning dhos, each on its own clock (7, 11

@@ -1,22 +1,22 @@
-# Phasors: why aither turns pairs
+# Phasors: why aither turns values
 
-Every value in aither is a pair, and a pair is a point that can turn.
-This page is why: the ideas the language is built on, where they come
-from, and what we measured when we tried the alternatives. Read it to
-understand why aither code is written the way it is: `turn` instead of
-multiplying sides, `amplitude` instead of rectifying, `dho` returning a
-pair, a `_` being worth a second look.
+A complex value `(a, b)` in aither is a point that can turn. This page is
+why: the ideas the language is built on, where they come from, and what
+we measured when we tried the alternatives. Read it to understand why
+aither code is written the way it is: `*` turning, `amplitude` instead of
+rectifying, `dho` returning a value, a `_` being worth a second look.
+(Older parts of this page say "pair": read a complex value.)
 
-## 1. A pair is a phasor
+## 1. A value is a phasor
 
 Charles Steinmetz showed in 1893 that a steady oscillation is best
 handled as a point turning in a plane: its length is how big it is,
 its angle where in its cycle it is, and what would be calculus on
 sines becomes arithmetic on points [1]. Electrical engineering has
-worked that way since, and so does aither. The two sides of a pair are
-two real numbers in fixed quadrature; aither does not add a "complex
-number" type, it adds the operations that read a pair as one
-(PHILOSOPHY.md, "Complex numbers as operations, not types"):
+worked that way since, and so does aither. The two parts of a value are
+two real numbers in fixed quadrature, and `(a, b)` says so; `[l, r]`
+is something else, two places (PHILOSOPHY.md, "Round brackets are one
+value, square brackets are many places"):
 
 | operation       | what it does to the point                          |
 |-----------------|----------------------------------------------------|
@@ -27,7 +27,7 @@ number" type, it adds the operations that read a pair as one
 | `phase(z)`      | which way it points                                |
 
 **Which way is positive: anticlockwise.** A positive frequency is a
-point turning anticlockwise, `e^(+iωt)`, which is `[cos, sin]`, which
+point turning anticlockwise, `e^(+iωt)`, which is `(cos, sin)`, which
 is `spin(hz)`: the convention of mathematics, of electrical engineering
 since Steinmetz, and of signal processing, and the one an SDR's IQ
 uses (a station above the tuned frequency turns anticlockwise). Some
@@ -44,13 +44,12 @@ mixing and octave doubling are all this rule.
 A phasor has an amplitude and a phase, in the engineers' words since
 Steinmetz, and those are the names: `amplitude(z)` is its length (what
 mathematics calls the modulus, `|z|`), `phase(z)` its angle. Not `abs`:
-a function given a pair runs on each side, so `abs` of a pair is two
-absolute values, and the length gets its own word.
+a function runs on each number, so `abs` of a value is two absolute
+values, and the length gets its own word.
 
-`+`, `-`, `*` and `/` stay side by side, so stereo arithmetic means
-what it looks like and nothing changes meaning because a value
-happened to be a pair. Only the named operations above read a pair as
-a turning point.
+`+`, `-`, `*` and `/` on a value are the algebra, so `z * w` turns. On
+`[l, r]` they are at each place, so stereo arithmetic means what it looks
+like.
 
 ## 2. A signal as spins: `analytic`
 
@@ -77,7 +76,7 @@ bell-like. It returns the turned pair, in quadrature, and what hears
 it decides: speakers play its sides a quarter turn apart, an SDR sends
 it as IQ. Summed to mono it doesn't cancel: cos + sin is a sine 3 dB up.
 
-## 4. Read the whole pair
+## 4. Read the whole value
 
 A pair from an oscillator or from `analytic` is a phasor, and most of
 what is wanted from it reads both sides at once:
@@ -168,7 +167,7 @@ passes 2, about 14 kHz at 44.1 kHz [8]. We measured it:
 (The small ripple left is the real drive's own mirror-image half, at
 twice the frequency, which a real signal always has.)
 
-**What the pair means.** `dho` returns `[x, q]`: `x` the position, the
+**What the pair means.** `dho` returns `(x, q)`: `x` the position, the
 sound; `q` the position a quarter turn behind. It turns the way `spin`
 does, so `phase(dho(...))` increases with time and turning it by a spin
 adds speeds, as everywhere else.

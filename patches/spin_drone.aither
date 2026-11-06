@@ -30,7 +30,7 @@
 #   K7 (CC 19) — REVERB          Wet mix. The breath-into-silence is
 #                                 dramatic with reverb up — the tail
 #                                 keeps ringing while the dry vanishes.
-#   K8 (CC 16) — MELODY SHIMMER  Octave-stack on the melody (turn(p,p))
+#   K8 (CC 16) — MELODY SHIMMER  Octave-stack on the melody (p * p)
 #                                 — phase-locked octave doubling.
 #
 # Try this sequence:
@@ -89,7 +89,7 @@ play drone:
 
 # ===== MELODY — 16-step spin-produced phrase =====
 # Each note built from spin (not sin(TAU*phasor)) so the
-# octave-shimmer knob can do exact phase-locked doubling via turn(p, p).
+# octave-shimmer knob can do exact phase-locked doubling via p * p.
 # Step rate 2 Hz = 8-second loop. Pluck envelopes give clean attacks.
 # (Pair ops live in the play block directly — they aren't inlinable
 # through user defs in current aither.)

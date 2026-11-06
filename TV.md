@@ -53,7 +53,7 @@ shears the picture.
 
 `pixel(64, 48)` on its own is the colour wheel: every hue round the
 centre, black at it. Any complex function of the pixel is a picture of
-that function: `turn(p, p)` winds the wheel twice, `rotate(p, t)`
+that function: `p * p` winds the wheel twice, `rotate(p, t)`
 turns it, and a polynomial shows each root as a point where every
 colour meets. Squeeze the result into the unit circle with
 `z / (1 + amplitude(z))`, which keeps the phase and bounds the size
@@ -67,10 +67,10 @@ z → z² + c a frame, so the set grows in:
 
 ```
 let k = pixel_index(w, h)
-let c = pixel(w, h) * 1.5 - [0.5, 0]
-$z = array(2 * w * h)
-let z = [$z[2 * k], $z[2 * k + 1]]
-let next = if amplitude(z) > 2 then z else turn(z, z) + c
+let c = pixel(w, h) * 1.5 - (0.5, 0)
+$z = array(w * h, (0, 0))
+let z = $z[k]
+let next = if amplitude(z) > 2 then z else z * z + c
 ```
 
 Points inside the set settle into cycles, which flicker frame to frame
@@ -88,8 +88,10 @@ every frame, with a recursion that stops as soon as the point leaves
 
 ```
 def rec escape(z, c, n):
-  if n == 0 or z[0] * z[0] + z[1] * z[1] > 4 then [n, z[0] * z[0] + z[1] * z[1]]
-  else escape(turn(z, z) + c, c, n - 1)
+  let (x, y) = z
+  let size = x * x + y * y
+  if n == 0 or size > 4 then [n, size]
+  else escape(z * z + c, c, n - 1)
 ```
 
 Compare |z|² with 4 rather than `amplitude(z)` with 2: `amplitude`

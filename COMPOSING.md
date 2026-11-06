@@ -735,11 +735,11 @@ wall do. The chord tunes itself:
 $pa = 0.0
 $pb = 0.0
 let k = 0.1                                   # the spring
-let a = vdp(220, push = k * ($pb - $pa))
-let b = vdp(223, push = k * ($pa - $pb))
-$pa = a[0]
-$pb = b[0]
-(a[0] + b[0]) * 0.4
+let (a, _) = vdp(220, push = k * ($pb - $pa))
+let (b, _) = vdp(223, push = k * ($pa - $pb))
+$pa = a
+$pb = b
+(a + b) * 0.4
 ```
 
 With `k` 0 they beat at 3 Hz; at 0.03 they pull at each other and
@@ -1018,7 +1018,7 @@ a cycle, and glide between the points they land on:
 def orbit(f, q, c):
   let step = phasor(f * q)
   $z = (0, 0)
-  $was = [0, 0]
+  $was = (0, 0)
   $last = 0
   let hop = step < $last                 # the phasor wrapped: hop
   $last = step

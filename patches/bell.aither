@@ -12,7 +12,7 @@
 #   an ellipse and, past 14 kHz, runs away.
 # - Warble: a real bell is not perfectly round, so each mode is two close
 #   frequencies that beat. Here that is the mode and itself turned a
-#   little faster, turn(mode, wob): no second oscillator to drift. (One
+#   little faster, mode * wob: no second oscillator to drift. (One
 #   wob a bell keeps it light; on a real bell each mode beats at its own
 #   rate.)
 # - Each mode is a quarter-turn pair, so the whole bell is too, and
