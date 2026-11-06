@@ -1,0 +1,81 @@
+# rosette: an instrument where the picture is the tuning. A circle
+# drones the root; each note you hold winds a spirograph round it, with
+# as many petals as its harmonic tells.
+#
+# The beam goes round a circle, the root, its laps a second the bass
+# note. A note is a smaller circle turning n times a lap the other way
+# round, n a whole harmonic of the root, carried on the big one: the
+# beam traces a spirograph with n + 1 cusps. So you see the interval:
+# the octave (2) is a three-pointed curve, the fifth above it (3) four,
+# two octaves (4) five, the third (5) six. A small circle turning fast
+# enough draws sharp cusps, so each note is sized to just draw them,
+# smaller the higher it is (which is also how loud a harmonic should
+# be). Hold two notes and the curves add into one figure, still and
+# exact, because every note is a harmonic of the lap.
+#
+# The d-pad moves the harmony and the register. Left and right step the
+# root round the circle of fifths, C, G, D, A, E, gliding; the figure
+# holds its shape and only its pitch slides. Up and down change which
+# four harmonics the buttons play, low to high:
+#   2 3 4 5     octave, twelfth, two octaves, the third: wide petals
+#   3 4 5 6     a major chord over the root
+#   4 5 6 8     the same chord an octave up, with its top root
+#   6 8 9 10    a fifth, root, second and third: a pentatonic run
+# The buttons, Y A B X, play those four, lowest to highest. A press
+# plucks; held, the note rings on and breathes; let go and it dies away.
+# The more you play, the faster the figure tips in space.
+#
+#   make tools/pad tools/scope
+#   tools/pad --notes &                                 # the gamepad, every key a note
+#   ./aither patches/rosette.aither | tools/scope | tools/play hw:rockchipes8388c 20
+
+let roots = [65.41, 98.0, 73.42, 110.0, 82.41]   # C2, G2, D2, A2, E2: the circle of fifths
+let sets = [2, 3, 4, 5,
+            3, 4, 5, 6,
+            4, 5, 6, 8,
+            6, 8, 9, 10]
+
+# The d-pad: the root, gliding; the register.
+$root = 2
+$root = clamp($root + midi_trig(43) - midi_trig(42), 0, 4)
+$f = 73.42
+$f = $f + (roots[$root] - $f) * dt * 10
+$reg = 1
+$reg = clamp($reg + midi_trig(40) - midi_trig(41), 0, 3)
+
+let ph = TAU * phasor($f)
+
+# The root: a circle, with a little of its octave so it has a body you
+# can hear on a small speaker (a limaçon, dimpled once).
+let base = [cos(ph), sin(ph)] + [cos(2 * ph), sin(2 * ph)] * 0.15
+
+# A note: a circle turning n times a lap backwards, sized to draw sharp
+# cusps (1.1 / n of the root's turn); plucked bright on the press,
+# ringing at half held, breathing, and dying away let go.
+def spiro(held, n, ph):
+  $e = 0.0
+  $since = 9.0
+  $since = if held > 0 then $since + dt else 0
+  let aim = if held > 0 then 0.6 + 0.4 * exp(-$since * 4) else 0
+  $e = $e + (aim - $e) * dt * (if held > 0 then 150 else 4)
+  let breath = 1 + 0.1 * sin(TAU * 0.6 * $since)
+  [cos(n * ph), sin(0 - n * ph)] * (1.1 / n) * $e * breath
+
+let k = $reg * 4
+let notes = spiro(midi_note(39), sets[k], ph) + spiro(midi_note(36), sets[k + 1], ph)
+          + spiro(midi_note(37), sets[k + 2], ph) + spiro(midi_note(38), sets[k + 3], ph)
+
+# Playing tips it: the more notes held, the faster it sways to and fro
+# in space, the near side bigger (a sway, not a turn: the figure is
+# flat, and edge on it would be a line).
+let playing = midi_note(36) + midi_note(37) + midi_note(38) + midi_note(39)
+$go = 0.0
+$go = $go + (0.15 + 0.5 * playing - $go) * dt * 1.5
+$tip = 0.0
+$tip = $tip + $go * dt
+let [x, y] = base + notes
+let [y1, z1] = rotate([y, 0], 0.9 * sin($tip))
+let near = 3 / (3.5 - z1)
+let [x2, y2] = rotate([x, y1] * near, 0.05 * t)  # and slowly round in the screen
+
+[x2, y2] * 0.6 |> tanh

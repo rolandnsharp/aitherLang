@@ -1,0 +1,82 @@
+# knotharp: an instrument you play on the scope. A knot drones the
+# harmony, and the buttons pluck notes into it as ripples round it.
+#
+# As in knotsong, the beam's laps a second are the bass note and the
+# knot it traces is a chord: a torus knot's spins are harmonics of the
+# lap. The d-pad moves the harmony. Left and right step the root round
+# the circle of fifths, C, G, D, A, E, gliding from one to the next, so
+# a step either way is always a good next chord. Up and down choose the
+# knot, which is the voicing, morphing over a quarter second:
+#   (3, 2)   harmonics 1, 3, 5   root, fifth, third: a major chord
+#   (2, 3)   harmonics 1, 2, 5   root, octave, third: open
+#   (3, 5)   harmonics 2, 3, 8   octaves and a fifth: bare
+#   (3, 4)   harmonics 1, 3, 7   with the natural seventh
+#   (2, 5)   harmonics 2, 3, 7   seventh, no root
+#
+# The buttons are the melody. Each is a spin at a whole harmonic of the
+# lap, locked to the knot's own phase, and seen as that many waves
+# rippling round it: Y the 6th (a fifth), A the 8th (the root), B the 10th (the third),
+# X the 12th (the fifth above). They are always in tune with the chord,
+# whatever it is, and the figure never tears: every note is a harmonic
+# of the lap. A press plucks; held, the note rings on, the ripples
+# breathing; let go and it dies away. Hold several for a chord.
+# The more you play, the faster the knot turns in space.
+#
+#   make tools/pad tools/scope
+#   tools/pad --notes &                                 # the gamepad, every key a note
+#   ./aither patches/knotharp.aither | tools/scope | tools/play hw:rockchipes8388c 20
+
+let roots = [65.41, 98.0, 73.42, 110.0, 82.41]   # C2, G2, D2, A2, E2: the circle of fifths
+let ps = [3, 2, 3, 3, 2]
+let qs = [2, 3, 5, 4, 5]
+
+# The d-pad: the root, gliding; the knot, morphing.
+$root = 2
+$root = clamp($root + midi_trig(43) - midi_trig(42), 0, 4)
+$f = 73.42
+$f = $f + (roots[$root] - $f) * dt * 10
+$from = 0
+$to = 0
+$mix = 1.0
+let next = clamp($to + midi_trig(40) - midi_trig(41), 0, 4)
+let turn = next != $to
+$from = if turn then $to else $from
+$mix = if turn then 0 else min($mix + dt * 4, 1)
+$to = next
+let m = $mix * $mix * (3 - 2 * $mix)
+
+def shadow(k, ph): (1.6 + cos(qs[k] * ph)) * [cos(ps[k] * ph), sin(ps[k] * ph)]
+def height(k, ph): sin(qs[k] * ph)
+
+let ph = TAU * phasor($f)
+let [x0, y0] = shadow($from, ph) * (1 - m) + shadow($to, ph) * m
+let z0 = height($from, ph) * (1 - m) + height($to, ph) * m
+
+# A string: plucked bright on the press, ringing on at half while held,
+# a slow breath in it, and dying away over half a second let go.
+def string(held, n, ph):
+  $e = 0.0
+  $since = 9.0
+  $since = if held > 0 then $since + dt else 0
+  let aim = if held > 0 then 0.5 + 0.5 * exp(-$since * 5) else 0
+  $e = $e + (aim - $e) * dt * (if held > 0 then 150 else 5)
+  let breath = 1 + 0.12 * sin(TAU * 0.7 * $since)
+  [cos(n * ph), sin(n * ph)] * $e * breath
+
+let notes = string(midi_note(39), 6, ph) + string(midi_note(36), 8, ph)
+          + string(midi_note(37), 10, ph) + string(midi_note(38), 12, ph)
+
+# Playing spins it: the more notes held, the faster it turns in space.
+let playing = midi_note(36) + midi_note(37) + midi_note(38) + midi_note(39)
+$go = 0.0
+$go = $go + (0.25 + 0.6 * playing - $go) * dt * 1.5
+$tip = 0.0
+$side = 0.0
+$tip = $tip + $go * dt
+$side = $side + 0.62 * $go * dt
+
+let [y1, z1] = rotate([y0, z0], $tip)
+let [z2, x2] = rotate([z1, x0], $side)
+let near = 3 / (4 - z2)
+
+([x2, y1] * near + notes * 0.3) * 0.33 |> tanh

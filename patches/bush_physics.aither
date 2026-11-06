@@ -1,0 +1,155 @@
+# bush_physics: a doof's rhythm and the bush around it, every sound a
+# physical model: a skin drum for the kick, two hardwood clapsticks, and
+# a chorus of cicadas. A bed to play the didge over (pad_didge), in D,
+# 140 beats a minute.
+#
+# The kick is a struck circular skin. A skin rings in modes at
+# 1 : 1.594 : 2.296 of its lowest (the (0,1), (1,1) and (0,2) modes of
+# an ideal membrane; Fletcher and Rossing, The Physics of Musical
+# Instruments, 1998), here tuned to D1. Struck hard it stretches, its
+# tension rises and every mode goes sharp; as it settles the pitch
+# falls back. That is the kick's downward "dwoom", and here it is not
+# drawn as a sweep: the pitch is the skin's, and the short-time tension
+# rise is proportional to how much energy the skin holds (Avanzini,
+# Marogna and Bank, Efficient synthesis of tension modulation in
+# strings and membranes based on energy estimation, JASA 131, 2012,
+# https://doi.org/10.1121/1.3651097), so every mode is sharpened by
+# sqrt(1 + 3E), E its energy, and a struck skin starts an octave up.
+#
+# The clapsticks are two hardwood bars, free at both ends, held in the
+# hands and struck together. A free bar's modes are not harmonic: they
+# sit at 1 : 2.757 : 5.404 : 8.933, the squares of the roots of
+# cos(b) cosh(b) = 1 (4.730, 7.853, 10.996, 14.137), and each is
+# excited by how far the bar moves where it is struck, its mode shape
+# there. Strike one near a quarter of the way along, close to the
+# first mode's node, and the fundamental all but vanishes, a dry click;
+# strike the middle and only the symmetric modes (1st and 3rd) sound,
+# full and woody. The player's grip drifts slowly between the two. The
+# wood loses its higher modes quicker; the contact is a fraction of a
+# millisecond, wood on wood, so it reaches them all.
+#
+# The cicadas are after the green grocer, Cyclochila australasiae, as
+# measured by Bennet-Clark and Young: a ribbed plate on the side, the
+# tymbal, buckles in with a click, and the click rings the abdomen's
+# air sac, a Helmholtz resonator tuned to the song, about 4.3 kHz, with
+# a Q of about 12.5; the tymbal popping back out clicks again 20 dB
+# quieter (Bennet-Clark and Young, A model of the mechanism of sound
+# production in cicadas, J. Exp. Biol. 173, 1992,
+# https://doi.org/10.1242/jeb.173.1.123; Young and Bennet-Clark, The
+# role of the tymbal in cicada sound production, J. Exp. Biol. 198,
+# 1995, https://doi.org/10.1242/jeb.198.4.1001). Each of six cicadas
+# here clicks a couple of hundred times a second (by ear) into its
+# own resonator, a little differently tuned, and swells and fades its
+# call; each listens to the rest, pulled toward the chorus's swell
+# (Kuramoto's mean-field coupling), so from scattered calls the trees
+# fall into waves of sound together, drift apart, and fall in again.
+#
+#   ./aither patches/bush_physics.aither | tools/play hw:rockchipes8388c 20
+#
+# The kick is a real D1 skin: on small speakers you hear its upper
+# modes and its strike, and through a PA its body.
+
+let tempo = 140 / 60
+let beats = t * tempo
+let step = floor(beats * 4)                      # sixteenths
+let s16 = step mod 16
+let bar = floor(beats / 4)
+let brk = bar mod 16 >= 14                       # two bars without the kick, every sixteen
+
+# A hit lasting one sample on each new sixteenth.
+$last = -1
+let fresh = step != $last
+$last = step
+def hit(on, vel): if on then vel else 0
+
+# A force: a shove that dies away at `rate` a second; its whole push is
+# `size`, however short.
+def shove(size, rate):
+  $s = 0.0
+  $s = $s * (1 - rate * dt) + size * rate
+  $s
+
+# A mode: a spin at f Hz losing `loss` of its size a second; a force
+# pushes its velocity, the side a quarter turn ahead.
+def mode(force, f, loss):
+  $z = [0, 0]
+  $z = rotate($z, TAU * f * dt) * (1 - loss * dt)
+  $z = $z + [0, force * dt]
+  $z
+
+# ------------------------------------------------------------- the skin
+let kickVel = hit(fresh and s16 mod 4 == 0 and not brk, 1)
+let push = shove(kickVel, 1500)                  # a felt beater, 2/3 ms
+let d1 = 36.71
+$E = 0.0
+let sharp = sqrt(1 + 3 * $E)
+let k1 = mode(push, d1 * sharp, 7)
+let k2 = mode(push * 0.35, d1 * 1.594 * sharp, 13)
+let k3 = mode(push * 0.25, d1 * 2.296 * sharp, 19)
+$E = amplitude(k1) ^ 2 + amplitude(k2) ^ 2 + amplitude(k3) ^ 2
+let beater = noise() * shove(kickVel, 900) * 0.0004
+let [kx1, _] = k1
+let [kx2, _] = k2
+let [kx3, _] = k3
+let kick = kx1 + kx2 + kx3 + beater
+
+# ------------------------------------------------------- the clapsticks
+# A free bar's mode shape at x along it (0 an end, 1 the other), 1 at
+# the ends.
+def shape(b, sigma, x):
+  let u = b * x
+  (0.5 * (exp(u) + exp(0 - u)) + cos(u) - sigma * (0.5 * (exp(u) - exp(0 - u)) + sin(u))) / 2
+
+def stick(force, f, x):
+  let [a, _] = mode(force * shape(4.730, 0.9825, x), f, 30)
+  let [b, _] = mode(force * shape(7.853, 1.0008, x), f * 2.757, 70)
+  let [c, _] = mode(force * shape(10.996, 1.0, x), f * 5.404, 130)
+  let [d, _] = mode(force * shape(14.137, 1.0, x), f * 8.933, 210)
+  a + b * 0.8 + c * 0.6 + d * 0.4
+
+let stickPat = [0, 0, 1, 0, 0, 0, 1, 0.4, 0, 0, 1, 0, 0, 0.5, 1, 0.3]
+let stickVel = hit(fresh, stickPat[s16])
+let contact = shove(stickVel, 6000)             # wood on wood, a sixth of a ms
+let grip = 0.36 + 0.14 * sin(TAU * t / 23)      # from near the node (0.22) to the middle (0.5)
+let sticks = stick(contact, 1580, grip) + stick(contact, 1190, 1 - grip * 0.9) * 0.8
+
+# ---------------------------------------------------------- the cicadas
+# A cicada's call: its phase round its swell, pulled toward the chorus.
+$mean = [0, 0]
+def call(rate, start, mean):
+  $th = start
+  let [mx, my] = mean
+  $th = $th + (TAU * rate + 0.35 * (my * cos($th) - mx * sin($th))) * dt
+  [cos($th), sin($th)]
+
+# Its sound: the tymbal clicking in (and out, 20 dB down) into the air
+# sac, swelling with the call.
+def cicada(clicks, f, swell):
+  let ph = phasor(clicks)
+  let was = prev(ph)
+  let inClick = if ph < was then 1 else 0
+  let outClick = if ph >= 0.5 and was < 0.5 then 0.1 else 0
+  let [s, _] = mode((inClick + outClick) * swell / dt, f, PI * f / 12.5)
+  s
+
+def loud(c): pow(max(0, 0.5 + 0.5 * c), 3)
+
+let c1 = call(0.110, 0.0, $mean)
+let c2 = call(0.124, 2.1, $mean)
+let c3 = call(0.097, 4.0, $mean)
+let c4 = call(0.131, 1.0, $mean)
+let c5 = call(0.105, 3.2, $mean)
+let c6 = call(0.118, 5.3, $mean)
+$mean = (c1 + c2 + c3 + c4 + c5 + c6) / 6
+let [a1, _] = c1
+let [a2, _] = c2
+let [a3, _] = c3
+let [a4, _] = c4
+let [a5, _] = c5
+let [a6, _] = c6
+let left = cicada(192, 4300, loud(a1)) + cicada(207, 4150, loud(a3)) + cicada(199, 4450, loud(a5)) * 0.7
+let right = cicada(185, 4250, loud(a2)) + cicada(214, 4380, loud(a4)) + cicada(201, 4100, loud(a6)) * 0.7
+
+# ------------------------------------------------------------- the mix
+let mid = kick * 0.75 + sticks * 0.12
+[mid + left * 0.09 + sticks * 0.03, mid + right * 0.09 - sticks * 0.03] |> tanh

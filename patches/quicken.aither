@@ -1,0 +1,63 @@
+# quicken: a rhythm played faster and faster until it is a chord. Three
+# beats against two, a ratio you hear as a rhythm; quickened a hundred
+# times over, the same ratio is a fifth. Nothing changes but the speed.
+#
+# Two voices, one in each ear and on each axis of the scope: the left
+# goes round three times while the right goes round twice. Each ticks
+# as it comes round, the left with the beam at the right edge, the
+# right with it at the top. Slow, you hear a hemiola, three against
+# two, the two ticks landing together once a bar with the beam in the
+# corner, and you see a dot wander the path between. The whole thing
+# quickens, doubling every few seconds: the ticks blur into a buzz,
+# the buzz has a pitch, and the voices' turning, too fast now to
+# follow, is heard as two notes a fifth apart, while the dot's path
+# closes into the fifth's Lissajous figure. Then it slows again and the
+# chord comes apart into a rhythm. That one ratio is a rhythm, an
+# interval and a shape is Stockhausen's point in "...wie die Zeit
+# vergeht..." (Die Reihe 3, 1957), and what Kontakte (1960) does when
+# a pitch falls until it is a beat.
+#
+# The buttons choose the ratio: Y two against one (the octave), A three
+# against two (the fifth), B four against three (the fourth), X five
+# against four (the third). Change it at any speed and hear it as both.
+#
+#   make tools/pad tools/scope
+#   tools/pad --notes &                                 # the gamepad, every key a note
+#   ./aither patches/quicken.aither | tools/scope | tools/play hw:rockchipes8388c 20
+
+# The bar: from half a bar a second (a slow hemiola) up to 55 (a fifth on
+# A2 and E3), and back. Over 90 seconds: 40 quickening, 10 held as a
+# chord, 30 slowing, 10 held as a rhythm.
+let loop = t mod 90
+let up = clamp(loop / 40, 0, 1)
+let down = clamp((loop - 50) / 30, 0, 1)
+def ease(u): u * u * (3 - 2 * u)
+let octaves = 6.78 * (ease(up) - ease(down))    # log2(55 / 0.5)
+let bar = 0.5 * exp(octaves * 0.6931)            # bars a second
+
+# The ratio, from the buttons; three against two to start.
+$a = 3
+$b = 2
+$a = if midi_trig(39) > 0 then 2 else if midi_trig(36) > 0 then 3 else if midi_trig(37) > 0 then 4 else if midi_trig(38) > 0 then 5 else $a
+$b = if midi_trig(39) > 0 then 1 else if midi_trig(36) > 0 then 2 else if midi_trig(37) > 0 then 3 else if midi_trig(38) > 0 then 4 else $b
+
+# Each voice keeps its own count of turns, so a change of speed or of
+# ratio never jumps. Once it is a chord the right runs a tenth of a
+# turn a second ahead, so the closed figure turns slowly; while it is a
+# rhythm the two stay locked.
+$pa = 0.0
+$pb = 0.0
+$pa = $pa + $a * bar * dt
+$pb = $pb + ($b * bar + 0.1 * clamp((bar - 20) / 20, 0, 1)) * dt
+
+# A tick each time a voice comes round: a burst of noise 1.5 ms long.
+# Past 20 bars a second they have fused into a buzz, and they fade
+# out by 40, leaving the voices' own tones.
+def tick(turns, rate):
+  let since = (turns mod 1) / rate
+  noise() * exp(0 - since * 700)
+let ticks = clamp(2 - bar / 20, 0, 1)
+let left = cos(TAU * $pa) * 0.7 + tick($pa, $a * bar) * 0.35 * ticks
+let right = cos(TAU * $pb) * 0.7 + tick($pb, $b * bar) * 0.35 * ticks
+
+[left, right] * 0.75 |> tanh

@@ -1,0 +1,68 @@
+# harmonograph: the Victorian drawing machine, struck like a bell. Three
+# pendulums swing at audio rates and the beam draws what they draw.
+#
+# A harmonograph hangs a pen from one pendulum swinging left and right
+# and another swinging to and fro, sometimes with a third turning the
+# paper round; the pen draws their sum, a Lissajous figure that spirals
+# in as the swings die away, and because the pendulums are never
+# quite in tune each lap lands a little beside the last, so the lines
+# weave into a lattice (Anthony Ashton, Harmonograph: a visual guide
+# to the mathematics of music, Wooden Books, 2003). Here the pendulums
+# swing hundreds of times a second, so you hear them too: the left one
+# the root, the to-and-fro one the interval over it, the table a third
+# voice under them, and the slight mistuning that weaves the lines is
+# heard as the slow beat of a bell.
+#
+# Each pendulum is a spin that slows: a pair turning at its pitch and
+# shrinking a little every sample. Striking one pushes it, a short
+# shove over a couple of milliseconds, so the beam never jumps; the
+# harder it already swings, the less a push adds.
+#   Y   strike the left-right pendulum
+#   A   strike the to-and-fro pendulum
+#   B   spin the table
+#   X   strike all three: a whole drawing
+# The d-pad: up and down choose the interval between the two
+# pendulums, the figure's shape: unison, octave, fifth, fourth, third
+# (1, 2, 3/2, 4/3, 5/4). Left and right set how far out of tune they
+# are, and so how fast the lines weave: a whisker (0.3 Hz), a little
+# (1), more (2.5), a lot (6).
+#
+#   make tools/pad tools/scope
+#   tools/pad --notes &                                 # the gamepad, every key a note
+#   ./aither patches/harmonograph.aither | tools/scope | tools/play hw:rockchipes8388c 20
+
+let root = 110.0                                 # A2: the left-right pendulum
+let ratios = [1, 2, 1.5, 1.3333, 1.25]
+let weaves = [0.3, 1, 2.5, 6]
+
+$shape = 2
+$shape = clamp($shape + midi_trig(40) - midi_trig(41), 0, 4)
+$weave = 1
+$weave = clamp($weave + midi_trig(43) - midi_trig(42), 0, 3)
+let w = weaves[$weave]
+
+# A pendulum: a pair turning at f Hz, losing `loss` of its size a
+# second, shoved sideways by `push` (the shove is a velocity, so its
+# quarter turn ahead of where it is).
+def pendulum(f, loss, push, start):
+  $z = start
+  $z = rotate($z, TAU * f * dt) * (1 - loss * dt)
+  $z = $z + [0, push * dt * 900 * max(1 - amplitude($z), 0)]
+  $z
+
+# A strike: a shove that dies away over a couple of milliseconds.
+def strike(hit):
+  $s = 0.0
+  $s = $s * (1 - dt * 500) + hit
+  $s
+
+let all = midi_trig(38)
+let px = strike(midi_trig(39) + all)
+let py = strike(midi_trig(36) + all)
+let pr = strike(midi_trig(37) + all)
+
+let [x, _] = pendulum(root, 0.2, px, [0.8, 0])
+let [y, _] = pendulum(root * ratios[$shape] + w, 0.25, py, [0, 0.8])
+let table = pendulum(root / 2 - w / 2, 0.18, pr, [0.5, 0])
+
+([x, y] + table * 0.6) * 0.55 |> tanh
