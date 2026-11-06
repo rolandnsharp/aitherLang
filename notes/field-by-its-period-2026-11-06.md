@@ -14,8 +14,12 @@ order held at 0.05 and the other passed +18 dBFS inside 4 s. So a block's
 laws are one system: they step together, whatever their order, and a field
 whose neighbours a law reads goes last, force before motion. x and v read
 each other, so reads alone can't order them; it is the neighbours that
-tell which is which. A pair both read through neighbours, as E and B
-would be, falls back on the order declared, and is untested. A push is
+tell which is which. A pair both read through neighbours, as V and I are,
+can't be ordered at all: a sweep's stores show at its end, so stepped
+together they blew up inside 2 s, and the order declared made no
+difference. So `slope($i)` makes a pair, stepped in place, the second a
+place behind the first, as a Yee grid staggers: bounded with no loss, and
+R = G keeps a pulse's shape (`patches/heaviside_line.aither`). A push is
 `$v'[p] += force`, a source: it was always a rate at a point, sized as a
 delta function, and `$v[p] = force` hid that. An `at(p)` term inside the
 law was turned down: it puts a where in the law, and only works by being

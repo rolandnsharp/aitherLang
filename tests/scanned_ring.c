@@ -144,6 +144,45 @@ TEST(shaped_source_has_area_one) {
   printf("  area 1 to within %.2e, widths 0 to 2\n", worst);
 }
 
+/* Heaviside's line. A pair stays bounded with no loss, either way declared;
+ * R = G keeps a pulse's shape as it dies; R alone smears it. */
+static double pulse_width(const char* first, const char* second, double r, double g, double rounds, double* peak) {
+  char src[640], err[4096];
+  snprintf(src, sizeof src,
+    "%s\n%s\n"
+    "$v' = -slope($i) - $v * %g\n"
+    "$i' = -slope($v) - $i * %g\n"
+    "$v'[gauss(0.3, 0.03)] += if t < 0.002 then 8 else 0\n"
+    "$v[0.55]\n", first, second, g, r);
+  Rendered o = {0};
+  if (render_src(src, rounds + 0.25, 48000, &o, err, sizeof err)) { CHECK(0, "doesn't render: %s", err); return -1; }
+  long from = (long)((rounds - 0.25) * 48000), to = o.n;
+  double top = 0;
+  for (long i = from; i < to; i++) top = fmax(top, fabs(o.left[i]));
+  long over = 0;
+  for (long i = from; i < to; i++) if (fabs(o.left[i]) > top / 2) over++;
+  *peak = top;
+  rendered_free(&o);
+  return (double)over / 48000;
+}
+TEST(heavisides_line) {
+  const char* v = "$v = ring(period = 1)";
+  const char* i = "$i = ring(period = 1)";
+  double p0, p1, pd, pr;
+  double first = pulse_width(v, i, 0, 0, 0.25, &p0);
+  double lossless = pulse_width(v, i, 0, 0, 4.25, &p1);
+  double swapped_peak;
+  double swapped = pulse_width(i, v, 0, 0, 4.25, &swapped_peak);
+  double balanced = pulse_width(v, i, 2, 2, 4.25, &pd);
+  double resistive = pulse_width(v, i, 4, 0, 4.25, &pr);
+  printf("  a pulse half-height wide: %.3f s at first; after 4 rounds %.3f, declared the other way %.3f, R = G %.3f, R alone %.3f\n",
+         first, lossless, swapped, balanced, resistive);
+  CHECK(p1 > 0.3 * p0 && p1 < 1.5 * p0, "no loss: %g after %g", p1, p0);
+  CHECK(fabs(swapped_peak / p1 - 1) < 0.2, "declared the other way %g against %g", swapped_peak, p1);
+  CHECK(fabs(balanced / lossless - 1) < 0.15, "R = G widened it: %g against %g", balanced, lossless);
+  CHECK(resistive > 1.5 * balanced, "R alone didn't smear it: %g against %g", resistive, balanced);
+}
+
 TEST(ring_keeps_its_period) {
   const int rates[] = {24000, 48000, 96000};
   const double period = 0.8;

@@ -1192,6 +1192,10 @@ clock.
 `patches/aether_ring.aither` is the same with a direction at each place,
 so a squeeze and a twist travel at their own speeds, from one product.
 
+`patches/heaviside_line.aither` is a pair, voltage and current, each changed
+by the other's `slope`: Heaviside's telegraph line. Its two losses in balance
+keep a pulse's shape as it dies, so every harmonic fades together.
+
 `patches/phasor_ring.aither` is that ring: apart, a swarm; coupled, one
 pitch with a travelling wave of phase round it. A medium with ends needs
 no `mod`: past either end reads 0, which is a string with fixed

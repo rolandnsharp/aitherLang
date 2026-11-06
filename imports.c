@@ -191,9 +191,11 @@ typedef struct {
   int law;                               /* it has a law */
   int stored;                            /* it has a line `$x = e` */
   const Node* pushed;                    /* where it was first pushed, or NULL */
+  void* reads;                           /* the field its law reads through `slope`, or NULL */
+  int trails;                            /* of a pair: it steps a place behind the other */
 } Field;
 
-typedef struct { Arena* a; Field* f; int n; int made; int in_ring; char* err; int errlen; int failed; int in_def; int own_gauss; } Fields;
+typedef struct { Arena* a; Field* f; int n; int made; int in_ring; char* err; int errlen; int failed; int in_def; int own_gauss; Field* law; const Node* pair_at; } Fields;
 
 static Node* fnode(Fields* fs, NodeKind k, const char* str, const Node* at) {
   Node* n = arena_alloc(fs->a, sizeof(Node));
@@ -313,6 +315,16 @@ static Node* field_expr(Fields* fs, Node* n) {
   if (n->kind == nkCall) {
     if (!strcmp(n->str, "len")) return n;
     Field* f = n->nkids == 1 ? bare_field(fs, n->kids[0]) : NULL;
+    if (f && !strcmp(n->str, "slope")) {                      /* of a pair: where they meet, a half place between */
+      if (!fs->law) {
+        field_fail(fs, n, "`slope($x)` is a law's word: it says how one of a pair changes the other");
+        return n;
+      }
+      Node* word = f->trails                                  /* the leader reads behind it, the trailer the fresh place ahead */
+        ? fcall(fs, "slope_behind", n, 2, (Node*[]){n->kids[0], fident(fs, fs->law->place, n)})
+        : fbin(fs, "-", fident(fs, f->now, n), fidx(fs, f->name, fident(fs, fs->law->place, n), n), n);
+      return fbin(fs, "*", word, f->size, n);
+    }
     if (f && !strcmp(n->str, "concentration"))
       return at_speed(fs, f, fcall(fs, "concentration", n, 2, (Node*[]){n->kids[0], fident(fs, f->place, n)}), n);
     Node* in = n->nkids == 1 ? n->kids[0] : NULL;
@@ -352,14 +364,17 @@ static Field* law_field(Fields* fs, const Node* s) { return rate_of(fs, s->str);
 static void find_reached(Fields* fs, const Node* n, char* reached) {
   if (!n) return;
   if (n->kind == nkCall && n->nkids == 1 && bare_field(fs, n->kids[0]) &&
-      (!strcmp(n->str, "concentration") || !strcmp(n->str, "convergence") || !strcmp(n->str, "curl")))
+      (!strcmp(n->str, "concentration") || !strcmp(n->str, "convergence") || !strcmp(n->str, "curl") ||
+       !strcmp(n->str, "slope")))
     reached[bare_field(fs, n->kids[0]) - fs->f] = 1;
   for (int i = 0; i < n->nkids; i++) find_reached(fs, n->kids[i], reached);
 }
 /* A block's laws are one system, so the order they're written in means
  * nothing: they are stepped together, where the last of them stands. What
  * moves on what its neighbours do is stepped last, on the rates just found,
- * as force comes before motion; the rest in the order they were declared. */
+ * as force comes before motion. A pair read through `slope` staggers: the
+ * one declared first steps at this place, the other a place behind it, so
+ * each sees the other fresh on both sides. */
 static void step_laws(Fields* fs, Node** in, int n, Kids* out) {
   char* reached = arena_alloc(fs->a, fs->n + 1);
   memset(reached, 0, fs->n + 1);
@@ -372,8 +387,10 @@ static void step_laws(Fields* fs, Node** in, int n, Kids* out) {
         if (!is_law(in[i]) || law_field(fs, in[i]) != f) continue;
         Node* s = in[i];
         fs->in_ring = 1;
+        fs->law = f;
         Node* change = fbin(fs, "*", field_expr(fs, s->kids[0]), fident(fs, f->step, s), s);
         fs->in_ring = 0;
+        fs->law = NULL;
         field_store(fs, f, s, fbin(fs, "+", field_expr(fs, fident(fs, f->name, s)), change, s), out);
       }
     }
@@ -471,14 +488,19 @@ static void field_stmts(Fields* fs, Node** in, int n, Kids* out, int top) {
       for (int k = 0; k < c->nkids; k++) if (c->kids[k]->kind == nkNamedArg) named = 1;
       if (f->period) {                                       /* the engine's places, stepped once through */
         c->str = "array";
-        fkids(fs, c, 3, (Node*[]){f->size, f->init ? f->init : fnum(fs, 0, c), f->size});
+        /* A sweep's stores show at its end, so a law sees its neighbours as a
+         * sweep left them; a pair steps in place, each seeing the other fresh. */
+        fkids(fs, c, f->reads ? 2 : 3, (Node*[]){f->size, f->init ? f->init : fnum(fs, 0, c), f->size});
       } else if (!named && c->nkids < 3) {
         Node* init = c->nkids == 2 ? c->kids[1] : fnum(fs, 0, c);
         fkids(fs, c, 3, (Node*[]){c->kids[0], init, c->kids[0]});
       }
       kid(out, s);
       Node* place = fnode(fs, nkLet, f->place, s);
-      fkids(fs, place, 1, (Node*[]){fcall(fs, "pixel_index", s, 2, (Node*[]){f->size, fnum(fs, 1, s)})});
+      Node* index = fcall(fs, "pixel_index", s, 2, (Node*[]){f->size, fnum(fs, 1, s)});
+      if (f->trails)
+        index = fbin(fs, "mod", fbin(fs, "+", index, fbin(fs, "-", f->size, fnum(fs, 1, s), s), s), f->size, s);
+      fkids(fs, place, 1, (Node*[]){index});
       kid(out, place);
       if (f->period) {
         Node* rate = fnode(fs, nkLet, f->rate, s);           /* N^2: a wave goes round in one round */
@@ -548,6 +570,40 @@ static void find_pushes(Fields* fs, const Node* n) {
   for (int i = 0; i < n->nkids; i++) find_pushes(fs, n->kids[i]);
 }
 
+/* What a law reads through `slope`. */
+static void find_slopes(Fields* fs, const Node* n, Field* law) {
+  if (!n || fs->failed) return;
+  if (n->kind == nkCall && !strcmp(n->str, "slope") && n->nkids == 1 && bare_field(fs, n->kids[0])) {
+    Field* f = bare_field(fs, n->kids[0]);
+    if (law->reads && law->reads != f) field_fail(fs, n, "`slope` joins two fields: a law reads the slope of one partner");
+    law->reads = f;
+  }
+  for (int i = 0; i < n->nkids; i++) find_slopes(fs, n->kids[i], law);
+}
+static int same_tree(const Node* a, const Node* b) {
+  if (!a || !b) return a == b;
+  if (a->kind != b->kind || a->num != b->num || strcmp(a->str, b->str) || a->nkids != b->nkids) return 0;
+  for (int i = 0; i < a->nkids; i++) if (!same_tree(a->kids[i], b->kids[i])) return 0;
+  return 1;
+}
+/* Two fields each read through the other's slope are a pair. */
+static void find_pairs(Fields* fs, const Node* at) {
+  for (int i = 0; i < fs->n; i++) {
+    Field* f = &fs->f[i];
+    Field* g = f->reads;
+    if (!g) continue;
+    char why[200];
+    if (g == f || g->reads != f) {
+      snprintf(why, sizeof why, "`slope($%s)` in `$%s'`'s law needs its partner: `$%s' = ... slope($%s) ...`",
+               g->name, f->name, g->name, f->name);
+      field_fail(fs, at, why);
+    } else if (!same_tree(f->period, g->period)) {
+      snprintf(why, sizeof why, "`$%s` and `$%s` are a pair: they share one period", f->name, g->name);
+      field_fail(fs, at, why);
+    } else if (g > f) g->trails = 1;
+  }
+}
+
 /* A law stands in a file's or a play's lines, once a field, for a ring. */
 static void check_laws(Fields* fs, Node* n, int stands, char* said) {
   if (!n || fs->failed) return;
@@ -563,6 +619,8 @@ static void check_laws(Fields* fs, Node* n, int stands, char* said) {
     }
     said[f - fs->f] = 1;
     f->law = 1;
+    find_slopes(fs, n->kids[0], f);
+    if (!fs->pair_at) fs->pair_at = n;
   }
   if (n->kind == nkIdxAssign && n->kids[0]->kind == nkIdent && primed(n->kids[0]->str)) {
     if (!rate_of(fs, n->kids[0]->str)) field_fail(fs, n, "a rate is of a ring's field: `$x = ring(period = 1)`");
@@ -618,6 +676,7 @@ static int fields_pass(Arena* a, Kids* kids, int from, char* err, int errlen) {
   char* said = arena_alloc(a, fs.n + 1);
   memset(said, 0, fs.n + 1);
   for (int i = from; i < kids->n; i++) check_laws(&fs, kids->v[i], 1, said);
+  if (fs.pair_at) find_pairs(&fs, fs.pair_at);
   if (fs.failed) return -1;
   if (!fs.n) return 0;
   for (int i = from; i < kids->n; i++) find_pushes(&fs, kids->v[i]);

@@ -1,0 +1,67 @@
+# heaviside_line: one pulse going round a telegraph line, and the balance
+# that keeps its shape (notes/field-by-its-period-2026-11-06.md).
+#
+# Heaviside's telegrapher's equations: voltage and current along a line,
+# each changed by the other's slope. A pulse sent down it travels, and on a
+# long line loses two ways: through the wire's resistance, and leaking
+# across its insulation. Each alone smears a pulse into a long tail, which
+# is what made long cables so slow. Balanced, the two cancel: the pulse
+# dies, but keeps its shape.
+#
+# Here the line closes into a ring, and its voltage is the size of a turning
+# value, read round at the note as in scanned_ring: a circle at rest, and
+# a pure tone. A strike pushes voltage and current together, so one pulse
+# goes one way: a single bump going round the circle. Heard, the bump is
+# the sound's harmonics. Balanced they all fade together, the tenth staying
+# 15 dB under the first, within a dB, down through 100 dB; out of balance
+# the low ones hang on, and it goes 6 dB duller as it dies. The losses are
+# strong, as they must be: it takes a line that loses most of a pulse in a
+# round to smear one, so a pulse goes a good part of the way, not all of it.
+#
+# The balance drifts by itself over 40 s, either side and through it.
+#
+#   ./aither patches/heaviside_line.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
+#
+# The gamepad (tools/pad): A sends a pulse one way, B the other; hold A and
+# press left and right for the note (CC 21), up and down to hold the balance
+# (CC 20: full is exactly balanced); hold B and press up and down for how
+# much the line loses (CC 22).
+#   tools/pad & AITHER_MIDI=aither-pad ./aither patches/heaviside_line.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
+
+# ---------------------------------------------------------------- the line
+
+let loss = 5 + 5 * midi_cc(22)                           # what it loses, a round
+let balance = cos(TAU * phasor(1 / 40)) * 0.95 * (1 - midi_cc(20))
+let resist = loss * (1 + balance)
+let leak = loss * (1 - balance)
+
+$v = ring(period = 4)                                      # a pulse goes round in 4 s
+$i = ring(period = 4)
+
+$v' = -slope($i) - $v * leak
+$i' = -slope($v) - $i * resist
+
+# ---------------------------------------------------------------- the pulse
+
+let golden = 0.381966
+let own = phasor(1 / 6) * 6                                # it sends one itself every 6 s
+let pad_a = midi_trig(36)
+let pad_b = midi_trig(37)
+let forward = min(own, since(pad_a))
+let back = since(pad_b)
+$where = 0.0
+$where = ($where + (pad_a + pad_b) * golden) mod 1
+
+let stroke = 0.003                                         # how long a blow takes
+let way = if back < forward then -1 else 1
+let landed = if own < stroke then floor(sweep / 6) * golden else $where
+let blow = if min(forward, back) < stroke then 0.06 / stroke else 0
+$v'[gauss(landed, 0.03)] += blow
+$i'[gauss(landed, 0.03)] += blow * way
+
+# ---------------------------------------------------------------- reading
+
+# Round the line at the note, its size the voltage: a circle, bent where
+# the pulse is.
+let note = 110 * pow(2, floor(midi_cc(21) * 25) / 12)
+spin(note) * (0.45 + $v[phasor(note)])

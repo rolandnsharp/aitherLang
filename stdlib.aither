@@ -340,6 +340,9 @@ def field_gauss(u, w, n):
 # giving the sign. Things flow away from it.
 def concentration(f, at): -(f[(at + len(f) - 1) mod len(f)] + f[(at + 1) mod len(f)] - f[at] * 2)
 
+# Of one of a pair, stepping staggered: the step from behind this place.
+def slope_behind(f, at): f[at] - f[(at + len(f) - 1) mod len(f)]
+
 # Hamilton's S and V: the scalar part and the vector part.
 def scalar(q):
   let ((w, _), (_, _)) = q

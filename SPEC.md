@@ -742,8 +742,22 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   them stepped. The engine steps a field whose neighbours a law reads
   last, on the rates just found: force before motion. By hand one order
   of a wave's two lines rings and the other blows up; a law can't get this
-  wrong. Fields it can't tell apart, both read through their neighbours,
-  go in the order they were declared.
+  wrong.
+- **`slope($i)` makes a pair**: two fields, each changed by the other's
+  slope, as voltage and current on a line are, and Heaviside's equations
+  are the laws themselves:
+
+  ```
+  $v' = -slope($i) - $v * leak
+  $i' = -slope($v) - $i * resist
+  ```
+
+  A pair steps staggered, the second declared a place behind the first, so
+  each sees the other fresh on both sides; stepped together they blow up.
+  Declared the other way round it is the same line. A pair shares one
+  period, a law reads one partner, and a slope with no partner, or outside a
+  law, is an error. A sharp pulse slowly widens as it travels, by about a
+  third in 4 rounds: that is the grain, not the law.
 - A field steps **one place a sample**, as `tv` draws a pixel, so it costs
   one place. Its stepping shows as a buzz at `sr / N`, about 40 dB under
   the note at 128 places. It suits a field that moves slowly against the
@@ -758,6 +772,7 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   | `concentration($x)`           | how much this place stands out from its neighbours: nabla twice, `i * i = -1` giving the sign |
   | `slope(convergence($d))`      | of a field of directions: the slope of its squeeze, the scalar part of nabla |
   | `curl(curl($d))`              | ... the curl of its twist, the vector part |
+  | `slope($i)`                   | of one of a pair: how it changes along the ring, a half place from here |
 
   Along a line nabla is Hamilton's `i` times a difference, a step ahead
   and a step behind. Two speeds are one period and a ratio: `curl(curl($d))

@@ -397,3 +397,57 @@ $x[0]
 # expect: 3
 def gauss(a, b): a + b
 gauss(1, 2)
+
+# --- `slope` joins a pair: a push on one travels by way of the other, at a round a round
+# expect at 12000: 1
+$v = ring(period = 1)
+$i = ring(period = 1)
+$v' = -slope($i)
+$i' = -slope($v)
+$v'[gauss(0.25, 0.02)] += if t < 0.001 then 1000 else 0
+if abs($v[0.5]) > abs($v[0.75]) then 1 else 0
+
+# --- a slope needs its partner
+# error: needs its partner
+$v = ring(period = 1)
+$i = ring(period = 1)
+$v' = -slope($i)
+$i' = 0
+$v[0]
+
+# --- ... not itself
+# error: needs its partner
+$v = ring(period = 1)
+$v' = -slope($v)
+$v[0]
+
+# --- a law reads one partner
+# error: `slope` joins two fields
+$a = ring(period = 1)
+$b = ring(period = 1)
+$c = ring(period = 1)
+$a' = slope($b) + slope($c)
+$b' = slope($a)
+$c' = slope($a)
+$a[0]
+
+# --- a pair shares one period
+# error: share one period
+$v = ring(period = 1)
+$i = ring(period = 2)
+$v' = -slope($i)
+$i' = -slope($v)
+$v[0]
+
+# --- `slope` is a law's word
+# error: is a law's word
+$v = ring(period = 1)
+$i = ring(period = 1)
+$v' = -slope($i)
+$i' = -slope($v)
+slope($v)
+
+# --- a patch's own slope, of a number, is its own
+# expect: 2
+def slope(a): a * 2
+slope(1)
