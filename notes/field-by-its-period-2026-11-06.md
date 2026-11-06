@@ -19,7 +19,13 @@ would be, falls back on the order declared, and is untested. A push is
 `$v'[p] += force`, a source: it was always a rate at a point, sized as a
 delta function, and `$v[p] = force` hid that. An `at(p)` term inside the
 law was turned down: it puts a where in the law, and only works by being
-lifted back out, as the ring reaches a place once a round;
+lifted back out, as the ring reaches a place once a round. A source with
+a shape is `$v'[gauss(p, width)] += force`, area 1 and standard deviation
+`width`, replacing the write head that swept a point across a stretch. The
+ring only visits a place once a sweep, so added on visits a 3 ms strike was
+2% to 146% off the swept one, by the rate; with the force totalled between
+visits, 0.5% to 3.4%, and a 0.5 ms strike within 9%. `around` was the
+first name, and too vague;
 3, one period and a ratio; 5, `ring` for now. `scanned_ring`'s sound
 matched at every check. Still open: a fast fine field, which needs more
 than one place a sample, and whether the engine's step should be better

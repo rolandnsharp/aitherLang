@@ -1180,6 +1180,7 @@ $v = ring(period = 1.66)                       # as a line on [l, r] is
 $v' = -concentration($x) - $v * loss
 $x' = $v
 $v'[where] += force                            # a source, at a point
+$v'[gauss(where, 0.02)] += force               # ... or with a shape: the same blow, spread
 let height = $x[phasor(note)]                  # read at a point
 ```
 

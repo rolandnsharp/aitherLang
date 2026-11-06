@@ -88,6 +88,34 @@ TEST(laws_have_no_order) {
   rendered_free(&r[1]);
 }
 
+/* A shaped strike is the same strike at any rate, however few places it
+ * crosses: the force is caught between visits. */
+TEST(shaped_strike_lands_whole) {
+  const int rates[] = {22050, 48000, 96000};
+  const char* src =
+    "$x = ring(period = 1.66)\n"
+    "$v = ring(period = 1.66)\n"
+    "$v' = -concentration($x) * 5 - $x * 200 - $v * 0.68\n"
+    "$x' = $v\n"
+    "$v'[gauss(0.4, 0.022)] += if t < 0.002 then 660 else 0\n"
+    "$x[0.37]\n";
+  double peak[3];
+  for (int k = 0; k < 3; k++) {
+    Rendered r = {0};
+    char err[4096];
+    int rc = render_src(src, 1.0, rates[k], &r, err, sizeof err);
+    CHECK(rc == 0, "doesn't render at %d: %s", rates[k], err);
+    if (rc) return;
+    peak[k] = 0;
+    for (long i = 0; i < r.n; i++) peak[k] = fmax(peak[k], fabs(r.left[i]));
+    printf("  at %d Hz a 2 ms strike peaks at %.4f\n", rates[k], peak[k]);
+    rendered_free(&r);
+  }
+  CHECK(peak[1] > 0.01, "nothing arrived: %g", peak[1]);
+  for (int k = 0; k < 3; k++)
+    CHECK(fabs(peak[k] / peak[1] - 1) < 0.1, "at %d Hz it peaked at %g, at 48000 %g", rates[k], peak[k], peak[1]);
+}
+
 TEST(ring_keeps_its_period) {
   const int rates[] = {24000, 48000, 96000};
   const double period = 0.8;

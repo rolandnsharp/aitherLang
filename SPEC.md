@@ -767,8 +767,19 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   adds to v's rate at that point, the term F δ(s − p) on the end of the
   equation, kept out of the law as a where belongs at the edge. It lands
   at the nearest place when the field reaches it, and is sized as a delta
-  should be, so a head sweeping a stretch lands the same whatever the
-  places. Sources sum, in any order; `-=` takes away. `$v'[p] = ...` is an
+  should be. Sources sum, in any order; `-=` takes away.
+- **`$v'[gauss(p, width)] += force` is a source with a shape**: a Gaussian
+  of area 1 and standard deviation `width`, in rounds, wrapping round the
+  ring. Area 1 means a wider blow is the same blow, spread, and the point is
+  its limit: narrower than the places can show, it is half a place wide, so
+  `width` of 0 is a point and not a fault. The ring reaches a place once a
+  sweep, so the engine keeps the running total of the force and gives each
+  place all that came since it last passed: a blow shorter than a sweep
+  lands whole, at any rate, whichever side of the law the line stands. A
+  centre moving fast against a sweep is smeared. `gauss` means this only in
+  a source's brackets; anywhere else it is an error, unless the patch has
+  its own `gauss`.
+- The rest of `[ ]` on a ring: `$v'[p] = ...` is an
   error, as it would claim to replace the law there, and so are `$v[p] =
   ...` and `$v[p] += ...` on a ring, a source on a field with no law, and
   reading one. This is the one way `[ ]` differs on a field: p is how far

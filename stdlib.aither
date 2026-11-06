@@ -313,6 +313,13 @@ def field_at(f, p):
 # The place nearest p.
 def field_place(p, n): floor((p - floor(p)) * n + 0.5) mod n
 
+# A Gaussian of area 1 round the ring, at u from its centre: no narrower
+# than the places can show.
+def field_gauss(u, w, n):
+  let d = u - floor(u + 0.5)
+  let s = max(w, 0.5 / n)
+  exp(-d * d / (2 * s * s)) / (s * sqrt(TAU))
+
 # How much this place stands out from its neighbours: nabla twice, i i = -1
 # giving the sign. Things flow away from it.
 def concentration(f, at): -(f[(at + len(f) - 1) mod len(f)] + f[(at + 1) mod len(f)] - f[at] * 2)

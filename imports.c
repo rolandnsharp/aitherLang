@@ -193,7 +193,7 @@ typedef struct {
   const Node* pushed;                    /* where it was first pushed, or NULL */
 } Field;
 
-typedef struct { Arena* a; Field* f; int n; int made; int in_ring; char* err; int errlen; int failed; int in_def; } Fields;
+typedef struct { Arena* a; Field* f; int n; int made; int in_ring; char* err; int errlen; int failed; int in_def; int own_gauss; } Fields;
 
 static Node* fnode(Fields* fs, NodeKind k, const char* str, const Node* at) {
   Node* n = arena_alloc(fs->a, sizeof(Node));
@@ -379,6 +379,63 @@ static void step_laws(Fields* fs, Node** in, int n, Kids* out) {
     }
 }
 
+/* `$v'[gauss(p, w)] += force`: a source with a shape. */
+static int is_gauss(Fields* fs, const Node* n) {
+  return !fs->own_gauss && n->kind == nkCall && !strcmp(n->str, "gauss") && n->nkids == 2;
+}
+static int gauss_source(Fields* fs, const Node* s) {
+  if (s->kind != nkIdxAssign || s->kids[0]->kind != nkIdent || !primed(s->kids[0]->str)) return 0;
+  const Node* said = s->kids[2];
+  return rate_of(fs, s->kids[0]->str) && is_gauss(fs, s->kids[1]) && said->kind == nkBinOp && said->num == 1.0 &&
+         (!strcmp(said->str, "+") || !strcmp(said->str, "-"));
+}
+static Node* fstore(Fields* fs, const char* array, Node* at, Node* value, const Node* s) {
+  Node* r = fnode(fs, nkIdxAssign, "", s);
+  fkids(fs, r, 3, (Node*[]){fident(fs, array, s), at, value});
+  return r;
+}
+static const char* flet(Fields* fs, const char* what, const char* name, int k, Node* value, const Node* s, Kids* out) {
+  const char* let = fname(fs, what, name, k);
+  Node* n = fnode(fs, nkLet, let, s);
+  fkids(fs, n, 1, (Node*[]){value});
+  kid(out, n);
+  return let;
+}
+/* The ring reaches each place once a sweep, so a shape can only be laid
+ * down as it does, and a blow shorter than a sweep would miss most of it.
+ * So the source keeps a running total of the force, and each place gets all
+ * that came since the ring last passed, in the shape. It goes on the place
+ * coming next, the same whichever side of the law the line stands. */
+static void shaped_source(Fields* fs, const Node* s, Kids* out) {
+  Field* f = rate_of(fs, s->kids[0]->str);
+  Node* shape = s->kids[1];
+  Node* said = s->kids[2];
+  int k = fs->made++;
+  Node* force = field_expr(fs, said->kids[1]);
+  if (!strcmp(said->str, "-")) force = fbin(fs, "*", force, fnum(fs, -1, s), s);
+  const char* total = fname(fs, "total", f->name, k);
+  const char* then = fname(fs, "then", f->name, k);
+  Node* zero = f->init ? fbin(fs, "*", f->init, fnum(fs, 0, s), s) : fnum(fs, 0, s);
+  Node* n = fnode(fs, nkVar, total, s);
+  fkids(fs, n, 1, (Node*[]){zero});
+  kid(out, n);
+  n = fnode(fs, nkVar, then, s);
+  fkids(fs, n, 1, (Node*[]){fcall(fs, "array", s, 2, (Node*[]){f->size, zero})});
+  kid(out, n);
+  n = fnode(fs, nkAssign, total, s);
+  fkids(fs, n, 1, (Node*[]){fbin(fs, "+", fident(fs, total, s), fbin(fs, "*", force, fident(fs, "dt", s), s), s)});
+  kid(out, n);
+  const char* caught = flet(fs, "caught", f->name, k,
+    fbin(fs, "/", fbin(fs, "-", fident(fs, total, s), fidx(fs, then, fident(fs, f->place, s), s), s), f->period, s), s, out);
+  kid(out, fstore(fs, then, fident(fs, f->place, s), fident(fs, total, s), s));
+  const char* next = flet(fs, "next", f->name, k,
+    fbin(fs, "mod", fbin(fs, "+", fident(fs, f->place, s), fnum(fs, 1, s), s), f->size, s), s, out);
+  Node* from = fbin(fs, "-", fbin(fs, "/", fident(fs, next, s), f->size, s), field_expr(fs, shape->kids[0]), s);
+  Node* laid = fbin(fs, "*", fident(fs, caught, s),
+                    fcall(fs, "field_gauss", s, 3, (Node*[]){from, field_expr(fs, shape->kids[1]), f->size}), s);
+  kid(out, fstore(fs, f->in, fident(fs, next, s), fbin(fs, "+", fidx(fs, f->in, fident(fs, next, s), s), laid, s), s));
+}
+
 /* A list of statements, as the lines they stand for. */
 static void field_stmts(Fields* fs, Node** in, int n, Kids* out, int top) {
   int laws_end = -1;
@@ -389,6 +446,7 @@ static void field_stmts(Fields* fs, Node** in, int n, Kids* out, int top) {
       if (i == laws_end) step_laws(fs, in, n, out);
       continue;
     }
+    if (gauss_source(fs, s)) { shaped_source(fs, s, out); continue; }
     Field* f = (s->kind == nkVar || s->kind == nkAssign) ? field_named(fs, s->str) : NULL;
     if (f && make_array(s->kids[0])) {                       /* its declaration */
       Node* c = s->kids[0];
@@ -493,6 +551,13 @@ static void check_laws(Fields* fs, Node* n, int stands, char* said) {
     if (!rate_of(fs, n->kids[0]->str)) field_fail(fs, n, "a rate is of a ring's field: `$x = ring(period = 1)`");
     else if (fs->in_def) field_fail(fs, n, "a source belongs in the file's lines or a play's, not in a def");
   }
+  if (is_gauss(fs, n)) field_fail(fs, n, "`gauss(p, width)` is a shape: it belongs in a source's brackets, `$v'[gauss(p, width)] += force`");
+  if (n->kind == nkIdxAssign && n->kids[0]->kind == nkIdent && primed(n->kids[0]->str) && is_gauss(fs, n->kids[1])) {
+    for (int i = 0; i < n->kids[1]->nkids; i++) check_laws(fs, n->kids[1]->kids[i], 0, said);   /* the one place it stands */
+    const Node* v = n->kids[2];
+    check_laws(fs, v->kind == nkBinOp && v->num == 1.0 ? v->kids[1] : n->kids[2], 0, said);
+    return;
+  }
   if (n->kind == nkDef) {
     fs->in_def++;
     for (int i = 0; i < n->nkids; i++) check_laws(fs, n->kids[i], 0, said);
@@ -511,6 +576,7 @@ static void check_laws(Fields* fs, Node* n, int stands, char* said) {
 static int fields_pass(Arena* a, Kids* kids, int from, char* err, int errlen) {
   Fields fs = {a, NULL, 0, 0, 0, err, errlen, 0};
   fs.f = arena_alloc(a, (kids->n + 1) * sizeof(Field));
+  for (int i = from; i < kids->n; i++) if (kids->v[i]->kind == nkDef && !strcmp(kids->v[i]->str, "gauss")) fs.own_gauss = 1;
   for (int i = from; i < kids->n; i++) {                     /* arrays at the file's level */
     Node* s = kids->v[i];
     if (s->kind == nkVar && make_array(s->kids[0]) && s->kids[0]->nkids >= 1 && !field_named(&fs, s->str)) {

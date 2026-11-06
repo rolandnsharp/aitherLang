@@ -275,3 +275,77 @@ def f(a):
   $x'[0.5] += a
   a
 f(1)
+
+# --- a shaped source: a Gaussian of area 1, so a blow of area 1 stands 1 / (w sqrt(TAU)) high
+# expect at 2000: 7
+$x = ring(period = 1)
+$x' = 0
+$x'[gauss(0.5, 0.05)] += if t < 0.001 then 1000 else 0
+floor($x[0.5])
+
+# --- ... a blow far shorter than a sweep lands whole, all the way across it
+# expect at 2000: 4
+$x = ring(period = 1)
+$x' = 0
+$x'[gauss(0.5, 0.05)] += if t < dt then 48000 else 0
+floor($x[0.55])
+
+# --- ... and nothing lands far from it
+# expect at 2000: 0
+$x = ring(period = 1)
+$x' = 0
+$x'[gauss(0.5, 0.05)] += if t < 0.001 then 1000 else 0
+$x[0.1]
+
+# --- it wraps: a bump on the join shows on both sides
+# expect at 2000: 7
+$x = ring(period = 1)
+$x' = 0
+$x'[gauss(0, 0.05)] += if t < 0.001 then 1000 else 0
+floor($x[0])
+
+# --- `-=` takes away
+# expect at 2000: 0
+$x = ring(period = 1)
+$x' = 0
+$x'[gauss(0.5, 0.05)] += if t < 0.001 then 1000 else 0
+$x'[gauss(0.5, 0.05)] -= if t < 0.001 then 1000 else 0
+$x[0.5]
+
+# --- no narrower than the places: width 0 is a point, not a fault
+# expect at 2000: 1
+$x = ring(period = 1)
+$x' = 0
+$x'[gauss(0.5, 0)] += if t < 0.001 then 1000 else 0
+if $x[0.5] > 10 then 1 else 0
+
+# --- which side of the law it stands doesn't matter
+# expect at 2000: 7
+$x = ring(period = 1)
+$x'[gauss(0.5, 0.05)] += if t < 0.001 then 1000 else 0
+$x' = 0
+floor($x[0.5])
+
+# --- it's a shape, so it isn't a value
+# error: is a shape
+$x = ring(period = 1)
+$x' = 0
+gauss(0.5, 0.1)
+
+# --- ... nor a place to read
+# error: is a shape
+$x = ring(period = 1)
+$x' = 0
+$x[gauss(0.5, 0.1)]
+
+# --- ... and a source adds
+# error: a push adds
+$x = ring(period = 1)
+$x' = 0
+$x'[gauss(0.5, 0.1)] = 1
+$x[0]
+
+# --- a patch's own gauss stays its own
+# expect: 3
+def gauss(a, b): a + b
+gauss(1, 2)

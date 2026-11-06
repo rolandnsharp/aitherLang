@@ -47,8 +47,8 @@ $x' = $v
 
 # A strike is a function of its age (COMPOSING, "How long since"): the
 # ring's own, every 5 s, is the clock's fraction, a pad's is since(). It
-# is a write head sweeping across the ring where it lands, each a golden
-# angle round from the last.
+# lands as a Gaussian, a source with a shape, each a golden angle round
+# from the last.
 let golden = 0.381966
 let own = phasor(1 / 5) * 5
 let pad_a = midi_trig(36)
@@ -61,9 +61,8 @@ $where = ($where + (pad_a + pad_b) * golden) mod 1
 let stroke = 0.003                                         # how long a blow takes
 let age = min(narrow, broad)
 let landed = if own < stroke then floor(sweep / 5) * golden else $where
-let width = if broad < narrow then 0.11 else 0.031         # of the way round
-let head = age / stroke * 2 - 1                            # across the stretch, -1 to 1
-$v'[landed + head * width * 3] += if age < stroke then 4.46 / stroke * exp(-head * head * 9) else 0
+let width = if broad < narrow then 0.078 else 0.022        # of the way round
+$v'[gauss(landed, width)] += if age < stroke then 1.32 / stroke else 0
 
 # ---------------------------------------------------------------- reading
 
