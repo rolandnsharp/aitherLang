@@ -336,3 +336,14 @@ turn(q, i) * 0.5
 let s = sum(3, n => if n < 3 then [[n, 0], [0, 0]] else n)
 let [[w, _], [_, _]] = s
 [w, w]
+
+# --- state read in one play before another writes it: all four numbers start as written
+# expect: 3, 4
+$q = [[1, 2], [3, 4]]
+play a:
+  let [[_, _], [y, z]] = $q
+  [y, z]
+play b:
+  $q = $q * 2
+  0
+a + b * 0
