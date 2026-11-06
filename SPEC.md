@@ -780,10 +780,12 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   place once a sweep, so the engine keeps the running total of the force
   and gives each place all that came since it last passed: a blow shorter
   than a sweep lands whole at any rate, whichever side of the law the line
-  stands, **as long as the centre holds still for a sweep after it.** The
-  shape is laid where the centre is at each visit, so a centre that jumps
-  as a blow ends lands most of it at the new place, and one moving fast
-  against a sweep shears the bump and changes its total. `gauss` means this only in
+  stands. The shape is held as the force stops, so all of a blow lands
+  where it was struck, even if the centre jumps the moment it ends. While
+  force is flowing the shape is laid where the centre is at each visit, so
+  a centre moving fast against a sweep shears the bump and changes its
+  total, and a new blow within a sweep of the last, at a new place, carries
+  what hadn't landed there with it. `gauss` means this only in
   a source's brackets; anywhere else it is an error, unless the patch has
   its own `gauss`.
 - The rest of `[ ]` on a ring: `$v'[p] = ...` is an

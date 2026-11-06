@@ -405,7 +405,9 @@ static const char* flet(Fields* fs, const char* what, const char* name, int k, N
  * down as it does, and a blow shorter than a sweep would miss most of it.
  * So the source keeps a running total of the force, and each place gets all
  * that came since the ring last passed, in the shape. It goes on the place
- * coming next, the same whichever side of the law the line stands. */
+ * coming next, the same whichever side of the law the line stands. The
+ * shape is held as the force stops: what's still to land was struck there,
+ * wherever the centre has gone since. */
 static void shaped_source(Fields* fs, const Node* s, Kids* out) {
   Field* f = rate_of(fs, s->kids[0]->str);
   Node* shape = s->kids[1];
@@ -413,6 +415,21 @@ static void shaped_source(Fields* fs, const Node* s, Kids* out) {
   int k = fs->made++;
   Node* force = field_expr(fs, said->kids[1]);
   if (!strcmp(said->str, "-")) force = fbin(fs, "*", force, fnum(fs, -1, s), s);
+  const char* blow = flet(fs, "blow", f->name, k, force, s, out);
+  const char* striking = flet(fs, "striking", f->name, k,
+    fcall(fs, "field_striking", s, 1, (Node*[]){fident(fs, blow, s)}), s, out);
+  const char* held[2];
+  for (int i = 0; i < 2; i++) {
+    held[i] = fname(fs, i ? "held_width" : "held_centre", f->name, k);
+    Node* v = fnode(fs, nkVar, held[i], s);
+    fkids(fs, v, 1, (Node*[]){fnum(fs, 0, s)});
+    kid(out, v);
+    Node* pick = fnode(fs, nkIf, "", s);
+    fkids(fs, pick, 3, (Node*[]){fident(fs, striking, s), field_expr(fs, shape->kids[i]), fident(fs, held[i], s)});
+    v = fnode(fs, nkAssign, held[i], s);
+    fkids(fs, v, 1, (Node*[]){pick});
+    kid(out, v);
+  }
   const char* total = fname(fs, "total", f->name, k);
   const char* then = fname(fs, "then", f->name, k);
   Node* zero = f->init ? fbin(fs, "*", f->init, fnum(fs, 0, s), s) : fnum(fs, 0, s);
@@ -423,16 +440,16 @@ static void shaped_source(Fields* fs, const Node* s, Kids* out) {
   fkids(fs, n, 1, (Node*[]){fcall(fs, "array", s, 2, (Node*[]){f->size, zero})});
   kid(out, n);
   n = fnode(fs, nkAssign, total, s);
-  fkids(fs, n, 1, (Node*[]){fbin(fs, "+", fident(fs, total, s), fbin(fs, "*", force, fident(fs, "dt", s), s), s)});
+  fkids(fs, n, 1, (Node*[]){fbin(fs, "+", fident(fs, total, s), fbin(fs, "*", fident(fs, blow, s), fident(fs, "dt", s), s), s)});
   kid(out, n);
   const char* caught = flet(fs, "caught", f->name, k,
     fbin(fs, "/", fbin(fs, "-", fident(fs, total, s), fidx(fs, then, fident(fs, f->place, s), s), s), f->period, s), s, out);
   kid(out, fstore(fs, then, fident(fs, f->place, s), fident(fs, total, s), s));
   const char* next = flet(fs, "next", f->name, k,
     fbin(fs, "mod", fbin(fs, "+", fident(fs, f->place, s), fnum(fs, 1, s), s), f->size, s), s, out);
-  Node* from = fbin(fs, "-", fbin(fs, "/", fident(fs, next, s), f->size, s), field_expr(fs, shape->kids[0]), s);
+  Node* from = fbin(fs, "-", fbin(fs, "/", fident(fs, next, s), f->size, s), fident(fs, held[0], s), s);
   Node* laid = fbin(fs, "*", fident(fs, caught, s),
-                    fcall(fs, "field_gauss", s, 3, (Node*[]){from, field_expr(fs, shape->kids[1]), f->size}), s);
+                    fcall(fs, "field_gauss", s, 3, (Node*[]){from, fident(fs, held[1], s), f->size}), s);
   kid(out, fstore(fs, f->in, fident(fs, next, s), fbin(fs, "+", fidx(fs, f->in, fident(fs, next, s), s), laid, s), s));
 }
 

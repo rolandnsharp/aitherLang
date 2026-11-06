@@ -28,9 +28,11 @@ visits, 0.5% to 3.4%, and a 0.5 ms strike within 9%. `around` was the
 first name, and too vague. Sampled, the curve needed a floor, and its total
 ran 1.4% either way with the centre's place; so a place holds the curve's
 integral over its stretch (`erf`), the copies round the ring summed, and
-the total is 1 at any width, with the point its true limit. Still open: a
-centre that jumps as a blow ends, as both rings' `landed` does, lands most
-of it at the new place (reports/Shaped sources in field languages.md);
+the total is 1 at any width, with the point its true limit. The first
+build laid the shape at each visit with the centre as it then stood, so
+when both rings' `landed` jumped as a stroke ended, most of the blow landed
+at the new place (reports/Shaped sources in field languages.md); now the
+shape is held as the force stops;
 3, one period and a ratio; 5, `ring` for now. `scanned_ring`'s sound
 matched at every check. Still open: a fast fine field, which needs more
 than one place a sample, and whether the engine's step should be better

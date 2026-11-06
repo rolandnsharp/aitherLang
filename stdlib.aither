@@ -313,6 +313,9 @@ def field_at(f, p):
 # The place nearest p.
 def field_place(p, n): floor((p - floor(p)) * n + 0.5) mod n
 
+# Whether a force is flowing, a number or a value.
+def field_striking(force): amplitude(force + ((0, 0), (0, 0))) != 0
+
 # What a stretch 2h long at d holds of a Gaussian of area 1, s being its
 # width times sqrt(2).
 def field_cell(d, h, s): 0.5 * (erf((d + h) / s) - erf((d - h) / s))

@@ -350,6 +350,30 @@ $x'[gauss(0.5, 0.05)] += if t < 0.001 then 1000 else 0
 $x' = 0
 floor($x[0.5])
 
+# --- a blow lands where it was struck, though the centre jumps as it ends
+# expect at 2000: 7
+$x = ring(period = 1)
+$x' = 0
+let striking = t < 0.001
+$x'[gauss(if striking then 0.5 else 0.1, 0.05)] += if striking then 1000 else 0
+floor($x[0.5])
+
+# --- ... and nothing lands where the centre went
+# expect at 2000: 0
+$x = ring(period = 1)
+$x' = 0
+let striking = t < 0.001
+$x'[gauss(if striking then 0.5 else 0.1, 0.05)] += if striking then 1000 else 0
+$x[0.1]
+
+# --- a width held the same way
+# expect at 2000: 7
+$x = ring(period = 1)
+$x' = 0
+let striking = t < 0.001
+$x'[gauss(0.5, if striking then 0.05 else 0.3)] += if striking then 1000 else 0
+floor($x[0.5])
+
 # --- it's a shape, so it isn't a value
 # error: is a shape
 $x = ring(period = 1)
