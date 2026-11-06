@@ -67,6 +67,9 @@ typedef struct {
 void  engine_init(const char* stdlib_src);
 /* Run the engine (aither with no command): never returns. */
 void  engine_run(char** files, int nfiles, double seconds);
+/* Plays to start silent, for `aither patch.aither --mute a,b` or `--solo
+ * a,b` (every play but those): commas between, or NULL. Before engine_run. */
+void  engine_start_parts(const char* mute, const char* solo);
 /* A script of MIDI moves for an offline run, played at its samples:
  * NULL, or the error (malloc'd). Before engine_run. */
 char* engine_play_script(const char* path);

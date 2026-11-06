@@ -6,6 +6,9 @@ tools/pad
 tools/scope
 tools/tv
 tools/rate
+tools/fft
+tools/ifft
+tools/add
 *.so
 .DS_Store
 .claude/

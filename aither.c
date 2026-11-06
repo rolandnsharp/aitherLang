@@ -265,6 +265,8 @@ static void usage(void) {
   puts("  aither set.aither | tools/play                 same, with a first voice loaded");
   puts("  aither set.aither 30 > take.raw                offline: 30 s from t=0, then exit");
   puts("  aither set.aither 30 --play moves.txt > take.raw   offline, its keys and knobs played from a script");
+  puts("  aither set.aither --solo trumpet | tools/fft 1024 | ...   start with only these plays heard;");
+  puts("                                                 --mute starts these silent (commas between)");
   puts("  AITHER_RATE=192000 aither fm.aither | sdr-tx   the rate is yours; the reader agrees");
   puts("  arecord -f FLOAT_LE -c 2 -r 48000 | aither fx.aither | tools/play");
   puts("                                                 input() reads stdin when it is a pipe");
@@ -318,10 +320,14 @@ int main(int argc, char** argv) {
     int nf = 0;
     double seconds = 0.0;
     const char* script = NULL;
+    const char* mute = NULL;
+    const char* solo = NULL;
     for (int i = 0; i < n; i++) {
       if (ends_with(a[i], ".aither")) files[nf++] = a[i];
       else if (parse_float(a[i], &x)) seconds = x;
       else if (strcmp(a[i], "--play") == 0 && i + 1 < n) script = a[++i];
+      else if (strcmp(a[i], "--mute") == 0 && i + 1 < n) mute = a[++i];
+      else if (strcmp(a[i], "--solo") == 0 && i + 1 < n) solo = a[++i];
       else {
         usage();
         return 1;
@@ -338,6 +344,7 @@ int main(int argc, char** argv) {
         return 1;
       }
     }
+    engine_start_parts(mute, solo);
     engine_run(files, nf, seconds);
     return 0;
   }

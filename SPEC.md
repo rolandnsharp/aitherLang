@@ -1681,6 +1681,27 @@ what you play is heard one block, the pipe and the card's buffer later
 against a stalled engine (a network stream) asks for it with a bigger
 block: `AITHER_BUFFER=2048` makes the pipe 2048 frames.
 
+A run on the command line can start with only some plays heard, from
+its first sample: `--solo a,b` silences every other play, `--mute a,b`
+silences those, as `solo` and `mute` do (they keep computing, and the
+final line still runs). A name that isn't a play stops the engine. So
+one instrument can go down a pipe of its own:
+
+```
+./aither song.aither --solo horn | tools/fft 1024 \
+  | AITHER_SOCK=/tmp/s.sock ./aither spectral.aither | tools/ifft 1024 | tools/play
+```
+
+`tools/fft N` writes a stream's spectrum as a stream of pairs at the
+same rate, a frame of N / 2 bins every N / 2 samples: pair k is bin k's
+`[re, im]`, and pair 0 is `[bin 0, bin N/2]`, the two that are real. A
+patch reads it through `input()` a bin at a time: `pixel_index(N / 2, 1)`
+is the bin, and an array stepped `every = N / 2` steps once a frame.
+`tools/ifft N` turns it back, the signal N / 2 samples later, whatever
+the engine's block. Such a patch starts with the stream, on the command
+line. `tools/add [--delay M] FILE ...` adds streams in step. See
+notes/spectrum-2026-11-06.md.
+
 An offline run takes its keys and knobs from a script with `--play`:
 
 ```

@@ -1,0 +1,27 @@
+# spectrum_freeze — hold a sound's spectrum and let it go on sounding.
+#
+# This patch hears a spectrum, not a sound: it goes between tools/fft and
+# tools/ifft, with 1024 samples a frame, so input() is a bin at a time, 512
+# bins a frame.
+#
+#   aither song.aither --solo horn | tools/fft 1024 \
+#     | AITHER_SOCK=/tmp/freeze.sock aither patches/spectrum_freeze.aither \
+#     | tools/ifft 1024 | tools/play
+#
+# Knob 20 past half holds the spectrum. A held frame played back as it
+# stands repeats, a buzz at the frame rate; each bin is turned by a new
+# angle every frame instead, so the frame's colour goes on and its pattern
+# in time doesn't. A frame is a row and a bin a pixel, so the array that
+# holds it steps once a frame, as a picture's does.
+
+let frame = 512
+let bin = pixel_index(frame, 1)
+
+$held = array(frame, [0, 0], every = frame)
+
+let frozen = midi_cc(20) > 0.5
+let source = if frozen then $held[bin] else input()
+let turned = rotate(source, TAU * noise())
+
+$held[bin] = turned
+if frozen then turned else input()

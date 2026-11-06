@@ -1827,6 +1827,54 @@ static char* read_line(int fd) {
   return bdone(&b);
 }
 
+static const char* start_mute;
+static const char* start_solo;
+
+void engine_start_parts(const char* mute, const char* solo) {
+  start_mute = mute;
+  start_solo = solo;
+}
+
+static int names(const char* list, const char* name) {
+  size_t n = strlen(name);
+  for (const char* p = list; p && *p;) {
+    const char* e = strchr(p, ',');
+    size_t k = e ? (size_t)(e - p) : strlen(p);
+    if (k == n && !memcmp(p, name, n)) return 1;
+    p = e ? e + 1 : NULL;
+  }
+  return 0;
+}
+
+/* Each name in `list` is a play of some voice, or the engine stops: a
+ * misspelt name must not start a silent stream down a pipe. */
+static void check_named(const char* list, const char* flag) {
+  if (!list) return;
+  char* copy = sdup(list);
+  for (char* save = NULL, *nm = strtok_r(copy, ",", &save); nm; nm = strtok_r(NULL, ",", &save)) {
+    int found = 0;
+    for (int i = 0; i < slot_count && !found; i++) found = find_part(slots[i].voice, nm) >= 0;
+    if (!found) {
+      fprintf(stderr, "aither: %s %s: no play of that name\n", flag, nm);
+      exit(1);
+    }
+  }
+  free(copy);
+}
+
+/* --mute and --solo, from the first sample. */
+static void apply_start_parts(void) {
+  check_named(start_mute, "--mute");
+  check_named(start_solo, "--solo");
+  for (int i = 0; i < slot_count; i++) {
+    Voice* v = slots[i].voice;
+    mute_named(v, start_mute, 1, 0.0);
+    if (!start_solo) continue;
+    for (int p = 0; p < v->cur.nparts; p++)
+      if (!names(start_solo, v->cur.part_names[p])) set_part_gain_target(v, p, 0.0, 0.0);
+  }
+}
+
 void engine_run(char** files, int nfiles, double seconds) {
   /* The voices in `files` (and any sent later), mixed to stdout as float
    * pairs. With `seconds`, run that long from t=0 and exit (offline, as
@@ -1864,6 +1912,7 @@ void engine_run(char** files, int nfiles, double seconds) {
       exit(1);
     }
   }
+  apply_start_parts();
   if (seconds > 0.0) {
     /* Offline: one deterministic pass, cc -O2 built up front when it pays. */
     if (seconds >= 4.0)

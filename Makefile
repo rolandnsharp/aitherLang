@@ -26,6 +26,15 @@ tools/card: tools/card.c realtime.c
 tools/rate: tools/rate.c
 	cc -O2 -Wall tools/rate.c -o $@.tmp -lm && mv -f $@.tmp $@
 
+tools/fft: tools/fft.c tools/fft.h
+	cc -O2 -Wall tools/fft.c -o $@.tmp -lm && mv -f $@.tmp $@
+
+tools/ifft: tools/ifft.c tools/fft.h
+	cc -O2 -Wall tools/ifft.c -o $@.tmp -lm && mv -f $@.tmp $@
+
+tools/add: tools/add.c
+	cc -O2 -Wall tools/add.c -o $@.tmp && mv -f $@.tmp $@
+
 tools/pad: tools/pad.c
 	cc -O2 tools/pad.c -o $@.tmp -lasound && mv -f $@.tmp $@
 
@@ -49,7 +58,7 @@ tests/run: $(TESTS) tests/check.h $(ENGINE) $(HDR) stdlib.aither
 tests/corpus tests/exact tests/temporal_audit tests/bench tests/blocks: tests/%: tests/%.c $(ENGINE) $(HDR) stdlib.aither
 	$(CC) $(TESTCFLAGS) -o $@.tmp $< $(ENGINE) $(LIBS) && mv -f $@.tmp $@
 
-test: aither tests/run
+test: aither tests/run tools/fft tools/ifft tools/add
 	tests/run
 
 # Every tracked patch rendered and fingerprinted against tests/corpus.golden
@@ -76,6 +85,6 @@ blocks: tests/blocks
 	tests/blocks
 
 clean:
-	rm -rf aither *.tmp tools/*.tmp tests/*.tmp nimcache/ tests/run tests/corpus tests/exact tests/temporal_audit tests/bench tests/blocks tools/play tools/card tools/pad tools/scope tools/tv tools/rate
+	rm -rf aither *.tmp tools/*.tmp tests/*.tmp nimcache/ tests/run tests/corpus tests/exact tests/temporal_audit tests/bench tests/blocks tools/play tools/card tools/pad tools/scope tools/tv tools/rate tools/fft tools/ifft tools/add
 
 .PHONY: all clean test corpus corpus-update exact bench blocks
