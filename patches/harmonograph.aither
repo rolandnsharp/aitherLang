@@ -47,7 +47,7 @@ let w = weaves[$weave]
 def pendulum(f, loss, push, start):
   $z = start
   $z = rotate($z, TAU * f * dt) * (1 - loss * dt)
-  $z = $z + [0, push * dt * 900 * max(1 - amplitude($z), 0)]
+  $z = $z + (0, push * dt * 900 * max(1 - amplitude($z), 0))
   $z
 
 # A strike: a shove that dies away over a couple of milliseconds.
@@ -61,8 +61,8 @@ let px = strike(midi_trig(39) + all)
 let py = strike(midi_trig(36) + all)
 let pr = strike(midi_trig(37) + all)
 
-let [x, _] = pendulum(root, 0.2, px, [0.8, 0])
-let [y, _] = pendulum(root * ratios[$shape] + w, 0.25, py, [0, 0.8])
-let table = pendulum(root / 2 - w / 2, 0.18, pr, [0.5, 0])
+let (x, _) = pendulum(root, 0.2, px, (0.8, 0))
+let (y, _) = pendulum(root * ratios[$shape] + w, 0.25, py, (0, 0.8))
+let (table_a, table_b) = pendulum(root / 2 - w / 2, 0.18, pr, (0.5, 0))
 
-([x, y] + table * 0.6) * 0.55 |> tanh
+([x, y] + [table_a, table_b] * 0.6) * 0.55 |> tanh

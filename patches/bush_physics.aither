@@ -72,9 +72,9 @@ def shove(size, rate):
 # A mode: a spin at f Hz losing `loss` of its size a second; a force
 # pushes its velocity, the side a quarter turn ahead.
 def mode(force, f, loss):
-  $z = [0, 0]
+  $z = (0, 0)
   $z = rotate($z, TAU * f * dt) * (1 - loss * dt)
-  $z = $z + [0, force * dt]
+  $z = $z + (0, force * dt)
   $z
 
 # ------------------------------------------------------------- the skin
@@ -88,9 +88,9 @@ let k2 = mode(push * 0.35, d1 * 1.594 * sharp, 13)
 let k3 = mode(push * 0.25, d1 * 2.296 * sharp, 19)
 $E = amplitude(k1) ^ 2 + amplitude(k2) ^ 2 + amplitude(k3) ^ 2
 let beater = noise() * shove(kickVel, 900) * 0.0004
-let [kx1, _] = k1
-let [kx2, _] = k2
-let [kx3, _] = k3
+let (kx1, _) = k1
+let (kx2, _) = k2
+let (kx3, _) = k3
 let kick = kx1 + kx2 + kx3 + beater
 
 # ------------------------------------------------------- the clapsticks
@@ -101,10 +101,10 @@ def shape(b, sigma, x):
   (0.5 * (exp(u) + exp(0 - u)) + cos(u) - sigma * (0.5 * (exp(u) - exp(0 - u)) + sin(u))) / 2
 
 def stick(force, f, x):
-  let [a, _] = mode(force * shape(4.730, 0.9825, x), f, 30)
-  let [b, _] = mode(force * shape(7.853, 1.0008, x), f * 2.757, 70)
-  let [c, _] = mode(force * shape(10.996, 1.0, x), f * 5.404, 130)
-  let [d, _] = mode(force * shape(14.137, 1.0, x), f * 8.933, 210)
+  let (a, _) = mode(force * shape(4.730, 0.9825, x), f, 30)
+  let (b, _) = mode(force * shape(7.853, 1.0008, x), f * 2.757, 70)
+  let (c, _) = mode(force * shape(10.996, 1.0, x), f * 5.404, 130)
+  let (d, _) = mode(force * shape(14.137, 1.0, x), f * 8.933, 210)
   a + b * 0.8 + c * 0.6 + d * 0.4
 
 let stickPat = [0, 0, 1, 0, 0, 0, 1, 0.4, 0, 0, 1, 0, 0, 0.5, 1, 0.3]
@@ -115,12 +115,12 @@ let sticks = stick(contact, 1580, grip) + stick(contact, 1190, 1 - grip * 0.9) *
 
 # ---------------------------------------------------------- the cicadas
 # A cicada's call: its phase round its swell, pulled toward the chorus.
-$mean = [0, 0]
+$mean = (0, 0)
 def call(rate, start, mean):
   $th = start
-  let [mx, my] = mean
+  let (mx, my) = mean
   $th = $th + (TAU * rate + 0.35 * (my * cos($th) - mx * sin($th))) * dt
-  [cos($th), sin($th)]
+  (cos($th), sin($th))
 
 # Its sound: the tymbal clicking in (and out, 20 dB down) into the air
 # sac, swelling with the call.
@@ -129,7 +129,7 @@ def cicada(clicks, f, swell):
   let was = prev(ph)
   let inClick = if ph < was then 1 else 0
   let outClick = if ph >= 0.5 and was < 0.5 then 0.1 else 0
-  let [s, _] = mode((inClick + outClick) * swell / dt, f, PI * f / 12.5)
+  let (s, _) = mode((inClick + outClick) * swell / dt, f, PI * f / 12.5)
   s
 
 def loud(c): pow(max(0, 0.5 + 0.5 * c), 3)
@@ -141,12 +141,12 @@ let c4 = call(0.131, 1.0, $mean)
 let c5 = call(0.105, 3.2, $mean)
 let c6 = call(0.118, 5.3, $mean)
 $mean = (c1 + c2 + c3 + c4 + c5 + c6) / 6
-let [a1, _] = c1
-let [a2, _] = c2
-let [a3, _] = c3
-let [a4, _] = c4
-let [a5, _] = c5
-let [a6, _] = c6
+let (a1, _) = c1
+let (a2, _) = c2
+let (a3, _) = c3
+let (a4, _) = c4
+let (a5, _) = c5
+let (a6, _) = c6
 let left = cicada(192, 4300, loud(a1)) + cicada(207, 4150, loud(a3)) + cicada(199, 4450, loud(a5)) * 0.7
 let right = cicada(185, 4250, loud(a2)) + cicada(214, 4380, loud(a4)) + cicada(201, 4100, loud(a6)) * 0.7
 
