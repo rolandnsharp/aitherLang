@@ -36,27 +36,24 @@ let N = 128                                                # masses round the ri
 
 # ---------------------------------------------------------------- the strike
 
-# The first sample, then every 5 s, a strike by itself, each a golden
+# A strike is a function of its age (COMPOSING, "How long since"). The ring
+# strikes itself every 5 s, the age the clock's own fraction, from the
+# first sample; a pad's age is since() it was pressed. Each lands a golden
 # angle round from the last, so the ring is never struck in the same place.
-$begun = 0
-let auto = impulse(1 / 5) + (1 - $begun)
-$begun = 1
-let narrow = auto + midi_trig(36)
-let broad = midi_trig(37)
-$turned = 0.0
-$turned = ($turned + (if narrow + broad > 0 then 0.381966 else 0)) mod 1
+let golden = 0.381966 * N
+let own = phasor(1 / 5) * 5
+let pad_a = midi_trig(36)
+let pad_b = midi_trig(37)
+let narrow = min(own, since(pad_a))
+let broad = since(pad_b)
 $where = 0.0
-$width = 4.0
-$where = if narrow + broad > 0 then $turned * N else $where
-$width = if narrow > 0 then 4 else if broad > 0 then 14 else $width
+$where = ($where + (pad_a + pad_b) * golden) mod N
 
-# A strike waits for the step to begin, and lasts one step.
-let k = pixel_index(N, 1)
-$waiting = 0
-$waiting = if narrow + broad > 0 then 1 else $waiting
-$striking = 0
-$striking = if k == 0 then $waiting else $striking
-$waiting = if k == 0 then 0 else $waiting
+# A blow lasts one step: the law, going one place a sample, passes every
+# mass once in that time, whenever it began.
+let blowing = min(narrow, broad) < N * dt
+let place = if own < N * dt then (floor(sweep / 5) * golden) mod N else $where
+let width = if broad < narrow then 14 else 4
 
 # ---------------------------------------------------------------- the field
 
@@ -68,11 +65,12 @@ $x = array(N, every = N)                                   # where each mass is
 $v = array(N, every = N)                                   # how it is moving
 
 # The law at this place: pushed by its neighbours and its own spring.
+let k = pixel_index(N, 1)
 let me = $x[k]
 let push = ($x[(k + N - 1) mod N] + $x[(k + 1) mod N] - me * 2) * stiff - me * held
-let far = abs(k - $where)
+let far = abs(k - place)
 let apart = min(far, N - far)                              # the way round, the shorter way
-let blow = if $striking > 0 then 0.1 / $width * exp(-apart * apart / ($width * $width)) else 0
+let blow = if blowing then 0.1 / width * exp(-apart * apart / (width * width)) else 0
 let moved = ($v[k] + push + blow) * (1 - loss)
 $v[k] = moved
 $x[k] = me + moved
