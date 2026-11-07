@@ -26,11 +26,12 @@
 # ---------------------------------------------------------------- the bore
 
 let wall = 0.1                                             # what it loses, a round
+let soften = 0.001                                         # ... and more the higher it is
 
 $p = line(period = 1 / 97, ends = [free, fixed], width = p => 0.03 + 0.06 * p ^ 3)
 $u = line(period = 1 / 97, ends = [fixed, free])
 
-$p' = -slope($u) - $p * wall
+$p' = -slope($u) - $p * wall + slope(slope($p)) * soften
 $u' = -slope($p) - $u * wall
 
 # ---------------------------------------------------------------- the lips

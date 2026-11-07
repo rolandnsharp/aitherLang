@@ -413,6 +413,38 @@ TEST(a_kick_is_a_law) {
   CHECK(hard_end < 60 && soft_end < 60, "%g, %g", hard_end, soft_end);
 }
 
+/* Two slopes of its own motion: high modes die sooner than low. */
+static double bar_left(double soften, double f) {
+  char src[640], err[4096];
+  snprintf(src, sizeof src,
+    "$x = line(period = 1 / 220, ends = free)\n$v = line(period = 1 / 220, ends = free)\n"
+    "$v' = -slope(slope(slope(slope($x)))) - $v * 0.012 + slope(slope($v)) * %g\n$x' = $v\n"
+    "$v'[gauss(0.2, 0.03)] += if t < 0.0005 then 1 else 0\n$v[0.28]\n", soften);
+  Rendered r = {0};
+  if (render_src(src, 0.5, 48000, &r, err, sizeof err)) { CHECK(0, "doesn't render: %s", err); return -1; }
+  double amp[2];
+  for (int k = 0; k < 2; k++) {
+    long from = k ? 19000 : 1000;
+    double a = 0, b = 0;
+    for (long i = 0; i < 4096; i++) {
+      double w = 0.5 - 0.5 * cos(TAU * i / 4096);
+      a += r.left[from + i] * w * cos(TAU * f * i / 48000);
+      b += r.left[from + i] * w * sin(TAU * f * i / 48000);
+    }
+    amp[k] = sqrt(a * a + b * b);
+  }
+  rendered_free(&r);
+  return 20 * log10(amp[1] / amp[0]);
+}
+TEST(soften_takes_the_highs_first) {
+  double flat_low = bar_left(0, 220), flat_high = bar_left(0, 594);
+  double low = bar_left(0.0001, 220), high = bar_left(0.0001, 594);
+  printf("  over 0.38 s: uniform %.1f, %.1f dB; softened %.1f, %.1f dB\n", flat_low, flat_high, low, high);
+  CHECK(fabs(flat_low - flat_high) < 1, "%g against %g", flat_low, flat_high);
+  CHECK(high < low - 3, "%g against %g", high, low);
+  CHECK(low < flat_low, "%g against %g", low, flat_low);
+}
+
 TEST(ring_keeps_its_period) {
   const int rates[] = {24000, 48000, 96000};
   const double period = 0.8;

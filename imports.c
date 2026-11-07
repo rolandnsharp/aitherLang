@@ -447,12 +447,12 @@ static void field_store(Fields* fs, Field* f, const Node* s, Node* value, Kids* 
 static int is_law(const Node* s) { return (s->kind == nkVar || s->kind == nkAssign) && primed(s->str); }
 static Field* law_field(Fields* fs, const Node* s) { return rate_of(fs, s->str); }
 /* Fields whose neighbours a law reads: `reached[k]` for the k-th. */
-static void find_reached(Fields* fs, const Node* n, char* reached) {
+static void find_reached(Fields* fs, const Node* n, char* reached, const Field* self) {
   if (!n) return;
   if (n->kind == nkCall && n->nkids == 1 && bare_field(fs, n->kids[0]) &&
       (!strcmp(n->str, "convergence") || !strcmp(n->str, "curl") || !strcmp(n->str, "slope")))
-    reached[bare_field(fs, n->kids[0]) - fs->f] = 1;
-  for (int i = 0; i < n->nkids; i++) find_reached(fs, n->kids[i], reached);
+    if (bare_field(fs, n->kids[0]) != self) reached[bare_field(fs, n->kids[0]) - fs->f] = 1;   /* a law smoothing itself moves nothing else */
+  for (int i = 0; i < n->nkids; i++) find_reached(fs, n->kids[i], reached, self);
 }
 /* A block's laws are one system, so the order they're written in means
  * nothing: they are stepped together, where the last of them stands. What
@@ -482,7 +482,7 @@ static void step_group(Fields* fs, Node** in, int n, Kids* out, const char* reac
 static void step_laws(Fields* fs, Node** in, int n, Kids* out) {
   char* reached = arena_alloc(fs->a, fs->n + 1);
   memset(reached, 0, fs->n + 1);
-  for (int i = 0; i < n; i++) if (is_law(in[i])) find_reached(fs, in[i]->kids[0], reached);
+  for (int i = 0; i < n; i++) if (is_law(in[i])) find_reached(fs, in[i]->kids[0], reached, law_field(fs, in[i]));
   step_group(fs, in, n, out, reached, NULL, 0);
   char* done = arena_alloc(fs->a, fs->n + 1);
   memset(done, 0, fs->n + 1);

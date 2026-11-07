@@ -758,6 +758,15 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   1, 3, 5 and a cone from 0.1 past its apex measures 1.80, 3.65, 5.55, 7.45
   against theory's 1.82, 3.67, 5.54, 7.45. Only a pair has one, and a
   `matched` end is for a line of one width.
+- **Two slopes of a field's own motion lose more the higher it is**:
+  `$v' = ... + slope(slope($v)) * soften`, or on a pair `$p' = ... +
+  slope(slope($p)) * soften`. `- $v * loss` takes the same from every mode;
+  this takes more from each mode up, as a real bar or pipe does. On
+  `field_bar` a `soften` of 0.0001 gives its first three modes 27, 44 and 64
+  dB a second, where `loss` alone gives them 11.5 each. It is a small number,
+  and too much goes unstable, with no warning: on that bar past about 0.1, on
+  `field_didge`'s bore past about 0.003. A law smoothing itself doesn't change
+  the order laws step in.
 - **Four slopes are a bar**: `$v' = -slope(slope(slope(slope($x))))`, `$x'
   = $v`. A `fixed` end is pinned, a `free` one is free to bend, and `period`
   is the first mode's: 220 Hz at `1 / 220`, whichever ends. The modes come
