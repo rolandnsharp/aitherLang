@@ -358,9 +358,14 @@ def line_at(f, p, lc, off, l, r):
 def line_place(p, lc, off, n): clamp(floor(p * lc - off + 0.5), 0, n - 1)
 def line_gauss(u, w, lc): field_cell(u, 0.5 / lc, max(abs(w), 1e-9) * sqrt(2)) * lc
 
-# How much this place stands out from its neighbours: nabla twice, i i = -1
-# giving the sign. Things flow away from it.
-def concentration(f, at, l, r): -(field_behind(f, at, l) + field_ahead(f, at, r) - f[at] * 2)
+# The slope of the slope: how much this place's neighbours stand above it.
+# Things flow towards them.
+def slope_twice(f, at, l, r): field_behind(f, at, l) + field_ahead(f, at, r) - f[at] * 2
+
+# Four slopes: a bar's bending, the slope of slope of what it is bent. A
+# bar's bend stops at a free end, so past one, and at it, there is none.
+def bar_bend(f, k, l, r): if k < 0 or k >= len(f) or (k == 0 and l == 2) or (k == len(f) - 1 and r == 2) then f[0] * 0 else slope_twice(f, k, l, r)
+def slope_four(f, at, l, r): bar_bend(f, at - 1, l, r) + bar_bend(f, at + 1, l, r) - bar_bend(f, at, l, r) * 2
 
 # Of one of a pair, stepping staggered: the step from behind this place, and
 # to the place ahead, just stepped.

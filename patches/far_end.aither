@@ -27,7 +27,7 @@ let loss = 3 * midi_cc(22)                                 # what it loses, a ro
 $x = line(period = 5, ends = [fixed, matched])             # there and back in 5 s
 $v = line(period = 5, ends = [fixed, matched])
 
-$v' = -concentration($x) - $v * loss
+$v' = slope(slope($x)) - $v * loss
 $x' = $v
 
 # ---------------------------------------------------------------- the pluck

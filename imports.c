@@ -203,6 +203,8 @@ typedef struct {
   const char* grain;                     /* the hidden let: a push's step */
   Node* width;                           /* line(width = p => ...): the lambda, else NULL */
   const char* table;                     /* the hidden array: width squared at each place, a pair's */
+  int bar;                               /* a law reads four slopes of it, or moves it by them */
+  const char* bend;                      /* the hidden let: what four slopes take */
   int per;                               /* a fine field: places a sample, else 0 */
   int sweep;                             /* ... and samples a sweep */
   const char* start;                     /* ... the hidden let: this sample's first place */
@@ -287,6 +289,14 @@ static Node* at_speed(Fields* fs, Field* f, Node* word, const Node* at) {
   return f->period ? fbin(fs, "*", word, fident(fs, f->rate, at), at) : word;
 }
 
+/* `slope(slope(...$x))`: how many deep, and the field; 0 if it isn't one. */
+static int slopes(Fields* fs, const Node* n, Field** of) {
+  int depth = 0;
+  while (n && n->kind == nkCall && !strcmp(n->str, "slope") && n->nkids == 1) { depth++; n = n->kids[0]; }
+  *of = depth ? bare_field(fs, n) : NULL;
+  return *of ? depth : 0;
+}
+
 static Node* field_expr(Fields* fs, Node* n) {
   if (!n) return n;
   if (n->kind == nkIdent) {
@@ -335,6 +345,37 @@ static Node* field_expr(Fields* fs, Node* n) {
   if (n->kind == nkCall) {
     if (!strcmp(n->str, "len")) return n;
     Field* f = n->nkids == 1 ? bare_field(fs, n->kids[0]) : NULL;
+    if (f && !strcmp(n->str, "concentration")) {
+      field_fail(fs, n, "`concentration($x)` is `-slope(slope($x))` now");
+      return n;
+    }
+    Field* of;
+    int depth = slopes(fs, n, &of);
+    if (depth == 3 || depth > 4) {
+      field_fail(fs, n, "slopes come one, for a pair, two, for a wave, or four, for a bar");
+      return n;
+    }
+    if (depth == 4) {
+      if (!of->length || of->ends[0] == 3 || of->ends[1] == 3) {
+        field_fail(fs, n, "four slopes are a bar: a `line` with `fixed` or `free` ends");
+        return n;
+      }
+      Node* inner = n->kids[0]->kids[0]->kids[0]->kids[0];
+      return fbin(fs, "*", fcall(fs, "slope_four", n, 4, (Node*[]){inner, fident(fs, of->place, n), fnum(fs, of->ends[0], n), fnum(fs, of->ends[1], n)}),
+                  fident(fs, of->bend, n), n);
+    }
+    if (depth == 2) {
+      f = of;
+      Node* word = at_speed(fs, f, fcall(fs, "slope_twice", n, 4, (Node*[]){n->kids[0]->kids[0], fident(fs, f->place, n), fnum(fs, f->ends[0], n), fnum(fs, f->ends[1], n)}), n);
+      if (f->ends[0] != 3 && f->ends[1] != 3) return word;
+      Field* v = f->moves;
+      if (!v) {
+        field_fail(fs, n, "a matched end takes what arrives as it moves: the field's law says it, `$x' = $v`");
+        return n;
+      }
+      return fbin(fs, "-", word, fcall(fs, "field_drag", n, 5, (Node*[]){fident(fs, v->name, n), fident(fs, f->place, n), fident(fs, f->speed, n),
+                                                                        fnum(fs, f->ends[0], n), fnum(fs, f->ends[1], n)}), n);
+    }
     if (f && !strcmp(n->str, "slope")) {                      /* of a pair: where they meet, a half place between */
       if (!fs->law) {
         field_fail(fs, n, "`slope($x)` is a law's word: it says how one of a pair changes the other");
@@ -351,21 +392,10 @@ static Node* field_expr(Fields* fs, Node* n) {
         word = fbin(fs, fs->law->width ? "/" : "*", word, fidx(fs, fs->law->table, fident(fs, fs->law->place, n), n), n);
       return word;
     }
-    if (f && !strcmp(n->str, "concentration")) {
-      Node* word = at_speed(fs, f, fcall(fs, "concentration", n, 4, (Node*[]){n->kids[0], fident(fs, f->place, n), fnum(fs, f->ends[0], n), fnum(fs, f->ends[1], n)}), n);
-      if (f->ends[0] != 3 && f->ends[1] != 3) return word;
-      Field* v = f->moves;
-      if (!v) {
-        field_fail(fs, n, "a matched end takes what arrives as it moves: the field's law says it, `$x' = $v`");
-        return n;
-      }
-      return fbin(fs, "+", word, fcall(fs, "field_drag", n, 5, (Node*[]){fident(fs, v->name, n), fident(fs, f->place, n), fident(fs, f->speed, n),
-                                                                        fnum(fs, f->ends[0], n), fnum(fs, f->ends[1], n)}), n);
-    }
     Node* in = n->nkids == 1 ? n->kids[0] : NULL;
     f = in && in->kind == nkCall && in->nkids == 1 ? bare_field(fs, in->kids[0]) : NULL;
     if (f && (f->ends[0] == 3 || f->ends[1] == 3) && (!strcmp(n->str, "slope") || !strcmp(n->str, "curl"))) {
-      field_fail(fs, n, "a matched end is for `concentration` or a pair: a squeeze and a twist go at their own speeds");
+      field_fail(fs, n, "a matched end is for two slopes or a pair: a squeeze and a twist go at their own speeds");
       return n;
     }
     if (f && !strcmp(n->str, "slope") && !strcmp(in->str, "convergence"))
@@ -420,8 +450,7 @@ static Field* law_field(Fields* fs, const Node* s) { return rate_of(fs, s->str);
 static void find_reached(Fields* fs, const Node* n, char* reached) {
   if (!n) return;
   if (n->kind == nkCall && n->nkids == 1 && bare_field(fs, n->kids[0]) &&
-      (!strcmp(n->str, "concentration") || !strcmp(n->str, "convergence") || !strcmp(n->str, "curl") ||
-       !strcmp(n->str, "slope")))
+      (!strcmp(n->str, "convergence") || !strcmp(n->str, "curl") || !strcmp(n->str, "slope")))
     reached[bare_field(fs, n->kids[0]) - fs->f] = 1;
   for (int i = 0; i < n->nkids; i++) find_reached(fs, n->kids[i], reached);
 }
@@ -621,6 +650,15 @@ static void field_stmts(Fields* fs, Node** in, int n, Kids* out, int top) {
           fkids(fs, length, 1, (Node*[]){fbin(fs, "+", f->size, fnum(fs, f->extra, s), s)});
           kid(out, length);
         }
+        if (f->bar) {                                        /* its first mode a period: by its ends, classically */
+          int free_ends = (f->ends[0] == 2) + (f->ends[1] == 2);
+          double first = free_ends == 2 ? 2.26669 : free_ends == 1 ? 1.5625 : 1;
+          double c = 2 / M_PI / first;
+          Node* lc = fident(fs, f->length, s);
+          Node* bend = fnode(fs, nkLet, f->bend, s);
+          fkids(fs, bend, 1, (Node*[]){fbin(fs, "*", fbin(fs, "*", fbin(fs, "*", lc, lc, s), fbin(fs, "*", lc, lc, s), s), fnum(fs, c * c, s), s)});
+          kid(out, bend);
+        }
         Node* speed = fnode(fs, nkLet, f->speed, s);
         fkids(fs, speed, 1, (Node*[]){f->length ? fbin(fs, "*", fident(fs, f->length, s), fnum(fs, 2, s), s) : f->size});
         kid(out, speed);
@@ -719,6 +757,8 @@ static void find_pushes(Fields* fs, const Node* n) {
 /* What a law reads through `slope`. */
 static void find_slopes(Fields* fs, const Node* n, Field* law) {
   if (!n || fs->failed) return;
+  Field* of;
+  if (slopes(fs, n, &of) > 1) return;                        /* an even number lands back on the places */
   if (n->kind == nkCall && !strcmp(n->str, "slope") && n->nkids == 1 && bare_field(fs, n->kids[0])) {
     Field* f = bare_field(fs, n->kids[0]);
     if (law->reads && law->reads != f) field_fail(fs, n, "`slope` joins two fields: a law reads the slope of one partner");
@@ -961,6 +1001,23 @@ static int plain_number(const Node* n, Kids* kids, int from, double* v) {
  * a sample instead: at least MIN_PLACES, the push going half a place a step,
  * M samples to a sweep of N = M * P. Finer costs P places a sample. */
 #define MIN_PLACES 32
+/* A bar: its highest mode, not a crossing, sets the step. At places of a
+ * sample or fewer, N * N * M = 0.47 * sr * T holds that mode to about a
+ * radian a step, with at least 16 places while the rate can give them. */
+static void bar_grain(Field* f, double period) {
+  double reach = 0.47 * period * field_sr;
+  int whole = (int)(cbrt(reach) + 0.5);                      /* a place a sample, if that's enough */
+  if (whole >= 16) {
+    f->per = 1;
+    f->sweep = whole;
+    return;
+  }
+  int m = (int)(reach / 256);
+  if (m < 1) m = 1;
+  int p = (int)(sqrt(reach / m) / m + 0.5);
+  f->per = p < 1 ? 1 : p;
+  f->sweep = m;
+}
 static void fine_grain(Field* f, double across) {
   if (sqrt(0.25 * across * field_sr) + 0.5 >= MIN_PLACES) return;
   double reach = 0.5 * across * field_sr;                    /* places times samples a sweep */
@@ -970,6 +1027,37 @@ static void fine_grain(Field* f, double across) {
   if (p < 1) p = 1;
   f->per = p;
   f->sweep = m;
+}
+
+/* A field read through four slopes is a bar, and so is what its law moves. */
+static void make_bar(Fields* fs, Field* f, Kids* kids, int from, const Node* at) {
+  double period;
+  if (f->bar) return;
+  if (!f->period || !plain_number(f->period, kids, from, &period) || period <= 0) {
+    field_fail(fs, at, "a bar's period has to be plain numbers and file-level lets, as its places come from it");
+    return;
+  }
+  f->bar = 1;
+  f->bend = fname(fs, "bend", f->name, -1);
+  bar_grain(f, period);
+  f->size = fnum(fs, f->per * f->sweep, at);
+}
+static void bars_in(Fields* fs, const Node* n, Field* law, Kids* kids, int from, const Node* at) {
+  Field* of;
+  if (!n) return;
+  if (slopes(fs, n, &of) == 4) {
+    make_bar(fs, of, kids, from, at);
+    if (law) make_bar(fs, law, kids, from, at);
+    return;
+  }
+  for (int i = 0; i < n->nkids; i++) bars_in(fs, n->kids[i], law, kids, from, at);
+}
+static void find_bars(Fields* fs, const Node* s, Kids* kids, int from) {
+  if (s->kind == nkPlay && s->kids[0] && s->kids[0]->kind == nkBlock) {
+    for (int i = 0; i < s->kids[0]->nkids; i++) find_bars(fs, s->kids[0]->kids[i], kids, from);
+    return;
+  }
+  if (is_law(s)) bars_in(fs, s->kids[0], law_field(fs, s), kids, from, s);
 }
 
 static int fields_pass(Arena* a, Kids* kids, int from, char* err, int errlen) {
@@ -1023,6 +1111,7 @@ static int fields_pass(Arena* a, Kids* kids, int from, char* err, int errlen) {
   char* said = arena_alloc(a, fs.n + 1);
   memset(said, 0, fs.n + 1);
   for (int i = from; i < kids->n; i++) check_laws(&fs, kids->v[i], 1, said);
+  for (int i = from; i < kids->n; i++) find_bars(&fs, kids->v[i], kids, from);
   for (int i = 0; i < fs.n; i++)
     if (fs.f[i].width && !fs.pair_at) field_fail(&fs, kids->v[from], "a width is of a pair: pressure and flow, `$p' = -slope($u)`, `$u' = -slope($p)`");
   if (fs.pair_at) find_pairs(&fs, fs.pair_at);

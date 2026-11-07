@@ -1,0 +1,42 @@
+# field_bar: a free bar, struck: four slopes
+# (notes/one-form-2026-11-07.md).
+#
+# A string pulls straight, so its law is two slopes: x'' = x_ss. A bar
+# resists bending, so its law is four, and nothing else changes: stiffness
+# is the slope of the slope of the bend, no new word. A free bar's modes
+# come out of that law and its ends, not out of a table of ratios: 1, 2.7,
+# 5.1 at this pitch against the textbook's 1, 2.76, 5.40, which is a
+# xylophone's clang. Period says the first mode's, so it sounds at 220 Hz.
+#
+# The scope shows two points of the bar against each other: its even modes
+# swing them together and its odd ones apart, so the figure opens and turns
+# as the modes die. Struck at the middle, only the even ones are in it.
+#
+#   ./aither patches/field_bar.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
+#
+# The gamepad (tools/pad): A strikes it near the end, B at the middle. It
+# strikes itself every 3 s.
+#   tools/pad & AITHER_MIDI=aither-pad ./aither patches/field_bar.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
+
+let loss = 0.012                                           # what it loses, a round
+
+$x = line(period = 1 / 220, ends = free)
+$v = line(period = 1 / 220, ends = free)
+
+$v' = -slope(slope(slope(slope($x)))) - $v * loss
+$x' = $v
+
+# ---------------------------------------------------------------- the strike
+
+let own = phasor(1 / 3) * 3
+let pad_a = midi_trig(36)
+let pad_b = midi_trig(37)
+let near_end = min(own, since(pad_a))
+let middle = since(pad_b)
+let stroke = 0.0005                                        # how long a blow takes
+let where = if middle < near_end then 0.5 else 0.2
+$v'[gauss(where, 0.03)] += if min(near_end, middle) < stroke then 0.5 / stroke * 0.001 else 0
+
+# ---------------------------------------------------------------- reading
+
+[$v[0.28], $v[0.72]]

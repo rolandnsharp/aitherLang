@@ -64,8 +64,8 @@ TEST(laws_have_no_order) {
   const char* tail =
     "$v'[0.3] += if t < 0.01 then 10 else 0\n"
     "$x[0.5]\n";
-  const char* laws[2] = {"$v' = -concentration($x) - $x * 60\n$x' = $v\n",
-                         "$x' = $v\n$v' = -concentration($x) - $x * 60\n"};
+  const char* laws[2] = {"$v' = slope(slope($x)) - $x * 60\n$x' = $v\n",
+                         "$x' = $v\n$v' = slope(slope($x)) - $x * 60\n"};
   Rendered r[2] = {{0}, {0}};
   for (int k = 0; k < 2; k++) {
     char src[512], err[4096];
@@ -96,7 +96,7 @@ TEST(shaped_strike_lands_whole) {
   const char* src =
     "$x = ring(period = 1.66)\n"
     "$v = ring(period = 1.66)\n"
-    "$v' = -concentration($x) * 5 - $x * 200 - $v * 0.68\n"
+    "$v' = slope(slope($x)) * 5 - $x * 200 - $v * 0.68\n"
     "$x' = $v\n"
     "$v'[gauss(0.4, 0.022)] += if t < 0.002 then 660 else 0\n"
     "$x[0.37]\n";
@@ -209,11 +209,11 @@ static double line_pitch(const char* decl, double expect) {
 }
 TEST(line_tunes) {
   const char* fixed = "$x = line(period = 0.5, ends = fixed)\n$v = line(period = 0.5, ends = fixed)\n"
-                      "$v' = -concentration($x)\n$x' = $v";
+                      "$v' = slope(slope($x))\n$x' = $v";
   const char* mixed = "$x = line(period = 0.5, ends = [fixed, free])\n$v = line(period = 0.5, ends = [fixed, free])\n"
-                      "$v' = -concentration($x)\n$x' = $v";
+                      "$v' = slope(slope($x))\n$x' = $v";
   const char* mixed2 = "$x = line(period = 0.5, ends = [free, fixed])\n$v = line(period = 0.5, ends = [free, fixed])\n"
-                       "$v' = -concentration($x)\n$x' = $v";
+                       "$v' = slope(slope($x))\n$x' = $v";
   const char* open = "$v = line(period = 0.5, ends = free)\n$x = line(period = 0.5, ends = fixed)\n"
                      "$v' = -slope($x)\n$x' = -slope($v)";
   const char* shorted = "$v = line(period = 0.5, ends = fixed)\n$x = line(period = 0.5, ends = free)\n"
@@ -243,7 +243,7 @@ static double echo_db(const char* decl, double width) {
   return 20 * log10((back + 1e-12) / out);
 }
 TEST(matched_end_takes_it_all) {
-  const char* wave = "$x = line(period = 2, ends = %s)\n$v = line(period = 2, ends = %s)\n$v' = -concentration($x)\n$x' = $v";
+  const char* wave = "$x = line(period = 2, ends = %s)\n$v = line(period = 2, ends = %s)\n$v' = slope(slope($x))\n$x' = $v";
   const char* pair = "$v = line(period = 2, ends = %s)\n$i = line(period = 2, ends = %s)\n$v' = -slope($i)\n$i' = -slope($v)";
   char d[300];
   snprintf(d, sizeof d, wave, "[free, free]", "[free, free]");
@@ -288,7 +288,7 @@ static double fine_pitch(const char* decl, double want) {
 }
 TEST(fine_fields_hold_a_note) {
   const char* wave = "$x = line(period = 1 / 110, ends = fixed)\n$v = line(period = 1 / 110, ends = fixed)\n"
-                     "$v' = -concentration($x) - $v * 0.05\n$x' = $v";
+                     "$v' = slope(slope($x)) - $v * 0.05\n$x' = $v";
   const char* pair = "$v = line(period = 1 / 110, ends = free)\n$x = line(period = 1 / 110, ends = fixed)\n"
                      "$v' = -slope($x) - $v * 0.05\n$x' = -slope($v) - $x * 0.05";
   double w1 = fine_pitch(wave, 110), w3 = fine_pitch(wave, 330), p1 = fine_pitch(pair, 110), p3 = fine_pitch(pair, 330);
@@ -355,13 +355,47 @@ TEST(spring_as_laws) {
   CHECK(fabs(a / 440 - 1) < 0.002, "%g", a);
 }
 
+/* Four slopes are a bar. A mode near where it should be, from a strike. */
+static double bar_mode(const char* ends, double near) {
+  char src[640], err[4096];
+  snprintf(src, sizeof src,
+    "$x = line(period = 1 / 220, ends = %s)\n$v = line(period = 1 / 220, ends = %s)\n"
+    "$v' = -slope(slope(slope(slope($x)))) - $v * 0.05\n$x' = $v\n"
+    "$v'[gauss(0.37, 0.03)] += if t < 0.0005 then 1 else 0\n$v[0.23]\n", ends, ends);
+  Rendered r = {0};
+  if (render_src(src, 0.5, 48000, &r, err, sizeof err)) { CHECK(0, "doesn't render: %s", err); return -1; }
+  double best = 0, top = 0, peak = 0;
+  for (long i = 0; i < r.n; i++) peak = fmax(peak, fabs(r.left[i]));
+  CHECK(peak > 0 && peak < 8, "peak %g", peak);
+  for (double f = near * 0.9; f < near * 1.1; f += near * 0.002) {
+    double a = 0, b = 0;
+    for (long i = 0; i < r.n; i++) {
+      double w = 0.5 - 0.5 * cos(TAU * i / r.n);
+      a += r.left[i] * w * cos(TAU * f * i / 48000);
+      b += r.left[i] * w * sin(TAU * f * i / 48000);
+    }
+    if (a * a + b * b > top) { top = a * a + b * b; best = f; }
+  }
+  rendered_free(&r);
+  return best;
+}
+TEST(four_slopes_are_a_bar) {
+  double p1 = bar_mode("fixed", 220), p2 = bar_mode("fixed", 860);
+  double f1 = bar_mode("free", 220), f2 = bar_mode("free", 595);
+  printf("  pinned %.0f, %.0f Hz; free %.0f, %.0f Hz\n", p1, p2, f1, f2);
+  CHECK(fabs(p1 / 220 - 1) < 0.01, "pinned %g", p1);
+  CHECK(fabs(p2 / p1 - 3.9) < 0.15, "pinned ratio %g", p2 / p1);
+  CHECK(fabs(f1 / 220 - 1) < 0.02, "free %g", f1);
+  CHECK(fabs(f2 / f1 - 2.7) < 0.1, "free ratio %g", f2 / f1);
+}
+
 TEST(ring_keeps_its_period) {
   const int rates[] = {24000, 48000, 96000};
   const double period = 0.8;
   const char* src =
     "$x = ring(period = 0.8)\n"
     "$v = ring(period = 0.8)\n"
-    "$v' = -concentration($x)\n"
+    "$v' = slope(slope($x))\n"
     "$x' = $v\n"
     "$v'[0.1 * (phasor(1000) * 0.2 - 0.1)] += if t < 0.01 then 1280 else 0\n"
     "$x[0.25]\n";

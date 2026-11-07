@@ -98,7 +98,7 @@ the medium does, and the engine works out the rest.
 ```
 $x = ring(period = 1.66)                  # a push goes round in 1.66 s
 $v = ring(period = 1.66)
-$v' = -concentration($x) - $v * 0.7
+$v' = slope(slope($x)) - $v * 0.7
 $x' = $v
 
 $v'[where] += force                       # the outside pushes in at a point

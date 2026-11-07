@@ -710,7 +710,7 @@ happens at one place, and arithmetic is at each place:
 $x = ring(period = 1.66)                       # a push goes round in 1.66 s
 $v = ring(period = 1.66)
 
-$v' = -concentration($x) - $x * held - $v * loss
+$v' = slope(slope($x)) - $x * held - $v * loss
 $x' = $v
 
 $v'[where] += force                            # a source, at a point
@@ -743,10 +743,10 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   free end with a dashpot, and needs the law `$x' = $v` to know what moves;
   on a pair both fields are `matched` there. About 2% of a pulse comes back,
   -35 dB, and -26 dB for one a few places wide, which is the grain. It is
-  matched to the line as declared: `concentration($x) * firm` moves the
+  matched to the line as declared: `slope(slope($x)) * firm` moves the
   speed and not the match, a `held` is a line no end can match, and a pair
   matches `$v' = -slope($i)`, `$i' = -slope($v)`, as written with the minus.
-  It works with `concentration` and pairs, not the squeeze and twist, which
+  It works with `slope(slope($x))` and pairs, not the squeeze and twist, which
   go at two speeds.
 - **`width = p => ...` gives a pair a shape**: how wide the line is at p, 0
   to 1 along it, stated where the line is, so a where stays out of the law.
@@ -758,6 +758,16 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   1, 3, 5 and a cone from 0.1 past its apex measures 1.80, 3.65, 5.55, 7.45
   against theory's 1.82, 3.67, 5.54, 7.45. Only a pair has one, and a
   `matched` end is for a line of one width.
+- **Four slopes are a bar**: `$v' = -slope(slope(slope(slope($x))))`, `$x'
+  = $v`. A `fixed` end is pinned, a `free` one is free to bend, and `period`
+  is the first mode's: 220 Hz at `1 / 220`, whichever ends. The modes come
+  of the law: pinned 1 : 3.9, free 1 : 2.7 : 5.1 at 220 Hz, nearer the
+  textbook's 2.76 and 5.40 the slower the bar, as a short one has few
+  places: its highest mode, not a crossing, sets the step, and that sets
+  how many. A free bar drifts as it's struck, so read `$v`, or hold it. A
+  multiplier on the word moves the pitch and can go unstable. About a
+  quarter of a uConsole core at 220 Hz, and more for a `gauss`. The period
+  has to be plain numbers and file-level lets.
 - A bare `$x` is the field at this place, and `$x = ...` stores there. A
   later line at the place sees what was stored; a neighbour sees the last
   step. A number or a value is everywhere.
@@ -811,7 +821,8 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
 
   | Word                          | What it is                               |
   |-------------------------------|------------------------------------------|
-  | `concentration($x)`           | how much this place stands out from its neighbours: nabla twice, `i * i = -1` giving the sign |
+  | `slope(slope($x))`            | a wave's: how much the neighbours stand above this place. Two slopes land back on the places, so a field can read itself |
+  | `slope(slope(slope(slope($x))))` | a bar's bending: four slopes, on a `line` |
   | `slope(convergence($d))`      | of a field of directions: the slope of its squeeze, the scalar part of nabla |
   | `curl(curl($d))`              | ... the curl of its twist, the vector part |
   | `slope($i)`                   | of one of a pair: how it changes along the ring, a half place from here |

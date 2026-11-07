@@ -25,12 +25,12 @@ $x = array(4)
 $x = 7
 $x[0.5]
 
-# --- concentration: how much a place stands out from its neighbours
+# --- two slopes: how much a place's neighbours stand above it
 # expect at 4: 2, -1
 $x = array(4, i => if i == 1 then 1 else 0)
 $y = array(4)
 $x = $x
-$y = concentration($x)
+$y = -slope(slope($x))
 [$y[0.25], $y[0]]
 
 # --- read from outside, between places
@@ -450,7 +450,7 @@ slope(1)
 # expect at 12000: 1
 $x = line(period = 1, ends = fixed)
 $v = line(period = 1, ends = fixed)
-$v' = -concentration($x)
+$v' = slope(slope($x))
 $x' = $v
 $v'[gauss(0.25, 0.03)] += if t < 0.001 then 1000 else 0
 if abs($v[0.75]) > 1 and abs($v[0.75]) > abs($v[0.5]) * 2 then 1 else 0
@@ -459,7 +459,7 @@ if abs($v[0.75]) > 1 and abs($v[0.75]) > abs($v[0.5]) * 2 then 1 else 0
 # expect at 3000: 0
 $x = line(period = 1, ends = fixed)
 $v = line(period = 1, ends = fixed)
-$v' = -concentration($x)
+$v' = slope(slope($x))
 $x' = $v
 $v'[gauss(0.1, 0.03)] += if t < 0.001 then 1000 else 0
 $x[0]
@@ -470,9 +470,9 @@ $a = line(period = 1, ends = fixed)
 $p = line(period = 1, ends = fixed)
 $b = line(period = 1, ends = free)
 $q = line(period = 1, ends = free)
-$p' = -concentration($a) - $a
+$p' = slope(slope($a)) - $a
 $a' = $p
-$q' = -concentration($b) - $b
+$q' = slope(slope($b)) - $b
 $b' = $q
 $p'[gauss(0.5, 0.03)] += if t < 0.001 then 1000 else 0
 $q'[gauss(0.5, 0.03)] += if t < 0.001 then 1000 else 0
@@ -523,12 +523,12 @@ if $x[1] > 1 and $x[0] == 0 then 1 else 0
 # error: a matched end takes what arrives as it moves
 $x = line(period = 1, ends = matched)
 $v = line(period = 1, ends = matched)
-$v' = -concentration($x)
+$v' = slope(slope($x))
 $x' = $v * 2
 $x[0]
 
 # --- ... and is for one speed
-# error: a matched end is for `concentration` or a pair
+# error: a matched end is for two slopes or a pair
 $d = line(period = 1, ends = matched, start = ((0, 0), (0, 0)))
 $v = line(period = 1, ends = matched, start = ((0, 0), (0, 0)))
 $v' = -curl(curl($d))
@@ -547,7 +547,7 @@ $v[0]
 # error: a width is of a pair
 $x = line(period = 1, ends = fixed, width = p => 1 + p)
 $v = line(period = 1, ends = fixed)
-$v' = -concentration($x)
+$v' = slope(slope($x))
 $x' = $v
 $x[0]
 
@@ -633,3 +633,35 @@ sum(2, n =>
   $y = 0
   $y' = n
   $y)
+
+# --- concentration is slope of slope now
+# error: is `-slope(slope($x))` now
+$x = ring(period = 1)
+$v = ring(period = 1)
+$v' = concentration($x)
+$x' = $v
+$x[0]
+
+# --- slopes come one, two or four
+# error: slopes come one, for a pair
+$x = ring(period = 1)
+$v = ring(period = 1)
+$v' = slope(slope(slope($x)))
+$x' = $v
+$x[0]
+
+# --- four slopes are a bar: a line
+# error: four slopes are a bar
+$x = ring(period = 1)
+$v = ring(period = 1)
+$v' = -slope(slope(slope(slope($x))))
+$x' = $v
+$x[0]
+
+# --- ... whose ends are fixed or free
+# error: four slopes are a bar
+$x = line(period = 1, ends = matched)
+$v = line(period = 1, ends = matched)
+$v' = -slope(slope(slope(slope($x))))
+$x' = $v
+$x[0]

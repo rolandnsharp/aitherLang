@@ -1177,7 +1177,7 @@ twentieth of stepping them all every sample.
 ```
 $x = ring(period = 1.66)                       # each line is at each place,
 $v = ring(period = 1.66)                       # as a line on [l, r] is
-$v' = -concentration($x) - $v * loss
+$v' = slope(slope($x)) - $v * loss
 $x' = $v
 $v'[where] += force                            # a source, at a point
 $v'[gauss(where, 0.02)] += force               # ... or with a shape: the same blow, spread
@@ -1204,7 +1204,8 @@ arrives, Heaviside's termination: `patches/far_end.aither`.
 A short field holds a note, the engine stepping several places a sample, and
 `width = p => ...` flares a pair into a horn. `patches/field_didge.aither` is
 a bore of two laws and a width, played by `dho` lips reading and pushing it
-at one point, so a field and the rest of the language mix freely.
+at one point, so a field and the rest of the language mix freely. Two slopes
+are a wave, four a bar: `patches/field_bar.aither`.
 
 Laws work on plain state too, a medium of one place, in a `def` or a `sum` as
 well: `$v' = -$x * w ^ 2 - $v * damp` and `$x' = $v` is a spring, in either
