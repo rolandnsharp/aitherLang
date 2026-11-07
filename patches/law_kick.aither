@@ -4,8 +4,7 @@
 # A drum head stretches as it moves, so the harder it swings the stiffer it
 # is, and it sounds higher. That is the whole sweep of a kick: one term of
 # stiffness growing with displacement, in the law. Nothing sets a pitch
-# envelope, a click or a brightness. Hit harder, it starts higher, sweeps
-# further and has more overtones, as the law bends the wave more.
+# envelope or a click. Hit harder, it starts higher and sweeps further.
 #
 # Four hits of that, then four of the usual kick: a sine swept by an
 # envelope, its level following the hit and nothing else. Same accents, and
