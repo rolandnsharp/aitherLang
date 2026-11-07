@@ -201,6 +201,8 @@ typedef struct {
   const char* speed;                     /* the hidden let: places a round */
   const char* length;                    /* the hidden let, a line's: its length in places */
   const char* grain;                     /* the hidden let: a push's step */
+  Node* width;                           /* line(width = p => ...): the lambda, else NULL */
+  const char* table;                     /* the hidden array: width squared at each place, a pair's */
   int per;                               /* a fine field: places a sample, else 0 */
   int sweep;                             /* ... and samples a sweep */
   const char* start;                     /* ... the hidden let: this sample's first place */
@@ -344,7 +346,10 @@ static Node* field_expr(Fields* fs, Node* n) {
             f->per ? fidx(fs, f->name, fbin(fs, "mod", fbin(fs, "+", fident(fs, fs->law->place, n), fnum(fs, 1, n), n), f->size, n), n)
                    : fident(fs, f->now, n),
             fident(fs, fs->law->place, n), fnum(fs, f->ends[1], n), fident(fs, fs->law->name, n)});
-      return fbin(fs, "*", word, fident(fs, f->speed, n), n);
+      word = fbin(fs, "*", word, fident(fs, f->speed, n), n);
+      if (fs->law->table)                                     /* flow over the width changes pressure, pressure over length flow */
+        word = fbin(fs, fs->law->width ? "/" : "*", word, fidx(fs, fs->law->table, fident(fs, fs->law->place, n), n), n);
+      return word;
     }
     if (f && !strcmp(n->str, "concentration")) {
       Node* word = at_speed(fs, f, fcall(fs, "concentration", n, 4, (Node*[]){n->kids[0], fident(fs, f->place, n), fnum(fs, f->ends[0], n), fnum(fs, f->ends[1], n)}), n);
@@ -630,6 +635,27 @@ static void field_stmts(Fields* fs, Node** in, int n, Kids* out, int top) {
                                                 : fident(fs, f->step, s)});
         kid(out, grain);
       }
+      if (f->table) {                                        /* the width where each place stands: squared, an area */
+        Field* w = f->width ? f : f->reads;
+        const char* i = fname(fs, "index", f->name, -1);
+        Node* lam = w->width;
+        Node* along = fnode(fs, nkLet, lam->params[0], s);
+        fkids(fs, along, 1, (Node*[]){fbin(fs, "/", fbin(fs, "+", fident(fs, i, s), fnum(fs, f->off, s), s),
+                                           fbin(fs, "+", f->size, fnum(fs, f->extra, s), s), s)});
+        const char* wide = fname(fs, "wide", f->name, -1);
+        Node* say = fnode(fs, nkLet, wide, s);
+        fkids(fs, say, 1, (Node*[]){lam->kids[0]});
+        Node* block = fnode(fs, nkBlock, "", s);
+        fkids(fs, block, 3, (Node*[]){along, say, fbin(fs, "*", fident(fs, wide, s), fident(fs, wide, s), s)});
+        Node* rule = fnode(fs, nkLambda, "", s);
+        fkids(fs, rule, 1, (Node*[]){block});
+        rule->nparams = 1;
+        rule->params = arena_alloc(fs->a, sizeof(char*));
+        rule->params[0] = i;
+        Node* table = fnode(fs, nkVar, f->table, s);
+        fkids(fs, table, 1, (Node*[]){fcall(fs, "array", s, 2, (Node*[]){f->size, rule})});
+        kid(out, table);
+      }
       if (f->in) {
         Node* zero = f->init ? fbin(fs, "*", f->init, fnum(fs, 0, s), s) : fnum(fs, 0, s);
         Node* pushes = fnode(fs, nkVar, f->in, s);
@@ -726,8 +752,24 @@ static void find_pairs(Fields* fs, const Node* at) {
                              (f->ends[0] == 3) != (g->ends[0] == 3) || (f->ends[1] == 3) != (g->ends[1] == 3))) {
       snprintf(why, sizeof why, "`$%s` and `$%s` are a pair: at each end one is fixed and the other free, or both matched", f->name, g->name);
       field_fail(fs, at, why);
-    } else if (g > f) g->trails = 1;
+    } else {
+      if (f->width && g->width) {
+        snprintf(why, sizeof why, "`$%s` and `$%s` are a pair: the one that is pressure says its width, the flow takes it", f->name, g->name);
+        field_fail(fs, at, why);
+      }
+      if (f->width && (f->ends[0] == 3 || f->ends[1] == 3)) {
+        snprintf(why, sizeof why, "`$%s`: a matched end is for a line of one width", f->name);
+        field_fail(fs, at, why);
+      }
+      if (f->width || g->width) {
+        f->table = fname(fs, "area", f->name, -1);
+        g->table = fname(fs, "area", g->name, -1);
+      }
+      if (g > f) g->trails = 1;
+    }
   }
+  for (int i = 0; i < fs->n; i++)
+    if (fs->f[i].width && !fs->f[i].reads) field_fail(fs, at, "a width is of a pair: pressure and flow, `$p' = -slope($u)`, `$u' = -slope($p)`");
 }
 
 /* Where a line's places stand. Past a fixed end the field is 0 a whole
@@ -848,6 +890,9 @@ static int fields_pass(Arena* a, Kids* kids, int from, char* err, int errlen) {
         f->period = ring_arg(s->kids[0], "period", 0);
         f->init = ring_arg(s->kids[0], "start", 1);
         Node* ends = ring_arg(s->kids[0], "ends", 99);
+        f->width = ring_arg(s->kids[0], "width", 99);
+        if (f->width && f->width->kind != nkLambda) field_fail(&fs, s, "a width says itself along the line: `width = p => 0.03 + 0.05 * p`");
+        if (f->width && !make_line(s->kids[0])) field_fail(&fs, s, "a ring has one width: `line` can vary");
         if (make_line(s->kids[0])) {                          /* there and back in a period, so across in half */
           f->size = fcall(&fs, "field_places", s, 1, (Node*[]){fbin(&fs, "/", f->period, fnum(&fs, 2, s), s)});
           f->length = fname(&fs, "length", f->name, -1);
@@ -881,6 +926,8 @@ static int fields_pass(Arena* a, Kids* kids, int from, char* err, int errlen) {
   char* said = arena_alloc(a, fs.n + 1);
   memset(said, 0, fs.n + 1);
   for (int i = from; i < kids->n; i++) check_laws(&fs, kids->v[i], 1, said);
+  for (int i = 0; i < fs.n; i++)
+    if (fs.f[i].width && !fs.pair_at) field_fail(&fs, kids->v[from], "a width is of a pair: pressure and flow, `$p' = -slope($u)`, `$u' = -slope($p)`");
   if (fs.pair_at) find_pairs(&fs, fs.pair_at);
   place_lines(&fs);
   if (fs.failed) return -1;

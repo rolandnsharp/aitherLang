@@ -548,3 +548,43 @@ $i = line(period = 1, ends = free)
 $v' = -slope($i)
 $i' = -slope($v)
 $v[0]
+
+# --- a width is of a pair
+# error: a width is of a pair
+$x = line(period = 1, ends = fixed, width = p => 1 + p)
+$v = line(period = 1, ends = fixed)
+$v' = -concentration($x)
+$x' = $v
+$x[0]
+
+# --- it says itself along the line
+# error: a width says itself along the line
+$p = line(period = 1, ends = free, width = 2)
+$u = line(period = 1, ends = fixed)
+$p' = -slope($u)
+$u' = -slope($p)
+$p[0]
+
+# --- only the pressure says it
+# error: the one that is pressure says its width
+$p = line(period = 1, ends = free, width = p => 1 + p)
+$u = line(period = 1, ends = fixed, width = p => 1 + p)
+$p' = -slope($u)
+$u' = -slope($p)
+$p[0]
+
+# --- a ring is one width
+# error: a ring has one width
+$p = ring(period = 1, width = p => 1 + p)
+$u = ring(period = 1)
+$p' = -slope($u)
+$u' = -slope($p)
+$p[0]
+
+# --- matched is for one width
+# error: a matched end is for a line of one width
+$p = line(period = 1, ends = matched, width = p => 1 + p)
+$u = line(period = 1, ends = matched)
+$p' = -slope($u)
+$u' = -slope($p)
+$p[0]

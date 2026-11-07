@@ -32,7 +32,9 @@ itself, not the last place, took the echo from -28 dB to -35. A field under
 the patch: a line at 110 Hz is 33 places, 11 a sample, its third harmonic
 329 Hz. A pair needs two `each`s, as an `each` holds its stores to its end;
 in one it blew up. Travelling waves, d'Alembert's, would be exact and nearly
-free for a plain law, and aren't built. A push is
+free for a plain law, and aren't built. `width = p => ...` gives a pair a
+shape at the edge, keeping the where out of the law: a horn, with the modes
+theory gives. A push is
 `$v'[p] += force`, a source: it was always a rate at a point, sized as a
 delta function, and `$v[p] = force` hid that. An `at(p)` term inside the
 law was turned down: it puts a where in the law, and only works by being

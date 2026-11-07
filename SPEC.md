@@ -748,6 +748,16 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   matches `$v' = -slope($i)`, `$i' = -slope($v)`, as written with the minus.
   It works with `concentration` and pairs, not the squeeze and twist, which
   go at two speeds.
+- **`width = p => ...` gives a pair a shape**: how wide the line is at p, 0
+  to 1 along it, stated where the line is, so a where stays out of the law.
+  The field that says it is the pressure, and its partner takes it as flow:
+  flow changes pressure over the area, and pressure changes flow times it,
+  the area being width squared. The laws don't change. Tapered, the line is
+  a horn, Webster's equation, as a tapered telegraph line is the same thing
+  with L and C changing along it. Closed at one end, a cylinder's modes are
+  1, 3, 5 and a cone from 0.1 past its apex measures 1.80, 3.65, 5.55, 7.45
+  against theory's 1.82, 3.67, 5.54, 7.45. Only a pair has one, and a
+  `matched` end is for a line of one width.
 - A bare `$x` is the field at this place, and `$x = ...` stores there. A
   later line at the place sees what was stored; a neighbour sees the last
   step. A number or a value is everywhere.

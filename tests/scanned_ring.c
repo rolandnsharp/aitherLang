@@ -297,6 +297,40 @@ TEST(fine_fields_hold_a_note) {
   CHECK(fabs(w3 / 330 - 1) < 0.01 && fabs(p3 / 330 - 1) < 0.01, "%g, %g", w3, p3);
 }
 
+/* A bore closed at one end: a cylinder's modes are odd, and a cone's aren't
+ * tan(kL) = -k x0, x0 from its apex to its narrow end. */
+static double bore_mode(const char* width, double near) {
+  char src[640], err[4096];
+  snprintf(src, sizeof src,
+    "$p = line(period = 0.5, ends = [free, fixed], width = p => %s)\n"
+    "$u = line(period = 0.5, ends = [fixed, free])\n"
+    "$p' = -slope($u) - $p * 0.02\n"
+    "$u' = -slope($p) - $u * 0.02\n"
+    "$p'[0.01] += if t < 0.01 then 0.05 else 0\n"
+    "$p[0.02]\n", width);
+  Rendered r = {0};
+  if (render_src(src, 20.0, 12000, &r, err, sizeof err)) { CHECK(0, "doesn't render: %s", err); return -1; }
+  double best = 0, top = 0, mean = 0;
+  for (long i = 0; i < r.n; i++) mean += r.left[i] / r.n;
+  for (double f = near * 0.92; f < near * 1.08; f += 0.01) {
+    double a = 0, b = 0;
+    for (long i = 0; i < r.n; i += 40) {
+      double w = 0.5 - 0.5 * cos(TAU * i / r.n), x = (r.left[i] - mean) * w;
+      a += x * cos(TAU * f * i / 12000);
+      b += x * sin(TAU * f * i / 12000);
+    }
+    if (a * a + b * b > top) { top = a * a + b * b; best = f; }
+  }
+  rendered_free(&r);
+  return best;
+}
+TEST(bores_resonate_as_they_should) {
+  double c1 = bore_mode("1", 1), c2 = bore_mode("1", 3), k1 = bore_mode("0.1 + p", 1.82), k2 = bore_mode("0.1 + p", 3.67);
+  printf("  cylinder %.2f, %.2f Hz (1, 3); cone %.2f, %.2f (1.82, 3.67)\n", c1, c2, k1, k2);
+  CHECK(fabs(c1 - 1) < 0.02 && fabs(c2 - 3) < 0.04, "cylinder %g, %g", c1, c2);
+  CHECK(fabs(k1 - 1.82) < 0.03 && fabs(k2 - 3.67) < 0.05, "cone %g, %g", k1, k2);
+}
+
 TEST(ring_keeps_its_period) {
   const int rates[] = {24000, 48000, 96000};
   const double period = 0.8;
