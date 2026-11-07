@@ -26,7 +26,9 @@ let soften = 0.0001                                        # ... and more the hi
 $x = line(period = 1 / 220, ends = free)
 $v = line(period = 1 / 220, ends = free)
 
-$v' = -slope(slope(slope(slope($x)))) - $v * loss + slope(slope($v)) * soften
+let curve = slope(slope($x))                               # how bent it is here
+let bend = slope(slope(curve))                             # how its bending changes: what pushes back
+$v' = -bend - $v * loss + slope(slope($v)) * soften
 $x' = $v
 
 # ---------------------------------------------------------------- the strike

@@ -758,6 +758,19 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   1, 3, 5 and a cone from 0.1 past its apex measures 1.80, 3.65, 5.55, 7.45
   against theory's 1.82, 3.67, 5.54, 7.45. Only a pair has one, and a
   `matched` end is for a line of one width.
+- **`sheet(period = T, ends = fixed)` is the same field on a surface**: a
+  square, `ends` one word for its whole edge, `fixed` or `free`. Two slopes
+  are how far the neighbours all round stand above this place, so the law is
+  a string's, and four are a plate, pinned, so `fixed` only. One slope has no
+  direction here, and is an error. A point on it is one value, `(p, q)`, each
+  0 to 1, so `$x[(0.3, 0.6)]` reads, `$v'[gauss((p, q), width)] += force`
+  strikes, and reading round a circle is `$x[spin(note) * 0.3 + (0.5, 0.5)]`.
+  T is the first mode's period: 0.500 Hz at 2 s and 99.8 Hz at `1 / 100`, the
+  next at 0.790 and 157.4 where theory has 0.79 and 158; a plate 99.0 and 241.5
+  of 100 and 250. It is as fine as a place a sample allows, about 31 a side at
+  2 s, for a place of cost. Too short for 12 a side, it takes several a sample
+  at 12 a side, about a third of a uConsole core at 100 Hz, and a plate 8. The
+  period has to be plain numbers and file-level lets.
 - **Two slopes of a field's own motion lose more the higher it is**:
   `$v' = ... + slope(slope($v)) * soften`, or on a pair `$p' = ... +
   slope(slope($p)) * soften`. `- $v * loss` takes the same from every mode;
@@ -825,6 +838,35 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   costs more. A push then goes half a place a step, so only four times
   stiffer is safe. The period has to be plain numbers and file-level lets
   for the engine to see it; anything else stays at a place a sample.
+**Slopes compose.** `slope` is the one word for reaching a neighbour: how much
+a field changes from here to the next place. Taken again it is how much *that*
+changes, and each slope says something physical:
+
+| Slopes | Written | What it is | What it makes |
+|--------|---------|------------|---------------|
+| 1 | `slope($i)` | how steep the field is here | a pair: voltage and current, pressure and flow |
+| 2 | `slope(slope($x))` | how bent it is: how far its neighbours stand above it | a wave: a string, a ring, a membrane |
+| 4 | `slope(slope(slope(slope($x))))` | how its bending changes | stiffness: a bar, a plate |
+
+A string pulls towards straight, so its force is its bend, two slopes. A bar
+resists being bent, so its force is how the bend changes, four. That is the only
+difference in their laws. Slopes come in ones, twos and fours: one lands between
+places, so it needs a partner stepping there; two and four land back on them,
+so a field can read itself. Name them, as the sum is easier to read than the
+brackets:
+
+```
+let curve = slope(slope($x))        # how bent it is here
+let bend = slope(slope(curve))      # how its bending changes
+$v' = -bend - $v * loss
+$x' = $v
+```
+
+A name here stands for the words, not a value: a law happens at every place, so
+`curve` goes into the law as if written there, and `slope(curve)` is one slope
+more. A slope with a name is for laws, and is gone from everywhere else. Two
+slopes of a field's own motion are a loss that grows with pitch, below.
+
 - A neighbour is reached only through these words, which on a ring carry
   its speed:
 
@@ -896,8 +938,8 @@ seconds to go round, the words carry no speed, and `+=` is plain, a
 step's worth, with the order its lines are in. A push on one has no rate
 to join, so it is an amount, `$v[p] += e`, each sample. Use
 `ring`, unless a number of places is the point. Fields are at the file's
-level, in its plays too; a def sees none. Not built: sheets, and a period
-that moves while it plays.
+level, in its plays too; a def sees none. Not built: a round sheet, and a
+period that moves while it plays.
 
 ### Arrays are data, not a map
 

@@ -651,7 +651,7 @@ $x' = $v
 $x[0]
 
 # --- four slopes are a bar: a line
-# error: four slopes are a bar
+# error: four slopes are a bar or a plate
 $x = ring(period = 1)
 $v = ring(period = 1)
 $v' = -slope(slope(slope(slope($x))))
@@ -659,9 +659,75 @@ $x' = $v
 $x[0]
 
 # --- ... whose ends are fixed or free
-# error: four slopes are a bar
+# error: four slopes are a bar or a plate
 $x = line(period = 1, ends = matched)
 $v = line(period = 1, ends = matched)
 $v' = -slope(slope(slope(slope($x))))
 $x' = $v
 $x[0]
+
+# --- a slope with a name is the words, in every law
+# expect at 12000: 1
+$x = line(period = 1, ends = fixed)
+$v = line(period = 1, ends = fixed)
+$y = line(period = 1, ends = fixed)
+$w = line(period = 1, ends = fixed)
+let pull = slope(slope($x))
+$v' = pull
+$x' = $v
+$w' = slope(slope($y))
+$y' = $w
+$v'[gauss(0.25, 0.03)] += if t < 0.001 then 1000 else 0
+$w'[gauss(0.25, 0.03)] += if t < 0.001 then 1000 else 0
+if $v[0.75] == $w[0.75] and abs($v[0.75]) > 1 then 1 else 0
+
+# --- ... and a slope of a named slope is a slope more
+# expect at 2400: 1
+$x = line(period = 1, ends = free)
+$v = line(period = 1, ends = free)
+$y = line(period = 1, ends = free)
+$w = line(period = 1, ends = free)
+let curve = slope(slope($x))
+let bend = slope(slope(curve))
+$v' = -bend
+$x' = $v
+$w' = -slope(slope(slope(slope($y))))
+$y' = $w
+$v'[gauss(0.3, 0.05)] += if t < 0.001 then 100 else 0
+$w'[gauss(0.3, 0.05)] += if t < 0.001 then 100 else 0
+if $v[0.7] == $w[0.7] and $v[0.3] != 0 then 1 else 0
+
+# --- a sheet says its edge
+# error: a sheet says its edge
+$x = sheet(period = 1)
+$x' = 0
+$x[(0, 0)]
+
+# --- ... all round
+# error: a sheet says its edge
+$x = sheet(period = 1, ends = [fixed, free])
+$x' = 0
+$x[(0, 0)]
+
+# --- a point on a sheet is one value, and a blow lands there
+# expect at 3000: 1
+$x = sheet(period = 1, ends = fixed)
+$x' = 0
+$x'[gauss((0.3, 0.6), 0.05)] += if t < 0.001 then 1000 else 0
+if $x[(0.3, 0.6)] > 10 * abs($x[(0.7, 0.2)]) and $x[(0.3, 0.6)] > 1 then 1 else 0
+
+# --- one slope has no direction on a sheet
+# error: one slope needs a direction
+$v = sheet(period = 1, ends = fixed)
+$i = sheet(period = 1, ends = free)
+$v' = -slope($i)
+$i' = -slope($v)
+$v[(0, 0)]
+
+# --- four slopes on a sheet are a plate, pinned
+# error: four slopes are a bar or a plate
+$x = sheet(period = 1, ends = free)
+$v = sheet(period = 1, ends = free)
+$v' = -slope(slope(slope(slope($x))))
+$x' = $v
+$x[(0, 0)]

@@ -1,0 +1,54 @@
+# pond: rain on a sheet, read round at pitch
+# (notes/one-form-2026-11-07.md).
+#
+# scanned_ring opened out into a surface. A sheet is the same field on
+# another domain: the law is a string's, two slopes, and in two directions
+# they mean how much the neighbours all round stand above this place. It
+# moves at the speed of a hand and costs a place a sample, however fine.
+#
+# A drop lands as a shaped source, and a ring of ripple spreads, reflects
+# off the fixed edge and crosses the others. A point on a sheet is one
+# value, (p, q), so reading round a circle is a turning value: the sound's
+# note is how fast the reading goes round, and what it passes over is its
+# timbre. On the scope the circle is drawn as it is, bent where a ripple
+# crosses it.
+#
+#   ./aither patches/pond.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
+#
+# The gamepad (tools/pad): A drops one, each a golden step from the last;
+# hold A and press left and right for the note (CC 21), up and down for how
+# wide a circle is read (CC 20); hold B and press up and down for how fast
+# ripples die (CC 22).
+#   tools/pad & AITHER_MIDI=aither-pad ./aither patches/pond.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
+
+# ---------------------------------------------------------------- the water
+
+let loss = 0.5 + 3 * midi_cc(22)                           # what it loses, a round
+let soften = 0.0005                                        # ... and more the finer the ripple
+
+$x = sheet(period = 2.5, ends = fixed)
+$v = sheet(period = 2.5, ends = fixed)
+
+let pull = slope(slope($x))                                # how far its neighbours stand above it
+$v' = pull - $v * loss + slope(slope($v)) * soften
+$x' = $v
+
+# ---------------------------------------------------------------- the rain
+
+let own = phasor(1 / 2.3) * 2.3                            # one by itself every 2.3 s
+let pad = midi_trig(36)
+let age = min(own, since(pad))
+$drops = 0.0
+$drops = $drops + pad + (if own < dt then 1 else 0)
+let stroke = 0.004
+let fall = (0.15 + 0.7 * (($drops * 0.381966) mod 1), 0.15 + 0.7 * (($drops * 0.754878) mod 1))
+$x'[gauss(fall, 0.04)] += if age < stroke then 0.014 / stroke else 0
+
+# ---------------------------------------------------------------- reading
+
+# Round a circle at the note, its size the water: a turning value, read at
+# itself.
+let note = 110 * pow(2, floor(midi_cc(21) * 25) / 12)
+let turn = spin(note)
+let wide = 0.2 + 0.25 * midi_cc(20)
+turn * (0.45 + $x[turn * wide + (0.5, 0.5)])

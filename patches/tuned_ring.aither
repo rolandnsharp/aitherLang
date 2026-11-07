@@ -25,7 +25,8 @@
 $x = ring(period = 2)
 $v = ring(period = 2)
 
-$v' = slope(slope($x)) - $v * (0.2 + $x ^ 2 * 16)
+let pull = slope(slope($x))                                # how far its neighbours stand above it
+$v' = pull - $v * (0.2 + $x ^ 2 * 16)
 $x' = $v
 
 let drift = (0.5 + 0.5 * cos(TAU * phasor(1 / 60))) * (1 - midi_cc(20))   # the slow turning, 1 to 0 and back

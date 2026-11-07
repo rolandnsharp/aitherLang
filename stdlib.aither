@@ -378,6 +378,38 @@ def slope_ahead(f, now, at, r, other): if r != 0 and at == len(f) - 1 then (if r
 # the line itself, so what arrives is all taken and nothing comes back.
 def field_drag(v, at, speed, l, r): if l == 3 and at == 0 then (v[0] * 1.5 - v[1] * 0.5) * speed else if r == 3 and at == len(v) - 1 then (v[at] * 1.5 - v[at - 1] * 0.5) * speed else v[at] * 0
 
+# A sheet: s places a side, row after row. A point on it is one value, (p, q),
+# each 0..1 across. An edge is 1, fixed, held at 0, or 2, free, going on as it
+# is here. It is lc long in places, its first place off along.
+def sheet_past(f, r, c, s, e): if r < 0 or r >= s or c < 0 or c >= s then (if e == 1 then f[0] * 0 else f[clamp(r, 0, s - 1) * s + clamp(c, 0, s - 1)]) else f[r * s + c]
+def sheet_twice(f, at, s, e):
+  let r = floor(at / s)
+  let c = at - r * s
+  sheet_past(f, r - 1, c, s, e) + sheet_past(f, r + 1, c, s, e) + sheet_past(f, r, c - 1, s, e) + sheet_past(f, r, c + 1, s, e) - f[at] * 4
+def sheet_inside(f, r, c, s): if r < 0 or r >= s or c < 0 or c >= s then f[0] * 0 else sheet_twice(f, r * s + c, s, 1)
+def sheet_four(f, at, s):
+  let r = floor(at / s)
+  let c = at - r * s
+  sheet_inside(f, r - 1, c, s) + sheet_inside(f, r + 1, c, s) + sheet_inside(f, r, c - 1, s) + sheet_inside(f, r, c + 1, s) - sheet_twice(f, at, s, 1) * 4
+def sheet_at(f, z, s, lc, off, e):
+  let (p, q) = z
+  let u = clamp(p, 0, 1) * lc - off
+  let w = clamp(q, 0, 1) * lc - off
+  let r = floor(u)
+  let c = floor(w)
+  let top = sheet_past(f, r, c, s, e) + (sheet_past(f, r, c + 1, s, e) - sheet_past(f, r, c, s, e)) * (w - c)
+  let low = sheet_past(f, r + 1, c, s, e) + (sheet_past(f, r + 1, c + 1, s, e) - sheet_past(f, r + 1, c, s, e)) * (w - c)
+  top + (low - top) * (u - r)
+def sheet_place(z, s, lc, off):
+  let (p, q) = z
+  clamp(floor(p * lc - off + 0.5), 0, s - 1) * s + clamp(floor(q * lc - off + 0.5), 0, s - 1)
+def sheet_gauss(at, s, z, w, lc, off):
+  let (p, q) = z
+  let r = floor(at / s)
+  let c = at - r * s
+  let d = max(abs(w), 1e-9) * sqrt(2)
+  field_cell((r + off) / lc - p, 0.5 / lc, d) * field_cell((c + off) / lc - q, 0.5 / lc, d) * lc * lc
+
 # Hamilton's S and V: the scalar part and the vector part.
 def scalar(q):
   let ((w, _), (_, _)) = q

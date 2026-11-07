@@ -203,6 +203,9 @@ typedef struct {
   const char* grain;                     /* the hidden let: a push's step */
   Node* width;                           /* line(width = p => ...): the lambda, else NULL */
   const char* table;                     /* the hidden array: width squared at each place, a pair's */
+  int sheet;                             /* a sheet: `side` places a side, row after row */
+  int side;
+  const char* across;                    /* the hidden let, a sheet's: its length in places */
   int bar;                               /* a law reads four slopes of it, or moves it by them */
   const char* bend;                      /* the hidden let: what four slopes take */
   int per;                               /* a fine field: places a sample, else 0 */
@@ -251,7 +254,8 @@ static Field* field_named(Fields* fs, const char* name) {
   return NULL;
 }
 static int make_line(const Node* n) { return n && n->kind == nkCall && !strcmp(n->str, "line"); }
-static int make_ring(const Node* n) { return n && n->kind == nkCall && (!strcmp(n->str, "ring") || make_line(n)); }
+static int make_sheet(const Node* n) { return n && n->kind == nkCall && !strcmp(n->str, "sheet"); }
+static int make_ring(const Node* n) { return n && n->kind == nkCall && (!strcmp(n->str, "ring") || make_line(n) || make_sheet(n)); }
 static int make_array(const Node* n) { return n && n->kind == nkCall && (!strcmp(n->str, "array") || make_ring(n)); }
 /* A ring's named argument, or its positional one. */
 static Node* ring_arg(const Node* c, const char* name, int at) {
@@ -312,6 +316,9 @@ static Node* field_expr(Fields* fs, Node* n) {
   }
   if (n->kind == nkIdx && bare_field(fs, n->kids[0])) {       /* read at a point */
     Field* f = bare_field(fs, n->kids[0]);
+    if (f->sheet)
+      return fcall(fs, "sheet_at", n, 6, (Node*[]){n->kids[0], field_expr(fs, n->kids[1]), fnum(fs, f->side, n), fident(fs, f->across, n),
+                                                  fnum(fs, f->off, n), fnum(fs, f->ends[0], n)});
     if (f->length)
       return fcall(fs, "line_at", n, 6, (Node*[]){n->kids[0], field_expr(fs, n->kids[1]), fident(fs, f->length, n),
                                                  fnum(fs, f->off, n), fnum(fs, f->ends[0], n), fnum(fs, f->ends[1], n)});
@@ -331,7 +338,9 @@ static Node* field_expr(Fields* fs, Node* n) {
       field_fail(fs, n, why);
     }
     if (fs->failed) return n;
-    Node* at = f->length
+    Node* at = f->sheet
+      ? fcall(fs, "sheet_place", n, 4, (Node*[]){field_expr(fs, n->kids[1]), fnum(fs, f->side, n), fident(fs, f->across, n), fnum(fs, f->off, n)})
+      : f->length
       ? fcall(fs, "line_place", n, 4, (Node*[]){field_expr(fs, n->kids[1]), fident(fs, f->length, n), fnum(fs, f->off, n), f->size})
       : fcall(fs, "field_place", n, 2, (Node*[]){field_expr(fs, n->kids[1]), f->size});
     Node* push = field_expr(fs, said->kids[1]);
@@ -355,17 +364,25 @@ static Node* field_expr(Fields* fs, Node* n) {
       field_fail(fs, n, "slopes come one, for a pair, two, for a wave, or four, for a bar");
       return n;
     }
+    if (depth == 1 && of->sheet) {
+      field_fail(fs, n, "one slope needs a direction, and a sheet has two: two slopes or four");
+      return n;
+    }
     if (depth == 4) {
-      if (!of->length || of->ends[0] == 3 || of->ends[1] == 3) {
-        field_fail(fs, n, "four slopes are a bar: a `line` with `fixed` or `free` ends");
+      if (of->sheet ? of->ends[0] != 1 : !of->length || of->ends[0] == 3 || of->ends[1] == 3) {
+        field_fail(fs, n, "four slopes are a bar or a plate: a `line` with `fixed` or `free` ends, or a `sheet` with `fixed`");
         return n;
       }
       Node* inner = n->kids[0]->kids[0]->kids[0]->kids[0];
+      if (of->sheet)
+        return fbin(fs, "*", fcall(fs, "sheet_four", n, 3, (Node*[]){inner, fident(fs, of->place, n), fnum(fs, of->side, n)}), fident(fs, of->bend, n), n);
       return fbin(fs, "*", fcall(fs, "slope_four", n, 4, (Node*[]){inner, fident(fs, of->place, n), fnum(fs, of->ends[0], n), fnum(fs, of->ends[1], n)}),
                   fident(fs, of->bend, n), n);
     }
     if (depth == 2) {
       f = of;
+      if (f->sheet)
+        return at_speed(fs, f, fcall(fs, "sheet_twice", n, 4, (Node*[]){n->kids[0]->kids[0], fident(fs, f->place, n), fnum(fs, f->side, n), fnum(fs, f->ends[0], n)}), n);
       Node* word = at_speed(fs, f, fcall(fs, "slope_twice", n, 4, (Node*[]){n->kids[0]->kids[0], fident(fs, f->place, n), fnum(fs, f->ends[0], n), fnum(fs, f->ends[1], n)}), n);
       if (f->ends[0] != 3 && f->ends[1] != 3) return word;
       Field* v = f->moves;
@@ -394,6 +411,10 @@ static Node* field_expr(Fields* fs, Node* n) {
     }
     Node* in = n->nkids == 1 ? n->kids[0] : NULL;
     f = in && in->kind == nkCall && in->nkids == 1 ? bare_field(fs, in->kids[0]) : NULL;
+    if (f && f->sheet && (!strcmp(n->str, "slope") || !strcmp(n->str, "curl"))) {
+      field_fail(fs, n, "a squeeze and a twist go along a line, not across a sheet");
+      return n;
+    }
     if (f && (f->ends[0] == 3 || f->ends[1] == 3) && (!strcmp(n->str, "slope") || !strcmp(n->str, "curl"))) {
       field_fail(fs, n, "a matched end is for two slopes or a pair: a squeeze and a twist go at their own speeds");
       return n;
@@ -565,7 +586,12 @@ static void shaped_source(Fields* fs, const Node* s, Kids* out) {
   for (int i = 0; i < 2; i++) {
     held[i] = fname(fs, i ? "held_width" : "held_centre", f->name, k);
     Node* v = fnode(fs, nkVar, held[i], s);
-    fkids(fs, v, 1, (Node*[]){fnum(fs, 0, s)});
+    Node* start = fnum(fs, 0, s);
+    if (f->sheet && i == 0) {                                 /* a point on a sheet is one value */
+      start = fnode(fs, nkArr, "()", s);
+      fkids(fs, start, 2, (Node*[]){fnum(fs, 0, s), fnum(fs, 0, s)});
+    }
+    fkids(fs, v, 1, (Node*[]){start});
     kid(out, v);
     Node* pick = fnode(fs, nkIf, "", s);
     fkids(fs, pick, 3, (Node*[]){fident(fs, striking, s), field_expr(fs, shape->kids[i]), fident(fs, held[i], s)});
@@ -594,10 +620,13 @@ static void shaped_source(Fields* fs, const Node* s, Kids* out) {
   kid(lay, fstore(fs, then, fident(fs, here, s), fident(fs, total, s), s));
   const char* next = flet(fs, "next", f->name, k,
     fbin(fs, "mod", fbin(fs, "+", fident(fs, here, s), fnum(fs, f->per ? f->per : 1, s), s), f->size, s), s, lay);
-  Node* along = f->length ? fbin(fs, "/", fbin(fs, "+", fident(fs, next, s), fnum(fs, f->off, s), s), fident(fs, f->length, s), s)
+  Node* along = f->sheet ? fnum(fs, 0, s) : f->length ? fbin(fs, "/", fbin(fs, "+", fident(fs, next, s), fnum(fs, f->off, s), s), fident(fs, f->length, s), s)
                           : fbin(fs, "/", fident(fs, next, s), f->size, s);
   Node* from = fbin(fs, "-", along, fident(fs, held[0], s), s);
-  Node* shaped = fbin(fs, "*", fident(fs, caught, s), f->length
+  Node* shaped = fbin(fs, "*", fident(fs, caught, s), f->sheet
+    ? fcall(fs, "sheet_gauss", s, 6, (Node*[]){fident(fs, next, s), fnum(fs, f->side, s), fident(fs, held[0], s), fident(fs, held[1], s),
+                                              fident(fs, f->across, s), fnum(fs, f->off, s)})
+    : f->length
     ? fcall(fs, "line_gauss", s, 3, (Node*[]){from, fident(fs, held[1], s), fident(fs, f->length, s)})
     : fcall(fs, "field_gauss", s, 3, (Node*[]){from, fident(fs, held[1], s), f->size}), s);
   Node* laid = fnode(fs, nkIf, "", s);                       /* nothing to lay, nothing to work out */
@@ -650,7 +679,18 @@ static void field_stmts(Fields* fs, Node** in, int n, Kids* out, int top) {
           fkids(fs, length, 1, (Node*[]){fbin(fs, "+", f->size, fnum(fs, f->extra, s), s)});
           kid(out, length);
         }
-        if (f->bar) {                                        /* its first mode a period: by its ends, classically */
+        if (f->sheet) {
+          Node* across = fnode(fs, nkLet, f->across, s);
+          fkids(fs, across, 1, (Node*[]){fnum(fs, f->side + f->extra, s)});
+          kid(out, across);
+        }
+        if (f->sheet && f->bar) {                            /* a plate's first mode a period: pinned, omega = (1 / pi) k^2 */
+          Node* lc = fident(fs, f->across, s);
+          Node* bend = fnode(fs, nkLet, f->bend, s);
+          fkids(fs, bend, 1, (Node*[]){fbin(fs, "*", fbin(fs, "*", fbin(fs, "*", lc, lc, s), fbin(fs, "*", lc, lc, s), s), fnum(fs, 1 / (M_PI * M_PI), s), s)});
+          kid(out, bend);
+        }
+        if (f->bar && !f->sheet) {                           /* its first mode a period: by its ends, classically */
           int free_ends = (f->ends[0] == 2) + (f->ends[1] == 2);
           double first = free_ends == 2 ? 2.26669 : free_ends == 1 ? 1.5625 : 1;
           double c = 2 / M_PI / first;
@@ -660,7 +700,8 @@ static void field_stmts(Fields* fs, Node** in, int n, Kids* out, int top) {
           kid(out, bend);
         }
         Node* speed = fnode(fs, nkLet, f->speed, s);
-        fkids(fs, speed, 1, (Node*[]){f->length ? fbin(fs, "*", fident(fs, f->length, s), fnum(fs, 2, s), s) : f->size});
+        fkids(fs, speed, 1, (Node*[]){f->sheet ? fbin(fs, "*", fident(fs, f->across, s), fnum(fs, f->ends[0] == 1 ? sqrt(2) : 2, s), s)
+                                     : f->length ? fbin(fs, "*", fident(fs, f->length, s), fnum(fs, 2, s), s) : f->size});
         kid(out, speed);
         Node* rate = fnode(fs, nkLet, f->rate, s);           /* N^2: a wave goes round in one round */
         fkids(fs, rate, 1, (Node*[]){fbin(fs, "*", fident(fs, f->speed, s), fident(fs, f->speed, s), s)});
@@ -669,7 +710,8 @@ static void field_stmts(Fields* fs, Node** in, int n, Kids* out, int top) {
         fkids(fs, step, 1, (Node*[]){fbin(fs, "/", fbin(fs, "*", f->per ? fnum(fs, f->sweep, s) : f->size, fident(fs, "dt", s), s), f->period, s)});
         kid(out, step);
         Node* grain = fnode(fs, nkLet, f->grain, s);         /* a push lands as a delta: a place's height, of its length */
-        fkids(fs, grain, 1, (Node*[]){f->length ? fbin(fs, "/", fbin(fs, "*", fident(fs, f->length, s), fident(fs, "dt", s), s), f->period, s)
+        fkids(fs, grain, 1, (Node*[]){f->sheet ? fbin(fs, "/", fbin(fs, "*", fbin(fs, "*", fident(fs, f->across, s), fident(fs, f->across, s), s), fident(fs, "dt", s), s), f->period, s)
+                                                : f->length ? fbin(fs, "/", fbin(fs, "*", fident(fs, f->length, s), fident(fs, "dt", s), s), f->period, s)
                                                 : fident(fs, f->step, s)});
         kid(out, grain);
       }
@@ -780,7 +822,9 @@ static void find_pairs(Fields* fs, const Node* at) {
     Field* g = f->reads;
     if (!g) continue;
     char why[200];
-    if (g == f || g->reads != f) {
+    if (f->sheet || g->sheet) {
+      field_fail(fs, at, "one slope needs a direction, and a sheet has two: two slopes or four");
+    } else if (g == f || g->reads != f) {
       snprintf(why, sizeof why, "`slope($%s)` in `$%s'`'s law needs its partner: `$%s' = ... slope($%s) ...`",
                g->name, f->name, g->name, f->name);
       field_fail(fs, at, why);
@@ -819,6 +863,10 @@ static void find_pairs(Fields* fs, const Node* at) {
 static void place_lines(Fields* fs) {
   for (int i = 0; i < fs->n; i++) {
     Field* f = &fs->f[i];
+    if (f->sheet) {
+      f->extra = f->ends[0] == 1 ? 1 : 0;
+      f->off = f->ends[0] == 1 ? 1 : 0.5;
+    }
     if (!f->length) continue;
     int l = f->ends[0] == 1, r = f->ends[1] == 1;
     if (f->reads) {
@@ -1001,6 +1049,30 @@ static int plain_number(const Node* n, Kids* kids, int from, double* v) {
  * a sample instead: at least MIN_PLACES, the push going half a place a step,
  * M samples to a sweep of N = M * P. Finer costs P places a sample. */
 #define MIN_PLACES 32
+/* A sheet goes round no place in particular, so its first mode says how fast
+ * a push goes. At a place a sample, a sweep is every place, and that is the
+ * finest it can be for the same cost; too few a side, and it takes several a
+ * sample, a sweep a divisor of its places, at 12 a side (8 for a plate). */
+static void sheet_grain(Field* f, double period, int plate) {
+  double reach = (plate ? 0.47 : f->ends[0] == 1 ? 0.354 : 0.25) * period * field_sr;
+  int least = plate ? 8 : 12;
+  int side = (int)((plate ? sqrt(sqrt(reach)) : cbrt(reach)) + 0.5);
+  if (side >= least) {
+    f->side = side;
+    f->per = 1;
+    f->sweep = side * side;
+    return;
+  }
+  side = least;
+  while (side > 4 && (plate ? side * side : side) > reach) side--;
+  int most = (int)(reach / (plate ? side * side : side));
+  if (most < 1) most = 1;
+  int m = most;
+  while (m > 1 && (side * side) % m) m--;
+  f->side = side;
+  f->per = side * side / m;
+  f->sweep = m;
+}
 /* A bar: its highest mode, not a crossing, sets the step. At places of a
  * sample or fewer, N * N * M = 0.47 * sr * T holds that mode to about a
  * radian a step, with at least 16 places while the rate can give them. */
@@ -1029,6 +1101,54 @@ static void fine_grain(Field* f, double across) {
   f->sweep = m;
 }
 
+/* A slope with a name: `let curve = slope(slope($x))`. A law is a line at each
+ * place, so the name stands for the words, not for a value at one of them,
+ * and goes into the laws as if written there; `slope(curve)` is a slope more. */
+static Node* copy_tree(Fields* fs, const Node* n) {
+  Node* c = arena_alloc(fs->a, sizeof(Node));
+  *c = *n;
+  if (n->nkids) {
+    c->kids = arena_alloc(fs->a, n->nkids * sizeof(Node*));
+    for (int i = 0; i < n->nkids; i++) c->kids[i] = copy_tree(fs, n->kids[i]);
+  }
+  return c;
+}
+static int says_slope(Fields* fs, const Node* n) {
+  if (!n) return 0;
+  Field* of;
+  if (slopes(fs, n, &of)) return 1;
+  for (int i = 0; i < n->nkids; i++) if (says_slope(fs, n->kids[i])) return 1;
+  return 0;
+}
+static Node* name_out(Fields* fs, Node* n, Node** lets, int count) {
+  if (!n) return n;
+  if (n->kind == nkIdent)
+    for (int i = 0; i < count; i++) if (!strcmp(lets[i]->str, n->str)) return copy_tree(fs, lets[i]->kids[0]);
+  for (int i = 0; i < n->nkids; i++) n->kids[i] = name_out(fs, n->kids[i], lets, count);
+  return n;
+}
+static void named_slopes(Fields* fs, Kids* kids, int from) {
+  Node* lets[kids->n + 1];
+  int count = 0, kept = from;
+  for (int i = from; i < kids->n; i++) {
+    Node* s = kids->v[i];
+    if (s->kind == nkLet && s->nkids == 1 && s->str[0]) {
+      s->kids[0] = name_out(fs, s->kids[0], lets, count);
+      if (says_slope(fs, s->kids[0])) { lets[count++] = s; continue; }
+    }
+    kids->v[kept++] = s;
+  }
+  kids->n = kept;
+  if (!count) return;
+  for (int i = from; i < kids->n; i++) {
+    Node* s = kids->v[i];
+    if (is_law(s)) s->kids[0] = name_out(fs, s->kids[0], lets, count);
+    if (s->kind == nkPlay && s->kids[0] && s->kids[0]->kind == nkBlock)
+      for (int k = 0; k < s->kids[0]->nkids; k++)
+        if (is_law(s->kids[0]->kids[k])) s->kids[0]->kids[k]->kids[0] = name_out(fs, s->kids[0]->kids[k]->kids[0], lets, count);
+  }
+}
+
 /* A field read through four slopes is a bar, and so is what its law moves. */
 static void make_bar(Fields* fs, Field* f, Kids* kids, int from, const Node* at) {
   double period;
@@ -1039,7 +1159,8 @@ static void make_bar(Fields* fs, Field* f, Kids* kids, int from, const Node* at)
   }
   f->bar = 1;
   f->bend = fname(fs, "bend", f->name, -1);
-  bar_grain(f, period);
+  if (f->sheet) sheet_grain(f, period, 1);
+  else bar_grain(f, period);
   f->size = fnum(fs, f->per * f->sweep, at);
 }
 static void bars_in(Fields* fs, const Node* n, Field* law, Kids* kids, int from, const Node* at) {
@@ -1075,10 +1196,18 @@ static int fields_pass(Arena* a, Kids* kids, int from, char* err, int errlen) {
         f->period = ring_arg(s->kids[0], "period", 0);
         f->init = ring_arg(s->kids[0], "start", 1);
         Node* ends = ring_arg(s->kids[0], "ends", 99);
+        if (make_sheet(s->kids[0])) {
+          f->sheet = 1;
+          f->across = fname(&fs, "across", f->name, -1);
+          f->ends[0] = !ends || ends->kind != nkIdent ? 0 : !strcmp(ends->str, "fixed") ? 1 : !strcmp(ends->str, "free") ? 2 : 0;
+          f->ends[1] = f->ends[0];
+          if (!f->ends[0]) field_fail(&fs, s, "a sheet says its edge, all round: `ends = fixed` or `ends = free`");
+        }
         f->width = ring_arg(s->kids[0], "width", 99);
         if (f->width && f->width->kind != nkLambda) field_fail(&fs, s, "a width says itself along the line: `width = p => 0.03 + 0.05 * p`");
         if (f->width && !make_line(s->kids[0])) field_fail(&fs, s, "a ring has one width: `line` can vary");
-        if (make_line(s->kids[0])) {                          /* there and back in a period, so across in half */
+        if (f->sheet) {                                       /* sized below, when its first mode is known */
+        } else if (make_line(s->kids[0])) {                   /* there and back in a period, so across in half */
           f->size = fcall(&fs, "field_places", s, 1, (Node*[]){fbin(&fs, "/", f->period, fnum(&fs, 2, s), s)});
           f->length = fname(&fs, "length", f->name, -1);
           if (!ends) field_fail(&fs, s, "a line says its ends: `line(period = 2, ends = fixed)`, or `ends = [fixed, free]`");
@@ -1098,9 +1227,12 @@ static int fields_pass(Arena* a, Kids* kids, int from, char* err, int errlen) {
         f->grain = fname(&fs, "grain", f->name, -1);
         double period;
         if (plain_number(f->period, kids, from, &period) && period > 0) {
-          fine_grain(f, f->length ? period / 2 : period);
-          if (f->per) f->size = fnum(&fs, f->per * f->sweep, s);
-        }
+          if (f->sheet) {
+            if (f->ends[0]) sheet_grain(f, period, 0);
+            f->size = fnum(&fs, f->side * f->side, s);
+          } else fine_grain(f, f->length ? period / 2 : period);
+          if (f->per && !f->sheet) f->size = fnum(&fs, f->per * f->sweep, s);
+        } else if (f->sheet) field_fail(&fs, s, "a sheet's period has to be plain numbers and file-level lets, as its places come from it");
       }
     }
   }
@@ -1108,6 +1240,7 @@ static int fields_pass(Arena* a, Kids* kids, int from, char* err, int errlen) {
   int kept = 0;                                              /* only what is assigned bare is a field */
   for (int i = 0; i < fs.n; i++) if (fs.f[i].place) fs.f[kept++] = fs.f[i];
   fs.n = kept;
+  named_slopes(&fs, kids, from);
   char* said = arena_alloc(a, fs.n + 1);
   memset(said, 0, fs.n + 1);
   for (int i = from; i < kids->n; i++) check_laws(&fs, kids->v[i], 1, said);

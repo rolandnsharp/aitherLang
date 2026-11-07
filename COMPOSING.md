@@ -1204,8 +1204,28 @@ arrives, Heaviside's termination: `patches/far_end.aither`.
 A short field holds a note, the engine stepping several places a sample, and
 `width = p => ...` flares a pair into a horn. `patches/field_didge.aither` is
 a bore of two laws and a width, played by `dho` lips reading and pushing it
-at one point, so a field and the rest of the language mix freely. Two slopes
-are a wave, four a bar: `patches/field_bar.aither`.
+at one point, so a field and the rest of the language mix freely.
+
+**Slopes compose, and it helps to name them.** `slope($x)` is how steep a field
+is. Take it twice and you have how bent it is, which is what a string pulls
+against. Take it four times and you have how its bending changes, which is what
+a bar pushes back with. So one law, three instruments:
+
+```
+let curve = slope(slope($x))        # how bent it is here
+$v' = curve                         # a string: it pulls straight
+
+let bend = slope(slope(curve))      # how its bending changes
+$v' = -bend                         # a bar: it resists bending
+```
+
+Names are the way to read these: `-slope(slope(slope(slope($x))))` is correct
+and tells you nothing. Pick the word for what it does in your instrument: `pull`
+on a string, `bend` on a bar. `patches/field_bar.aither`.
+
+`sheet(period = T, ends = fixed)` is the same field on a surface, with the same
+two slopes. `patches/pond.aither` reads round a circle on it at pitch, so ripples
+are timbre, at a place a sample. A sheet at pitch is a drum head, but a costly one.
 
 Laws work on plain state too, a medium of one place, in a `def` or a `sum` as
 well: `$v' = -$x * w ^ 2 - $v * damp` and `$x' = $v` is a spring, in either

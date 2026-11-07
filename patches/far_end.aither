@@ -27,7 +27,8 @@ let loss = 3 * midi_cc(22)                                 # what it loses, a ro
 $x = line(period = 5, ends = [fixed, matched])             # there and back in 5 s
 $v = line(period = 5, ends = [fixed, matched])
 
-$v' = slope(slope($x)) - $v * loss
+let pull = slope(slope($x))                                # how far its neighbours stand above it
+$v' = pull - $v * loss
 $x' = $v
 
 # ---------------------------------------------------------------- the pluck

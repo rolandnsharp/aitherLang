@@ -445,6 +445,45 @@ TEST(soften_takes_the_highs_first) {
   CHECK(low < flat_low, "%g against %g", low, flat_low);
 }
 
+/* A sheet's first mode is its period: at hand speed, and at pitch; a
+ * square's next ones at 1.58 and 2. A plate pinned round its edge: 1, 2.5. */
+static double sheet_mode(const char* law, const char* period, double near, double rounds) {
+  char src[640], err[4096];
+  snprintf(src, sizeof src,
+    "$x = sheet(period = %s, ends = fixed)\n$v = sheet(period = %s, ends = fixed)\n"
+    "$v' = %s - $v * 0.01\n$x' = $v\n"
+    "$v'[gauss((0.31, 0.42), 0.08)] += if t < 0.001 then 1 else 0\n$x[(0.27, 0.61)]\n", period, period, law);
+  Rendered r = {0};
+  double f0 = near;
+  if (render_src(src, rounds / f0, 48000, &r, err, sizeof err)) { CHECK(0, "doesn't render: %s", err); return -1; }
+  double best = 0, top = 0, mean = 0;
+  for (long i = 0; i < r.n; i++) mean += r.left[i] / r.n;
+  long by = r.n / 12000 + 1;
+  for (double f = near * 0.9; f < near * 1.1; f += near * 0.002) {
+    double a = 0, b = 0;
+    for (long i = 0; i < r.n; i += by) {
+      double w = 0.5 - 0.5 * cos(TAU * i / r.n), x = (r.left[i] - mean) * w;
+      a += x * cos(TAU * f * i / 48000);
+      b += x * sin(TAU * f * i / 48000);
+    }
+    if (a * a + b * b > top) { top = a * a + b * b; best = f; }
+  }
+  rendered_free(&r);
+  return best;
+}
+TEST(sheets_ring_as_they_should) {
+  const char* wave = "slope(slope($x))";
+  const char* plate = "-slope(slope(slope(slope($x))))";
+  double slow = sheet_mode(wave, "2", 0.5, 12), slow2 = sheet_mode(wave, "2", 0.79, 12);
+  double drum = sheet_mode(wave, "1 / 100", 100, 40), drum2 = sheet_mode(wave, "1 / 100", 158, 40);
+  double pl = sheet_mode(plate, "1 / 100", 100, 40), pl2 = sheet_mode(plate, "1 / 100", 250, 40);
+  printf("  a sheet: %.3f, %.3f Hz of 0.5, 0.79; at pitch %.1f, %.1f of 100, 158; a plate %.1f, %.1f of 100, 250\n",
+         slow, slow2, drum, drum2, pl, pl2);
+  CHECK(fabs(slow / 0.5 - 1) < 0.04 && fabs(slow2 / 0.79 - 1) < 0.04, "%g, %g", slow, slow2);
+  CHECK(fabs(drum / 100 - 1) < 0.03 && fabs(drum2 / 158 - 1) < 0.04, "%g, %g", drum, drum2);
+  CHECK(fabs(pl / 100 - 1) < 0.05, "plate %g", pl);
+}
+
 TEST(ring_keeps_its_period) {
   const int rates[] = {24000, 48000, 96000};
   const double period = 0.8;
