@@ -16,9 +16,10 @@
 #
 #   ./aither patches/field_harp.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
 #
-# The gamepad (tools/pad): hold A and press up and down for more wind (CC 20),
-# left and right for the note (CC 21); hold B and press up and down for how
-# long the string holds its energy (CC 22).
+# The gamepad (tools/pad): hold A and press up and down to take the wind in
+# hand (CC 20: down is the gusts, up is a gale, each press about a harmonic
+# in between), left and right for the note (CC 21); hold B and press up and
+# down for how long the string holds its energy (CC 22).
 #   tools/pad & AITHER_MIDI=aither-pad ./aither patches/field_harp.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
 
 # ---------------------------------------------------------------- the string
@@ -34,9 +35,14 @@ $i' = -slope($v) - $i * loss
 
 # ---------------------------------------------------------------- the wind
 
+# The gusts blow by themselves until the knob takes over. Vortices are
+# counted against the note, so the wind picks a harmonic and the note moves
+# the whole sound. That is a liberty: real wind doesn't care how the string is
+# tuned, and without it the note hardly moves the pitch, which stays with the wind.
 let gust = 0.4 + 0.25 * sin(TAU * phasor(1 / 23)) + 0.12 * sin(TAU * phasor(1 / 7.1))
-let wind = clamp(slew(gust + midi_cc(20), 0.4), 0, 1)
-let shed = TAU * (60 + wind * 1300)                        # vortices a second, as the wind
+let hand = midi_cc(20)
+let wind = slew(gust * (1 - hand) + hand, 0.15)
+let shed = TAU * note * (0.5 + wind * 11.5)                # vortices a second, as the wind
 
 # ---------------------------------------------------------------- the wake
 
