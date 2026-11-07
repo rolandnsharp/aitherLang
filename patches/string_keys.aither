@@ -1,0 +1,35 @@
+# string_keys: six strings played from the number keys, in A minor
+# (notes/field-by-its-period-2026-11-06.md).
+#
+# A string is a def holding a field, written out where it's called, so it
+# reads the file's `scale`: a pair whose period moves, so each key
+# can take any voice's string and retune it, and its harmonics are exact.
+# Six calls are six strings, one for each voice the keyboard hands out. A key
+# going down plucks its string; let go, and a felt damps it.
+#
+# Tuned justly: every interval a ratio of harmonics, so a chord's partials
+# fall on each other, as the strings' own harmonics are exact. Swap the two
+# `scale` lines for Pythagorean, a scale made of fifths alone, whose thirds beat.
+#
+# The keys 1 to 0 are A minor up from A3: A B C D E F G A B C.
+#
+#   cd ~/aitherLang; pkill -x pad; tools/pad & sleep 1; AITHER_MIDI=aither-pad ./aither patches/string_keys.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
+
+let scale = [1, 9 / 8, 6 / 5, 4 / 3, 3 / 2, 8 / 5, 9 / 5, 2, 9 / 4, 12 / 5]            # just
+# let scale = [1, 9 / 8, 32 / 27, 4 / 3, 3 / 2, 128 / 81, 16 / 9, 2, 9 / 4, 64 / 27]  # Pythagorean
+let root = 220                                             # A3
+
+def string(voice, root):
+  let key = clamp(midi_voice_key(voice) - 60, 0, 9)
+  let note = root * scale[key]
+  let held = midi_voice_gate(voice)
+  let loss = if held > 0 then 0.004 else 0.08              # what it loses, a round: felt when let go
+  $v = line(period = 1 / note, ends = fixed)
+  $i = line(period = 1 / note, ends = free)
+  $v' = -slope($i) - $v * loss
+  $i' = -slope($v) - $i * loss
+  let age = since(midi_voice_on(voice))
+  $v'[0.27] += if age < 0.0005 and held > 0 then 0.0012 / 0.0005 else 0
+  [$v[0.13], $v[0.71]]
+
+sum(6, n => string(n, root)) * 0.5 |> tanh

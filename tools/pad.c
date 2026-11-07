@@ -9,6 +9,9 @@
    midi_cc(20) etc.
        A: cc20 up/down  cc21 left/right      B: cc22 cc23
        X: cc24 cc25                          Y: cc26 cc27
+   The number keys 1 to 0 are notes 60 to 69, always, as they go down and
+   up: a patch maps them to its own scale (patches/string_keys.aither).
+   They reach the terminal too.
    Each button is also a note, sent as it goes down and up: A 36, B 37,
    X 38, Y 39 (midi_trig(36) strikes on A). A patch that plays every note
    it hears, as midi_keyboard does, hears these too.
@@ -120,14 +123,19 @@ int main(int argc, char **argv) {
             }
         }
         if (pf[1].revents & POLLIN) {
+            if (read(fk, &ev, sizeof ev) != sizeof ev) continue;
+            if (ev.type == EV_KEY && ev.code >= KEY_1 && ev.code <= KEY_0 && (ev.value == 0 || ev.value == 1)) {
+                send_note(seq, port, 60 + ev.code - KEY_1, ev.value);   /* the number keys, 1 to 0, as notes 60..69 */
+                continue;
+            }
             if (notes) {                                  /* the d-pad as notes 40..43 */
-                if (read(fk, &ev, sizeof ev) == sizeof ev && ev.type == EV_KEY && (ev.value == 0 || ev.value == 1)) {
+                if (ev.type == EV_KEY && (ev.value == 0 || ev.value == 1)) {
                     int n = ev.code == KEY_UP ? 40 : ev.code == KEY_DOWN ? 41 : ev.code == KEY_LEFT ? 42 : ev.code == KEY_RIGHT ? 43 : 0;
                     if (n) send_note(seq, port, n, ev.value);
                 }
                 continue;
             }
-            if (read(fk, &ev, sizeof ev) == sizeof ev && ev.type == EV_KEY && held >= 0) {
+            if (ev.type == EV_KEY && held >= 0) {
                 int which = -1, dir = 0;
                 switch (ev.code) {
                     case KEY_UP:    which = 0; dir = +1; break;
