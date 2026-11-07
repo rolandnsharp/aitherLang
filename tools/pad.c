@@ -9,6 +9,8 @@
    midi_cc(20) etc.
        A: cc20 up/down  cc21 left/right      B: cc22 cc23
        X: cc24 cc25                          Y: cc26 cc27
+       the arrows alone, no button held: cc28 up/down, cc29 left/right
+       (they reach the terminal as well)
    The number keys 1 to 0 are notes 60 to 69, always, as they go down and
    up: a patch maps them to its own scale (patches/string_keys.aither).
    They reach the terminal too.
@@ -39,7 +41,7 @@
 #define KBD "/dev/input/by-id/usb-ClockworkPI_uConsole_20230713-event-kbd"
 #define FIRST_CC 20
 
-static const char *names[4] = {"A", "B", "X", "Y"};
+static const char *names[5] = {"A", "B", "X", "Y", "arrows"};   /* the arrows alone are a fifth bank */
 
 static int bank_of(int code) {            /* the gamepad's button codes */
     switch (code) { case 289: return 0; case 290: return 1; case 288: return 2; case 291: return 3; }   /* A B X Y, read off the uConsole 2026-10-29 */
@@ -77,7 +79,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "aither-pad: client %d port %d  (aither midi connect %d:%d)\n",
             snd_seq_client_id(seq), port, snd_seq_client_id(seq), port);
 
-    int knob[8] = {0};
+    int knob[10] = {0};
     int held = -1;            /* which button is down, or -1 */
     int arrow = 0;            /* d-pad key currently down, or 0 */
     int ticks = 0;            /* repeat ticks so far in this d-pad hold */
@@ -86,18 +88,19 @@ int main(int argc, char **argv) {
     for (;;) {
         /* a tap is one step: the sweep waits until the d-pad has been held
            300 ms, as a keyboard's repeat does (at 45 ms every tap swept too) */
-        int r = poll(pf, 2, (held >= 0 && arrow) ? (ticks == 0 ? 300 : 45) : -1);
+        int r = poll(pf, 2, arrow ? (ticks == 0 ? 300 : 45) : -1);
         if (r < 0) break;
         /* the gamepad or keyboard gone (unplugged, the session ended): poll
            would report it at once, every time, and the loop would spin */
         if ((pf[0].revents | pf[1].revents) & (POLLERR | POLLHUP | POLLNVAL)) break;
         struct input_event ev;
-        if (r == 0 && held >= 0 && arrow) {         /* d-pad held: sweep */
+        int bank = held >= 0 ? held : 4;
+        if (r == 0 && arrow) {                      /* d-pad held: sweep */
             ticks++;
             int which = (arrow == KEY_UP || arrow == KEY_DOWN) ? 0 : 1;
             int dir = (arrow == KEY_UP || arrow == KEY_RIGHT) ? +1 : -1;
             int step = ticks > 40 ? 4 : ticks > 15 ? 2 : 1;
-            int k = held * 2 + which;
+            int k = bank * 2 + which;
             int v = knob[k] + dir * step;
             knob[k] = v < 0 ? 0 : v > 127 ? 127 : v;
             snd_seq_event_t e;
@@ -107,7 +110,7 @@ int main(int argc, char **argv) {
             snd_seq_ev_set_direct(&e);
             snd_seq_ev_set_controller(&e, 0, FIRST_CC + k, knob[k]);
             snd_seq_event_output_direct(seq, &e);
-            fprintf(stderr, "\r%s %s  cc%d = %3d   ", names[held], which ? "<>" : "^v", FIRST_CC + k, knob[k]);
+            fprintf(stderr, "\r%s %s  cc%d = %3d   ", names[bank], which ? "<>" : "^v", FIRST_CC + k, knob[k]);
             continue;
         }
         if (pf[0].revents & POLLIN) {
@@ -135,7 +138,7 @@ int main(int argc, char **argv) {
                 }
                 continue;
             }
-            if (ev.type == EV_KEY && held >= 0) {
+            if (ev.type == EV_KEY) {
                 int which = -1, dir = 0;
                 switch (ev.code) {
                     case KEY_UP:    which = 0; dir = +1; break;
@@ -148,7 +151,7 @@ int main(int argc, char **argv) {
                 if (ev.value == 2) continue;                                      /* a repeat we didn't ask for */
                 arrow = ev.code; ticks = 0;
                 int step = 6;                                                     /* one press */
-                int k = held * 2 + which;
+                int k = bank * 2 + which;
                 int v = knob[k] + dir * step;
                 knob[k] = v < 0 ? 0 : v > 127 ? 127 : v;
                 snd_seq_event_t e;
@@ -158,7 +161,7 @@ int main(int argc, char **argv) {
                 snd_seq_ev_set_direct(&e);
                 snd_seq_ev_set_controller(&e, 0, FIRST_CC + k, knob[k]);
                 snd_seq_event_output_direct(seq, &e);
-                fprintf(stderr, "\r%s %s  cc%d = %3d   ", names[held], which ? "<>" : "^v", FIRST_CC + k, knob[k]);
+                fprintf(stderr, "\r%s %s  cc%d = %3d   ", names[bank], which ? "<>" : "^v", FIRST_CC + k, knob[k]);
             }
         }
     }
