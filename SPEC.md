@@ -852,7 +852,7 @@ A string pulls towards straight, so its force is its bend, two slopes. A bar
 resists being bent, so its force is how the bend changes, four. That is the only
 difference in their laws. Slopes come in ones, twos and fours: one lands between
 places, so it needs a partner stepping there; two and four land back on them,
-so a field can read itself. Name them, as the sum is easier to read than the
+so a field can read itself. Name them, as a name reads better than the
 brackets:
 
 ```
@@ -864,7 +864,7 @@ $x' = $v
 
 A name here stands for the words, not a value: a law happens at every place, so
 `curve` goes into the law as if written there, and `slope(curve)` is one slope
-more. A slope with a name is for laws, and is gone from everywhere else. Two
+more. A slope with a name is for laws: anywhere else it is an unknown name. Two
 slopes of a field's own motion are a loss that grows with pitch, below.
 
 - A neighbour is reached only through these words, which on a ring carry
