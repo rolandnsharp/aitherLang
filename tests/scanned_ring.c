@@ -3,6 +3,7 @@
  * patch as it is, against the same run with nothing pressed. */
 
 #include "check.h"
+#define TAU 6.283185307179586
 
 enum { SR = 48000, N = 3 * SR, PRESS = 2 * SR + 1000 };
 
@@ -181,6 +182,46 @@ TEST(heavisides_line) {
   CHECK(fabs(swapped_peak / p1 - 1) < 0.2, "declared the other way %g against %g", swapped_peak, p1);
   CHECK(fabs(balanced / lossless - 1) < 0.15, "R = G widened it: %g against %g", balanced, lossless);
   CHECK(resistive > 1.5 * balanced, "R alone didn't smear it: %g against %g", resistive, balanced);
+}
+
+/* A line's period is there and back, and its pitch is exact: the strongest
+ * frequency near the one it should have. */
+static double line_pitch(const char* decl, double expect) {
+  char src[640], err[4096];
+  snprintf(src, sizeof src, "%s\n"
+    "$v'[gauss(0.3, 0.05)] += if t < 0.002 then 2 else 0\n"
+    "$x[0.17]\n", decl);
+  Rendered r = {0};
+  if (render_src(src, 12.0, 48000, &r, err, sizeof err)) { CHECK(0, "doesn't render: %s", err); return -1; }
+  double best = 0, top = 0, mean = 0;
+  for (long i = 0; i < r.n; i++) mean += r.left[i] / r.n;
+  for (double f = expect * 0.9; f < expect * 1.1; f += expect * 0.001) {
+    double a = 0, b = 0;
+    for (long i = 0; i < r.n; i += 16) {
+      double w = 0.5 - 0.5 * cos(TAU * i / r.n), x = (r.left[i] - mean) * w;
+      a += x * cos(TAU * f * i / 48000);
+      b += x * sin(TAU * f * i / 48000);
+    }
+    if (a * a + b * b > top) { top = a * a + b * b; best = f; }
+  }
+  rendered_free(&r);
+  return best;
+}
+TEST(line_tunes) {
+  const char* fixed = "$x = line(period = 0.5, ends = fixed)\n$v = line(period = 0.5, ends = fixed)\n"
+                      "$v' = -concentration($x)\n$x' = $v";
+  const char* mixed = "$x = line(period = 0.5, ends = [fixed, free])\n$v = line(period = 0.5, ends = [fixed, free])\n"
+                      "$v' = -concentration($x)\n$x' = $v";
+  const char* mixed2 = "$x = line(period = 0.5, ends = [free, fixed])\n$v = line(period = 0.5, ends = [free, fixed])\n"
+                       "$v' = -concentration($x)\n$x' = $v";
+  const char* open = "$v = line(period = 0.5, ends = free)\n$x = line(period = 0.5, ends = fixed)\n"
+                     "$v' = -slope($x)\n$x' = -slope($v)";
+  const char* shorted = "$v = line(period = 0.5, ends = fixed)\n$x = line(period = 0.5, ends = free)\n"
+                        "$v' = -slope($x)\n$x' = -slope($v)";
+  double f[5] = {line_pitch(fixed, 2), line_pitch(mixed, 1), line_pitch(mixed2, 1), line_pitch(open, 2), line_pitch(shorted, 2)};
+  double want[5] = {2, 1, 1, 2, 2};
+  printf("  fixed %.3f Hz, fixed-free %.3f, free-fixed %.3f, open pair %.3f, shorted pair %.3f\n", f[0], f[1], f[2], f[3], f[4]);
+  for (int k = 0; k < 5; k++) CHECK(fabs(f[k] / want[k] - 1) < 0.006, "case %d: %g Hz, not %g", k, f[k], want[k]);
 }
 
 TEST(ring_keeps_its_period) {

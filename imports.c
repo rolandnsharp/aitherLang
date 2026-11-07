@@ -193,6 +193,12 @@ typedef struct {
   const Node* pushed;                    /* where it was first pushed, or NULL */
   void* reads;                           /* the field its law reads through `slope`, or NULL */
   int trails;                            /* of a pair: it steps a place behind the other */
+  int ends[2];                           /* a line's: 1 fixed, 2 free; a ring's are 0 */
+  double extra;                          /* a line: how much longer than its places */
+  double off;                            /* ... and how far along its first place stands */
+  const char* speed;                     /* the hidden let: places a round */
+  const char* length;                    /* the hidden let, a line's: its length in places */
+  const char* grain;                     /* the hidden let: a push's step */
 } Field;
 
 typedef struct { Arena* a; Field* f; int n; int made; int in_ring; char* err; int errlen; int failed; int in_def; int own_gauss; Field* law; const Node* pair_at; } Fields;
@@ -235,7 +241,8 @@ static Field* field_named(Fields* fs, const char* name) {
   for (int i = 0; i < fs->n; i++) if (!strcmp(fs->f[i].name, name)) return &fs->f[i];
   return NULL;
 }
-static int make_ring(const Node* n) { return n && n->kind == nkCall && !strcmp(n->str, "ring"); }
+static int make_line(const Node* n) { return n && n->kind == nkCall && !strcmp(n->str, "line"); }
+static int make_ring(const Node* n) { return n && n->kind == nkCall && (!strcmp(n->str, "ring") || make_line(n)); }
 static int make_array(const Node* n) { return n && n->kind == nkCall && (!strcmp(n->str, "array") || make_ring(n)); }
 /* A ring's named argument, or its positional one. */
 static Node* ring_arg(const Node* c, const char* name, int at) {
@@ -287,6 +294,10 @@ static Node* field_expr(Fields* fs, Node* n) {
     return f->now ? fident(fs, f->now, n) : fidx(fs, f->name, fident(fs, f->place, n), n);
   }
   if (n->kind == nkIdx && bare_field(fs, n->kids[0])) {       /* read at a point */
+    Field* f = bare_field(fs, n->kids[0]);
+    if (f->length)
+      return fcall(fs, "line_at", n, 6, (Node*[]){n->kids[0], field_expr(fs, n->kids[1]), fident(fs, f->length, n),
+                                                 fnum(fs, f->off, n), fnum(fs, f->ends[0], n), fnum(fs, f->ends[1], n)});
     return fcall(fs, "field_at", n, 2, (Node*[]){n->kids[0], field_expr(fs, n->kids[1])});
   }
   if (n->kind == nkIdxAssign && pushed_field(fs, n->kids[0])) { /* a push at a point */
@@ -303,10 +314,12 @@ static Node* field_expr(Fields* fs, Node* n) {
       field_fail(fs, n, why);
     }
     if (fs->failed) return n;
-    Node* at = fcall(fs, "field_place", n, 2, (Node*[]){field_expr(fs, n->kids[1]), f->size});
+    Node* at = f->length
+      ? fcall(fs, "line_place", n, 4, (Node*[]){field_expr(fs, n->kids[1]), fident(fs, f->length, n), fnum(fs, f->off, n), f->size})
+      : fcall(fs, "field_place", n, 2, (Node*[]){field_expr(fs, n->kids[1]), f->size});
     Node* push = field_expr(fs, said->kids[1]);
     if (f->period)                                            /* a change a round, per length of ring: the grain falls out */
-      push = fbin(fs, "*", push, fident(fs, f->step, n), n);
+      push = fbin(fs, "*", push, fident(fs, f->grain, n), n);
     Node* sum = fbin(fs, said->str, fidx(fs, f->in, at, n), push, n);
     Node* r = fnode(fs, nkIdxAssign, "", n);
     fkids(fs, r, 3, (Node*[]){fident(fs, f->in, n), at, sum});
@@ -321,18 +334,18 @@ static Node* field_expr(Fields* fs, Node* n) {
         return n;
       }
       Node* word = f->trails                                  /* the leader reads behind it, the trailer the fresh place ahead */
-        ? fcall(fs, "slope_behind", n, 2, (Node*[]){n->kids[0], fident(fs, fs->law->place, n)})
-        : fbin(fs, "-", fident(fs, f->now, n), fidx(fs, f->name, fident(fs, fs->law->place, n), n), n);
-      return fbin(fs, "*", word, f->size, n);
+        ? fcall(fs, "slope_behind", n, 3, (Node*[]){n->kids[0], fident(fs, fs->law->place, n), fnum(fs, f->ends[0], n)})
+        : fcall(fs, "slope_ahead", n, 4, (Node*[]){n->kids[0], fident(fs, f->now, n), fident(fs, fs->law->place, n), fnum(fs, f->ends[1], n)});
+      return fbin(fs, "*", word, fident(fs, f->speed, n), n);
     }
     if (f && !strcmp(n->str, "concentration"))
-      return at_speed(fs, f, fcall(fs, "concentration", n, 2, (Node*[]){n->kids[0], fident(fs, f->place, n)}), n);
+      return at_speed(fs, f, fcall(fs, "concentration", n, 4, (Node*[]){n->kids[0], fident(fs, f->place, n), fnum(fs, f->ends[0], n), fnum(fs, f->ends[1], n)}), n);
     Node* in = n->nkids == 1 ? n->kids[0] : NULL;
     f = in && in->kind == nkCall && in->nkids == 1 ? bare_field(fs, in->kids[0]) : NULL;
     if (f && !strcmp(n->str, "slope") && !strcmp(in->str, "convergence"))
-      return at_speed(fs, f, fcall(fs, "slope_of_convergence", n, 2, (Node*[]){in->kids[0], fident(fs, f->place, n)}), n);
+      return at_speed(fs, f, fcall(fs, "slope_of_convergence", n, 4, (Node*[]){in->kids[0], fident(fs, f->place, n), fnum(fs, f->ends[0], n), fnum(fs, f->ends[1], n)}), n);
     if (f && !strcmp(n->str, "curl") && !strcmp(in->str, "curl"))
-      return at_speed(fs, f, fcall(fs, "curl_of_curl", n, 2, (Node*[]){in->kids[0], fident(fs, f->place, n)}), n);
+      return at_speed(fs, f, fcall(fs, "curl_of_curl", n, 4, (Node*[]){in->kids[0], fident(fs, f->place, n), fnum(fs, f->ends[0], n), fnum(fs, f->ends[1], n)}), n);
   }
   for (int i = 0; i < n->nkids; i++) n->kids[i] = field_expr(fs, n->kids[i]);
   return n;
@@ -464,9 +477,12 @@ static void shaped_source(Fields* fs, const Node* s, Kids* out) {
   kid(out, fstore(fs, then, fident(fs, f->place, s), fident(fs, total, s), s));
   const char* next = flet(fs, "next", f->name, k,
     fbin(fs, "mod", fbin(fs, "+", fident(fs, f->place, s), fnum(fs, 1, s), s), f->size, s), s, out);
-  Node* from = fbin(fs, "-", fbin(fs, "/", fident(fs, next, s), f->size, s), fident(fs, held[0], s), s);
-  Node* laid = fbin(fs, "*", fident(fs, caught, s),
-                    fcall(fs, "field_gauss", s, 3, (Node*[]){from, fident(fs, held[1], s), f->size}), s);
+  Node* along = f->length ? fbin(fs, "/", fbin(fs, "+", fident(fs, next, s), fnum(fs, f->off, s), s), fident(fs, f->length, s), s)
+                          : fbin(fs, "/", fident(fs, next, s), f->size, s);
+  Node* from = fbin(fs, "-", along, fident(fs, held[0], s), s);
+  Node* laid = fbin(fs, "*", fident(fs, caught, s), f->length
+    ? fcall(fs, "line_gauss", s, 3, (Node*[]){from, fident(fs, held[1], s), fident(fs, f->length, s)})
+    : fcall(fs, "field_gauss", s, 3, (Node*[]){from, fident(fs, held[1], s), f->size}), s);
   kid(out, fstore(fs, f->in, fident(fs, next, s), fbin(fs, "+", fidx(fs, f->in, fident(fs, next, s), s), laid, s), s));
 }
 
@@ -503,12 +519,24 @@ static void field_stmts(Fields* fs, Node** in, int n, Kids* out, int top) {
       fkids(fs, place, 1, (Node*[]){index});
       kid(out, place);
       if (f->period) {
+        if (f->length) {                                     /* there and back in a round */
+          Node* length = fnode(fs, nkLet, f->length, s);
+          fkids(fs, length, 1, (Node*[]){fbin(fs, "+", f->size, fnum(fs, f->extra, s), s)});
+          kid(out, length);
+        }
+        Node* speed = fnode(fs, nkLet, f->speed, s);
+        fkids(fs, speed, 1, (Node*[]){f->length ? fbin(fs, "*", fident(fs, f->length, s), fnum(fs, 2, s), s) : f->size});
+        kid(out, speed);
         Node* rate = fnode(fs, nkLet, f->rate, s);           /* N^2: a wave goes round in one round */
-        fkids(fs, rate, 1, (Node*[]){fbin(fs, "*", f->size, f->size, s)});
+        fkids(fs, rate, 1, (Node*[]){fbin(fs, "*", fident(fs, f->speed, s), fident(fs, f->speed, s), s)});
         kid(out, rate);
         Node* step = fnode(fs, nkLet, f->step, s);           /* a step, in rounds: N samples of T */
         fkids(fs, step, 1, (Node*[]){fbin(fs, "/", fbin(fs, "*", f->size, fident(fs, "dt", s), s), f->period, s)});
         kid(out, step);
+        Node* grain = fnode(fs, nkLet, f->grain, s);         /* a push lands as a delta: a place's height, of its length */
+        fkids(fs, grain, 1, (Node*[]){f->length ? fbin(fs, "/", fbin(fs, "*", fident(fs, f->length, s), fident(fs, "dt", s), s), f->period, s)
+                                                : fident(fs, f->step, s)});
+        kid(out, grain);
       }
       if (f->in) {
         Node* zero = f->init ? fbin(fs, "*", f->init, fnum(fs, 0, s), s) : fnum(fs, 0, s);
@@ -597,10 +625,34 @@ static void find_pairs(Fields* fs, const Node* at) {
       snprintf(why, sizeof why, "`slope($%s)` in `$%s'`'s law needs its partner: `$%s' = ... slope($%s) ...`",
                g->name, f->name, g->name, f->name);
       field_fail(fs, at, why);
-    } else if (!same_tree(f->period, g->period)) {
-      snprintf(why, sizeof why, "`$%s` and `$%s` are a pair: they share one period", f->name, g->name);
+    } else if (!same_tree(f->period, g->period) || !f->length != !g->length) {
+      snprintf(why, sizeof why, "`$%s` and `$%s` are a pair: they share one period, on one ring or line", f->name, g->name);
+      field_fail(fs, at, why);
+    } else if (f->length && (f->ends[0] + g->ends[0] != 3 || f->ends[1] + g->ends[1] != 3)) {
+      snprintf(why, sizeof why, "`$%s` and `$%s` are a pair: at each end one is fixed and the other free", f->name, g->name);
       field_fail(fs, at, why);
     } else if (g > f) g->trails = 1;
+  }
+}
+
+/* Where a line's places stand. Past a fixed end the field is 0 a whole
+ * place on, past a free one it mirrors, half a place on. A pair stands
+ * staggered: its second a half place on from the first, and only the first's
+ * ends say how long it is. */
+static void place_lines(Fields* fs) {
+  for (int i = 0; i < fs->n; i++) {
+    Field* f = &fs->f[i];
+    if (!f->length) continue;
+    int l = f->ends[0] == 1, r = f->ends[1] == 1;
+    if (f->reads) {
+      Field* lead = f->trails ? f->reads : f;
+      l = lead->ends[0] == 1; r = lead->ends[1] == 1;
+      f->extra = (r ? 0 : -0.5) + (l ? 0 : 0.5);
+      f->off = (l ? 0 : 0.5) + (f->trails ? 0.5 : 0);
+    } else {
+      f->extra = 0.5 * (l + r);
+      f->off = l ? 1 : 0.5;
+    }
   }
 }
 
@@ -662,10 +714,25 @@ static int fields_pass(Arena* a, Kids* kids, int from, char* err, int errlen) {
       if (make_ring(s->kids[0])) {
         f->period = ring_arg(s->kids[0], "period", 0);
         f->init = ring_arg(s->kids[0], "start", 1);
-        f->size = fcall(&fs, "field_places", s, 1, (Node*[]){f->period});
+        Node* ends = ring_arg(s->kids[0], "ends", 99);
+        if (make_line(s->kids[0])) {                          /* there and back in a period, so across in half */
+          f->size = fcall(&fs, "field_places", s, 1, (Node*[]){fbin(&fs, "/", f->period, fnum(&fs, 2, s), s)});
+          f->length = fname(&fs, "length", f->name, -1);
+          if (!ends) field_fail(&fs, s, "a line says its ends: `line(period = 2, ends = fixed)`, or `ends = [fixed, free]`");
+          else for (int e = 0; e < 2; e++) {
+            const Node* end = ends->kind == nkArr && ends->nkids == 2 ? ends->kids[e] : ends;
+            f->ends[e] = end->kind != nkIdent ? 0 : !strcmp(end->str, "fixed") ? 1 : !strcmp(end->str, "free") ? 2 : 0;
+            if (!f->ends[e]) field_fail(&fs, s, "an end is `fixed` or `free`, and a line has two: `ends = [fixed, free]`");
+          }
+        } else {
+          f->size = fcall(&fs, "field_places", s, 1, (Node*[]){f->period});
+          if (ends) field_fail(&fs, s, "a ring has no ends: `line(period = 2, ends = fixed)` has");
+        }
         f->place = fname(&fs, "place", f->name, -1);
         f->rate = fname(&fs, "rate", f->name, -1);
         f->step = fname(&fs, "step", f->name, -1);
+        f->speed = fname(&fs, "speed", f->name, -1);
+        f->grain = fname(&fs, "grain", f->name, -1);
       }
     }
   }
@@ -677,6 +744,7 @@ static int fields_pass(Arena* a, Kids* kids, int from, char* err, int errlen) {
   memset(said, 0, fs.n + 1);
   for (int i = from; i < kids->n; i++) check_laws(&fs, kids->v[i], 1, said);
   if (fs.pair_at) find_pairs(&fs, fs.pair_at);
+  place_lines(&fs);
   if (fs.failed) return -1;
   if (!fs.n) return 0;
   for (int i = from; i < kids->n; i++) find_pushes(&fs, kids->v[i]);

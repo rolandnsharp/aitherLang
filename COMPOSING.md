@@ -1196,6 +1196,10 @@ so a squeeze and a twist travel at their own speeds, from one product.
 by the other's `slope`: Heaviside's telegraph line. Its two losses in balance
 keep a pulse's shape as it dies, so every harmonic fades together.
 
+`line(period = T, ends = fixed)` is a ring opened up, each end `fixed` or
+`free`. `patches/two_ends.aither` draws one, with one of each: a pulse comes
+back flipped from one and not the other.
+
 `patches/phasor_ring.aither` is that ring: apart, a swarm; coupled, one
 pitch with a travelling wave of phase round it. A medium with ends needs
 no `mod`: past either end reads 0, which is a string with fixed

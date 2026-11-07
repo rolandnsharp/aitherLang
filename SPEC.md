@@ -726,6 +726,18 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   the patch compiles. `start =` is its first value at every place: a
   number, by default 0, or a value. The engine picks `sqrt(T * sr / 4)`
   places, so the same patch has the same motion at any rate.
+- `line(period = T, ends = fixed)` is a ring opened up: a field with two
+  ends, and everything here holds on it. T is there and back, the line's
+  own period, so `ends = fixed` sounds at exactly 1 / T. An end is `fixed`,
+  the field held at 0, so a pulse comes back upside down, or `free`, left to
+  move, so it comes back as it went. `ends = [fixed, free]` is one each, as
+  square brackets are many places, left then right, and a single word is
+  both: one of each is an octave down, with odd harmonics only. `p` goes 0
+  to 1 from end to end, reads past them stop there, and what a `gauss` lays
+  past an end is gone. A line held by neither end slides away, so `free`
+  at both wants a `held` or a loss. Of a pair, each end is one fixed and
+  the other free: `$v` free and `$i` fixed is an open line, the reverse a
+  shorted one. `ends` is known when the patch compiles.
 - A bare `$x` is the field at this place, and `$x = ...` stores there. A
   later line at the place sees what was stored; a neighbour sees the last
   step. A number or a value is everywhere.
@@ -815,8 +827,8 @@ seconds to go round, the words carry no speed, and `+=` is plain, a
 step's worth, with the order its lines are in. A push on one has no rate
 to join, so it is an amount, `$v[p] += e`, each sample. Use
 `ring`, unless a number of places is the point. Fields are at the file's
-level, in its plays too; a def sees none. Not built: ends and sheets, and a
-fast fine field, which needs more than one place a sample: at one, a 1 s
+level, in its plays too; a def sees none. Not built: sheets, an end that
+absorbs, and a fast fine field, which needs more than one place a sample: at one, a 1 s
 ring can't have more than about 210 places.
 
 ### Arrays are data, not a map

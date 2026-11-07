@@ -336,12 +336,36 @@ def field_gauss(u, w, n):
   else 1 + 2 * sum(5, k =>
     exp(-2 * PI * PI * k * k * sd * sd) * cos(TAU * k * d) * sin(PI * k / n) / (PI * k / n))
 
+# The neighbour behind and ahead. An end is 0 on a ring, which has none and
+# wraps; past 1, fixed, the field is held at 0; past 2, free, it goes on as
+# it is here.
+def field_behind(f, at, e): if e == 0 then f[(at + len(f) - 1) mod len(f)] else if at > 0 then f[at - 1] else if e == 1 then f[0] * 0 else f[0]
+def field_ahead(f, at, e): if e == 0 then f[(at + 1) mod len(f)] else if at < len(f) - 1 then f[at + 1] else if e == 1 then f[0] * 0 else f[at]
+
+# A line read at any place, past its ends too.
+def field_past(f, at, l, r): if at < 0 then (if l == 1 then f[0] * 0 else f[0]) else if at >= len(f) then (if r == 1 then f[0] * 0 else f[len(f) - 1]) else f[at]
+
+# A line read between its places, p 0..1 from end to end, it being lc long
+# in places, and its first off along.
+def line_at(f, p, lc, off, l, r):
+  let s = clamp(p, 0, 1) * lc - off
+  let at = floor(s)
+  let was = field_past(f, at, l, r)
+  was + (field_past(f, at + 1, l, r) - was) * (s - at)
+
+# The place nearest p, and the Gaussian on a line: what falls past an end
+# is gone.
+def line_place(p, lc, off, n): clamp(floor(p * lc - off + 0.5), 0, n - 1)
+def line_gauss(u, w, lc): field_cell(u, 0.5 / lc, max(abs(w), 1e-9) * sqrt(2)) * lc
+
 # How much this place stands out from its neighbours: nabla twice, i i = -1
 # giving the sign. Things flow away from it.
-def concentration(f, at): -(f[(at + len(f) - 1) mod len(f)] + f[(at + 1) mod len(f)] - f[at] * 2)
+def concentration(f, at, l, r): -(field_behind(f, at, l) + field_ahead(f, at, r) - f[at] * 2)
 
-# Of one of a pair, stepping staggered: the step from behind this place.
-def slope_behind(f, at): f[at] - f[(at + len(f) - 1) mod len(f)]
+# Of one of a pair, stepping staggered: the step from behind this place, and
+# to the place ahead, just stepped.
+def slope_behind(f, at, l): f[at] - field_behind(f, at, l)
+def slope_ahead(f, now, at, r): if r != 0 and at == len(f) - 1 then (if r == 1 then -f[at] else f[at] * 0) else now - f[at]
 
 # Hamilton's S and V: the scalar part and the vector part.
 def scalar(q):
@@ -349,14 +373,14 @@ def scalar(q):
   w
 def vector(q): q - scalar(q)
 
-def nabla_ahead(f, at): (0, 1) * (f[(at + 1) mod len(f)] - f[at])
-def nabla_behind(f, at): (0, 1) * (f[at] - f[(at + len(f) - 1) mod len(f)])
+def nabla_ahead(f, at, r): (0, 1) * (field_ahead(f, at, r) - f[at])
+def nabla_behind(f, at, l): (0, 1) * (f[at] - field_behind(f, at, l))
 
 # Of a field of directions along a line: the slope of its convergence, the
 # scalar part of nabla, and the curl of its curl, the vector part. A wave
 # of squeeze and a wave of twist are these two.
-def slope_of_convergence(f, at): (0, 1) * (scalar(nabla_ahead(f, at)) - scalar(nabla_behind(f, at)))
-def curl_of_curl(f, at): (0, 1) * (vector(nabla_ahead(f, at)) - vector(nabla_behind(f, at)))
+def slope_of_convergence(f, at, l, r): (0, 1) * (scalar(nabla_ahead(f, at, r)) - scalar(nabla_behind(f, at, l)))
+def curl_of_curl(f, at, l, r): (0, 1) * (vector(nabla_ahead(f, at, r)) - vector(nabla_behind(f, at, l)))
 
 # ---------------------------------------------------------------- spectrum
 # Timbre construction via sum-of-sines. Every physical resonant system

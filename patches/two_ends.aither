@@ -1,0 +1,57 @@
+# two_ends: a line drawn on the scope, one end fixed and one free
+# (notes/field-by-its-period-2026-11-06.md).
+#
+# A line is a ring opened up, with two ends. Past a fixed end the field is
+# held at 0, so a pulse comes back upside down; past a free end it goes on
+# as it is, so a pulse comes back as it went. With one of each, a pulse is
+# upside down after one trip there and back and right way up after two, so
+# the line's note is an octave under one fixed at both ends, with only its
+# odd harmonics: the difference between a flute and a clarinet.
+#
+# Here it moves at the speed of a hand, so all of that is there to watch.
+# Read along at the note, the scope draws the line itself, fixed end on the
+# left, sweeping across and back so there's no retrace. A pluck displaces it
+# with a blow into `$x'`, not `$v'`, and the bump parts into two pulses
+# going opposite ways. Heard, the left channel is the sweep, a soft triangle
+# at the note, and the right is the line, so a pulse is a brightness moving
+# across the sound, and what comes back flipped comes back in opposite phase.
+#
+#   ./aither patches/two_ends.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
+#
+# The gamepad (tools/pad): A plucks up, B down, each a golden angle along
+# from the last; hold A and press left and right for the note (CC 21); hold
+# B and press up and down for how much it loses (CC 22).
+#   tools/pad & AITHER_MIDI=aither-pad ./aither patches/two_ends.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
+
+# ---------------------------------------------------------------- the line
+
+let loss = 0.25 + 3 * midi_cc(22)                          # what it loses, a round
+
+$x = line(period = 5, ends = [fixed, free])                # there and back in 5 s
+$v = line(period = 5, ends = [fixed, free])
+
+$v' = -concentration($x) - $v * loss
+$x' = $v
+
+# ---------------------------------------------------------------- the pluck
+
+let golden = 0.381966
+let own = phasor(1 / 10) * 10                              # it plucks itself every 10 s
+let pad_a = midi_trig(36)
+let pad_b = midi_trig(37)
+let up = min(own, since(pad_a))
+let down = since(pad_b)
+$where = 0.0
+$where = ($where + (pad_a + pad_b) * golden) mod 1
+
+let stroke = 0.003                                         # how long a blow takes
+let way = if down < up then -1 else 1
+let landed = 0.2 + 0.6 * (if own < stroke then (floor(sweep / 10) * golden) mod 1 else $where)
+$x'[gauss(landed, 0.04)] += if min(up, down) < stroke then way * 0.4 / stroke else 0
+
+# ---------------------------------------------------------------- reading
+
+# Across and back at the note: the sweep, and the line where it is.
+let note = 110 * pow(2, floor(midi_cc(21) * 25) / 12)
+let along = 1 - abs(2 * phasor(note) - 1)
+[(2 * along - 1) * 0.7, $x[along]]

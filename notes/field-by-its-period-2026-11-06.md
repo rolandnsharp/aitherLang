@@ -19,7 +19,13 @@ can't be ordered at all: a sweep's stores show at its end, so stepped
 together they blew up inside 2 s, and the order declared made no
 difference. So `slope($i)` makes a pair, stepped in place, the second a
 place behind the first, as a Yee grid staggers: bounded with no loss, and
-R = G keeps a pulse's shape (`patches/heaviside_line.aither`). A push is
+R = G keeps a pulse's shape (`patches/heaviside_line.aither`). `line(period
+= T, ends = fixed)` opens the ring: T there and back, an end `fixed` or
+`free`, and `[fixed, free]` one each, the two ends being two places. The
+length counts what lies past an end, a place past a fixed one and half past
+a free one, which makes the pitch exact: fixed 2.000 Hz, fixed-free 1.000,
+open and shorted pairs 2.000, on a period of 0.5 s. `matched`, an end that
+absorbs, comes next. A push is
 `$v'[p] += force`, a source: it was always a rate at a point, sized as a
 delta function, and `$v[p] = force` hid that. An `at(p)` term inside the
 law was turned down: it puts a where in the law, and only works by being

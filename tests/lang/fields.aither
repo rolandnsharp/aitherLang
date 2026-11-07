@@ -451,3 +451,76 @@ slope($v)
 # expect: 2
 def slope(a): a * 2
 slope(1)
+
+# --- a line: a pulse sent along it comes back there and back in a period
+# expect at 12000: 1
+$x = line(period = 1, ends = fixed)
+$v = line(period = 1, ends = fixed)
+$v' = -concentration($x)
+$x' = $v
+$v'[gauss(0.25, 0.03)] += if t < 0.001 then 1000 else 0
+if abs($v[0.75]) > 1 and abs($v[0.75]) > abs($v[0.5]) * 2 then 1 else 0
+
+# --- a fixed end holds it at 0
+# expect at 3000: 0
+$x = line(period = 1, ends = fixed)
+$v = line(period = 1, ends = fixed)
+$v' = -concentration($x)
+$x' = $v
+$v'[gauss(0.1, 0.03)] += if t < 0.001 then 1000 else 0
+$x[0]
+
+# --- fixed flips a pulse coming back, free doesn't
+# expect at 24000: 1
+$a = line(period = 1, ends = fixed)
+$p = line(period = 1, ends = fixed)
+$b = line(period = 1, ends = free)
+$q = line(period = 1, ends = free)
+$p' = -concentration($a) - $a
+$a' = $p
+$q' = -concentration($b) - $b
+$b' = $q
+$p'[gauss(0.5, 0.03)] += if t < 0.001 then 1000 else 0
+$q'[gauss(0.5, 0.03)] += if t < 0.001 then 1000 else 0
+if $p[0.5] < -1 and $q[0.5] > 1 then 1 else 0
+
+# --- a line says its ends
+# error: a line says its ends
+$x = line(period = 1)
+$x' = 0
+$x[0]
+
+# --- an end is fixed or free
+# error: an end is `fixed` or `free`
+$x = line(period = 1, ends = sticky)
+$x' = 0
+$x[0]
+
+# --- a ring has none
+# error: a ring has no ends
+$x = ring(period = 1, ends = fixed)
+$x' = 0
+$x[0]
+
+# --- at each end of a pair one is fixed and the other free
+# error: one is fixed and the other free
+$v = line(period = 1, ends = fixed)
+$i = line(period = 1, ends = fixed)
+$v' = -slope($i)
+$i' = -slope($v)
+$v[0]
+
+# --- a pair is on one kind of field
+# error: on one ring or line
+$v = line(period = 1, ends = free)
+$i = ring(period = 1)
+$v' = -slope($i)
+$i' = -slope($v)
+$v[0]
+
+# --- a point past a line's end lands on the end place, and reads of a line clamp
+# expect at 2000: 1
+$x = line(period = 1, ends = free)
+$x' = 0
+$x'[1.5] += if t < 0.001 then 1000 else 0
+if $x[1] > 1 and $x[0] == 0 then 1 else 0
