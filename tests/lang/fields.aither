@@ -826,3 +826,18 @@ def string(note):
   $v[0.5]
 let f = n => string(n)
 f(2)
+
+# --- a let that reads a field here is what it says at each place, in a law
+# expect at 4000: 1
+$x = line(period = 1 / 110, ends = fixed)
+$v = line(period = 1 / 110, ends = fixed)
+$y = line(period = 1 / 110, ends = fixed)
+$w = line(period = 1 / 110, ends = fixed)
+let back = $x * 3000
+$v' = slope(slope($x)) - back
+$x' = $v
+$w' = slope(slope($y)) - $y * 3000
+$y' = $w
+$v'[gauss(0.3, 0.05)] += if t < 0.0005 then 2 else 0
+$w'[gauss(0.3, 0.05)] += if t < 0.0005 then 2 else 0
+if $x[0.13] == $y[0.13] and $x[0.13] != 0 then 1 else 0

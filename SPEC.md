@@ -874,7 +874,9 @@ $x' = $v
 
 A name here stands for the words, not a value: a law happens at every place, so
 `curve` goes into the law as if written there, and `slope(curve)` is one slope
-more. A slope with a name is for laws: anywhere else it is an unknown name. Two
+more. A slope with a name is for laws: anywhere else it is an unknown name. A
+let that reads a field bare, `let back = $x * held`, goes into a law the same
+way, being what it says at each place, and stays a let everywhere else. Two
 slopes of a field's own motion are a loss that grows with pitch, below.
 
 - A neighbour is reached only through these words, which on a ring carry

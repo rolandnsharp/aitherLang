@@ -1267,6 +1267,15 @@ static Node* name_out(Fields* fs, Node* n, Node** lets, int count) {
   for (int i = 0; i < n->nkids; i++) n->kids[i] = name_out(fs, n->kids[i], lets, count);
   return n;
 }
+/* Whether a let reads a field here, bare: then in a law it is what it says at
+ * each place, so it goes in as words too, and stays a let for the rest. */
+static int reads_here(Fields* fs, const Node* n) {
+  if (!n) return 0;
+  if (n->kind == nkIdent && field_named(fs, n->str)) return 1;
+  if (n->kind == nkIdx) return reads_here(fs, n->kids[1]);    /* `$x[p]`: at a point, not here */
+  for (int i = 0; i < n->nkids; i++) if (reads_here(fs, n->kids[i])) return 1;
+  return 0;
+}
 static void named_slopes(Fields* fs, Kids* kids, int from) {
   Node* lets[kids->n + 1];
   int count = 0, kept = from;
@@ -1275,6 +1284,7 @@ static void named_slopes(Fields* fs, Kids* kids, int from) {
     if (s->kind == nkLet && s->nkids == 1 && s->str[0]) {
       s->kids[0] = name_out(fs, s->kids[0], lets, count);
       if (says_slope(fs, s->kids[0])) { lets[count++] = s; continue; }
+      if (reads_here(fs, s->kids[0])) lets[count++] = s;
     }
     kids->v[kept++] = s;
   }
