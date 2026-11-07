@@ -4,6 +4,7 @@
  * A library holds defs, constant lets and further imports: plays, state
  * and sound belong in the patch. */
 
+#include <math.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -200,6 +201,9 @@ typedef struct {
   const char* speed;                     /* the hidden let: places a round */
   const char* length;                    /* the hidden let, a line's: its length in places */
   const char* grain;                     /* the hidden let: a push's step */
+  int per;                               /* a fine field: places a sample, else 0 */
+  int sweep;                             /* ... and samples a sweep */
+  const char* start;                     /* ... the hidden let: this sample's first place */
 } Field;
 
 typedef struct { Arena* a; Field* f; int n; int made; int in_ring; char* err; int errlen; int failed; int in_def; int own_gauss; Field* law; const Node* pair_at; } Fields;
@@ -336,7 +340,10 @@ static Node* field_expr(Fields* fs, Node* n) {
       }
       Node* word = f->trails                                  /* the leader reads behind it, the trailer the fresh place ahead */
         ? fcall(fs, "slope_behind", n, 4, (Node*[]){n->kids[0], fident(fs, fs->law->place, n), fnum(fs, f->ends[0], n), fident(fs, fs->law->name, n)})
-        : fcall(fs, "slope_ahead", n, 5, (Node*[]){n->kids[0], fident(fs, f->now, n), fident(fs, fs->law->place, n), fnum(fs, f->ends[1], n), fident(fs, fs->law->name, n)});
+        : fcall(fs, "slope_ahead", n, 5, (Node*[]){n->kids[0],
+            f->per ? fidx(fs, f->name, fbin(fs, "mod", fbin(fs, "+", fident(fs, fs->law->place, n), fnum(fs, 1, n), n), f->size, n), n)
+                   : fident(fs, f->now, n),
+            fident(fs, fs->law->place, n), fnum(fs, f->ends[1], n), fident(fs, fs->law->name, n)});
       return fbin(fs, "*", word, fident(fs, f->speed, n), n);
     }
     if (f && !strcmp(n->str, "concentration")) {
@@ -363,6 +370,23 @@ static Node* field_expr(Fields* fs, Node* n) {
   }
   for (int i = 0; i < n->nkids; i++) n->kids[i] = field_expr(fs, n->kids[i]);
   return n;
+}
+
+/* `each(count, j => body)`, for what happens at several places a sample. */
+static void each_place(Fields* fs, int count, const char* j, Kids* body, const Node* at, Kids* out) {
+  kid(body, fnum(fs, 0, at));
+  Node* block = fnode(fs, nkBlock, "", at);
+  fkids(fs, block, body->n, body->v);
+  Node* lam = fnode(fs, nkLambda, "", at);
+  fkids(fs, lam, 1, (Node*[]){block});
+  lam->nparams = 1;
+  lam->params = arena_alloc(fs->a, sizeof(char*));
+  lam->params[0] = j;
+  kid(out, fcall(fs, "each", at, 2, (Node*[]){fnum(fs, count, at), lam}));
+}
+/* The place j along from this sample's first. */
+static Node* place_along(Fields* fs, Field* f, const char* j, const Node* at) {
+  return fbin(fs, "mod", fbin(fs, "+", fident(fs, f->start, at), fident(fs, j, at), at), f->size, at);
 }
 
 /* The line that stores `value` at this place, with whatever pushes landed. */
@@ -402,14 +426,13 @@ static void find_reached(Fields* fs, const Node* n, char* reached) {
  * as force comes before motion. A pair read through `slope` staggers: the
  * one declared first steps at this place, the other a place behind it, so
  * each sees the other fresh on both sides. */
-static void step_laws(Fields* fs, Node** in, int n, Kids* out) {
-  char* reached = arena_alloc(fs->a, fs->n + 1);
-  memset(reached, 0, fs->n + 1);
-  for (int i = 0; i < n; i++) if (is_law(in[i])) find_reached(fs, in[i]->kids[0], reached);
+static int same_tree(const Node* a, const Node* b);
+static void step_group(Fields* fs, Node** in, int n, Kids* out, const char* reached, const Field* with, int trails) {
   for (int last = 0; last < 2; last++)
     for (int k = 0; k < fs->n; k++) {
       if (reached[k] != last) continue;
       Field* f = &fs->f[k];
+      if (with ? !f->per || !same_tree(f->period, with->period) || f->trails != trails : f->per != 0) continue;
       for (int i = 0; i < n; i++) {
         if (!is_law(in[i]) || law_field(fs, in[i]) != f) continue;
         Node* s = in[i];
@@ -421,6 +444,48 @@ static void step_laws(Fields* fs, Node** in, int n, Kids* out) {
         field_store(fs, f, s, fbin(fs, "+", field_expr(fs, fident(fs, f->name, s)), change, s), out);
       }
     }
+}
+static void step_laws(Fields* fs, Node** in, int n, Kids* out) {
+  char* reached = arena_alloc(fs->a, fs->n + 1);
+  memset(reached, 0, fs->n + 1);
+  for (int i = 0; i < n; i++) if (is_law(in[i])) find_reached(fs, in[i]->kids[0], reached);
+  step_group(fs, in, n, out, reached, NULL, 0);
+  char* done = arena_alloc(fs->a, fs->n + 1);
+  memset(done, 0, fs->n + 1);
+  for (int k = 0; k < fs->n; k++) {                          /* fine fields of a period step together, several places a sample */
+    Field* f = &fs->f[k];
+    if (!f->per || done[k]) continue;
+    const Node* s = NULL;
+    for (int i = 0; i < n; i++) if (is_law(in[i]) && law_field(fs, in[i]) && same_tree(law_field(fs, in[i])->period, f->period)) s = in[i];
+    if (!s) continue;
+    /* An `each` holds its stores to its end, so a pair takes two: the second
+     * of it sees all the first has just done, a whole block at a time. */
+    for (int trails = 0; trails < 2; trails++) {
+      const char* j = fname(fs, "along", f->name, fs->made++);
+      Kids body = {0};
+      const char* outer[fs->n + 1];
+      int any = 0;
+      for (int g = 0; g < fs->n; g++) {
+        Field* h = &fs->f[g];
+        outer[g] = h->place;
+        if (!h->per || !same_tree(h->period, f->period)) continue;
+        done[g] = 1;
+        any |= h->trails == trails;
+        const char* inner = fname(fs, "at", h->name, fs->made++);
+        Node* let = fnode(fs, nkLet, inner, s);
+        fkids(fs, let, 1, (Node*[]){place_along(fs, h, j, s)});
+        kid(&body, let);
+        h->place = inner;
+      }
+      if (any) step_group(fs, in, n, &body, reached, f, trails);
+      for (int g = 0; g < fs->n; g++) {
+        fs->f[g].place = outer[g];
+        if (fs->f[g].per && same_tree(fs->f[g].period, f->period)) fs->f[g].now = NULL;
+      }
+      if (any) each_place(fs, f->per, j, &body, s, out);
+      free(body.v);
+    }
+  }
 }
 
 /* `$v'[gauss(p, w)] += force`: a source with a shape. */
@@ -486,18 +551,29 @@ static void shaped_source(Fields* fs, const Node* s, Kids* out) {
   n = fnode(fs, nkAssign, total, s);
   fkids(fs, n, 1, (Node*[]){fbin(fs, "+", fident(fs, total, s), fbin(fs, "*", fident(fs, blow, s), fident(fs, "dt", s), s), s)});
   kid(out, n);
+  Kids body = {0};                                           /* a fine field's, once a place this sample */
+  Kids* lay = f->per ? &body : out;
+  const char* j = f->per ? fname(fs, "along", f->name, fs->made++) : NULL;
+  const char* here = f->per ? flet(fs, "at", f->name, fs->made++, place_along(fs, f, j, s), s, lay) : f->place;
   const char* caught = flet(fs, "caught", f->name, k,
-    fbin(fs, "/", fbin(fs, "-", fident(fs, total, s), fidx(fs, then, fident(fs, f->place, s), s), s), f->period, s), s, out);
-  kid(out, fstore(fs, then, fident(fs, f->place, s), fident(fs, total, s), s));
+    fbin(fs, "/", fbin(fs, "-", fident(fs, total, s), fidx(fs, then, fident(fs, here, s), s), s), f->period, s), s, lay);
+  kid(lay, fstore(fs, then, fident(fs, here, s), fident(fs, total, s), s));
   const char* next = flet(fs, "next", f->name, k,
-    fbin(fs, "mod", fbin(fs, "+", fident(fs, f->place, s), fnum(fs, 1, s), s), f->size, s), s, out);
+    fbin(fs, "mod", fbin(fs, "+", fident(fs, here, s), fnum(fs, f->per ? f->per : 1, s), s), f->size, s), s, lay);
   Node* along = f->length ? fbin(fs, "/", fbin(fs, "+", fident(fs, next, s), fnum(fs, f->off, s), s), fident(fs, f->length, s), s)
                           : fbin(fs, "/", fident(fs, next, s), f->size, s);
   Node* from = fbin(fs, "-", along, fident(fs, held[0], s), s);
-  Node* laid = fbin(fs, "*", fident(fs, caught, s), f->length
+  Node* shaped = fbin(fs, "*", fident(fs, caught, s), f->length
     ? fcall(fs, "line_gauss", s, 3, (Node*[]){from, fident(fs, held[1], s), fident(fs, f->length, s)})
     : fcall(fs, "field_gauss", s, 3, (Node*[]){from, fident(fs, held[1], s), f->size}), s);
-  kid(out, fstore(fs, f->in, fident(fs, next, s), fbin(fs, "+", fidx(fs, f->in, fident(fs, next, s), s), laid, s), s));
+  Node* laid = fnode(fs, nkIf, "", s);                       /* nothing to lay, nothing to work out */
+  fkids(fs, laid, 3, (Node*[]){fcall(fs, "field_striking", s, 1, (Node*[]){fident(fs, caught, s)}), shaped,
+                               fbin(fs, "*", fident(fs, caught, s), fnum(fs, 0, s), s)});
+  kid(lay, fstore(fs, f->in, fident(fs, next, s), fbin(fs, "+", fidx(fs, f->in, fident(fs, next, s), s), laid, s), s));
+  if (f->per) {
+    each_place(fs, f->per, j, &body, s, out);
+    free(body.v);
+  }
 }
 
 /* A list of statements, as the lines they stand for. */
@@ -520,17 +596,19 @@ static void field_stmts(Fields* fs, Node** in, int n, Kids* out, int top) {
         c->str = "array";
         /* A sweep's stores show at its end, so a law sees its neighbours as a
          * sweep left them; a pair steps in place, each seeing the other fresh. */
-        fkids(fs, c, f->reads ? 2 : 3, (Node*[]){f->size, f->init ? f->init : fnum(fs, 0, c), f->size});
+        fkids(fs, c, f->reads ? 2 : 3, (Node*[]){f->size, f->init ? f->init : fnum(fs, 0, c), f->per ? fnum(fs, f->sweep, c) : f->size});
       } else if (!named && c->nkids < 3) {
         Node* init = c->nkids == 2 ? c->kids[1] : fnum(fs, 0, c);
         fkids(fs, c, 3, (Node*[]){c->kids[0], init, c->kids[0]});
       }
       kid(out, s);
       Node* place = fnode(fs, nkLet, f->place, s);
-      Node* index = fcall(fs, "pixel_index", s, 2, (Node*[]){f->size, fnum(fs, 1, s)});
+      Node* index = f->per ? fbin(fs, "*", fcall(fs, "pixel_index", s, 2, (Node*[]){fnum(fs, f->sweep, s), fnum(fs, 1, s)}), fnum(fs, f->per, s), s)
+                           : fcall(fs, "pixel_index", s, 2, (Node*[]){f->size, fnum(fs, 1, s)});
       if (f->trails)
         index = fbin(fs, "mod", fbin(fs, "+", index, fbin(fs, "-", f->size, fnum(fs, 1, s), s), s), f->size, s);
       fkids(fs, place, 1, (Node*[]){index});
+      f->start = f->place;
       kid(out, place);
       if (f->period) {
         if (f->length) {                                     /* there and back in a round */
@@ -545,7 +623,7 @@ static void field_stmts(Fields* fs, Node** in, int n, Kids* out, int top) {
         fkids(fs, rate, 1, (Node*[]){fbin(fs, "*", fident(fs, f->speed, s), fident(fs, f->speed, s), s)});
         kid(out, rate);
         Node* step = fnode(fs, nkLet, f->step, s);           /* a step, in rounds: N samples of T */
-        fkids(fs, step, 1, (Node*[]){fbin(fs, "/", fbin(fs, "*", f->size, fident(fs, "dt", s), s), f->period, s)});
+        fkids(fs, step, 1, (Node*[]){fbin(fs, "/", fbin(fs, "*", f->per ? fnum(fs, f->sweep, s) : f->size, fident(fs, "dt", s), s), f->period, s)});
         kid(out, step);
         Node* grain = fnode(fs, nkLet, f->grain, s);         /* a push lands as a delta: a place's height, of its length */
         fkids(fs, grain, 1, (Node*[]){f->length ? fbin(fs, "/", fbin(fs, "*", fident(fs, f->length, s), fident(fs, "dt", s), s), f->period, s)
@@ -623,6 +701,7 @@ static void find_slopes(Fields* fs, const Node* n, Field* law) {
   for (int i = 0; i < n->nkids; i++) find_slopes(fs, n->kids[i], law);
 }
 static int same_tree(const Node* a, const Node* b) {
+  if (a == b) return 1;
   if (!a || !b) return a == b;
   if (a->kind != b->kind || a->num != b->num || strcmp(a->str, b->str) || a->nkids != b->nkids) return 0;
   for (int i = 0; i < a->nkids; i++) if (!same_tree(a->kids[i], b->kids[i])) return 0;
@@ -717,6 +796,43 @@ static void check_laws(Fields* fs, Node* n, int stands, char* said) {
   for (int i = 0; i < n->nkids; i++) check_laws(fs, n->kids[i], 0, said);
 }
 
+/* A period the patch states plainly, in numbers and file-level lets. */
+static double field_sr = 48000.0;
+void fields_rate(double sr) { if (sr > 0) field_sr = sr; }
+static int plain_number(const Node* n, Kids* kids, int from, double* v) {
+  double a, b;
+  if (!n) return 0;
+  if (n->kind == nkNum) { *v = n->num; return 1; }
+  if (n->kind == nkBinOp && n->nkids == 2 && plain_number(n->kids[0], kids, from, &a) && plain_number(n->kids[1], kids, from, &b)) {
+    if (!strcmp(n->str, "+")) *v = a + b;
+    else if (!strcmp(n->str, "-")) *v = a - b;
+    else if (!strcmp(n->str, "*")) *v = a * b;
+    else if (!strcmp(n->str, "/") && b != 0) *v = a / b;
+    else return 0;
+    return 1;
+  }
+  if (n->kind == nkIdent)
+    for (int i = from; i < kids->n; i++)
+      if (kids->v[i]->kind == nkLet && !strcmp(kids->v[i]->str, n->str) && kids->v[i]->nkids == 1)
+        return plain_number(kids->v[i]->kids[0], kids, from, v);
+  return 0;
+}
+/* At a place a sample a field a push crosses in `across` seconds has
+ * sqrt(across * sr / 4) places. Too few to hold a note, and it takes several
+ * a sample instead: at least MIN_PLACES, the push going half a place a step,
+ * M samples to a sweep of N = M * P. Finer costs P places a sample. */
+#define MIN_PLACES 32
+static void fine_grain(Field* f, double across) {
+  if (sqrt(0.25 * across * field_sr) + 0.5 >= MIN_PLACES) return;
+  double reach = 0.5 * across * field_sr;                    /* places times samples a sweep */
+  int m = (int)(reach / MIN_PLACES);
+  if (m < 1) m = 1;
+  int p = (int)(reach / m / m + 0.5);
+  if (p < 1) p = 1;
+  f->per = p;
+  f->sweep = m;
+}
+
 static int fields_pass(Arena* a, Kids* kids, int from, char* err, int errlen) {
   Fields fs = {a, NULL, 0, 0, 0, err, errlen, 0};
   fs.f = arena_alloc(a, (kids->n + 1) * sizeof(Field));
@@ -750,6 +866,11 @@ static int fields_pass(Arena* a, Kids* kids, int from, char* err, int errlen) {
         f->step = fname(&fs, "step", f->name, -1);
         f->speed = fname(&fs, "speed", f->name, -1);
         f->grain = fname(&fs, "grain", f->name, -1);
+        double period;
+        if (plain_number(f->period, kids, from, &period) && period > 0) {
+          fine_grain(f, f->length ? period / 2 : period);
+          if (f->per) f->size = fnum(&fs, f->per * f->sweep, s);
+        }
       }
     }
   }

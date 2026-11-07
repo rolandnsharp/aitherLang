@@ -262,6 +262,41 @@ TEST(matched_end_takes_it_all) {
   CHECK(pair_end < -30, "a matched pair gave back %g dB", pair_end);
 }
 
+/* A field short enough for a note: a line at 110 Hz, its first partials
+ * true, a wave or a pair, and bounded. */
+static double fine_pitch(const char* decl, double want) {
+  char src[640], err[4096];
+  snprintf(src, sizeof src, "%s\n"
+    "$v'[gauss(0.3, 0.05)] += if t < 0.0005 then 2 else 0\n"
+    "$x[0.13]\n", decl);
+  Rendered r = {0};
+  if (render_src(src, 1.0, 48000, &r, err, sizeof err)) { CHECK(0, "doesn't render: %s", err); return -1; }
+  double best = 0, top = 0, mean = 0, peak = 0;
+  for (long i = 0; i < r.n; i++) { mean += r.left[i] / r.n; peak = fmax(peak, fabs(r.left[i])); }
+  for (double f = want * 0.96; f < want * 1.04; f += want * 0.001) {
+    double a = 0, b = 0;
+    for (long i = 0; i < r.n; i++) {
+      double w = 0.5 - 0.5 * cos(TAU * i / r.n), x = (r.left[i] - mean) * w;
+      a += x * cos(TAU * f * i / 48000);
+      b += x * sin(TAU * f * i / 48000);
+    }
+    if (a * a + b * b > top) { top = a * a + b * b; best = f; }
+  }
+  rendered_free(&r);
+  CHECK(peak > 0 && peak < 8, "peak %g at %g Hz", peak, want);
+  return best;
+}
+TEST(fine_fields_hold_a_note) {
+  const char* wave = "$x = line(period = 1 / 110, ends = fixed)\n$v = line(period = 1 / 110, ends = fixed)\n"
+                     "$v' = -concentration($x) - $v * 0.05\n$x' = $v";
+  const char* pair = "$v = line(period = 1 / 110, ends = free)\n$x = line(period = 1 / 110, ends = fixed)\n"
+                     "$v' = -slope($x) - $v * 0.05\n$x' = -slope($v) - $x * 0.05";
+  double w1 = fine_pitch(wave, 110), w3 = fine_pitch(wave, 330), p1 = fine_pitch(pair, 110), p3 = fine_pitch(pair, 330);
+  printf("  a line at 110 Hz: wave %.1f, %.1f Hz; pair %.1f, %.1f Hz\n", w1, w3, p1, p3);
+  CHECK(fabs(w1 / 110 - 1) < 0.01 && fabs(p1 / 110 - 1) < 0.01, "%g, %g", w1, p1);
+  CHECK(fabs(w3 / 330 - 1) < 0.01 && fabs(p3 / 330 - 1) < 0.01, "%g, %g", w3, p3);
+}
+
 TEST(ring_keeps_its_period) {
   const int rates[] = {24000, 48000, 96000};
   const double period = 0.8;

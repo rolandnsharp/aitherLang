@@ -172,6 +172,7 @@ Prepared* voice_prepare(const char* stdlib_src, const char* src, const char* tag
                         int* kind, char* err, int errlen) {
   Arena* a = arena_new();
   int bkind;
+  fields_rate(sr);
   Node* prog = build_program(a, stdlib_src, src, tag, seed_self, &bkind, err, errlen);
   if (!prog) {
     arena_free(a);

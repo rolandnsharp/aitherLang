@@ -12,6 +12,8 @@
  * directory). `seed_self`: the patch counts as already imported, so a
  * library importing it back stops there. */
 enum { BUILD_OK, BUILD_PARSE, BUILD_IMPORT };
+/* The rate the program is built for: how fine a short field can be. */
+void fields_rate(double sr);
 Node* build_program(Arena* a, const char* stdlib_src, const char* src, const char* src_tag,
                     int seed_self, int* kind, char* err, int errlen);
 

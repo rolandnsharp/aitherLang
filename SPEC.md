@@ -786,6 +786,16 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   sound, read at audio rate. A push goes a quarter of a place a step at
   the ring's period, and one place a step is the limit, so stiffer than
   sixteen times, a law multiplying the word by more than 16, is unstable.
+- **A field too short for that is fine: it takes several places a sample.**
+  At a place a sample a line at 110 Hz would have 7 places, and its
+  harmonics go out of tune. Under 32 places the engine goes to at least 32,
+  stepping as many a sample as that needs, so `line(period = 1 / 110, ends
+  = fixed)` holds a note: 110 Hz, its third harmonic 329 Hz. The patch says
+  nothing different. It costs: about 11 places a sample there, a tenth of a
+  uConsole core for the law, and more for a shaped source; a shorter period
+  costs more. A push then goes half a place a step, so only four times
+  stiffer is safe. The period has to be plain numbers and file-level lets
+  for the engine to see it; anything else stays at a place a sample.
 - A neighbour is reached only through these words, which on a ring carry
   its speed:
 
@@ -837,9 +847,8 @@ seconds to go round, the words carry no speed, and `+=` is plain, a
 step's worth, with the order its lines are in. A push on one has no rate
 to join, so it is an amount, `$v[p] += e`, each sample. Use
 `ring`, unless a number of places is the point. Fields are at the file's
-level, in its plays too; a def sees none. Not built: sheets, and a fast
-fine field, which needs more than one place a sample: at one, a 1 s
-ring can't have more than about 210 places.
+level, in its plays too; a def sees none. Not built: sheets, and a period
+that moves while it plays.
 
 ### Arrays are data, not a map
 

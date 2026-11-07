@@ -27,7 +27,12 @@ a free one, which makes the pitch exact: fixed 2.000 Hz, fixed-free 1.000,
 open and shorted pairs 2.000, on a period of 0.5 s. `matched` takes what
 arrives: on a wave a free end with a dashpot as strong as the line, on a
 pair each field set to the other at the end. Reading the dashpot at the end
-itself, not the last place, took the echo from -28 dB to -35. A push is
+itself, not the last place, took the echo from -28 dB to -35. A field under
+32 places goes to several a sample, the engine choosing, with nothing new in
+the patch: a line at 110 Hz is 33 places, 11 a sample, its third harmonic
+329 Hz. A pair needs two `each`s, as an `each` holds its stores to its end;
+in one it blew up. Travelling waves, d'Alembert's, would be exact and nearly
+free for a plain law, and aren't built. A push is
 `$v'[p] += force`, a source: it was always a rate at a point, sized as a
 delta function, and `$v[p] = force` hid that. An `at(p)` term inside the
 law was turned down: it puts a where in the law, and only works by being
@@ -46,9 +51,8 @@ when both rings' `landed` jumped as a stroke ended, most of the blow landed
 at the new place (reports/Shaped sources in field languages.md); now the
 shape is held as the force stops;
 3, one period and a ratio; 5, `ring` for now. `scanned_ring`'s sound
-matched at every check. Still open: a fast fine field, which needs more
-than one place a sample, and whether the engine's step should be better
-than the plain one it is. From a conversation in
+matched at every check. Still open: whether the engine's step should be
+better than the plain one it is. From a conversation in
 a forked session, for the main one. It follows
 [nabla-and-medium-2026-11-06.md](nabla-and-medium-2026-11-06.md) and SPEC
 "Fields" (`cfbff97`). Roland: "love the idea that it can be worked out
