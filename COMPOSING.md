@@ -1201,6 +1201,11 @@ keep a pulse's shape as it dies, so every harmonic fades together.
 back flipped from one and not the other. `matched` is an end that takes what
 arrives, Heaviside's termination: `patches/far_end.aither`.
 
+A short field holds a note, the engine stepping several places a sample, and
+`width = p => ...` flares a pair into a horn. `patches/field_didge.aither` is
+a bore of two laws and a width, played by `dho` lips reading and pushing it
+at one point, so a field and the rest of the language mix freely.
+
 `patches/phasor_ring.aither` is that ring: apart, a swarm; coupled, one
 pitch with a travelling wave of phase round it. A medium with ends needs
 no `mod`: past either end reads 0, which is a string with fixed
