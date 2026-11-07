@@ -160,16 +160,10 @@ $x'' = 1
 $x[0]
 
 # --- a rate is of a ring's field: not an array's
-# error: a rate is of a ring's field
+# error: a rate is of state or a ring's field
 $x = array(4)
 $x' = 1
 $x[0]
-
-# --- ... nor a state's
-# error: a rate is of a ring's field
-$x = 0
-$x' = 1
-$x
 
 # --- one law a field
 # error: one law a field
@@ -178,7 +172,7 @@ $x' = 1
 $x' = 2
 $x[0]
 
-# --- a law belongs in the file's lines
+# --- a field's law belongs in the file's lines
 # error: not in a def
 $x = ring(period = 1)
 def f(a):
@@ -588,3 +582,54 @@ $u = line(period = 1, ends = matched)
 $p' = -slope($u)
 $u' = -slope($p)
 $p[0]
+
+# --- a law on plain state: a rate a second, as it has no round
+# expect at 23999: 0.5
+$x = 0
+$x' = 1
+$x
+
+# --- force before motion, whichever way it's written: this is a fall
+# expect at 47999: 0.5
+$x = 0
+$v = 0
+$x' = $v
+$v' = 1
+floor($x * 1000) / 1000
+
+# --- the laws are a system, whatever line they're on
+# expect at 4800: 1
+$a = 1
+$b = 0
+$b' = $a
+let was = $a
+$a' = -$b
+if abs($a ^ 2 + $b ^ 2 - 1) < 0.001 then 1 else 0
+
+# --- no time in a law, on state either
+# error: there is no time in a law
+$x = 0
+$x' = sin(t)
+$x
+
+# --- one law a state
+# error: one law a state
+$x = 0
+$x' = 1
+$x' = 2
+$x
+
+# --- a law in a def has the def's state, a call its own
+# expect at 23999: 1.5
+def rise(r):
+  $y = 0
+  $y' = r
+  $y
+rise(1) + rise(2)
+
+# --- ... and in a lambda
+# expect at 23999: 1.5
+sum(2, n =>
+  $y = 0
+  $y' = n
+  $y)

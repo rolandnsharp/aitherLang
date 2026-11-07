@@ -799,7 +799,7 @@ static void check_laws(Fields* fs, Node* n, int stands, char* said) {
   if (is_law(n)) {
     Field* f = law_field(fs, n);
     const char* wrong = !stands ? "a law belongs in the file's lines or a play's, not in a def" :
-                        !f ? "a rate is of a ring's field: `$x = ring(period = 1)`" :
+                        !f ? "a rate is of state or a ring's field: `$x = 0` or `$x = ring(period = 1)`" :
                         said[f - fs->f] ? "one law a field: say all that changes it in one line" : NULL;
     if (wrong) {
       fs->failed = 1;
@@ -836,6 +836,103 @@ static void check_laws(Fields* fs, Node* n, int stands, char* said) {
     return;
   }
   for (int i = 0; i < n->nkids; i++) check_laws(fs, n->kids[i], 0, said);
+}
+
+/* A law on plain state: one place, no neighbours, and nothing to take a
+ * round from, so its rates are a second. It is lowered here, before anything
+ * else sees it, to `$x = $x + rate * dt`. As with a field, the laws of a
+ * block are one system and the order written means nothing: they step where
+ * the last stands, in the order the state was declared, and one that says
+ * only what it moves at, `$x' = $v`, last: force before motion. */
+typedef struct { Node** at; int n; } Scope1;
+static int plain_decl(const Node* s, const char* name, size_t len) {
+  if (s->kind != nkVar || primed(s->str) || strlen(s->str) != len || strncmp(s->str, name, len)) return 0;
+  return !make_array(s->kids[0]);
+}
+static int declared_at(Node** list, int n, const char* name, size_t len) {
+  for (int i = 0; i < n; i++) if (plain_decl(list[i], name, len)) return i;
+  return -1;
+}
+static void has_time(const Node* n, const char** which, const Node** where) {
+  if (!n || *which) return;
+  if (n->kind == nkIdent && (!strcmp(n->str, "dt") || !strcmp(n->str, "t"))) { *which = n->str; *where = n; return; }
+  for (int i = 0; i < n->nkids; i++) has_time(n->kids[i], which, where);
+}
+static int plain_block(Arena* a, Node** list, int n, Scope1 file, char* err, int errlen);
+static int plain_walk(Arena* a, Node* n, Scope1 file, char* err, int errlen) {
+  if (!n) return 0;
+  if ((n->kind == nkBlock || n->kind == nkDef) && plain_block(a, n->kids, n->nkids, file, err, errlen)) return -1;
+  for (int i = 0; i < n->nkids; i++) if (plain_walk(a, n->kids[i], file, err, errlen)) return -1;
+  return 0;
+}
+static int plain_block(Arena* a, Node** list, int n, Scope1 file, char* err, int errlen) {
+  Node* laws[n + 1];
+  int keys[n + 1], count = 0, last = -1;
+  for (int i = 0; i < n; i++) {
+    if (!(list[i]->kind == nkVar || list[i]->kind == nkAssign) || !primed(list[i]->str)) continue;
+    size_t len = strlen(list[i]->str) - 1;
+    int order = declared_at(list, n, list[i]->str, len);
+    if (order < 0) {
+      order = declared_at(file.at, file.n, list[i]->str, len);
+      if (order < 0) continue;                               /* a field's, or nobody's: fields_pass says */
+      order += n;
+    }
+    const char* time = NULL;
+    const Node* where = NULL;
+    has_time(list[i]->kids[0], &time, &where);
+    if (time) {
+      snprintf(err, errlen, "`%s` in a law (%s:%d): there is no time in a law, only what changes. Say the rate; "
+               "what varies with time comes in by a let above it", time, where->source, where->line);
+      return -1;
+    }
+    for (int k = 0; k < count; k++)
+      if (!strcmp(laws[k]->str, list[i]->str)) {
+        snprintf(err, errlen, "`$%s` (%s:%d): one law a state: say all that changes it in one line", list[i]->str,
+                 list[i]->source, list[i]->line);
+        return -1;
+      }
+    keys[count] = order + (list[i]->kids[0]->kind == nkIdent ? 100000 : 0);
+    laws[count++] = list[i];
+    last = i;
+  }
+  if (!count) return 0;
+  for (int i = 1; i < count; i++)                            /* by declaration, what only moves last */
+    for (int k = i; k > 0 && keys[k - 1] > keys[k]; k--) {
+      int key = keys[k]; keys[k] = keys[k - 1]; keys[k - 1] = key;
+      Node* law = laws[k]; laws[k] = laws[k - 1]; laws[k - 1] = law;
+    }
+  Fields fs = {0};
+  fs.a = a;
+  for (int k = 0; k < count; k++) {
+    Node* s = laws[k];
+    char* name = arena_alloc(a, strlen(s->str));
+    memcpy(name, s->str, strlen(s->str) - 1);
+    name[strlen(s->str) - 1] = 0;
+    Node* step = fbin(&fs, "*", s->kids[0], fident(&fs, "dt", s), s);
+    s->kids[0] = fbin(&fs, "+", fident(&fs, name, s), step, s);
+    s->kind = nkAssign;
+    s->str = name;
+  }
+  int w = 0, seen = 0;                                       /* the others keep their order; the laws go where the last stood */
+  Node* rest[n + 1];
+  for (int i = 0; i < n; i++) {
+    int law = 0;
+    for (int k = 0; k < count; k++) if (list[i] == laws[k]) law = 1;
+    if (!law) rest[w++] = list[i];
+    else if (i < last) seen++;
+  }
+  int before = last - seen;
+  for (int i = 0, o = 0; i < n; i++) {
+    if (i >= before && i < before + count) list[i] = laws[i - before];
+    else list[i] = rest[o++];
+  }
+  return 0;
+}
+static int plain_laws(Arena* a, Kids* kids, int from, char* err, int errlen) {
+  Scope1 file = {kids->v + from, kids->n - from};
+  if (plain_block(a, kids->v + from, kids->n - from, (Scope1){NULL, 0}, err, errlen)) return -1;
+  for (int i = from; i < kids->n; i++) if (plain_walk(a, kids->v[i], file, err, errlen)) return -1;
+  return 0;
 }
 
 /* A period the patch states plainly, in numbers and file-level lets. */
@@ -973,7 +1070,7 @@ Node* build_program(Arena* a, const char* stdlib_src, const char* src, const cha
   memmove(kids.v + kept, kids.v + std->nkids, (kids.n - std->nkids) * sizeof(Node*));
   kids.n -= std->nkids - kept;
   *kind = BUILD_PARSE;
-  if (fields_pass(a, &kids, kept, err, errlen)) { free(kids.v); return NULL; }
+  if (plain_laws(a, &kids, kept, err, errlen) || fields_pass(a, &kids, kept, err, errlen)) { free(kids.v); return NULL; }
   *kind = BUILD_OK;
   Node* prog = arena_alloc(a, sizeof(Node));
   prog->kind = nkBlock; prog->line = 1; prog->str = ""; prog->source = "";

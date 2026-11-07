@@ -851,6 +851,25 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   reading one. This is the one way `[ ]` differs on a field: p is how far
   round, not a place number.
 
+**A law on plain state** is the same thing at one place, with no neighbours:
+
+```
+$x = 0
+$v = 0
+$v' = -$x * (TAU * f) ^ 2 - $v * damp + push
+$x' = $v
+```
+
+With no round to count in, its rates are a second. The laws of a block are
+one system, in the file, a `play`, a `def` or a lambda, and each call of a def
+and each run of a `sum` has its own: they step together where the last stands,
+whatever order they're written in, by the order the state was declared, and
+one that only says what it moves at, `$x' = $v`, last: force before motion.
+There is no `dt` or `t` in a law, one law a state, and a rate is said, never
+read. What varies with time comes in by a `let` above it. Such a spring runs
+sharp at high pitch, 11 cents at 3 kHz at 48 kHz, where `dho` and `resonator`
+turn it exactly: laws are for what those can't say.
+
 An array assigned bare (`$x = array(128)`, `$x = $x + ...`) is a field too,
 with the size in the patch: a push then takes `N² / (sqrt(stiff) * sr)`
 seconds to go round, the words carry no speed, and `+=` is plain, a

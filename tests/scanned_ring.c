@@ -331,6 +331,30 @@ TEST(bores_resonate_as_they_should) {
   CHECK(fabs(k1 - 1.82) < 0.03 && fabs(k2 - 3.67) < 0.05, "cone %g, %g", k1, k2);
 }
 
+/* A spring as two laws, against the same spring by `dho`: either order of
+ * the lines is the same sound, and the pitch is the spring's. */
+static double law_pitch(const char* law, double f) {
+  char src[512], err[4096];
+  snprintf(src, sizeof src, "let w = TAU * %g\n$x = 1\n$v = 0\n%s\n$x\n", f, law);
+  Rendered r = {0};
+  if (render_src(src, 0.5, 48000, &r, err, sizeof err)) { CHECK(0, "doesn't render: %s", err); return -1; }
+  long first = -1, last = -1, cross = 0;
+  for (long i = 1; i < r.n; i++)
+    if (r.left[i - 1] < 0 && r.left[i] >= 0) { if (first < 0) first = i; last = i; cross++; }
+  double got = (cross - 1) / ((last - first) / 48000.0), peak = 0;
+  for (long i = 0; i < r.n; i++) peak = fmax(peak, fabs(r.left[i]));
+  CHECK(peak < 1.05, "it grew to %g", peak);
+  rendered_free(&r);
+  return got;
+}
+TEST(spring_as_laws) {
+  double a = law_pitch("$v' = -$x * w ^ 2\n$x' = $v", 440), b = law_pitch("$x' = $v\n$v' = -$x * w ^ 2", 440);
+  double high = law_pitch("$v' = -$x * w ^ 2\n$x' = $v", 3000);
+  printf("  a spring at 440 Hz: %.2f, either way written; at 3000 Hz, %.1f (%.1f cents sharp)\n", a, high, 1200 * log2(high / 3000));
+  CHECK(a == b, "the order showed: %g against %g", a, b);
+  CHECK(fabs(a / 440 - 1) < 0.002, "%g", a);
+}
+
 TEST(ring_keeps_its_period) {
   const int rates[] = {24000, 48000, 96000};
   const double period = 0.8;

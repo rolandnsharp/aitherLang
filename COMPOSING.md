@@ -1206,6 +1206,11 @@ A short field holds a note, the engine stepping several places a sample, and
 a bore of two laws and a width, played by `dho` lips reading and pushing it
 at one point, so a field and the rest of the language mix freely.
 
+Laws work on plain state too, a medium of one place, in a `def` or a `sum` as
+well: `$v' = -$x * w ^ 2 - $v * damp` and `$x' = $v` is a spring, in either
+order, and any nonlinear law you can write is as short (SPEC "Fields"). For a
+plain resonance `dho` stays better: it is exact, and this runs sharp up high.
+
 `patches/phasor_ring.aither` is that ring: apart, a swarm; coupled, one
 pitch with a travelling wave of phase round it. A medium with ends needs
 no `mod`: past either end reads 0, which is a string with fixed
