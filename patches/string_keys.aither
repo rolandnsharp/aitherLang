@@ -1,9 +1,12 @@
 # string_keys: six strings played from the number keys, in A minor
 # (notes/field-by-its-period-2026-11-06.md).
 #
-# And the wind, on the arrows: up for more. Each string has a wake, as
-# field_harp's do, so a held string sings a harmonic in the wind as well as
-# its pluck, and let go its felt quiets it. With no wind, they are only plucked.
+# And the wind, on the arrows. Up and down is how hard it blows, its lift on
+# the strings growing gently at first; left and right is how fast, which
+# harmonic the wake sheds near. In real wind the two go together: here
+# they're apart, a liberty, so the strength comes up smoothly from nothing
+# where a rising wind would jump. A held string sings in it as well as its
+# pluck, and let go its felt quiets it. With no wind, they're only plucked.
 #
 # A string is a def holding a field, written out where it's called, so it
 # reads the file's `scale`: a pair whose period moves, so each key
@@ -22,9 +25,10 @@
 let scale = [1, 9 / 8, 6 / 5, 4 / 3, 3 / 2, 8 / 5, 9 / 5, 2, 9 / 4, 12 / 5]            # just
 # let scale = [1, 9 / 8, 32 / 27, 4 / 3, 3 / 2, 128 / 81, 16 / 9, 2, 9 / 4, 64 / 27]  # Pythagorean
 let root = 220                                             # A3
-let wind = slew(midi_cc(28), 0.15)                         # the up and down arrows
+let blow = slew(midi_cc(28) ^ 2, 0.15)                     # up and down: how hard, gentle at first
+let speed = slew(floor(midi_cc(29) * 8) / 8, 0.3)          # left and right: how fast, a harmonic a step or so
 
-def string(voice, root, wind):
+def string(voice, root, blow, speed):
   let key = clamp(midi_voice_key(voice) - 60, 0, 9)
   let note = root * scale[key]
   let held = midi_voice_gate(voice)
@@ -33,15 +37,15 @@ def string(voice, root, wind):
   $i = line(period = 1 / note, ends = free)
   $v' = -slope($i) - $v * loss
   $i' = -slope($v) - $i * loss
-  let shed = TAU * note * (0.5 + wind * 11.5)                # the wind's vortices, against the note
+  let shed = TAU * note * (1 + speed * 7)                    # the wind's vortices, against the note
   let moving = $v[0.37]
   $q = 0.1
   $r = 0
   $r' = -$q * shed ^ 2 + shed * 0.1 * (1 - $q ^ 2) * $r + moving * 0.5 * shed ^ 2
   $q' = $r
-  $v'[0.37] += $q * 0.01 * min(1, wind * 4)
+  $v'[0.37] += $q * 0.04 * blow                             # lift, growing with the blow
   let age = since(midi_voice_on(voice))
   $v'[0.27] += if age < 0.0005 and held > 0 then 0.0012 / 0.0005 else 0
   [$v[0.13], $v[0.71]]
 
-sum(6, n => string(n, root, wind)) * 0.25 |> tanh
+sum(6, n => string(n, root, blow, speed)) * 0.25 |> tanh
