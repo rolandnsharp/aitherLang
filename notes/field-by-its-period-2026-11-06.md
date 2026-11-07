@@ -24,8 +24,10 @@ R = G keeps a pulse's shape (`patches/heaviside_line.aither`). `line(period
 `free`, and `[fixed, free]` one each, the two ends being two places. The
 length counts what lies past an end, a place past a fixed one and half past
 a free one, which makes the pitch exact: fixed 2.000 Hz, fixed-free 1.000,
-open and shorted pairs 2.000, on a period of 0.5 s. `matched`, an end that
-absorbs, comes next. A push is
+open and shorted pairs 2.000, on a period of 0.5 s. `matched` takes what
+arrives: on a wave a free end with a dashpot as strong as the line, on a
+pair each field set to the other at the end. Reading the dashpot at the end
+itself, not the last place, took the echo from -28 dB to -35. A push is
 `$v'[p] += force`, a source: it was always a rate at a point, sized as a
 delta function, and `$v[p] = force` hid that. An `at(p)` term inside the
 law was turned down: it puts a where in the law, and only works by being

@@ -224,6 +224,44 @@ TEST(line_tunes) {
   for (int k = 0; k < 5; k++) CHECK(fabs(f[k] / want[k] - 1) < 0.006, "case %d: %g Hz, not %g", k, f[k], want[k]);
 }
 
+/* What comes back from the far end, against what went out: a pulse is read
+ * going past 0.75, and again where it would return. */
+static double echo_db(const char* decl, double width) {
+  char src[640], err[4096];
+  snprintf(src, sizeof src, "%s\n"
+    "$v'[gauss(0.5, %g)] += if t < 0.002 then 100 else 0\n"
+    "$v[0.75]\n", decl, width);
+  Rendered r = {0};
+  if (render_src(src, 1.4, 48000, &r, err, sizeof err)) { CHECK(0, "doesn't render: %s", err); return 0; }
+  double out = 0, back = 0;                /* period 2: across in 1 s, 0.75 at 0.25 s, back at 0.75 s */
+  for (long i = 0; i < r.n; i++) {
+    double s = (double)i / 48000, a = fabs(r.left[i]);
+    if (s < 0.45) out = fmax(out, a);
+    else if (s < 1.05) back = fmax(back, a);
+  }
+  rendered_free(&r);
+  return 20 * log10((back + 1e-12) / out);
+}
+TEST(matched_end_takes_it_all) {
+  const char* wave = "$x = line(period = 2, ends = %s)\n$v = line(period = 2, ends = %s)\n$v' = -concentration($x)\n$x' = $v";
+  const char* pair = "$v = line(period = 2, ends = %s)\n$i = line(period = 2, ends = %s)\n$v' = -slope($i)\n$i' = -slope($v)";
+  char d[300];
+  snprintf(d, sizeof d, wave, "[free, free]", "[free, free]");
+  double free_end = echo_db(d, 0.03);
+  snprintf(d, sizeof d, wave, "[free, matched]", "[free, matched]");
+  double wide = echo_db(d, 0.03), narrow = echo_db(d, 0.01);
+  snprintf(d, sizeof d, pair, "[free, free]", "[fixed, fixed]");
+  double open_end = echo_db(d, 0.03);
+  snprintf(d, sizeof d, pair, "[free, matched]", "[fixed, matched]");
+  double pair_end = echo_db(d, 0.03);
+  printf("  what comes back: free %.1f dB, matched %.1f (narrow pulse %.1f); open pair %.1f, matched pair %.1f\n",
+         free_end, wide, narrow, open_end, pair_end);
+  CHECK(free_end > -3, "a free end gave back %g dB", free_end);
+  CHECK(open_end > -3, "an open end gave back %g dB", open_end);
+  CHECK(wide < -30, "a matched end gave back %g dB", wide);
+  CHECK(pair_end < -30, "a matched pair gave back %g dB", pair_end);
+}
+
 TEST(ring_keeps_its_period) {
   const int rates[] = {24000, 48000, 96000};
   const double period = 0.8;

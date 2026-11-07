@@ -1198,7 +1198,8 @@ keep a pulse's shape as it dies, so every harmonic fades together.
 
 `line(period = T, ends = fixed)` is a ring opened up, each end `fixed` or
 `free`. `patches/two_ends.aither` draws one, with one of each: a pulse comes
-back flipped from one and not the other.
+back flipped from one and not the other. `matched` is an end that takes what
+arrives, Heaviside's termination: `patches/far_end.aither`.
 
 `patches/phasor_ring.aither` is that ring: apart, a swarm; coupled, one
 pitch with a travelling wave of phase round it. A medium with ends needs

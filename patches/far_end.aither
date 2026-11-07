@@ -1,0 +1,54 @@
+# far_end: a line drawn on the scope, one end fixed and one matched
+# (notes/field-by-its-period-2026-11-06.md). two_ends with its free end
+# matched.
+#
+# A matched end is what Heaviside terminated a line with: a load exactly as
+# strong as the line itself, so what arrives is all taken and nothing comes
+# back. On a string it is a dashpot of just the right strength. A pluck
+# parts into two pulses: one goes straight out of the far end and is gone,
+# the other flips at the fixed end, follows it out, and the line is still.
+# Measured, about 2% of a pulse comes back, -35 dB; a pulse only a few
+# places wide, about 5%, which is the grain.
+#
+# Read along at the note, the scope draws the line itself, fixed end on the
+# left, and the left channel is the sweep, a soft triangle at the note.
+#
+#   ./aither patches/far_end.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
+#
+# The gamepad (tools/pad): A plucks up, B down, each a golden angle along
+# from the last; hold A and press left and right for the note (CC 21); hold
+# B and press up and down for how much it loses (CC 22).
+#   tools/pad & AITHER_MIDI=aither-pad ./aither patches/far_end.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
+
+# ---------------------------------------------------------------- the line
+
+let loss = 3 * midi_cc(22)                                 # what it loses, a round
+
+$x = line(period = 5, ends = [fixed, matched])             # there and back in 5 s
+$v = line(period = 5, ends = [fixed, matched])
+
+$v' = -concentration($x) - $v * loss
+$x' = $v
+
+# ---------------------------------------------------------------- the pluck
+
+let golden = 0.381966
+let own = phasor(1 / 10) * 10                              # it plucks itself every 10 s
+let pad_a = midi_trig(36)
+let pad_b = midi_trig(37)
+let up = min(own, since(pad_a))
+let down = since(pad_b)
+$where = 0.0
+$where = ($where + (pad_a + pad_b) * golden) mod 1
+
+let stroke = 0.003                                         # how long a blow takes
+let way = if down < up then -1 else 1
+let landed = 0.2 + 0.6 * (if own < stroke then (floor(sweep / 10) * golden) mod 1 else $where)
+$x'[gauss(landed, 0.04)] += if min(up, down) < stroke then way * 0.4 / stroke else 0
+
+# ---------------------------------------------------------------- reading
+
+# Across and back at the note: the sweep, and the line where it is.
+let note = 110 * pow(2, floor(midi_cc(21) * 25) / 12)
+let along = 1 - abs(2 * phasor(note) - 1)
+[(2 * along - 1) * 0.7, $x[along]]

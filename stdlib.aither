@@ -338,7 +338,7 @@ def field_gauss(u, w, n):
 
 # The neighbour behind and ahead. An end is 0 on a ring, which has none and
 # wraps; past 1, fixed, the field is held at 0; past 2, free, it goes on as
-# it is here.
+# it is here; 3, matched, reads as free, the law's drag being the rest.
 def field_behind(f, at, e): if e == 0 then f[(at + len(f) - 1) mod len(f)] else if at > 0 then f[at - 1] else if e == 1 then f[0] * 0 else f[0]
 def field_ahead(f, at, e): if e == 0 then f[(at + 1) mod len(f)] else if at < len(f) - 1 then f[at + 1] else if e == 1 then f[0] * 0 else f[at]
 
@@ -364,8 +364,14 @@ def concentration(f, at, l, r): -(field_behind(f, at, l) + field_ahead(f, at, r)
 
 # Of one of a pair, stepping staggered: the step from behind this place, and
 # to the place ahead, just stepped.
-def slope_behind(f, at, l): f[at] - field_behind(f, at, l)
-def slope_ahead(f, now, at, r): if r != 0 and at == len(f) - 1 then (if r == 1 then -f[at] else f[at] * 0) else now - f[at]
+# A matched end has what leaves it: past the first place the two are equal
+# and opposite, past the last equal, each wave going out.
+def slope_behind(f, at, l, other): if l == 3 and at == 0 then f[0] + other[0] * 1.5 - other[1] * 0.5 else f[at] - field_behind(f, at, l)
+def slope_ahead(f, now, at, r, other): if r != 0 and at == len(f) - 1 then (if r == 3 then other[at] * 1.5 - other[at - 1] * 0.5 - f[at] else if r == 1 then -f[at] else f[at] * 0) else now - f[at]
+
+# A matched end of a wave: a free end with a dashpot on it, as strong as
+# the line itself, so what arrives is all taken and nothing comes back.
+def field_drag(v, at, speed, l, r): if l == 3 and at == 0 then (v[0] * 1.5 - v[1] * 0.5) * speed else if r == 3 and at == len(v) - 1 then (v[at] * 1.5 - v[at - 1] * 0.5) * speed else v[at] * 0
 
 # Hamilton's S and V: the scalar part and the vector part.
 def scalar(q):

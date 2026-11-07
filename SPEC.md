@@ -738,6 +738,16 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   at both wants a `held` or a loss. Of a pair, each end is one fixed and
   the other free: `$v` free and `$i` fixed is an open line, the reverse a
   shorted one. `ends` is known when the patch compiles.
+- **`matched` is an end that takes what arrives**: a load as strong as the
+  line itself, so a pulse leaves and doesn't come back. On a wave it is a
+  free end with a dashpot, and needs the law `$x' = $v` to know what moves;
+  on a pair both fields are `matched` there. About 2% of a pulse comes back,
+  -35 dB, and -26 dB for one a few places wide, which is the grain. It is
+  matched to the line as declared: `concentration($x) * firm` moves the
+  speed and not the match, a `held` is a line no end can match, and a pair
+  matches `$v' = -slope($i)`, `$i' = -slope($v)`, as written with the minus.
+  It works with `concentration` and pairs, not the squeeze and twist, which
+  go at two speeds.
 - A bare `$x` is the field at this place, and `$x = ...` stores there. A
   later line at the place sees what was stored; a neighbour sees the last
   step. A number or a value is everywhere.
@@ -827,8 +837,8 @@ seconds to go round, the words carry no speed, and `+=` is plain, a
 step's worth, with the order its lines are in. A push on one has no rate
 to join, so it is an amount, `$v[p] += e`, each sample. Use
 `ring`, unless a number of places is the point. Fields are at the file's
-level, in its plays too; a def sees none. Not built: sheets, an end that
-absorbs, and a fast fine field, which needs more than one place a sample: at one, a 1 s
+level, in its plays too; a def sees none. Not built: sheets, and a fast
+fine field, which needs more than one place a sample: at one, a 1 s
 ring can't have more than about 210 places.
 
 ### Arrays are data, not a map

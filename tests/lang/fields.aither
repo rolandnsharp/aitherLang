@@ -491,7 +491,7 @@ $x' = 0
 $x[0]
 
 # --- an end is fixed or free
-# error: an end is `fixed` or `free`
+# error: an end is `fixed`, `free` or `matched`
 $x = line(period = 1, ends = sticky)
 $x' = 0
 $x[0]
@@ -524,3 +524,27 @@ $x = line(period = 1, ends = free)
 $x' = 0
 $x'[1.5] += if t < 0.001 then 1000 else 0
 if $x[1] > 1 and $x[0] == 0 then 1 else 0
+
+# --- a matched end needs to know how the field moves
+# error: a matched end takes what arrives as it moves
+$x = line(period = 1, ends = matched)
+$v = line(period = 1, ends = matched)
+$v' = -concentration($x)
+$x' = $v * 2
+$x[0]
+
+# --- ... and is for one speed
+# error: a matched end is for `concentration` or a pair
+$d = line(period = 1, ends = matched, start = ((0, 0), (0, 0)))
+$v = line(period = 1, ends = matched, start = ((0, 0), (0, 0)))
+$v' = -curl(curl($d))
+$d' = $v
+$d[0]
+
+# --- of a pair, matched is both
+# error: or both matched
+$v = line(period = 1, ends = matched)
+$i = line(period = 1, ends = free)
+$v' = -slope($i)
+$i' = -slope($v)
+$v[0]

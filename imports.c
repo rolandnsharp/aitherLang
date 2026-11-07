@@ -193,7 +193,8 @@ typedef struct {
   const Node* pushed;                    /* where it was first pushed, or NULL */
   void* reads;                           /* the field its law reads through `slope`, or NULL */
   int trails;                            /* of a pair: it steps a place behind the other */
-  int ends[2];                           /* a line's: 1 fixed, 2 free; a ring's are 0 */
+  int ends[2];                           /* a line's: 1 fixed, 2 free, 3 matched; a ring's are 0 */
+  void* moves;                           /* the field its law says it moves at, `$x' = $v`, or NULL */
   double extra;                          /* a line: how much longer than its places */
   double off;                            /* ... and how far along its first place stands */
   const char* speed;                     /* the hidden let: places a round */
@@ -334,14 +335,27 @@ static Node* field_expr(Fields* fs, Node* n) {
         return n;
       }
       Node* word = f->trails                                  /* the leader reads behind it, the trailer the fresh place ahead */
-        ? fcall(fs, "slope_behind", n, 3, (Node*[]){n->kids[0], fident(fs, fs->law->place, n), fnum(fs, f->ends[0], n)})
-        : fcall(fs, "slope_ahead", n, 4, (Node*[]){n->kids[0], fident(fs, f->now, n), fident(fs, fs->law->place, n), fnum(fs, f->ends[1], n)});
+        ? fcall(fs, "slope_behind", n, 4, (Node*[]){n->kids[0], fident(fs, fs->law->place, n), fnum(fs, f->ends[0], n), fident(fs, fs->law->name, n)})
+        : fcall(fs, "slope_ahead", n, 5, (Node*[]){n->kids[0], fident(fs, f->now, n), fident(fs, fs->law->place, n), fnum(fs, f->ends[1], n), fident(fs, fs->law->name, n)});
       return fbin(fs, "*", word, fident(fs, f->speed, n), n);
     }
-    if (f && !strcmp(n->str, "concentration"))
-      return at_speed(fs, f, fcall(fs, "concentration", n, 4, (Node*[]){n->kids[0], fident(fs, f->place, n), fnum(fs, f->ends[0], n), fnum(fs, f->ends[1], n)}), n);
+    if (f && !strcmp(n->str, "concentration")) {
+      Node* word = at_speed(fs, f, fcall(fs, "concentration", n, 4, (Node*[]){n->kids[0], fident(fs, f->place, n), fnum(fs, f->ends[0], n), fnum(fs, f->ends[1], n)}), n);
+      if (f->ends[0] != 3 && f->ends[1] != 3) return word;
+      Field* v = f->moves;
+      if (!v) {
+        field_fail(fs, n, "a matched end takes what arrives as it moves: the field's law says it, `$x' = $v`");
+        return n;
+      }
+      return fbin(fs, "+", word, fcall(fs, "field_drag", n, 5, (Node*[]){fident(fs, v->name, n), fident(fs, f->place, n), fident(fs, f->speed, n),
+                                                                        fnum(fs, f->ends[0], n), fnum(fs, f->ends[1], n)}), n);
+    }
     Node* in = n->nkids == 1 ? n->kids[0] : NULL;
     f = in && in->kind == nkCall && in->nkids == 1 ? bare_field(fs, in->kids[0]) : NULL;
+    if (f && (f->ends[0] == 3 || f->ends[1] == 3) && (!strcmp(n->str, "slope") || !strcmp(n->str, "curl"))) {
+      field_fail(fs, n, "a matched end is for `concentration` or a pair: a squeeze and a twist go at their own speeds");
+      return n;
+    }
     if (f && !strcmp(n->str, "slope") && !strcmp(in->str, "convergence"))
       return at_speed(fs, f, fcall(fs, "slope_of_convergence", n, 4, (Node*[]){in->kids[0], fident(fs, f->place, n), fnum(fs, f->ends[0], n), fnum(fs, f->ends[1], n)}), n);
     if (f && !strcmp(n->str, "curl") && !strcmp(in->str, "curl"))
@@ -628,8 +642,10 @@ static void find_pairs(Fields* fs, const Node* at) {
     } else if (!same_tree(f->period, g->period) || !f->length != !g->length) {
       snprintf(why, sizeof why, "`$%s` and `$%s` are a pair: they share one period, on one ring or line", f->name, g->name);
       field_fail(fs, at, why);
-    } else if (f->length && (f->ends[0] + g->ends[0] != 3 || f->ends[1] + g->ends[1] != 3)) {
-      snprintf(why, sizeof why, "`$%s` and `$%s` are a pair: at each end one is fixed and the other free", f->name, g->name);
+    } else if (f->length && (!(f->ends[0] + g->ends[0] == 3 || f->ends[0] + g->ends[0] == 6) ||
+                             !(f->ends[1] + g->ends[1] == 3 || f->ends[1] + g->ends[1] == 6) ||
+                             (f->ends[0] == 3) != (g->ends[0] == 3) || (f->ends[1] == 3) != (g->ends[1] == 3))) {
+      snprintf(why, sizeof why, "`$%s` and `$%s` are a pair: at each end one is fixed and the other free, or both matched", f->name, g->name);
       field_fail(fs, at, why);
     } else if (g > f) g->trails = 1;
   }
@@ -646,7 +662,7 @@ static void place_lines(Fields* fs) {
     int l = f->ends[0] == 1, r = f->ends[1] == 1;
     if (f->reads) {
       Field* lead = f->trails ? f->reads : f;
-      l = lead->ends[0] == 1; r = lead->ends[1] == 1;
+      l = lead->ends[0] == 1; r = lead->ends[1] != 2;
       f->extra = (r ? 0 : -0.5) + (l ? 0 : 0.5);
       f->off = (l ? 0 : 0.5) + (f->trails ? 0.5 : 0);
     } else {
@@ -672,6 +688,7 @@ static void check_laws(Fields* fs, Node* n, int stands, char* said) {
     said[f - fs->f] = 1;
     f->law = 1;
     find_slopes(fs, n->kids[0], f);
+    if (bare_field(fs, n->kids[0])) f->moves = bare_field(fs, n->kids[0]);
     if (!fs->pair_at) fs->pair_at = n;
   }
   if (n->kind == nkIdxAssign && n->kids[0]->kind == nkIdent && primed(n->kids[0]->str)) {
@@ -721,8 +738,8 @@ static int fields_pass(Arena* a, Kids* kids, int from, char* err, int errlen) {
           if (!ends) field_fail(&fs, s, "a line says its ends: `line(period = 2, ends = fixed)`, or `ends = [fixed, free]`");
           else for (int e = 0; e < 2; e++) {
             const Node* end = ends->kind == nkArr && ends->nkids == 2 ? ends->kids[e] : ends;
-            f->ends[e] = end->kind != nkIdent ? 0 : !strcmp(end->str, "fixed") ? 1 : !strcmp(end->str, "free") ? 2 : 0;
-            if (!f->ends[e]) field_fail(&fs, s, "an end is `fixed` or `free`, and a line has two: `ends = [fixed, free]`");
+            f->ends[e] = end->kind != nkIdent ? 0 : !strcmp(end->str, "fixed") ? 1 : !strcmp(end->str, "free") ? 2 : !strcmp(end->str, "matched") ? 3 : 0;
+            if (!f->ends[e]) field_fail(&fs, s, "an end is `fixed`, `free` or `matched`, and a line has two: `ends = [fixed, free]`");
           }
         } else {
           f->size = fcall(&fs, "field_places", s, 1, (Node*[]){f->period});
