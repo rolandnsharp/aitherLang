@@ -533,6 +533,39 @@ TEST(a_moving_line_is_exact) {
   rendered_free(&g);
 }
 
+/* The harp: a wake on a moving line locks to a harmonic, and more wind
+ * takes it to a higher one. */
+static double harp_harmonic(double hz) {
+  char src[800], err[4096];
+  snprintf(src, sizeof src,
+    "let shed = TAU * %g\nlet note = 110 + 0 * midi_cc(20)\n"
+    "$v = line(period = 1 / note, ends = fixed)\n$i = line(period = 1 / note, ends = free)\n"
+    "$v' = -slope($i) - $v * 0.02\n$i' = -slope($v) - $i * 0.02\n"
+    "let moving = $v[0.37]\n$q = 0.1\n$r = 0\n"
+    "$r' = -$q * shed ^ 2 + shed * 0.1 * (1 - $q ^ 2) * $r + moving * 0.5 * shed ^ 2\n$q' = $r\n"
+    "$v'[0.37] += $q * 0.01\n$v[0.13]\n", hz);
+  Rendered r = {0};
+  if (render_src(src, 1.0, 48000, &r, err, sizeof err)) { CHECK(0, "doesn't render: %s", err); return -1; }
+  double best = 0, top = 0;
+  for (double h = 0.5; h <= 8; h += 0.25) {
+    double a = 0, b = 0;
+    for (long i = 24000; i < 48000; i++) {
+      double w = 0.5 - 0.5 * cos(TAU * (i - 24000) / 24000.0);
+      a += r.left[i] * w * cos(TAU * 110 * h * i / 48000);
+      b += r.left[i] * w * sin(TAU * 110 * h * i / 48000);
+    }
+    if (a * a + b * b > top) { top = a * a + b * b; best = h; }
+  }
+  rendered_free(&r);
+  return best;
+}
+TEST(the_wind_finds_harmonics) {
+  double low = harp_harmonic(210), high = harp_harmonic(460);
+  printf("  shedding at 210 Hz it sings harmonic %.2f, at 460 Hz %.2f\n", low, high);
+  CHECK(low == floor(low) && high == floor(high), "%g, %g", low, high);
+  CHECK(high > low, "%g, %g", low, high);
+}
+
 TEST(ring_keeps_its_period) {
   const int rates[] = {24000, 48000, 96000};
   const double period = 0.8;

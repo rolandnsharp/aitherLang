@@ -1,0 +1,54 @@
+# field_harp: a line the wind plays
+# (aeolian, with one string, as a field).
+#
+# Wind past a string sheds vortices at a rate that follows the wind. The wake
+# is an oscillator of its own (a van der Pol, the wake-oscillator model:
+# see aeolian's references), its lift pushes the string at a point, and the
+# string's motion there pulls the wake back. So it locks: the string sings a
+# harmonic, and as the wind rises it jumps to the next it can reach. Nobody
+# plays the notes: measured on a rising wind it goes 1, 2, 3, 4, 7, 9, skipping
+# the harmonics with a node near where the wind meets it.
+#
+# The string is a pair whose period can move, so its harmonics are exact and
+# the note can be slid. The wake is a law on plain state. The wind gusts by
+# itself, and the two points read go to left and right, so on the scope a
+# harmonic is a figure, snapping to another as the wind moves it.
+#
+#   ./aither patches/field_harp.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
+#
+# The gamepad (tools/pad): hold A and press up and down for more wind (CC 20),
+# left and right for the note (CC 21); hold B and press up and down for how
+# long the string holds its energy (CC 22).
+#   tools/pad & AITHER_MIDI=aither-pad ./aither patches/field_harp.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
+
+# ---------------------------------------------------------------- the string
+
+let note = 110 * pow(2, slew(floor(midi_cc(21) * 25) / 12, 0.08))
+let loss = 0.03 - 0.02 * midi_cc(22)                       # what it loses, a round
+
+$v = line(period = 1 / note, ends = fixed)
+$i = line(period = 1 / note, ends = free)
+
+$v' = -slope($i) - $v * loss
+$i' = -slope($v) - $i * loss
+
+# ---------------------------------------------------------------- the wind
+
+let gust = 0.4 + 0.25 * sin(TAU * phasor(1 / 23)) + 0.12 * sin(TAU * phasor(1 / 7.1))
+let wind = clamp(slew(gust + midi_cc(20), 0.4), 0, 1)
+let shed = TAU * (60 + wind * 1300)                        # vortices a second, as the wind
+
+# ---------------------------------------------------------------- the wake
+
+let moving = $v[0.37]                                      # the string where the wind meets it
+
+$q = 0.1
+$r = 0
+$r' = -$q * shed ^ 2 + shed * 0.1 * (1 - $q ^ 2) * $r + moving * 0.5 * shed ^ 2
+$q' = $r
+
+$v'[0.37] += $q * 0.01
+
+# ---------------------------------------------------------------- reading
+
+[$v[0.13], $v[0.71]] * 5 |> tanh
