@@ -948,8 +948,12 @@ seconds to go round, the words carry no speed, and `+=` is plain, a
 step's worth, with the order its lines are in. A push on one has no rate
 to join, so it is an amount, `$v[p] += e`, each sample. Use
 `ring`, unless a number of places is the point. Fields are at the file's
-level, in its plays too; a def sees none. Not built: a round sheet, and a
-moving line in a def, so a voice each.
+level, in its plays too. **A def can hold a field**, and each call is its own:
+`def string(note, at): $v = line(...) ... $v[0.13]` and `sum(5, n => string(...))`
+are five strings. A call is written out where it stands, its names made its own,
+so it is called in the file's lines, or in a `sum` of a known count with a
+one-line body, not in a play or another lambda. Its fields see what it is given,
+as a def does. Not built: a round sheet, and a voice each for the keyboard.
 
 ### Arrays are data, not a map
 

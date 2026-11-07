@@ -1226,7 +1226,8 @@ on a string, `bend` on a bar. `patches/field_bar.aither`.
 A pair's period can move, so a line can be slid and played
 (`patches/slide_line.aither`), and a law on plain state can meet it at a point:
 `patches/field_harp.aither` is a wake and a string locking, in about a dozen lines
-of physics, against `patches/aeolian.aither`'s hand-built waveguides.
+of physics a string, against `patches/aeolian.aither`'s hand-built waveguides. A
+def can hold a field, each call its own, so the harp is `sum(5, n => string(...))`.
 
 `sheet(period = T, ends = fixed)` is the same field on a surface, with the same
 two slopes. `patches/pond.aither` reads round a circle on it at pitch, so ripples

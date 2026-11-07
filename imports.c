@@ -1289,6 +1289,141 @@ static void named_slopes(Fields* fs, Kids* kids, int from) {
   }
 }
 
+/* A def that holds a field: each call is its own field, so a call is written
+ * out where it stands, its names made its own, in the file's lines. In a `sum`
+ * of a known count, each turn is a call. */
+static Node** def_lines(const Node* d, int* n) {
+  Node* body = d->nkids ? d->kids[0] : NULL;
+  if (body && body->kind == nkBlock) { *n = body->nkids; return body->kids; }
+  *n = body ? 1 : 0;
+  return d->kids;
+}
+static int field_def(const Node* d) {
+  if (d->kind != nkDef) return 0;
+  int n;
+  Node** lines = def_lines(d, &n);
+  for (int i = 0; i < n; i++)
+    if (lines[i]->kind == nkVar && make_ring(lines[i]->kids[0])) return 1;
+  return 0;
+}
+typedef struct { const char* from; const char* to; } Rename;
+static const char* renamed(Fields* fs, const char* name, Rename* map, int count) {
+  size_t n = strlen(name);
+  int prime = n && name[n - 1] == '\'';
+  if (prime) n--;
+  for (int i = 0; i < count; i++)
+    if (strlen(map[i].from) == n && !strncmp(map[i].from, name, n)) {
+      if (!prime) return map[i].to;
+      char* r = arena_alloc(fs->a, strlen(map[i].to) + 2);
+      sprintf(r, "%s'", map[i].to);
+      return r;
+    }
+  return name;
+}
+static void rename_tree(Fields* fs, Node* n, Rename* map, int count) {
+  if (!n) return;
+  if (n->kind == nkIdent || n->kind == nkVar || n->kind == nkAssign || n->kind == nkLet) n->str = renamed(fs, n->str, map, count);
+  for (int i = 0; i < n->nkids; i++) rename_tree(fs, n->kids[i], map, count);
+}
+static void put_number(Node* n, const char* name, double v) {
+  if (!n) return;
+  if (n->kind == nkIdent && !strcmp(n->str, name)) { n->kind = nkNum; n->num = v; n->str = ""; return; }
+  for (int i = 0; i < n->nkids; i++) put_number(n->kids[i], name, v);
+}
+static const Node* def_named(Kids* kids, int from, const char* name) {
+  for (int i = from; i < kids->n; i++) if (field_def(kids->v[i]) && !strcmp(kids->v[i]->str, name)) return kids->v[i];
+  return NULL;
+}
+static int calls_field_def(const Node* n, Kids* kids, int from) {
+  if (!n) return 0;
+  if (n->kind == nkCall && def_named(kids, from, n->str)) return 1;
+  for (int i = 0; i < n->nkids; i++) if (calls_field_def(n->kids[i], kids, from)) return 1;
+  return 0;
+}
+static Node* write_out(Fields* fs, Node* n, Kids* kids, int from, Kids* out) {
+  if (!n || fs->failed || !calls_field_def(n, kids, from)) return n;
+  if (n->kind == nkCall && !strcmp(n->str, "sum") && n->nkids == 2 && n->kids[0]->kind == nkNum &&
+      n->kids[1]->kind == nkLambda && n->kids[1]->nparams == 1 && n->kids[1]->kids[0]->kind != nkBlock) {
+    Node* total = NULL;
+    for (int turn = 1; turn <= (int)n->kids[0]->num; turn++) {
+      Node* one = copy_tree(fs, n->kids[1]->kids[0]);
+      put_number(one, n->kids[1]->params[0], turn);
+      one = write_out(fs, one, kids, from, out);
+      total = total ? fbin(fs, "+", total, one, n) : one;
+    }
+    return total ? total : fnum(fs, 0, n);
+  }
+  if (n->kind == nkLambda) {
+    field_fail(fs, n, "a def with a field is called in the file's lines, or in a `sum` with a known count and one line");
+    return n;
+  }
+  for (int i = 0; i < n->nkids; i++) n->kids[i] = write_out(fs, n->kids[i], kids, from, out);
+  const Node* d = n->kind == nkCall ? def_named(kids, from, n->str) : NULL;
+  if (!d) return n;
+  int k = fs->made++;
+  int lines_n;
+  Node** lines = def_lines(d, &lines_n);
+  Rename map[d->nparams + lines_n + 1];
+  int count = 0;
+  char buf[256];
+  for (int i = 0; i < d->nparams; i++) {
+    Node* given = i < n->nkids ? n->kids[i] : d->defaults && d->defaults[i] ? copy_tree(fs, d->defaults[i]) : NULL;
+    if (!given) {
+      snprintf(buf, sizeof buf, "`%s` needs `%s`", d->str, d->params[i]);
+      field_fail(fs, n, buf);
+      return n;
+    }
+    const char* name = fname(fs, d->params[i], d->str, k);
+    Node* let = fnode(fs, nkLet, name, n);
+    fkids(fs, let, 1, (Node*[]){given});
+    kid(out, let);
+    map[count++] = (Rename){d->params[i], name};
+  }
+  for (int i = 0; i < lines_n; i++) {
+    const Node* s = lines[i];
+    if ((s->kind != nkVar && s->kind != nkLet && s->kind != nkAssign) || !s->str[0]) continue;
+    size_t len = strlen(s->str) - primed(s->str);
+    snprintf(buf, sizeof buf, "%.*s", (int)len, s->str);
+    int known = 0;
+    for (int m = 0; m < count; m++) if (!strcmp(map[m].from, buf)) known = 1;
+    if (known) continue;
+    char* from_name = arena_alloc(fs->a, len + 1);
+    strcpy(from_name, buf);
+    map[count++] = (Rename){from_name, fname(fs, from_name, d->str, k)};
+  }
+  Node* result = NULL;
+  for (int i = 0; i < lines_n; i++) {
+    Node* s = copy_tree(fs, lines[i]);
+    rename_tree(fs, s, map, count);
+    if (i == lines_n - 1) result = s;
+    else kid(out, s);
+  }
+  const char* back = fname(fs, "result", d->str, k);
+  Node* let = fnode(fs, nkLet, back, n);
+  fkids(fs, let, 1, (Node*[]){result});
+  kid(out, let);
+  return fident(fs, back, n);
+}
+static int field_defs(Arena* a, Kids* kids, int from, char* err, int errlen) {
+  int any = 0;
+  for (int i = from; i < kids->n; i++) any |= field_def(kids->v[i]);
+  if (!any) return 0;
+  Fields fs = {a, NULL, 0, 0, 0, err, errlen, 0};
+  Kids out = {0};
+  for (int i = from; i < kids->n; i++) {
+    Node* s = kids->v[i];
+    if (field_def(s)) continue;
+    if (s->kind == nkPlay && calls_field_def(s, kids, from)) field_fail(&fs, s, "a def with a field is called in the file's lines, not a play");
+    else if (s->kind != nkDef)
+      for (int k = 0; k < s->nkids; k++) s->kids[k] = write_out(&fs, s->kids[k], kids, from, &out);
+    kid(&out, s);
+  }
+  kids->n = from;
+  for (int i = 0; i < out.n; i++) kid(kids, out.v[i]);
+  free(out.v);
+  return fs.failed ? -1 : 0;
+}
+
 /* A field read through four slopes is a bar, and so is what its law moves. */
 static void make_bar(Fields* fs, Field* f, Kids* kids, int from, const Node* at) {
   double period;
@@ -1441,7 +1576,7 @@ Node* build_program(Arena* a, const char* stdlib_src, const char* src, const cha
   memmove(kids.v + kept, kids.v + std->nkids, (kids.n - std->nkids) * sizeof(Node*));
   kids.n -= std->nkids - kept;
   *kind = BUILD_PARSE;
-  if (plain_laws(a, &kids, kept, err, errlen) || fields_pass(a, &kids, kept, err, errlen)) { free(kids.v); return NULL; }
+  if (field_defs(a, &kids, kept, err, errlen) || plain_laws(a, &kids, kept, err, errlen) || fields_pass(a, &kids, kept, err, errlen)) { free(kids.v); return NULL; }
   *kind = BUILD_OK;
   Node* prog = arena_alloc(a, sizeof(Node));
   prog->kind = nkBlock; prog->line = 1; prog->str = ""; prog->source = "";

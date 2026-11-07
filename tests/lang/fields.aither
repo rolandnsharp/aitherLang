@@ -778,3 +778,51 @@ $i = line(period = 1 / note, ends = free)
 $v' = -slope($i)
 $i' = -slope($v)
 $v
+
+# --- a def can hold a field, and each call is its own
+# expect at 3000: 1
+def string(note, at):
+  $v = line(period = 1 / note, ends = fixed)
+  $i = line(period = 1 / note, ends = free)
+  $v' = -slope($i)
+  $i' = -slope($v)
+  $v'[at] += if t < 0.002 then 100 else 0
+  $v[0.5]
+let a = string(2 + 0 * midi_cc(20), 0.25)
+let b = string(2 + 0 * midi_cc(20), 0.9)
+if abs(a) > 0.1 and b == 0 then 1 else 0
+
+# --- ... and each turn of a sum
+# expect at 3000: 1
+def string(note, at):
+  $v = line(period = 1 / note, ends = fixed)
+  $i = line(period = 1 / note, ends = free)
+  $v' = -slope($i)
+  $i' = -slope($v)
+  $v'[at] += if t < 0.002 then 100 else 0
+  $v[0.5]
+let one = string(2 + 0 * midi_cc(20), 0.25)
+if abs(sum(2, n => string(2 + 0 * midi_cc(20), 0.25)) - one * 2) < 0.000001 and abs(one) > 0.1 then 1 else 0
+
+# --- not in a play
+# error: is called in the file's lines, not a play
+def string(note):
+  $v = line(period = 1 / note, ends = fixed)
+  $i = line(period = 1 / note, ends = free)
+  $v' = -slope($i)
+  $i' = -slope($v)
+  $v[0.5]
+play a:
+  string(2)
+a
+
+# --- nor in a lambda that isn't a sum's
+# error: or in a `sum` with a known count
+def string(note):
+  $v = line(period = 1 / note, ends = fixed)
+  $i = line(period = 1 / note, ends = free)
+  $v' = -slope($i)
+  $i' = -slope($v)
+  $v[0.5]
+let f = n => string(n)
+f(2)
