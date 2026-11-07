@@ -484,6 +484,55 @@ TEST(sheets_ring_as_they_should) {
   CHECK(fabs(pl / 100 - 1) < 0.05, "plate %g", pl);
 }
 
+/* A moving period, held still, against the same line on the places: same
+ * level, and every partial exact where the places run flat. */
+static double partial(const Rendered* r, double near) {
+  double best = 0, top = 0;
+  for (double f = near * 0.97; f < near * 1.03; f += near * 0.0005) {
+    double a = 0, b = 0;
+    for (long i = 0; i < 48000; i++) {
+      double w = 0.5 - 0.5 * cos(TAU * i / 48000.0);
+      a += r->left[i] * w * cos(TAU * f * i / 48000);
+      b += r->left[i] * w * sin(TAU * f * i / 48000);
+    }
+    if (a * a + b * b > top) { top = a * a + b * b; best = f; }
+  }
+  return best;
+}
+TEST(a_moving_line_is_exact) {
+  char src[640], err[4096];
+  const char* law = "$v = line(period = 1 / note, ends = fixed)\n$i = line(period = 1 / note, ends = free)\n"
+    "$v' = -slope($i) - $v * 0.01\n$i' = -slope($v) - $i * 0.01\n"
+    "$v'[0.3] += if t < 0.0004 then 8 else 0\n$v[0.13]\n";
+  Rendered w = {0}, p = {0};
+  snprintf(src, sizeof src, "let note = 110 + 0 * midi_cc(20)\n%s", law);
+  CHECK(render_src(src, 1.0, 48000, &w, err, sizeof err) == 0, "%s", err);
+  snprintf(src, sizeof src, "let note = 110\n%s", law);
+  CHECK(render_src(src, 1.0, 48000, &p, err, sizeof err) == 0, "%s", err);
+  double wp = 0, pp = 0;
+  for (long i = 0; i < 2000; i++) { wp = fmax(wp, fabs(w.left[i])); pp = fmax(pp, fabs(p.left[i])); }
+  double w5 = partial(&w, 550), w8 = partial(&w, 880), p8 = partial(&p, 880);
+  printf("  peaks %.3f, %.3f; waves 5th %.1f, 8th %.1f of 550, 880; places 8th %.1f\n", wp, pp, w5, w8, p8);
+  CHECK(fabs(wp / pp - 1) < 0.1, "%g against %g", wp, pp);
+  CHECK(fabs(w5 / 550 - 1) < 0.002 && fabs(w8 / 880 - 1) < 0.002, "%g, %g", w5, w8);
+  rendered_free(&w);
+  rendered_free(&p);
+  /* and held, it slides: the note it's told, at each moment */
+  Rendered g = {0};
+  snprintf(src, sizeof src, "let note = 110 * pow(2, if t < 0.5 then 0 else 1)\n%s", law);
+  CHECK(render_src(src, 1.0, 48000, &g, err, sizeof err) == 0, "%s", err);
+  long best = 0;
+  double top = -1;
+  for (long lag = 120; lag < 320; lag++) {
+    double c = 0;
+    for (long i = 30000; i < 40000; i++) c += g.left[i] * g.left[i + lag];
+    if (c > top) { top = c; best = lag; }
+  }
+  printf("  after the slide its period is %ld samples: %.1f Hz of 220\n", best, 48000.0 / best);
+  CHECK(labs(best - 218) <= 2, "%ld samples", best);
+  rendered_free(&g);
+}
+
 TEST(ring_keeps_its_period) {
   const int rates[] = {24000, 48000, 96000};
   const double period = 0.8;

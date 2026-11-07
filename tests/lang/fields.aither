@@ -731,3 +731,50 @@ $v = sheet(period = 1, ends = free)
 $v' = -slope(slope(slope(slope($x))))
 $x' = $v
 $x[(0, 0)]
+
+# --- a line's period can move, if it is a pair of equal loss: its waves are exact
+# expect at 3000: 1
+let note = 2 + 0 * midi_cc(20)
+$v = line(period = 1 / note, ends = fixed)
+$i = line(period = 1 / note, ends = free)
+$v' = -slope($i)
+$i' = -slope($v)
+$v'[0.25] += if t < 0.002 then 100 else 0
+if abs($v[0.5]) > 0.1 and $v[0.9] == 0 then 1 else 0
+
+# --- a wave doesn't stay two travelling waves here
+# error: a line whose period moves is a pair
+let note = 2 + 0 * midi_cc(20)
+$x = line(period = 1 / note, ends = fixed)
+$v = line(period = 1 / note, ends = fixed)
+$v' = slope(slope($x))
+$x' = $v
+$x[0.5]
+
+# --- nor does a pair out of balance
+# error: keeps its losses equal
+let note = 2 + 0 * midi_cc(20)
+$v = line(period = 1 / note, ends = fixed)
+$i = line(period = 1 / note, ends = free)
+$v' = -slope($i) - $v * 0.1
+$i' = -slope($v)
+$v[0.5]
+
+# --- a shaped blow is a shorter one, here
+# error: a line whose period moves takes a point
+let note = 2 + 0 * midi_cc(20)
+$v = line(period = 1 / note, ends = fixed)
+$i = line(period = 1 / note, ends = free)
+$v' = -slope($i)
+$i' = -slope($v)
+$v'[gauss(0.5, 0.1)] += 1
+$v[0.5]
+
+# --- read at a point
+# error: is read at a point
+let note = 2 + 0 * midi_cc(20)
+$v = line(period = 1 / note, ends = fixed)
+$i = line(period = 1 / note, ends = free)
+$v' = -slope($i)
+$i' = -slope($v)
+$v

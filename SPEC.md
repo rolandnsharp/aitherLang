@@ -758,6 +758,16 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   1, 3, 5 and a cone from 0.1 past its apex measures 1.80, 3.65, 5.55, 7.45
   against theory's 1.82, 3.67, 5.54, 7.45. Only a pair has one, and a
   `matched` end is for a line of one width.
+- **A line's period can move**: `line(period = 1 / note, ends = fixed)`, with
+  any signal for `note`. Such a line is a pair of equal loss, `$v' = -slope($i)
+  - $v * loss`, `$i' = -slope($v) - $i * loss`, and anything else is an error,
+  as only that stays two travelling waves. The engine holds it as those, d'Alembert's
+  solution, each a delay, so it has no places: its partials are exact, up to
+  a period of 2.7 s, and it costs about a tenth of a uConsole core. Held still
+  it matches the same line on places in level, where the places run flat at the
+  top. Ends do as they do; a `gauss` is an error, as a shorter blow at a
+  point is a sharper one; and it is read at a point, `$v[p]`, not bare. Its
+  losses have to be the same expression. Moved fast, the highs dull a little.
 - **`sheet(period = T, ends = fixed)` is the same field on a surface**: a
   square, `ends` one word for its whole edge, `fixed` or `free`. Two slopes
   are how far the neighbours all round stand above this place, so the law is
@@ -939,7 +949,7 @@ step's worth, with the order its lines are in. A push on one has no rate
 to join, so it is an amount, `$v[p] += e`, each sample. Use
 `ring`, unless a number of places is the point. Fields are at the file's
 level, in its plays too; a def sees none. Not built: a round sheet, and a
-period that moves while it plays.
+moving line in a def, so a voice each.
 
 ### Arrays are data, not a map
 

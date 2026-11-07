@@ -203,6 +203,12 @@ typedef struct {
   const char* grain;                     /* the hidden let: a push's step */
   Node* width;                           /* line(width = p => ...): the lambda, else NULL */
   const char* table;                     /* the hidden array: width squared at each place, a pair's */
+  int waves;                             /* a line whose period moves: held as two travelling waves */
+  Node* wave_loss;                       /* ... the loss its law says, or NULL */
+  const char* right;                     /* the hidden arrays: the wave going each way */
+  const char* left;
+  const char* head;                      /* the hidden let: this sample's cell */
+  const char* cross;                     /* the hidden let: samples to cross it */
   int sheet;                             /* a sheet: `side` places a side, row after row */
   int side;
   const char* across;                    /* the hidden let, a sheet's: its length in places */
@@ -213,6 +219,7 @@ typedef struct {
   const char* start;                     /* ... the hidden let: this sample's first place */
 } Field;
 
+#define WAVE_CELLS 131072                    /* a moving line's waves: 2.7 s across at 48 kHz */
 typedef struct { Arena* a; Field* f; int n; int made; int in_ring; char* err; int errlen; int failed; int in_def; int own_gauss; Field* law; const Node* pair_at; } Fields;
 
 static Node* fnode(Fields* fs, NodeKind k, const char* str, const Node* at) {
@@ -304,6 +311,11 @@ static int slopes(Fields* fs, const Node* n, Field** of) {
 static Node* field_expr(Fields* fs, Node* n) {
   if (!n) return n;
   if (n->kind == nkIdent) {
+    Field* moving = field_named(fs, n->str);
+    if (moving && moving->waves) {
+      field_fail(fs, n, "a line whose period moves is read at a point: `$v[p]`");
+      return n;
+    }
     if (fs->in_ring && (!strcmp(n->str, "dt") || !strcmp(n->str, "t")) && !fs->failed) {
       fs->failed = 1;
       snprintf(fs->err, fs->errlen, "`%s` in a ring's line (%s:%d): a field has no time, only what changes. Say "
@@ -316,6 +328,11 @@ static Node* field_expr(Fields* fs, Node* n) {
   }
   if (n->kind == nkIdx && bare_field(fs, n->kids[0])) {       /* read at a point */
     Field* f = bare_field(fs, n->kids[0]);
+    if (f->waves) {
+      Field* w = f->trails ? f->reads : f;
+      return fcall(fs, "wave_read", n, 6, (Node*[]){fident(fs, w->right, n), fident(fs, w->left, n), fident(fs, w->head, n), fident(fs, w->cross, n),
+                                                   field_expr(fs, n->kids[1]), fnum(fs, f->trails ? -1 : 1, n)});
+    }
     if (f->sheet)
       return fcall(fs, "sheet_at", n, 6, (Node*[]){n->kids[0], field_expr(fs, n->kids[1]), fnum(fs, f->side, n), fident(fs, f->across, n),
                                                   fnum(fs, f->off, n), fnum(fs, f->ends[0], n)});
@@ -482,11 +499,59 @@ static void find_reached(Fields* fs, const Node* n, char* reached, const Field* 
  * one declared first steps at this place, the other a place behind it, so
  * each sees the other fresh on both sides. */
 static int same_tree(const Node* a, const Node* b);
+static Node* fstore(Fields* fs, const char* array, Node* at, Node* value, const Node* s);
+static const char* flet(Fields* fs, const char* what, const char* name, int k, Node* value, const Node* s, Kids* out);
+/* One step of a line's two waves: each reaches its far end, and comes back by
+ * what that end does, having lost half a round's loss on the way. */
+static void step_waves(Fields* fs, Field* f, const Node* s, Kids* out) {
+  int k = fs->made++;
+  double turn[2];
+  for (int e = 0; e < 2; e++) turn[e] = f->ends[e] == 1 ? -1 : f->ends[e] == 2 ? 1 : 0;
+  Node* loss = f->wave_loss ? field_expr(fs, f->wave_loss) : fnum(fs, 0, s);
+  const char* keep = flet(fs, "keep", f->name, k, fcall(fs, "exp", s, 1, (Node*[]){fbin(fs, "*", loss, fnum(fs, -0.5, s), s)}), s, out);
+  const char* to_right = flet(fs, "at_right", f->name, k,
+    fcall(fs, "wave_tap", s, 3, (Node*[]){fident(fs, f->right, s), fident(fs, f->head, s), fident(fs, f->cross, s)}), s, out);
+  const char* to_left = flet(fs, "at_left", f->name, k,
+    fcall(fs, "wave_tap", s, 3, (Node*[]){fident(fs, f->left, s), fident(fs, f->head, s), fident(fs, f->cross, s)}), s, out);
+  kid(out, fstore(fs, f->right, fident(fs, f->head, s),
+    fbin(fs, "*", fident(fs, to_left, s), fbin(fs, "*", fident(fs, keep, s), fnum(fs, turn[0], s), s), s), s));
+  kid(out, fstore(fs, f->left, fident(fs, f->head, s),
+    fbin(fs, "*", fident(fs, to_right, s), fbin(fs, "*", fident(fs, keep, s), fnum(fs, turn[1], s), s), s), s));
+}
+/* A point source on a moving line: a quarter of its force a sample into each
+ * wave where it passes, split between the two cells either side. */
+static void lay_wave(Fields* fs, const char* array, const char* head, const char* lag, const char* amount, double sign, const Node* s, Kids* out) {
+  int k = fs->made++;
+  const char* whole = flet(fs, "lag", array, k, fcall(fs, "floor", s, 1, (Node*[]){fident(fs, lag, s)}), s, out);
+  const char* part = flet(fs, "part", array, k, fbin(fs, "-", fident(fs, lag, s), fident(fs, whole, s), s), s, out);
+  for (int e = 0; e < 2; e++) {
+    Node* cell = fbin(fs, "-", fident(fs, head, s), fbin(fs, "+", fident(fs, whole, s), fnum(fs, e, s), s), s);
+    cell = fbin(fs, "mod", fbin(fs, "+", cell, fnum(fs, WAVE_CELLS, s), s), fnum(fs, WAVE_CELLS, s), s);
+    const char* at = flet(fs, "cell", array, fs->made++, cell, s, out);
+    Node* share = e ? fident(fs, part, s) : fbin(fs, "-", fnum(fs, 1, s), fident(fs, part, s), s);
+    Node* add = fbin(fs, "*", fbin(fs, "*", fident(fs, amount, s), share, s), fnum(fs, sign, s), s);
+    kid(out, fstore(fs, array, fident(fs, at, s), fbin(fs, "+", fidx(fs, array, fident(fs, at, s), s), add, s), s));
+  }
+}
+static void wave_source(Fields* fs, Field* f, const Node* s, Kids* out) {
+  Field* w = f->trails ? f->reads : f;
+  const Node* said = s->kids[2];
+  int k = fs->made++;
+  Node* force = field_expr(fs, said->kids[1]);
+  if (!strcmp(said->str, "-")) force = fbin(fs, "*", force, fnum(fs, -1, s), s);
+  const char* amount = flet(fs, "amount", f->name, k, fbin(fs, "*", force, fnum(fs, 0.25, s), s), s, out);
+  const char* p = flet(fs, "point", f->name, k, fcall(fs, "clamp", s, 3, (Node*[]){field_expr(fs, s->kids[1]), fnum(fs, 0, s), fnum(fs, 1, s)}), s, out);
+  Node* lag_r = fcall(fs, "max", s, 2, (Node*[]){fnum(fs, 1, s), fbin(fs, "*", fident(fs, p, s), fident(fs, w->cross, s), s)});
+  Node* lag_l = fcall(fs, "max", s, 2, (Node*[]){fnum(fs, 1, s), fbin(fs, "*", fbin(fs, "-", fnum(fs, 1, s), fident(fs, p, s), s), fident(fs, w->cross, s), s)});
+  lay_wave(fs, w->right, w->head, flet(fs, "lag_r", f->name, k, lag_r, s, out), amount, 1, s, out);
+  lay_wave(fs, w->left, w->head, flet(fs, "lag_l", f->name, k, lag_l, s, out), amount, f->trails ? -1 : 1, s, out);
+}
 static void step_group(Fields* fs, Node** in, int n, Kids* out, const char* reached, const Field* with, int trails) {
   for (int last = 0; last < 2; last++)
     for (int k = 0; k < fs->n; k++) {
       if (reached[k] != last) continue;
       Field* f = &fs->f[k];
+      if (f->waves) continue;
       if (with ? !f->per || !same_tree(f->period, with->period) || f->trails != trails : f->per != 0) continue;
       for (int i = 0; i < n; i++) {
         if (!is_law(in[i]) || law_field(fs, in[i]) != f) continue;
@@ -505,6 +570,11 @@ static void step_laws(Fields* fs, Node** in, int n, Kids* out) {
   memset(reached, 0, fs->n + 1);
   for (int i = 0; i < n; i++) if (is_law(in[i])) find_reached(fs, in[i]->kids[0], reached, law_field(fs, in[i]));
   step_group(fs, in, n, out, reached, NULL, 0);
+  for (int k = 0; k < fs->n; k++) {
+    Field* f = &fs->f[k];
+    if (!f->waves || f->trails) continue;
+    for (int i = 0; i < n; i++) if (is_law(in[i]) && law_field(fs, in[i]) == f) step_waves(fs, f, in[i], out);
+  }
   char* done = arena_alloc(fs->a, fs->n + 1);
   memset(done, 0, fs->n + 1);
   for (int k = 0; k < fs->n; k++) {                          /* fine fields of a period step together, several places a sample */
@@ -649,8 +719,36 @@ static void field_stmts(Fields* fs, Node** in, int n, Kids* out, int top) {
       if (i == laws_end) step_laws(fs, in, n, out);
       continue;
     }
+    if (s->kind == nkIdxAssign && pushed_field(fs, s->kids[0]) && pushed_field(fs, s->kids[0])->waves) {
+      Field* w = pushed_field(fs, s->kids[0]);
+      const Node* said = s->kids[2];
+      if (is_gauss(fs, s->kids[1]))
+        field_fail(fs, s, "a line whose period moves takes a point: a shorter blow is a sharper one, `$v'[p] += force`");
+      else if (!primed(s->kids[0]->str) || said->kind != nkBinOp || said->num != 1.0 || (strcmp(said->str, "+") && strcmp(said->str, "-")))
+        field_fail(fs, s, "a push on a line is a change to its rate: `$v'[p] += ...`");
+      else wave_source(fs, w, s, out);
+      continue;
+    }
     if (gauss_source(fs, s)) { shaped_source(fs, s, out); continue; }
     Field* f = (s->kind == nkVar || s->kind == nkAssign) ? field_named(fs, s->str) : NULL;
+    if (f && f->waves) {                                     /* its declaration: the first of the pair holds the waves */
+      if (!f->trails) {
+        for (int e = 0; e < 2; e++) {
+          Node* buffer = fnode(fs, nkVar, e ? f->left : f->right, s);
+          fkids(fs, buffer, 1, (Node*[]){fcall(fs, "array", s, 2, (Node*[]){fnum(fs, WAVE_CELLS, s), fnum(fs, 0, s)})});
+          kid(out, buffer);
+        }
+        Node* head = fnode(fs, nkLet, f->head, s);
+        fkids(fs, head, 1, (Node*[]){fcall(fs, "pixel_index", s, 2, (Node*[]){fnum(fs, WAVE_CELLS, s), fnum(fs, 1, s)})});
+        kid(out, head);
+        Node* cross = fnode(fs, nkLet, f->cross, s);       /* there and back in a period, so across in half */
+        fkids(fs, cross, 1, (Node*[]){fcall(fs, "clamp", s, 3, (Node*[]){
+          fbin(fs, "/", field_expr(fs, f->period), fbin(fs, "*", fident(fs, "dt", s), fnum(fs, 2, s), s), s),
+          fnum(fs, 2, s), fnum(fs, WAVE_CELLS - 8, s)})});
+        kid(out, cross);
+      }
+      continue;
+    }
     if (f && make_array(s->kids[0])) {                       /* its declaration */
       Node* c = s->kids[0];
       int named = 0;
@@ -878,6 +976,48 @@ static void place_lines(Fields* fs) {
       f->extra = 0.5 * (l + r);
       f->off = l ? 1 : 0.5;
     }
+  }
+}
+
+/* A moving line's law: `-slope($i)`, less `$v * loss` if it has one. */
+static int wave_law(Fields* fs, const Node* n, Field* self, Field* other, Node** loss) {
+  Field* of;
+  *loss = NULL;
+  if (n->kind == nkBinOp && !strcmp(n->str, "-") && n->nkids == 2) {
+    const Node* term = n->kids[1];
+    if (term->kind != nkBinOp || strcmp(term->str, "*") || term->nkids != 2) return 0;
+    if (bare_field(fs, term->kids[0]) == self) *loss = term->kids[1];
+    else if (bare_field(fs, term->kids[1]) == self) *loss = term->kids[0];
+    else return 0;
+    n = n->kids[0];
+  }
+  if (n->kind != nkUnary || n->nkids != 1) return 0;
+  return slopes(fs, n->kids[0], &of) == 1 && of == other;
+}
+static void check_waves(Fields* fs, Node** list, int count) {
+  for (int i = 0; i < fs->n; i++) {
+    Field* f = &fs->f[i];
+    if (!f->waves || fs->failed) continue;
+    const char* odd = "a line whose period moves is a pair, `$v' = -slope($i) - $v * loss` and `$i' = -slope($v) - $i * loss`: nothing else stays two travelling waves";
+    Field* g = f->reads;
+    if (!g || !g->waves) { field_fail(fs, list[0], odd); return; }
+    Node* mine = NULL;
+    const Node* at = NULL;
+    for (int k = 0; k < count; k++)
+      if (is_law(list[k]) && law_field(fs, list[k]) == f) {
+        at = list[k];
+        if (!wave_law(fs, list[k]->kids[0], f, g, &mine)) { field_fail(fs, at, odd); return; }
+      }
+    if (!at) { field_fail(fs, list[0], odd); return; }
+    f->wave_loss = mine;
+    if (f->width) field_fail(fs, at, "a flared line doesn't stay two travelling waves: its period is fixed");
+  }
+  for (int i = 0; i < fs->n; i++) {
+    Field* f = &fs->f[i];
+    if (!f->waves || !f->reads || fs->failed) continue;
+    Field* g = f->reads;
+    if (!!f->wave_loss != !!g->wave_loss || (f->wave_loss && !same_tree(f->wave_loss, g->wave_loss)))
+      field_fail(fs, list[0], "a line whose period moves keeps its losses equal, `* loss` in both laws: out of balance it doesn't stay two travelling waves");
   }
 }
 
@@ -1233,6 +1373,14 @@ static int fields_pass(Arena* a, Kids* kids, int from, char* err, int errlen) {
           } else fine_grain(f, f->length ? period / 2 : period);
           if (f->per && !f->sheet) f->size = fnum(&fs, f->per * f->sweep, s);
         } else if (f->sheet) field_fail(&fs, s, "a sheet's period has to be plain numbers and file-level lets, as its places come from it");
+        else if (f->length) {                                /* a period that moves */
+          f->waves = 1;
+          f->size = fnum(&fs, WAVE_CELLS, s);
+          f->right = fname(&fs, "right", f->name, -1);
+          f->left = fname(&fs, "left", f->name, -1);
+          f->head = fname(&fs, "head", f->name, -1);
+          f->cross = fname(&fs, "cross", f->name, -1);
+        }
       }
     }
   }
@@ -1248,6 +1396,7 @@ static int fields_pass(Arena* a, Kids* kids, int from, char* err, int errlen) {
   for (int i = 0; i < fs.n; i++)
     if (fs.f[i].width && !fs.pair_at) field_fail(&fs, kids->v[from], "a width is of a pair: pressure and flow, `$p' = -slope($u)`, `$u' = -slope($p)`");
   if (fs.pair_at) find_pairs(&fs, fs.pair_at);
+  check_waves(&fs, kids->v + from, kids->n - from);
   place_lines(&fs);
   if (fs.failed) return -1;
   if (!fs.n) return 0;

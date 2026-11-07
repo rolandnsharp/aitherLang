@@ -410,6 +410,21 @@ def sheet_gauss(at, s, z, w, lc, off):
   let d = max(abs(w), 1e-9) * sqrt(2)
   field_cell((r + off) / lc - p, 0.5 / lc, d) * field_cell((c + off) / lc - q, 0.5 / lc, d) * lc * lc
 
+# A line whose period moves is held as its two travelling waves, d'Alembert's:
+# each a buffer, written at head and read lag samples back, lag whole or not.
+def wave_at(b, at): b[(at + len(b) * 4) mod len(b)]
+def wave_tap(b, head, lag):
+  let i = floor(lag)
+  let x = lag - i
+  let a = wave_at(b, head - i + 1)
+  let c = wave_at(b, head - i)
+  let d = wave_at(b, head - i - 1)
+  let e = wave_at(b, head - i - 2)
+  c + x * ((d - a) * 0.5 + x * (a - c * 2.5 + d * 2 - e * 0.5 + x * ((c - d) * 1.5 + (e - a) * 0.5)))
+def wave_read(r, l, head, across, p, sign):
+  let s = clamp(p, 0, 1)
+  wave_tap(r, head, max(1, s * across)) + wave_tap(l, head, max(1, (1 - s) * across)) * sign
+
 # Hamilton's S and V: the scalar part and the vector part.
 def scalar(q):
   let ((w, _), (_, _)) = q
