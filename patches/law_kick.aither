@@ -1,0 +1,54 @@
+# law_kick: a kick as a law, four bars at a time against the envelope kick
+# (notes/one-form-2026-11-07.md).
+#
+# A drum head stretches as it moves, so the harder it swings the stiffer it
+# is, and it sounds higher. That is the whole sweep of a kick: one term of
+# stiffness growing with displacement, in the law. Nothing sets a pitch
+# envelope, a click or a brightness. Hit harder, it starts higher, sweeps
+# further and has more overtones, as the law bends the wave more.
+#
+# Four hits of that, then four of the usual kick: a sine swept by an
+# envelope, its level following the hit and nothing else. Same accents, and
+# about the same level at the hardest, so what differs is what the law does
+# by itself: measured, its hardest hit starts at 179 Hz and its softest at
+# 126, where the envelope's start at 161 Hz however they're hit.
+#
+# Left is the head, right is the same a quarter turn on, so on the scope a
+# hit is a spiral, its pace winding down as it closes.
+#
+#   ./aither patches/law_kick.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
+#
+# The gamepad (tools/pad): hold A and press up and down for how far the head
+# stretches (CC 20), left and right for how it's tuned (CC 21); hold B and
+# press up and down for how fast it dies (CC 22).
+#   tools/pad & AITHER_MIDI=aither-pad ./aither patches/law_kick.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
+
+let accents = [1, 0.5, 0.8, 0.6]
+let beat = sweep * 2                                       # two a second
+let hit = accents[floor(beat) mod 4]
+let age = (beat - floor(beat)) / 2                         # seconds since the last
+let turn = (floor(beat / 4) mod 2) == 0                    # four of each
+
+# ---------------------------------------------------------------- the law
+
+let tuned = 45 + 30 * midi_cc(21)
+let w = TAU * tuned
+let stretch = 30 + 120 * midi_cc(20)
+let damp = 28 + 40 * midi_cc(22)
+let blow = if age < 0.001 then 900 * hit / 0.001 else 0
+
+$x = 0
+$v = 0
+$v' = -$x * w ^ 2 * (1 + stretch * $x ^ 2) - $v * damp + blow
+$x' = $v
+
+# ---------------------------------------------------------------- the envelope
+
+let swept = tuned + 150 * exp(-age * 30)
+$phase = 0.0
+$phase = if age < dt then 0.0 else ($phase + swept * dt) mod 1
+let level = 0.8 * hit * exp(-age * 14)
+
+# ---------------------------------------------------------------- reading
+
+if turn then [$x, $v / w * 0.5] else [sin(TAU * $phase) * level, cos(TAU * $phase) * level]

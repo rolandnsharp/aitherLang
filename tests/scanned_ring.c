@@ -389,6 +389,30 @@ TEST(four_slopes_are_a_bar) {
   CHECK(fabs(f2 / f1 - 2.7) < 0.1, "free ratio %g", f2 / f1);
 }
 
+/* A head stiffer the further it moves: the sweep of a kick is in the law,
+ * so it starts higher hit harder, and falls to its tuning. */
+static double kick_start(double hit, double* end) {
+  char src[512], err[4096];
+  snprintf(src, sizeof src,
+    "let w = TAU * 50\nlet blow = if t < 0.001 then %g / 0.001 else 0\n$x = 0\n$v = 0\n"
+    "$v' = -$x * w ^ 2 * (1 + 30 * $x ^ 2) - $v * 28 + blow\n$x' = $v\n$x\n", hit);
+  Rendered r = {0};
+  if (render_src(src, 0.5, 48000, &r, err, sizeof err)) { CHECK(0, "doesn't render: %s", err); return -1; }
+  long z[64];
+  int n = 0;
+  for (long i = 1; i < r.n && n < 64; i++) if (r.left[i - 1] < 0 && r.left[i] >= 0) z[n++] = i;
+  double first = 48000.0 / (z[1] - z[0]);
+  *end = 48000.0 / (z[n - 1] - z[n - 2]);
+  rendered_free(&r);
+  return first;
+}
+TEST(a_kick_is_a_law) {
+  double hard_end, soft_end, hard = kick_start(900, &hard_end), soft = kick_start(450, &soft_end);
+  printf("  hit hard it starts at %.0f Hz, soft %.0f, and they end at %.0f and %.0f\n", hard, soft, hard_end, soft_end);
+  CHECK(hard > soft * 1.2, "%g against %g", hard, soft);
+  CHECK(hard_end < 60 && soft_end < 60, "%g, %g", hard_end, soft_end);
+}
+
 TEST(ring_keeps_its_period) {
   const int rates[] = {24000, 48000, 96000};
   const double period = 0.8;

@@ -1425,6 +1425,10 @@ position, so the user gets free crossfade with no glitches.
 
 ### The kick recipe — three paradigms in parallel
 
+A fourth, and the only one with no sweep to set: a head stiffer the further it
+moves, a law on plain state, so hitting harder starts it higher
+(`patches/law_kick.aither`). The three below are cheaper to shape.
+
 From `patches/acid_complex.aither`:
 
 ```
