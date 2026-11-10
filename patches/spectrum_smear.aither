@@ -1,0 +1,52 @@
+# spectrum_smear — a sound's colour left ringing after it, and rising.
+#
+# Like spectrum_freeze, this patch hears a spectrum: it goes between
+# tools/fft and tools/ifft, 1024 samples a frame, so input() is a bin at
+# a time, 512 bins a frame.
+#
+#   cd ~/aitherLang; pgrep -x pad > /dev/null || { tools/pad & sleep 1; }
+#   aither song.aither --solo horn | tools/fft 1024 \
+#     | AITHER_SOCK=/tmp/smear.sock AITHER_MIDI=aither-pad aither patches/spectrum_smear.aither \
+#     | tools/ifft 1024 | tools/play
+#
+# Each bin keeps a tail: how loud it was, falling away a little every
+# frame. The playing always passes as it came; where it is quieter than
+# the tail, the difference is added, turned by a new angle every frame (as
+# spectrum_freeze's held frame is), so it is the sound's colour without its
+# pattern in time. A note leaves its own harmonics ringing behind it.
+#
+# On tools/pad, no button held: up and down is how long the tail rings,
+# from none (where the knob starts: the sound passes as it is) through a
+# tenth of a second to twenty, and endless at the top. Left and right is
+# how fast the tail climbs, up to an octave a second. It climbs in pitch,
+# a bin's tail moving to a bin a little higher each frame, so a note's
+# harmonics stay its harmonics as they rise. Holding A freezes: the tail
+# stops taking the playing in and goes on as it is, climbing if it climbs,
+# with the playing on top.
+
+let frame = 512
+let bin = pixel_index(frame, 1)
+let frames = sr / frame                      # frames a second
+
+$tail = array(frame, 0, every = frame)       # each bin's tail: how loud, a number
+
+let length = midi_cc(28)
+let seconds = 0.1 * 200 ^ length
+let keep = if length == 0 then 0 else if length >= 1 then 1 else exp(-1 / (seconds * frames))
+let climb = midi_cc(29)                      # octaves a second
+let frozen = midi_note(36) > 0
+
+# where this bin's tail was a frame ago: a little lower, between two bins
+let from = bin * 2 ^ (-climb / frames)
+let low = floor(from)
+let part = from - low
+let was = $tail[low] * (1 - part) + $tail[min(low + 1, frame - 1)] * part
+
+let [in_re, in_im] = input()
+let here = (in_re, in_im)                    # a spectrum's bin: one complex number
+let loud = amplitude(here)
+let fading = was * keep
+let missing = if frozen then was else max(0, fading - loud)
+
+$tail[bin] = if frozen then was else max(loud, fading)
+here + rotate((missing, 0), TAU * noise())
