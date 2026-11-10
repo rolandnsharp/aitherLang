@@ -8,7 +8,8 @@
 #     | AITHER_SOCK=/tmp/freeze.sock aither patches/spectrum_freeze.aither \
 #     | tools/ifft 1024 | tools/play
 #
-# Knob 20 past half holds the spectrum. A held frame played back as it
+# Holding A on the uConsole's pad (tools/pad, note 36), or knob 20 past
+# half, holds the spectrum. A held frame played back as it
 # stands repeats, a buzz at the frame rate; each bin is turned by a new
 # angle every frame instead, so the frame's colour goes on and its pattern
 # in time doesn't. A frame is a row and a bin a pixel, so the array that
@@ -19,7 +20,7 @@ let bin = pixel_index(frame, 1)
 
 $held = array(frame, (0, 0), every = frame)
 
-let frozen = midi_cc(20) > 0.5
+let frozen = midi_note(36) > 0 or midi_cc(20) > 0.5
 let [in_re, in_im] = input()
 let here = (in_re, in_im)                  # a spectrum's bin: one complex number
 let source = if frozen then $held[bin] else here
