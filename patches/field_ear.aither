@@ -1,0 +1,103 @@
+# field_ear — a field of resonators the sound drives: an ear that can hold.
+#
+# The spectral patches hear a sound in frames, through tools/fft. This one
+# hears it as an ear does, with no frames: a hundred resonators, a
+# twelfth of an octave apart from 40 Hz to 12 kHz, each a place of a
+# medium the sound shakes, every sample. How much each one swings is how
+# much of the sound is near its pitch. Nothing waits for a frame, so
+# nothing is late but the resonators' own ringing.
+#
+#   cd ~/aitherLang
+#   ./aither patches/field_didge.aither \
+#     | AITHER_SOCK=/tmp/ear.sock AITHER_MIDI=aither-pad ./aither patches/field_ear.aither \
+#     | tools/play
+#
+# Each resonator tunes itself to what drives it. It turns at its own pitch
+# when nothing does; driven, it turns a little faster or slower each
+# sample until it turns with what it hears, but no further than a step
+# from home, or the loudest partial anywhere would pull them all to
+# itself. Each is two resonators in a row, the sound driving the first and
+# the first the second, so it hears little of what is far from it: an
+# octave off, 36 dB down, where one alone hears it 18 dB down, louder than
+# a quiet partial beside it. And it keeps a measure, over a fifth of a
+# second, of how fast it really swings, which a driven resonator takes
+# from what drives it even where its tuning can't reach: frozen, it goes
+# on at that speed. So a partial between two of them rings on in tune.
+#
+# Measured on field_didge, frozen at 3 s, against spectrum_freeze (FFT):
+# all of it on the didge's partials, pitches within 0.9%, a pumping of
+# 1.7% (the FFT's 1.3%). What differs is that the level swells, 31% over
+# seconds: a few resonators ring on each partial, a hair apart in speed,
+# and beat, as a piano's strings for one note do.
+#
+# On tools/pad, as spectrum_smear has them: Y with up and down is how long
+# the resonators ring, from as short as hearing needs (where the knob
+# starts: the sound passes with a faint ring) through a tenth of a second
+# to twenty, and endless at the top. X with up freezes, until X with down:
+# the sound stops reaching the resonators, they stop losing anything, and
+# what they held rings on, at the pitches they had tuned to, alone.
+
+let count = 100
+let lowest = 40
+let step = 2 ^ (1 / 12)
+
+# each resonator's own pitch, and how fast it turns a sample there
+$home = array(count, k => rotate((1, 0), TAU * lowest * step ^ k / sr))
+$turn = array(count, k => rotate((1, 0), TAU * lowest * step ^ k / sr))
+$swinging = array(count, k => rotate((1, 0), TAU * lowest * step ^ k / sr))  # how fast it really swings, measured
+$y = array(count, (0, 0))                     # each resonator's first half, which the sound drives
+$z = array(count, (0, 0))                     # and its second, which the first drives: how it swings
+# how far it may be pulled from home: a step either way, and no further,
+# or the loudest partial anywhere would pull every resonator to itself
+$reach = array(count, k => sin(TAU * lowest * step ^ k * (step - 1) / sr))
+$highest = array(count, k => rotate((1, 0), TAU * lowest * step ^ (k + 1) / sr))
+$lowest_turn = array(count, k => rotate((1, 0), TAU * lowest * step ^ (k - 1) / sr))
+# to hear, a resonator is a twelfth of an octave wide: it forgets in
+# 1 / (π × width) seconds, longer at the bottom, and the sound pushes it as
+# much as it forgets, so a sine at its pitch swings it as far as itself
+$hearing = array(count, k => exp(-PI * lowest * step ^ k * (step - 1) / sr))
+$push = array(count, k => 1 - exp(-PI * lowest * step ^ k * (step - 1) / sr))
+
+let length = midi_cc(26)
+let frozen = midi_cc(24) > 0
+let seconds = 0.1 * 200 ^ length              # how long a ring lasts, at least
+# the knob makes a resonator ring longer than hearing needs, and the top
+# of the knob, or a freeze, lose nothing at all
+let tail = if frozen or length >= 1 then 1 else if length == 0 then 0 else exp(-1 / (seconds * sr))
+
+let x = mono(input())
+
+each(count, k =>
+  let keep = max($hearing[k], tail)
+  let drive = if frozen then 0 else $push[k]
+  # frozen, it goes on at the speed it was swinging, which a driven
+  # resonator takes from what drives it, even where its tuning can't reach
+  let spin = if frozen then $swinging[k] else $turn[k]
+  let first = $y[k] * spin * keep + drive * x
+  let was = $z[k]
+  let guess = was * spin                      # where it would be, turning as it does
+  let now = guess * keep + drive * first
+  # how far what it hears turned it past its own turn, and how far it is
+  # from home: it turns toward the first, and a little toward the second
+  let (big, _) = guess * conj(guess) + first * conj(first) * drive ^ 2   # sizes squared, with no roots
+  let size = big + 0.0000000001
+  let (_, ahead) = now * conj(guess)
+  let (_, away) = $home[k] * conj($turn[k])
+  let nudge = if frozen then 0 else 0.002 * ahead / size + 0.00002 * away
+  let turned = $turn[k] * (1, nudge)
+  let (_, off) = turned * conj($home[k])      # how far from home, faster above
+  let kept = if off > $reach[k] then $highest[k] else if off < -$reach[k] then $lowest_turn[k] else turned
+  let (kept2, _) = kept * conj(kept)
+  $turn[k] = kept * (1.5 - 0.5 * kept2)
+  let (was2, _) = was * conj(was)
+  let moved = now * conj(was) / (was2 + 0.0000000001)
+  let measured = if frozen then $swinging[k] else $swinging[k] * 0.9999 + moved * 0.0001
+  let (measured2, _) = measured * conj(measured)
+  $swinging[k] = measured * (1.5 - 0.5 * measured2)
+  $y[k] = first
+  $z[k] = now)
+
+# the resonators together, added up whole; then a mono mix with the sound
+# coming in, where one side is all that fits (COMPOSING, "In order of preference")
+let (swing, _) = sum(count, n => $z[n - 1])
+if frozen then swing * 1.75 else x + swing * 1.75 * length
