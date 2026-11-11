@@ -40,8 +40,8 @@ let twist = 0.17 + 0.57 * midi_cc(22)                      # how stiff to twist,
 let held = 28                                              # how strongly a mass keeps its place
 let loss = 0.26                                            # what it loses, a round
 
-$d = ring(period = 0.63, start = ((0, 0), (0, 0)))         # a squeeze goes round in 0.63 s
-$v = ring(period = 0.63, start = ((0, 0), (0, 0)))
+$d = field(period = 0.63, start = ((0, 0), (0, 0)), ends = round)         # a squeeze goes round in 0.63 s
+$v = field(period = 0.63, start = ((0, 0), (0, 0)), ends = round)
 
 # ---------------------------------------------------------------- the strike
 

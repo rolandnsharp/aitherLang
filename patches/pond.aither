@@ -26,8 +26,8 @@
 let loss = 0.5 + 3 * midi_cc(22)                           # what it loses, a round
 let soften = 0.0005                                        # ... and more the finer the ripple
 
-$x = sheet(period = 2.5, ends = fixed)
-$v = sheet(period = 2.5, ends = fixed)
+$x = field(period = [2.5 * 1.4142135623730951, 2.5 * 1.4142135623730951], ends = fixed)
+$v = field(period = [2.5 * 1.4142135623730951, 2.5 * 1.4142135623730951], ends = fixed)
 
 let pull = Δ$x                                             # how far its neighbours stand above it
 

@@ -23,8 +23,8 @@
 let loss = 0.012                                           # what it loses, a round
 let soften = 0.0001                                        # ... and more the higher the mode
 
-$x = line(period = 1 / 220, ends = free)
-$v = line(period = 1 / 220, ends = free)
+$x = field(period = 1 / 220, ends = free)
+$v = field(period = 1 / 220, ends = free)
 
 let curve = Δ$x                                            # how bent it is here
 let bend = Δcurve                                          # how its bending changes: what pushes back

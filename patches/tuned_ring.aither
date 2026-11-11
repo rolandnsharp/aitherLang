@@ -22,8 +22,8 @@
 # (CC 22).
 #   tools/pad & AITHER_MIDI=aither-pad ./aither patches/tuned_ring.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
 
-$x = ring(period = 2)
-$v = ring(period = 2)
+$x = field(period = 2, ends = round)
+$v = field(period = 2, ends = round)
 
 let pull = Δ$x                                             # how far its neighbours stand above it
 

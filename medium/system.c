@@ -353,8 +353,8 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
     if ((t->kind == nkDef || t->kind == nkPlay) && holds_field(t)) return 0;
     if (t->kind == nkVar && t->nkids == 1 && t->kids[0]->kind == nkCall) {
       const char* w = t->kids[0]->str;
-      if (!strcmp(w, "ring") || !strcmp(w, "sheet")) return 0;
-      if (!strcmp(w, "line")) any_line = 1;
+      if (!strcmp(w, "sheet")) return 0;
+      if (!strcmp(w, "line") || !strcmp(w, "ring")) any_line = 1;
     }
     if (t->kind == nkVar && t->nkids == 1 && t->kids[0]->kind == nkCall && !strcmp(t->kids[0]->str, "array")) {
       for (int k = from; k < s->n; k++)                /* an array assigned bare is a field of the old kind */
@@ -372,7 +372,8 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
     Node *xd = NULL, *vd = NULL;
     for (int k = from; k < s->n; k++) {
       Node* d = s->v[k];
-      if (d->kind == nkVar && d->nkids == 1 && d->kids[0]->kind == nkCall && !strcmp(d->kids[0]->str, "line")) {
+      if (d->kind == nkVar && d->nkids == 1 && d->kids[0]->kind == nkCall &&
+          (!strcmp(d->kids[0]->str, "line") || !strcmp(d->kids[0]->str, "ring"))) {
         if (!strcmp(d->str, x)) xd = d;
         if (!strcmp(d->str, v)) vd = d;
       }
@@ -386,10 +387,13 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
     double T, T2;
     if (!plain_number(s, pe, &T) || !plain_number(s, pv, &T2) || T != T2 || T <= 0) return 0;
     if (arg(xd->kids[0], "width", 99) || arg(vd->kids[0], "width", 99)) return 0;
+    if (arg(xd->kids[0], "start", 99) || arg(vd->kids[0], "start", 99)) return 0;   /* a start: later */
+    int round = !strcmp(xd->kids[0]->str, "ring");
+    if (round != !strcmp(vd->kids[0]->str, "ring")) return 0;
     Node *ex = arg(xd->kids[0], "ends", 99), *ev = arg(vd->kids[0], "ends", 99);
     for (int e = 0; e < 2; e++) {
-      m->ends[e] = ends_of(ex, e);
-      if (!m->ends[e] || ends_of(ev, e) != m->ends[e]) return 0;
+      m->ends[e] = round ? 0 : ends_of(ex, e);
+      if (!round && (!m->ends[e] || ends_of(ev, e) != m->ends[e])) return 0;
     }
     m->T = T;
     m->period = pe;
@@ -399,7 +403,8 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
   if (!s->nm) return 0;
   for (int i = from; i < s->n; i++) {                  /* every line is a medium's */
     Node* d = s->v[i];
-    if (d->kind == nkVar && d->nkids == 1 && d->kids[0]->kind == nkCall && !strcmp(d->kids[0]->str, "line") && !medium_of(s, d->str))
+    if (d->kind == nkVar && d->nkids == 1 && d->kids[0]->kind == nkCall &&
+        (!strcmp(d->kids[0]->str, "line") || !strcmp(d->kids[0]->str, "ring")) && !medium_of(s, d->str))
       return 0;
   }
 
@@ -421,7 +426,7 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
       m->C = coef[2] ? coef[2] : num(s, 0, t);
       m->D = coef[3] ? coef[3] : num(s, 0, t);
       m->E = coef[4] ? coef[4] : num(s, 0, t);
-      if (coef[4] && (m->ends[0] != 1 || m->ends[1] != 1)) return 0;   /* a free bar's modes aren't sines: later */
+      if (coef[4] && (m->ends[0] != 1 || m->ends[1] != 1)) return 0;   /* a free bar's modes aren't sines, and a round one: later */
       continue;
     }
     int declared = 0;                                  /* a law on plain state, declared as a number */

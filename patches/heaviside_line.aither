@@ -35,8 +35,8 @@ let balance = cos(TAU * phasor(1 / 40)) * 0.95 * (1 - midi_cc(20))
 let resist = loss * (1 + balance)
 let leak = loss * (1 - balance)
 
-$v = ring(period = 4)                                      # a pulse goes round in 4 s
-$i = ring(period = 4)
+$v = field(period = 4, ends = round)                                      # a pulse goes round in 4 s
+$i = field(period = 4, ends = round)
 
 
 # ---------------------------------------------------------------- the pulse

@@ -28,8 +28,8 @@
 # ---------------------------------------------------------------- a string
 
 def string(note, wind, thin, at, loss):
-  $v = line(period = 1 / note, ends = fixed)
-  $i = line(period = 1 / note, ends = free)
+  $v = field(period = 1 / note, ends = fixed)
+  $i = field(period = 1 / note, ends = free)
   let shed = TAU * note * (0.5 + wind * 11.5) * thin       # vortices a second, as the wind
   let moving = $v(at)                                      # the string where the wind meets it
   $q = 0.1

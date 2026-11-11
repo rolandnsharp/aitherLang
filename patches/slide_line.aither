@@ -22,8 +22,8 @@ let drift = 0.5 - 0.5 * cos(TAU * phasor(1 / 12))
 let note = 110 * pow(2, slew(floor(midi_cc(21) * 25) / 12, 0.08)) * pow(1.5, drift)
 let loss = 0.012 - 0.01 * midi_cc(22)                      # what it loses, a round
 
-$v = line(period = 1 / note, ends = fixed)
-$i = line(period = 1 / note, ends = free)
+$v = field(period = 1 / note, ends = fixed)
+$i = field(period = 1 / note, ends = free)
 
 let own = phasor(1 / 3) * 3
 let hard = min(own, since(midi_trig(36)))

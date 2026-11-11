@@ -387,12 +387,30 @@ double n_input_r(void) { return dsp_input_r; }
  * bar's period is its first mode's, SPEC "Four slopes are a bar"), so
  * w^2 = (4 A k^2 - B - 4 E k^4 / pi^2) / T^2 and gamma = (4 D k^2 - C) / T a second. Ends: 1 fixed, 2 free; the shapes
  * are sin (fixed at 0) or cos (free at 0), k = (j + o) pi with o = 1 fixed at
- * both, 0 free at both, 1/2 one of each. Modes above Nyquist are left out. */
+ * both, 0 free at both, 1/2 one of each. Round (ends 0, a ring, a push going
+ * round in T): mode 0 the whole ring, then cos and sin of 2 pi n p for each
+ * n, k = n pi. Modes above Nyquist are left out. */
 enum { MD_N, MD_T, MD_A, MD_B, MD_C, MD_D, MD_EL, MD_ER, MD_H, MD_CAP, MD_E, MD_AT, MD_WIDTH, MD_SPREAD,
        MD_HEAD = 16 };   /* then N places, N velocities, 4N of the step, N of a spread force's share */
 static double md_offset(const double* m) { return m[MD_EL] == m[MD_ER] ? (m[MD_EL] == 1 ? 1.0 : 0.0) : 0.5; }
+static int md_round(const double* m) { return m[MD_EL] == 0; }
+static double md_k(const double* m, long j) {               /* mode j's wavenumber */
+  return md_round(m) ? (double)((j + 1) / 2) * PI_ : ((double)j + md_offset(m)) * PI_;
+}
 /* phi_j(p) for every j, by turning: e^{i (j + o) pi p} = e^{i o pi p} e^{i pi p}^j. */
 static void md_shapes(const double* m, double p, double* out, long n) {
+  if (md_round(m)) {                                        /* 1, then cos and sin of 2 pi n p */
+    double rr = cos(TAU_ * p), ri = sin(TAU_ * p), zr = 1.0, zi = 0.0;
+    if (n > 0) out[0] = 1.0;
+    for (long j = 1; j < n; j += 2) {
+      double t = zr * rr - zi * ri;
+      zi = zr * ri + zi * rr;
+      zr = t;
+      out[j] = zr;
+      if (j + 1 < n) out[j + 1] = zi;
+    }
+    return;
+  }
   double o = md_offset(m), zr = cos(PI_ * o * p), zi = sin(PI_ * o * p), rr = cos(PI_ * p), ri = sin(PI_ * p);
   int sine = m[MD_EL] == 1;
   for (long j = 0; j < n; j++) {
@@ -412,10 +430,10 @@ double n_medium_turn(double* m, double cap, double T, double A, double B, double
     m[MD_CAP] = cap; m[MD_T] = T; m[MD_A] = A; m[MD_B] = B; m[MD_C] = C; m[MD_D] = D; m[MD_E] = E;
     m[MD_SPREAD] = 0.0;                                     /* a spread force's shares are worked out again */
     m[MD_EL] = el; m[MD_ER] = er; m[MD_H] = h;
-    double o = md_offset(m), nyquist = PI_ / (2.0 * h);       /* h is half a sample */
+    double nyquist = PI_ / (2.0 * h);                        /* h is half a sample */
     long used = 0;
     for (long j = 0; j < N; j++) {
-      double k = (j + o) * PI_, w2 = (4.0 * A * k * k - B - 4.0 * E * k * k * k * k / (PI_ * PI_)) / (T * T), g = (4.0 * D * k * k - C) / T;
+      double k = md_k(m, j), w2 = (4.0 * A * k * k - B - 4.0 * E * k * k * k * k / (PI_ * PI_)) / (T * T), g = (4.0 * D * k * k - C) / T;
       if (w2 > nyquist * nyquist) break;
       double s2 = w2 - 0.25 * g * g, c, S;
       if (s2 > 1e-12) { double sq = sqrt(s2); c = cos(sq * h); S = sin(sq * h) / sq; }
@@ -449,11 +467,13 @@ double n_medium_turn(double* m, double cap, double T, double A, double B, double
  * (v' = ... + force), 1 the place's (x' = v + force). */
 static void md_shares(double* m, double at, double width, double* out, long n) {
   double o = md_offset(m);
-  int sine = m[MD_EL] == 1, rigid = m[MD_EL] == 2 && m[MD_ER] == 2;
-  if (width <= 0.0 || (at - 8.0 * width > 0.0 && at + 8.0 * width < 1.0)) {
+  int sine = m[MD_EL] == 1, rigid = md_round(m) || (m[MD_EL] == 2 && m[MD_ER] == 2);
+  /* Round, the Gaussian wraps round, its copies summed, and its transform
+   * is exact at any width; well inside a line, so is it. */
+  if (md_round(m) || width <= 0.0 || (at - 8.0 * width > 0.0 && at + 8.0 * width < 1.0)) {
     md_shapes(m, at, out, n);
     for (long j = 0; j < n; j++) {
-      double k = (j + o) * PI_;
+      double k = md_k(m, j) * (md_round(m) ? 2.0 : 1.0);      /* the shape's own wavenumber in p */
       out[j] *= (rigid && j == 0 ? 1.0 : 2.0) * exp(-0.5 * k * k * width * width);
     }
     return;

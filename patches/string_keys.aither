@@ -49,8 +49,8 @@ def string(voice, root, blow, speed):
   let note = root * scale[key]
   let held = midi_voice_gate(voice)
   let loss = if held > 0 then 0.004 else 0.08              # what it loses, a round: felt when let go
-  $v = line(period = 1 / note, ends = fixed)
-  $i = line(period = 1 / note, ends = free)
+  $v = field(period = 1 / note, ends = fixed)
+  $i = field(period = 1 / note, ends = free)
   let shed = TAU * note * (1 + speed * 7)                    # the wind's vortices, against the note
   let moving = $v(0.37)
   $q = 0.1
@@ -67,8 +67,8 @@ def string(voice, root, blow, speed):
 
 # A string nobody plays: tuned, open, moved by the bridge alone.
 def open_string(note, bridge):
-  $v = line(period = 1 / note, ends = fixed)
-  $i = line(period = 1 / note, ends = free)
+  $v = field(period = 1 / note, ends = fixed)
+  $i = field(period = 1 / note, ends = free)
   $v' = -∇$i - $v * 0.003 + bridge * δ(0.13) + bridge * δ(0.71)
   $i' = -∇$v - $i * 0.003
   [$v(0.13), $v(0.71)]

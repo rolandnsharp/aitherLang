@@ -96,8 +96,8 @@ voice on both sides. A field is the same rule at many places: say what
 the medium does, and the engine works out the rest.
 
 ```
-$x = ring(period = 1.66)                  # a push goes round in 1.66 s
-$v = ring(period = 1.66)
+$x = field(period = 1.66, ends = round)   # a push goes round in 1.66 s
+$v = field(period = 1.66, ends = round)
 $v' = Δ$x - $v * 0.7 + force * δ(where)  # bent, it pulls straight; pushed at a place
 $x' = $v
 spin(110) * (0.45 + $x(phasor(110)))      # and read out at a place

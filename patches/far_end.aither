@@ -24,8 +24,8 @@
 
 let loss = 3 * midi_cc(22)                                 # what it loses, a round
 
-$x = line(period = 5, ends = [fixed, matched])             # there and back in 5 s
-$v = line(period = 5, ends = [fixed, matched])
+$x = field(period = 5, ends = [fixed, matched])             # there and back in 5 s
+$v = field(period = 5, ends = [fixed, matched])
 
 let pull = Δ$x                                             # how far its neighbours stand above it
 

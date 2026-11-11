@@ -707,8 +707,8 @@ sixteenth as much. `every` is `array`'s third parameter, usually named
 happens at one place, and arithmetic is at each place:
 
 ```
-$x = ring(period = 1.66)                       # a push goes round in 1.66 s
-$v = ring(period = 1.66)
+$x = field(period = 1.66, ends = round)   # a push goes round in 1.66 s
+$v = field(period = 1.66, ends = round)
 
 $v' = Δ$x - $x * held - $v * loss + force * δ(where)
 $x' = $v
@@ -740,11 +740,19 @@ it touches (notes/nabla-and-medium-2026-11-06.md). **The patch says what
 the medium does; the engine owns the places, the wrap, the stepping and
 the grain** (notes/field-by-its-period-2026-11-06.md).
 
-- `ring(period = T)` is a field a push goes round in T seconds, known when
+- **A field's domain is its ends, not a name** (notes/one-system-2026-11-11.md,
+  "Domains, without names"): one word, `field`, and in `ends` each piece of
+  the domain, an interval's two ends (`fixed`, `free`, `matched`; one word for
+  both, or `[left, right]`) or `round`, a circle. One period is one piece: a
+  line, or, `round`, a ring; a list of periods, `[T, T]`, is one piece an axis,
+  a sheet. `ring`, `line` and `sheet` are what the engine calls them inside,
+  not words a patch writes. Other shapes, given by a function or a mesh, are
+  designed and not built.
+- `field(period = T, ends = round)` is a field a push goes round in T seconds, known when
   the patch compiles. `start =` is its first value at every place: a
   number, by default 0, or a value. The engine picks `sqrt(T * sr / 4)`
   places, so the same patch has the same motion at any rate.
-- `line(period = T, ends = fixed)` is a ring opened up: a field with two
+- `field(period = T, ends = fixed)` is a ring opened up: a field with two
   ends, and everything here holds on it. T is there and back, the line's
   own period, so `ends = fixed` sounds at exactly 1 / T. An end is `fixed`,
   the field held at 0, so a pulse comes back upside down, or `free`, left to
@@ -767,11 +775,13 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   It works with `Δ$x` and pairs, not the squeeze and twist, which
   go at two speeds.
 - **The field core holds what it can exactly** (`medium/`,
-  notes/one-system-2026-11-11.md). A `line` under a linear wave law at the
-  file's level, `$v' = A Δ$x + B $x + C $v + D Δ$v + force * δ(p)` and `$x' =
-  $v` with A to D from outside, `fixed` or `free` ends, is held as its modes:
+  notes/one-system-2026-11-11.md). A field with two ends or round, under a
+  linear wave law at the file's level, `$v' = A Δ$x + B $x + C $v + D Δ$v + E
+  ΔΔ$x + force * δ(p)` and `$x' = $v + ...` with A to E from outside, ends
+  `fixed`, `free` or `round` (E, a bar, pinned at both), is held as its modes:
   each turned exactly, so its partials are exact at any rate, and a force or a
-  reading at a place is exact there. Up to 256 modes, those under Nyquist. Laws
+  reading at a place is exact there. A spread force, `δ(p, width)`, gives each
+  mode the Gaussian's exact share, round wrapped, what lies past an end gone. Up to 256 modes, those under Nyquist. Laws
   on plain state beside it step with it, by RK4, and everything couples within
   one step: each medium turns half a sample, the laws and forces act at the
   midpoint, it turns the other half. The patch's own lines read the media and
@@ -787,7 +797,7 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   1, 3, 5 and a cone from 0.1 past its apex measures 1.80, 3.65, 5.55, 7.45
   against theory's 1.82, 3.67, 5.54, 7.45. Only a pair has one, and a
   `matched` end is for a line of one width.
-- **A line's period can move**: `line(period = 1 / note, ends = fixed)`, with
+- **A line's period can move**: `field(period = 1 / note, ends = fixed)`, with
   any signal for `note`. Such a line is a pair of equal loss, `$v' = -∇$i
   - $v * loss`, `$i' = -∇$v - $i * loss`, and anything else is an error,
   as only that stays two travelling waves. The engine holds it as those, d'Alembert's
@@ -797,16 +807,18 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   top. Ends do as they do; a spread `δ(p, width)` is an error, as a shorter blow at a
   point is a sharper one; and it is read at a place, `$v(p)`, not bare. Its
   losses have to be the same expression. Moved fast, the highs dull a little.
-- **`sheet(period = T, ends = fixed)` is the same field on a surface**: a
+- **`field(period = [T, T], ends = fixed)` is the same field on a surface**: a
   square, `ends` one word for its whole edge, `fixed` or `free`. Two slopes
   are how far the neighbours all round stand above this place, so the law is
   a string's, and four are a plate, pinned, so `fixed` only. One slope has no
   direction here, and is an error. A point on it is one value, `(p, q)`, each
   0 to 1, so `$x((0.3, 0.6))` reads, a term `force * δ((p, q), width)`
   strikes, and reading round a circle is `$x(spin(note) * 0.3 + (0.5, 0.5))`.
-  T is the first mode's period: 0.500 Hz at 2 s and 99.8 Hz at `1 / 100`, the
-  next at 0.790 and 157.4 where theory has 0.79 and 158; a plate 99.0 and 241.5
-  of 100 and 250. It is as fine as a place a sample allows, about 31 a side at
+  Each period is its axis's, there and back along it as a line's, so a square
+  fixed all round sounds first at sqrt 2 / T: measured (in the old spelling,
+  whose period was that first mode's) 0.500 Hz where theory has 0.5, 99.8 Hz of
+  100, the next at 0.790 and 157.4 of 0.79 and 158; a plate 99.0 and 241.5 of
+  100 and 250. Two axes have one period as yet, a square. It is as fine as a place a sample allows, about 31 a side at
   2 s, for a place of cost. Too short for 12 a side, it takes several a sample
   at 12 a side, about a third of a uConsole core at 100 Hz, and a plate 8. The
   period has to be plain numbers and file-level lets.
@@ -868,7 +880,7 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
 - **A field too short for that is fine: it takes several places a sample.**
   At a place a sample a line at 110 Hz would have 7 places, and its
   harmonics go out of tune. Under 32 places the engine goes to at least 32,
-  stepping as many a sample as that needs, so `line(period = 1 / 110, ends
+  stepping as many a sample as that needs, so `field(period = 1 / 110, ends
   = fixed)` holds a note: 110 Hz, its third harmonic 329 Hz. The patch says
   nothing different. It costs: about 11 places a sample there, a tenth of a
   uConsole core for the law, and more for a spread source; a shorter period
@@ -979,7 +991,7 @@ to join, so it is an amount, `$v[p] += e`, each sample: a store, so in
 brackets, though the field is read `$v(p)`. Use
 `ring`, unless a number of places is the point. Fields are at the file's
 level, in its plays too. **A def can hold a field**, and each call is its own:
-`def string(note, at): $v = line(...) ... $v(0.13)` and `sum(5, n => string(...))`
+`def string(note, at): $v = field(...) ... $v(0.13)` and `sum(5, n => string(...))`
 are five strings. A call is written out where it stands, its names made its own,
 so it is called in the file's lines, or in a `sum` of a known count with a
 one-line body, not in a play or another lambda. Its fields see what it is given,

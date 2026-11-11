@@ -1175,8 +1175,8 @@ reading is pitch. `patches/scanned_ring.aither`: 128 masses cost a
 twentieth of stepping them all every sample.
 
 ```
-$x = ring(period = 1.66)                       # each line is at each place,
-$v = ring(period = 1.66)                       # as a line on [l, r] is
+$x = field(period = 1.66, ends = round)   # each line is at each place,
+$v = field(period = 1.66, ends = round)   # as a line on [l, r] is
 $v' = Δ$x - $v * loss + force * δ(where)       # a source, a force at a place
 $x' = $v
 let height = $x(phasor(note))                  # the field at a place
@@ -1199,7 +1199,7 @@ so a squeeze and a twist travel at their own speeds, from one product.
 by the other's slope, `$v' = -∇$i`, `$i' = -∇$v`: Heaviside's telegraph line. Its two losses in balance
 keep a pulse's shape as it dies, so every harmonic fades together.
 
-`line(period = T, ends = fixed)` is a ring opened up, each end `fixed` or
+`field(period = T, ends = fixed)` is a ring opened up, each end `fixed` or
 `free`. `patches/two_ends.aither` draws one, with one of each: a pulse comes
 back flipped from one and not the other. `matched` is an end that takes what
 arrives, Heaviside's termination: `patches/far_end.aither`.
@@ -1240,7 +1240,7 @@ pushing back with the strings' motion feeds every resonance and runs away,
 and then all eleven step together sample by sample, one piece the engine
 can't spread over its cores, too heavy for its slow first build.
 
-`sheet(period = T, ends = fixed)` is the same field on a surface, with the same
+`field(period = [T, T], ends = fixed)` is the same field on a surface, with the same
 two slopes. `patches/pond.aither` reads round a circle on it at pitch, so ripples
 are timbre, at a place a sample. A sheet at pitch is a drum head, but a costly one.
 

@@ -1044,7 +1044,7 @@ static void check_laws(Fields* fs, Node* n, int stands, char* said) {
   if (is_law(n)) {
     Field* f = law_field(fs, n);
     const char* wrong = !stands ? "a law belongs in the file's lines or a play's, not in a def" :
-                        !f ? "a rate is of state or a ring's field: `$x = 0` or `$x = ring(period = 1)`" :
+                        !f ? "a rate is of state or a field: `$x = 0` or `$x = field(period = 1, ends = round)`" :
                         said[f - fs->f] ? "one law a field: say all that changes it in one line" : NULL;
     if (wrong) {
       fs->failed = 1;
@@ -1058,7 +1058,7 @@ static void check_laws(Fields* fs, Node* n, int stands, char* said) {
     if (!fs->pair_at) fs->pair_at = n;
   }
   if (n->kind == nkIdxAssign && n->kids[0]->kind == nkIdent && primed(n->kids[0]->str)) {
-    if (!rate_of(fs, n->kids[0]->str)) field_fail(fs, n, "δ is a place on a field, and this is one number: a source is on a ring, line or sheet, `$x = ring(period = 1)`");
+    if (!rate_of(fs, n->kids[0]->str)) field_fail(fs, n, "δ is a place on a field, and this is one number: a source is on a field, `$x = field(period = 1, ends = round)`");
     else if (fs->in_def) field_fail(fs, n, "a source belongs in the file's lines or a play's, not in a def");
   }
   if (is_gauss(fs, n)) field_fail(fs, n, "a spread source is `δ(p, width)`, a term of a law: `$v' = ... + force * δ(p, width)`");
@@ -1538,7 +1538,7 @@ static int fields_pass(Arena* a, Kids* kids, int from, char* err, int errlen) {
         } else if (make_line(s->kids[0])) {                   /* there and back in a period, so across in half */
           f->size = fcall(&fs, "field_places", s, 1, (Node*[]){fbin(&fs, "/", f->period, fnum(&fs, 2, s), s)});
           f->length = fname(&fs, "length", f->name, -1);
-          if (!ends) field_fail(&fs, s, "a line says its ends: `line(period = 2, ends = fixed)`, or `ends = [fixed, free]`");
+          if (!ends) field_fail(&fs, s, "a field says its ends: `field(period = 2, ends = fixed)`, `ends = [fixed, free]`, or `ends = round`");
           else for (int e = 0; e < 2; e++) {
             const Node* end = ends->kind == nkArr && ends->nkids == 2 ? ends->kids[e] : ends;
             f->ends[e] = end->kind != nkIdent ? 0 : !strcmp(end->str, "fixed") ? 1 : !strcmp(end->str, "free") ? 2 : !strcmp(end->str, "matched") ? 3 : 0;
@@ -1546,7 +1546,7 @@ static int fields_pass(Arena* a, Kids* kids, int from, char* err, int errlen) {
           }
         } else {
           f->size = fcall(&fs, "field_places", s, 1, (Node*[]){f->period});
-          if (ends) field_fail(&fs, s, "a ring has no ends: `line(period = 2, ends = fixed)` has");
+          if (ends) field_fail(&fs, s, "round has no ends: `field(period = 2, ends = fixed)` has");
         }
         f->place = fname(&fs, "place", f->name, -1);
         f->rate = fname(&fs, "rate", f->name, -1);
@@ -1605,6 +1605,71 @@ static int fields_pass(Arena* a, Kids* kids, int from, char* err, int errlen) {
   return fs.failed ? -1 : 0;
 }
 
+/* A field's domain is its ends (notes/one-system-2026-11-11.md, "Domains,
+ * without names"): `field(period = T, ends = round)` goes round, `ends =
+ * fixed` or `[fixed, free]` has two ends, and a list of periods, one an
+ * axis, is a sheet, each axis's period there and back as a line's. They
+ * become the words the lowering knows (a sheet's period there is its first
+ * mode's, the axis's over sqrt 2, a square as yet). Those words aren't a
+ * patch's to write. */
+static Node* dw_node(Arena* a, NodeKind k, const char* str, const Node* at) {
+  Node* n = arena_alloc(a, sizeof(Node));
+  memset(n, 0, sizeof *n);
+  n->kind = k; n->str = str; n->line = at->line; n->source = at->source;
+  return n;
+}
+static int dw_same(const Node* x, const Node* y) {
+  if (x->kind != y->kind || x->nkids != y->nkids || strcmp(x->str, y->str) || (x->kind == nkNum && x->num != y->num)) return 0;
+  for (int i = 0; i < x->nkids; i++) if (!dw_same(x->kids[i], y->kids[i])) return 0;
+  return 1;
+}
+static int domain_words(Arena* a, Node* n, char* err, int errlen) {
+  if (!n) return 0;
+  if (n->kind == nkCall && (!strcmp(n->str, "ring") || !strcmp(n->str, "line") || !strcmp(n->str, "sheet"))) {
+    snprintf(err, errlen, "a field's domain is its ends now (%s:%d): `field(period = 1, ends = round)` goes round, "
+             "`field(period = 2, ends = [fixed, free])` has two ends, `field(period = [2, 2], ends = fixed)` is a sheet",
+             n->source, n->line);
+    return -1;
+  }
+  if (n->kind == nkCall && !strcmp(n->str, "field")) {
+    int pi = -1, ei = -1;
+    for (int k = 0; k < n->nkids; k++) {
+      Node* c = n->kids[k];
+      if (c->kind == nkNamedArg && !strcmp(c->str, "period")) pi = k;
+      else if (c->kind == nkNamedArg && !strcmp(c->str, "ends")) ei = k;
+      else if (c->kind != nkNamedArg && k == 0) pi = k;
+    }
+    Node** period = pi < 0 ? NULL : n->kids[pi]->kind == nkNamedArg ? &n->kids[pi]->kids[0] : &n->kids[pi];
+    Node* ends = ei < 0 ? NULL : n->kids[ei]->kids[0];
+    if (period && (*period)->kind == nkArr && strcmp((*period)->str, "()")) {
+      Node* sides = *period;
+      if (sides->nkids != 2 || !dw_same(sides->kids[0], sides->kids[1])) {
+        snprintf(err, errlen, "a field of two axes is a square, as yet (%s:%d): `period = [2, 2]`", n->source, n->line);
+        return -1;
+      }
+      if (ends && ends->kind == nkArr) {
+        snprintf(err, errlen, "a sheet says its edge, all round, as yet (%s:%d): `ends = fixed` or `ends = free`", n->source, n->line);
+        return -1;
+      }
+      Node* root2 = dw_node(a, nkNum, "", n);
+      root2->num = 1.4142135623730951;
+      Node* q = dw_node(a, nkBinOp, "/", n);
+      q->kids = arena_alloc(a, 2 * sizeof(Node*));
+      q->kids[0] = sides->kids[0]; q->kids[1] = root2; q->nkids = 2;
+      *period = q;
+      n->str = "sheet";
+    } else if (ends && ends->kind == nkIdent && !strcmp(ends->str, "round")) {
+      for (int k = ei; k < n->nkids - 1; k++) n->kids[k] = n->kids[k + 1];
+      n->nkids--;
+      n->str = "ring";
+    } else {
+      n->str = "line";
+    }
+  }
+  for (int i = 0; i < n->nkids; i++) if (domain_words(a, n->kids[i], err, errlen)) return -1;
+  return 0;
+}
+
 Node* build_program(Arena* a, const char* stdlib_src, const char* src, const char* src_tag,
                     int seed_self, int* kind, char* err, int errlen) {
   char perr[1024];
@@ -1630,6 +1695,9 @@ Node* build_program(Arena* a, const char* stdlib_src, const char* src, const cha
   memmove(kids.v + kept, kids.v + std->nkids, (kids.n - std->nkids) * sizeof(Node*));
   kids.n -= std->nkids - kept;
   *kind = BUILD_PARSE;
+  /* `field(...)`: a domain is its ends, not a name (domain_words). */
+  for (int i = kept; i < kids.n; i++)
+    if (domain_words(a, kids.v[i], err, errlen)) { free(kids.v); return NULL; }
   /* The field core takes the patch's system when it can hold it
    * (medium/system.c); what it can't hold yet goes the old way. */
   if (system_pass(a, &kids.v, &kids.n, &kids.cap, kept, err, errlen) < 0) { free(kids.v); return NULL; }

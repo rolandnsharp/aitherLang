@@ -37,8 +37,8 @@ let firm = 1 + 8 * midi_cc(20)                             # how stiff, against 
 let held = 66 + 3300 * midi_cc(22)                         # how strongly a mass keeps its place
 let loss = 0.68                                            # what it loses, a round
 
-$x = ring(period = 1.66)                                   # a push goes round in 1.66 s
-$v = ring(period = 1.66)
+$x = field(period = 1.66, ends = round)                                   # a push goes round in 1.66 s
+$v = field(period = 1.66, ends = round)
 
 let pull = Δ$x                                             # how far its neighbours stand above it
 
