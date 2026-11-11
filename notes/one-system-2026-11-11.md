@@ -179,22 +179,64 @@ be sized to the lowest note a call reaches).
    moment's. Allow it, for laws only?
 3. `reverb` and `delay` are media too; are they laws now, or later?
 
-## Plan, each step a commit with SPEC and COMPOSING
+## Two layers (decided 2026-11-11)
 
-1. **The test suite of known answers and convergence**, run on today's engine
-   first, so what fails is on record before anything changes: these
-   experiments are its first cases.
-2. **Modes for linear media**: `line`, `ring` and `sheet` under a linear law
-   held as modes by the engine; the grid kept for nonlinear laws and
-   `matched` ends, with its places chosen for accuracy and held the same at
-   every rate. Then **the coupling**: a field and a law on plain state that
-   push each other stepped so the answer doesn't depend on the rate, measured
-   by the wake settling at 48 kHz where it settles at 384.
-3. **One system**: laws on fields and plain state stepped together; the
-   position rules, `settle_sources` and the per-call grouping go. Expected:
-   reads below the laws shift a sample, and the suite says whether answers
-   got closer to the physics.
-4. **Memory as laws**: `dho`, `lp1` and the filters in stdlib as laws, with
-   exact stepping for linear ones; the coupled-`dho` springs then hold
-   their energy.
-5. **Fields of a call**, then `string_keys` on `midi_keyboard`.
+Roland asked whether this is two projects: aither grew as a language that runs
+a function of `t` and of state, sample by sample, line after line, so any
+signal-processing paradigm fits it; a field theory is a system of equations
+with no order, which a solver holds as modes, delay lines or a grid and
+couples exactly. Most of this week's bugs lived where the second was lowered
+into the first (`imports.c`, about 1600 lines rewriting the syntax tree).
+
+Not two projects, and nothing deleted: the live engine, `send`, rollback,
+plays, MIDI, the pad, `scope`, `tv`, export, rhythm and effects are what a
+field-theory bush doof is played with, and none of them is field theory. Two
+layers in one project:
+
+1. **The field core, a module of its own** (`medium/`). In: the laws, `∇`,
+   `Δ`, `δ`, the domains (`ring`, `line`, `sheet`, a point), as a system of
+   equations. Out: a compiled solver, each medium held as it is best computed
+   (modes for a linear one, delay lines for a uniform moving string, a grid
+   for a nonlinear law or a `matched` end, its places chosen for accuracy and
+   the same at every rate), stepped as one moment a sample, with what couples
+   inside it coupled exactly. Its own suite of known answers and convergence
+   from the first day. It never goes through aither's line-by-line lowering.
+2. **aither, the live environment**, hands a patch's field system to the core
+   whole. Its signals drive the core as forcing; reads come back. **The
+   boundary is one sample of memory**, said in SPEC with its size; whatever
+   must push back exactly (a wake, lips) is written as a law, inside the
+   medium, on the exact side of it.
+3. `imports.c`'s field lowering goes, replaced by the core. Patches keep
+   their syntax: `string_keys` reads the same and sounds correct.
+
+**Types across it.** The output stays one pair, `[l, r]`: two channels, one
+complex number, what the scope draws; the least a stereo instrument can be.
+The core works in pairs, as a mode is a pair turned exactly each sample, and in
+pairs of pairs only for a medium with a direction at each place
+(`aether_ring`). What crosses the boundary is a read, a number or a pair, and
+a force back. A bush doof patch can be numbers to its `[l, r]` and never meet
+a pair of pairs.
+
+**Where it is built.** On the branch `field-core`, in its own worktree
+(`~/aitherLang-core`), so `main` stays playable and the other session's
+checkout isn't switched under it. `main` takes it when it beats the lowering
+on the suite and plays every field patch; only then does the old code go.
+
+## Plan
+
+1. **The suite**: known answers and convergence, run on today's engine first,
+   so what fails is on record. Its first cases are these experiments: coupled
+   springs (laws, and `dho` through `$state`), a struck string's partials, the
+   didge across rates, the wake's lock across rates.
+2. **The core, first milestone**: one linear `line` held as modes, and one law
+   on plain state coupled to it (the wake), passing the suite's string and
+   wake cases: exact partials, and the lock the same at 48 kHz as at 384.
+3. **Into aither**: a patch's field system handed to the core, the boundary as
+   said; the field patches moved over and checked by the suite and by ear.
+4. **The rest of the media**: delay lines for moving strings, grids for
+   nonlinear laws and `matched` ends, sheets, bars.
+5. **Memory as laws**: `dho`, `lp1` and the filters in stdlib as laws, stepped
+   exactly; the coupled-`dho` springs then hold their energy.
+6. **Fields of a call**, then `string_keys` on `midi_keyboard`.
+
+Each step a commit with SPEC and COMPOSING.
