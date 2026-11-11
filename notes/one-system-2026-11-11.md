@@ -370,6 +370,47 @@ state alone are the core's). No patch in `patches/` is taken yet (each has a
 ring, a spread source, a pair, a `matched` end, a sheet or a field in a def),
 so all render as before; `make test` passes.
 
+## Domains, without names (decided 2026-11-11)
+
+Roland: "i dont like names declaring domains as there could be infinite
+domains", and "what about more complex shapes with a rough surface". `line`,
+`ring` and `sheet` are three names out of infinitely many shapes. Field
+theory states a problem as a region, its boundary, and a condition on the
+boundary, and so does aither from here: one word, `field`, and the domain in
+its `ends`.
+
+- **A product of one-dimensional pieces**, each an interval with two ends
+  (`fixed`, `free`, `matched`) or a circle, `round`:
+
+  | was | is |
+  |---|---|
+  | `ring(period = T)` | `field(period = T, ends = round)` |
+  | `line(period = T, ends = fixed)` | `field(period = T, ends = fixed)` |
+  | `line(period = T, ends = [fixed, free])` | `field(period = T, ends = [fixed, free])` |
+  | `sheet(period = T, ends = fixed)` | `field(period = T, ends = [fixed, fixed])` (one end word an axis) |
+  | (new) a cylinder, a torus | `ends = [round, [fixed, free]]`, `ends = [round, round]` |
+
+  The dimension is how many pieces `ends` has: a word or a pair of ends is
+  one, a list of those is one each. A place is a fraction along each.
+- **Any other shape, later**: a region given by a function (`inside = (p, q)
+  => ...`, as rough as the function is) or a mesh read from a file (a scanned
+  bell, a measured bore), its boundary condition a function along the edge;
+  the core works out its modes numerically, once (finite elements). Material
+  that varies is a coefficient that's a function of place, `Δ$x * stiff(p)`,
+  as `width = p => ...` is now.
+- **Roughness and what it costs**: detail much finer than the shortest
+  wavelength kept barely moves the modes (it acts as a slightly lossy, shifted
+  boundary); detail near a wavelength splits and scatters them, the sound of
+  a rough thing. So the core needs the geometry to about the highest kept
+  mode's wavelength, and may turn finer roughness into a loss at the edge.
+- **The limit in three dimensions, said**: a room held as modes to 20 kHz has
+  millions of them, past any machine at audio rate. A three-dimensional field
+  is for small or slow things (a box at low frequencies, a visual or radio
+  field at a low rate); a hall at audio rate is what a reverb is for.
+
+Built in that order: the spelling with rings first (so patches move once),
+the region functions and meshes when a sound needs them.
+
 ## Plan
 
 1. **The suite**: known answers and convergence, run on today's engine first,
