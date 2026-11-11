@@ -1,0 +1,14 @@
+# moving_wake: a van der Pol wake near the 3rd harmonic, coupled at 0.37 to a
+# 110 Hz string whose period is a signal, so on travelling waves (run.py)
+let shed = TAU * 110 * 3.05
+let note = 110 + 0 * midi_cc(20)
+$v = field(period = 1 / note, ends = fixed)
+$i = field(period = 1 / note, ends = free)
+let moving = $v(0.37)
+$q = 0.1
+$r = 0
+$r' = -$q * shed ^ 2 + shed * 0.1 * (1 - $q ^ 2) * $r + moving * 0.5 * shed ^ 2
+$q' = $r
+$v' = -∇$i - $v * 0.002 + $q * 0.01 * δ(0.37)
+$i' = -∇$v - $i * 0.002
+[$v(0.13), $q]

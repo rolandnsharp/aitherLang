@@ -719,6 +719,81 @@ double n_medium_pair_turn(double* m, double cap, double T, double Cv, double Gv,
   }
   return 0.0;
 }
+/* ---- a pair whose period moves: two travelling waves (d'Alembert) ----
+ * Heaviside's line with equal losses, `v' = -∇i - v g`, `i' = -∇v - i g`, is
+ * exactly two waves: R = (v + i) / 2 going right, L = (v - i) / 2 going left,
+ * each a push crossing in half a period, decaying by g a round. Held as two
+ * delay lines its partials are exact whatever the period does, at the cost of
+ * a sample of each wave a sample: what modes, worked out anew each sample
+ * while the period moves, cost thirty times over. An end turns what arrives:
+ * v fixed there, -1; v free, +1. A force at a place adds half of itself to
+ * each wave, at that place (the partner's, with the left wave's sign turned).
+ * Reads are cubic between cells. The state: a header, then each wave's cells. */
+#define LN_CELLS 131072
+enum { LN_HEAD = 24, LN_AT = 0, LN_CROSS, LN_DECAY, LN_T };
+static double ln_tap(const double* w, long head, double d) {      /* a wave d cells back from its head, cubic */
+  if (d < 0.0) d = 0.0;
+  if (d > LN_CELLS - 3) d = LN_CELLS - 3;
+  if (d < 1.0)                                                 /* the newest cell and the one before: linear */
+    return w[head & (LN_CELLS - 1)] * (1.0 - d) + w[(head - 1) & (LN_CELLS - 1)] * d;
+  long i = (long)floor(d);
+  double f = d - (double)i;
+  double y0 = w[(head - i + 1) & (LN_CELLS - 1)], y1 = w[(head - i) & (LN_CELLS - 1)];
+  double y2 = w[(head - i - 1) & (LN_CELLS - 1)], y3 = w[(head - i - 2) & (LN_CELLS - 1)];
+  double c1 = 0.5 * (y2 - y0), c2 = y0 - 2.5 * y1 + 2.0 * y2 - 0.5 * y3, c3 = 0.5 * (y3 - y0) + 1.5 * (y1 - y2);
+  return ((c3 * f + c2) * f + c1) * f + y1;
+}
+/* One sample on: each wave moves a cell, what reaches an end turns back. */
+double n_medium_line_turn(double* m, double T, double g, double el, double er, double dt) {
+  double* R = m + LN_HEAD;
+  double* L = R + LN_CELLS;
+  long head = (long)m[LN_AT];
+  double cross = T / (2.0 * dt);                             /* cells to go across */
+  double decay = g * dt / T;                                 /* a wave's loss a cell, in e-folds */
+  m[LN_CROSS] = cross; m[LN_DECAY] = decay; m[LN_T] = T;
+  /* What arrives at each end at the next sample, a cell short of a crossing
+   * now: it is written at the next head, where it is that sample's. */
+  double far = exp(-decay * cross);
+  double r1 = ln_tap(R, head, cross - 1.0) * far, l0 = ln_tap(L, head, cross - 1.0) * far;
+  head = (head + 1) & (LN_CELLS - 1);
+  R[head] = (el == 1 ? -1.0 : 1.0) * l0;
+  L[head] = (er == 1 ? -1.0 : 1.0) * r1;
+  m[LN_AT] = (double)head;
+  return 0.0;
+}
+/* A force at `at`, `impulse` its strength (rounds) times the seconds it acts:
+ * the field it acts on changes by impulse / T there, a delta, half to each
+ * wave, laid between the two cells either side, ahead of its loss so it reads
+ * back as it should. `into` 1 the first field, 2 its partner. */
+double n_medium_line_kick(double* m, double impulse, double at, double into) {
+  if (impulse == 0.0 || m[LN_CROSS] <= 0.0) return 0.0;
+  double* R = m + LN_HEAD;
+  double* L = R + LN_CELLS;
+  long head = (long)m[LN_AT];
+  double cross = m[LN_CROSS], decay = m[LN_DECAY];
+  double each = 0.5 * impulse / m[LN_T] * cross;              /* a delta: its amount over a cell's width, 1 / cross */
+  for (int w = 0; w < 2; w++) {
+    double d = (w ? 1.0 - at : at) * cross, sign = (w && into == 2) ? -1.0 : 1.0;   /* after this sample's turn */
+    double* buf = w ? L : R;
+    long i = (long)floor(d);
+    double f = d - (double)i, amount = each * sign * exp(decay * d);
+    buf[(head - i) & (LN_CELLS - 1)] += amount * (1.0 - f);
+    buf[(head - i - 1) & (LN_CELLS - 1)] += amount * f;
+  }
+  return 0.0;
+}
+/* The first field at `at` (R + L), or its partner (R - L, into 2). */
+double n_medium_line_at(double* m, double at, double which) {
+  if (m[LN_CROSS] <= 0.0) return 0.0;
+  const double* R = m + LN_HEAD;
+  const double* L = R + LN_CELLS;
+  long head = (long)m[LN_AT];
+  double cross = m[LN_CROSS], decay = m[LN_DECAY];
+  double r = ln_tap(R, head, at * cross) * exp(-decay * at * cross);
+  double l = ln_tap(L, head, (1.0 - at) * cross) * exp(-decay * (1.0 - at) * cross);
+  return which == 2 ? r - l : r + l;
+}
+
 const NativeSpec dsp_natives[] = {
   {"lp1", "signal,cut", 1, -1, (void*)n_lp1},
   {"hp1", "signal,cut", 1, -1, (void*)n_hp1},

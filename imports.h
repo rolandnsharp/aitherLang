@@ -14,6 +14,7 @@
 enum { BUILD_OK, BUILD_PARSE, BUILD_IMPORT };
 /* The rate the program is built for: how fine a short field can be. */
 void fields_rate(double sr);
+double fields_sr(void);
 Node* build_program(Arena* a, const char* stdlib_src, const char* src, const char* src_tag,
                     int seed_self, int* kind, char* err, int errlen);
 

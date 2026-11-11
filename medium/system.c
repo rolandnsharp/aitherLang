@@ -26,6 +26,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "system.h"
+#include "../imports.h"
 
 #define MODE_CAP 256               /* modes kept a medium, at most: the rest is left out, and said */
 
@@ -47,6 +48,8 @@ typedef struct {
   Node *A, *B, *C, *D, *E;         /* the law's coefficients, outside expressions */
   int pair;                        /* a pair, ∇ each the other's: x the first field, v its partner */
   int axes;                        /* 1, or 2: a sheet, each axis's period T, a square, its edge all one end */
+  int delay;                       /* a pair whose period moves, of equal loss: two travelling waves */
+  Node* loss;                      /* its loss a round, g */
   Node* law[2][3];                 /* a pair's: each field's coefficients of ∇partner, itself, Δ itself */
   Source src[64];
   int nsrc;
@@ -326,9 +329,10 @@ static Node* inside(Sys* s, const Node* n, int depth) {
     if (reads_system(s, n->kids[1], 0)) s->no = 1;   /* a reading where the system says: later */
     const char* name = fresh(s, "read");
     int vel = !strcmp(n->kids[0]->str, m->v);
-    push(&s->reads, let(s, name, call(s, vel ? (m->pair ? "medium_partner_at" : m->axes == 2 ? "medium_velocity_at2" : "medium_velocity_at")
-                                                : m->axes == 2 ? "medium_at2" : "medium_at", n, 2,
-                                      (Node*[]){ident(s, m->store, n), at})));
+    push(&s->reads, let(s, name, m->delay
+      ? call(s, "medium_line_at", n, 3, (Node*[]){ident(s, m->store, n), at, num(s, vel ? 2 : 1, n)})
+      : call(s, vel ? (m->pair ? "medium_partner_at" : m->axes == 2 ? "medium_velocity_at2" : "medium_velocity_at")
+                    : m->axes == 2 ? "medium_at2" : "medium_at", n, 2, (Node*[]){ident(s, m->store, n), at})));
     return ident(s, name, n);
   }
   if (n->kind == nkIdent && !medium_of(s, n->str) && !plain_of(s, n->str)) {
@@ -361,6 +365,8 @@ static Node* outside(Sys* s, Node* n) {
   if (n->kind == nkIdx && n->num == 2 && n->kids[0]->kind == nkIdent && medium_of(s, n->kids[0]->str)) {
     Medium* m = medium_of(s, n->kids[0]->str);
     int vel = !strcmp(n->kids[0]->str, m->v);
+    if (m->delay)
+      return call(s, "medium_line_at", n, 3, (Node*[]){ident(s, m->store, n), outside(s, n->kids[1]), num(s, vel ? 2 : 1, n)});
     return call(s, vel ? (m->pair ? "medium_partner_at" : m->axes == 2 ? "medium_velocity_at2" : "medium_velocity_at")
                        : m->axes == 2 ? "medium_at2" : "medium_at", n, 2,
                 (Node*[]){ident(s, m->store, n), outside(s, n->kids[1])});
@@ -388,10 +394,18 @@ static int ends_of(const Node* e, int which) {
   return !strcmp(end->str, "fixed") ? 1 : !strcmp(end->str, "free") ? 2 : 0;   /* matched: later */
 }
 
+/* Why a patch goes the old way, said when AITHER_CORE_SAY=1: the line here
+ * that turned it away. */
+static int said_no(int line) {
+  const char* say = getenv("AITHER_CORE_SAY");
+  if (say && !strcmp(say, "1")) fprintf(stderr, "[aither] the field core leaves this patch to the old way (medium/system.c:%d)\n", line);
+  return 0;
+}
+
 int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, int errlen) {
   (void)capp;
   const char* off = getenv("AITHER_CORE");
-  if (off && !strcmp(off, "0")) return 0;
+  if (off && !strcmp(off, "0")) return said_no(__LINE__);
   Sys sys = {0}, *s = &sys;
   s->a = a; s->err = err; s->errlen = errlen; s->v = *vp; s->n = *np; s->from = from;
 
@@ -400,17 +414,18 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
   int any_line = 0;
   for (int i = from; i < s->n; i++) {
     Node* t = s->v[i];
-    if ((t->kind == nkDef || t->kind == nkPlay) && holds_field(t)) return 0;
+    if (t->kind == nkPlay && holds_field(t)) return said_no(__LINE__);      /* a def's fields are written out before this (field_defs) */
+    if (t->kind == nkDef && holds_field(t)) return said_no(__LINE__);
     if (t->kind == nkVar && t->nkids == 1 && t->kids[0]->kind == nkCall) {
       const char* w = t->kids[0]->str;
       if (!strcmp(w, "line") || !strcmp(w, "ring") || !strcmp(w, "sheet")) any_line = 1;
     }
     if (t->kind == nkVar && t->nkids == 1 && t->kids[0]->kind == nkCall && !strcmp(t->kids[0]->str, "array")) {
       for (int k = from; k < s->n; k++)                /* an array assigned bare is a field of the old kind */
-        if (s->v[k]->kind == nkAssign && !strcmp(s->v[k]->str, t->str)) return 0;
+        if (s->v[k]->kind == nkAssign && !strcmp(s->v[k]->str, t->str)) return said_no(__LINE__);
     }
   }
-  if (!any_line) return 0;
+  if (!any_line) return said_no(__LINE__);
 
   /* The media: a place and its velocity, `$x' = $v`, on one line. */
   for (int i = from; i < s->n; i++) {
@@ -428,29 +443,29 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
       }
     }
     if (!xd || !vd) continue;
-    if (s->nm == 16) return 0;
+    if (s->nm == 16) return said_no(__LINE__);
     Medium* m = &s->m[s->nm++];
     memset(m, 0, sizeof *m);
     m->x = x; m->v = v; m->xdecl = xd; m->vdecl = vd; m->xlaw = t;
     Node *pe = arg(xd->kids[0], "period", 0), *pv = arg(vd->kids[0], "period", 0);
-    if (strcmp(xd->kids[0]->str, vd->kids[0]->str)) return 0;
+    if (strcmp(xd->kids[0]->str, vd->kids[0]->str)) return said_no(__LINE__);
     m->axes = !strcmp(xd->kids[0]->str, "sheet") ? 2 : 1;
     if (m->axes == 2) {                                /* `field(period = [T, T])` arrives as sheet(T / sqrt 2): each axis's T */
       if (!(is(pe, nkBinOp, "/") && pe->kids[1]->kind == nkNum && pe->kids[1]->num == 1.4142135623730951) ||
-          !(is(pv, nkBinOp, "/") && pv->kids[1]->kind == nkNum && pv->kids[1]->num == 1.4142135623730951)) return 0;
+          !(is(pv, nkBinOp, "/") && pv->kids[1]->kind == nkNum && pv->kids[1]->num == 1.4142135623730951)) return said_no(__LINE__);
       pe = pe->kids[0]; pv = pv->kids[0];
     }
     double T, T2;
-    if (!plain_number(s, pe, &T) || !plain_number(s, pv, &T2) || T != T2 || T <= 0) return 0;
-    if (arg(xd->kids[0], "width", 99) || arg(vd->kids[0], "width", 99)) return 0;
-    if (arg(xd->kids[0], "start", 99) || arg(vd->kids[0], "start", 99)) return 0;   /* a start: later */
+    if (!plain_number(s, pe, &T) || !plain_number(s, pv, &T2) || T != T2 || T <= 0) return said_no(__LINE__);
+    if (arg(xd->kids[0], "width", 99) || arg(vd->kids[0], "width", 99)) return said_no(__LINE__);
+    if (arg(xd->kids[0], "start", 99) || arg(vd->kids[0], "start", 99)) return said_no(__LINE__);   /* a start: later */
     int round = !strcmp(xd->kids[0]->str, "ring");
     Node *ex = arg(xd->kids[0], "ends", 99), *ev = arg(vd->kids[0], "ends", 99);
     for (int e = 0; e < 2; e++) {
       m->ends[e] = round ? 0 : ends_of(ex, e);
-      if (!round && (!m->ends[e] || ends_of(ev, e) != m->ends[e])) return 0;
+      if (!round && (!m->ends[e] || ends_of(ev, e) != m->ends[e])) return said_no(__LINE__);
     }
-    if (m->axes == 2 && m->ends[0] != m->ends[1]) return 0;   /* a sheet's edge is one end all round */
+    if (m->axes == 2 && m->ends[0] != m->ends[1]) return said_no(__LINE__);   /* a sheet's edge is one end all round */
     m->T = T;
     m->period = pe;
     m->store = fresh(s, "medium");
@@ -477,24 +492,26 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
           reads_slope_of(s, inline_words(s, el->kids[0], 0), d->str)) { pd = e; plaw = el; }
     }
     if (!pd) continue;
-    if (s->nm == 16) return 0;
+    if (s->nm == 16) return said_no(__LINE__);
     Medium* m = &s->m[s->nm++];
     memset(m, 0, sizeof *m);
     m->pair = 1;
     m->x = d->str; m->v = pd->str; m->xdecl = d; m->vdecl = pd; m->xlaw = law; m->vlaw = plaw;
     Node *pe = arg(d->kids[0], "period", 0), *pv = arg(pd->kids[0], "period", 0);
     double T, T2;
-    /* A period that moves stays on delay lines, the old way: exact for a
-     * uniform pair, and turning every mode anew each sample cost 30 times
+    /* A period that moves: two travelling waves, delay lines, exact for a
+     * uniform pair, where turning every mode anew each sample cost 30 times
      * as much (slide_line, 0.46 of a core against 0.015). */
-    if (!plain_number(s, pe, &T) || !plain_number(s, pv, &T2) || T != T2 || T <= 0) return 0;
-    if (arg(d->kids[0], "width", 99) || arg(pd->kids[0], "width", 99)) return 0;    /* a horn: later */
-    if (arg(d->kids[0], "start", 99) || arg(pd->kids[0], "start", 99)) return 0;
+    int moves = !(plain_number(s, pe, &T) && plain_number(s, pv, &T2));
+    if (moves ? !same_tree(pe, pv) || reads_system(s, pe, 0) : (T != T2 || T <= 0)) return said_no(__LINE__);
+    m->delay = moves;
+    if (arg(d->kids[0], "width", 99) || arg(pd->kids[0], "width", 99)) return said_no(__LINE__);    /* a horn: later */
+    if (arg(d->kids[0], "start", 99) || arg(pd->kids[0], "start", 99)) return said_no(__LINE__);
     int round = !strcmp(d->kids[0]->str, "ring");
     Node *ex = arg(d->kids[0], "ends", 99), *ev = arg(pd->kids[0], "ends", 99);
     for (int e = 0; e < 2; e++) {
       m->ends[e] = round ? 0 : ends_of(ex, e);
-      if (!round && (!m->ends[e] || ends_of(ev, e) != 3 - m->ends[e])) return 0;   /* a pair's ends: one fixed, the other free */
+      if (!round && (!m->ends[e] || ends_of(ev, e) != 3 - m->ends[e])) return said_no(__LINE__);   /* a pair's ends: one fixed, the other free */
     }
     m->T = plain_number(s, pe, &T) ? T : 0;
     m->period = pe;
@@ -502,19 +519,28 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
       Node* coef[3] = {0};
       Node* lw = f ? plaw : law;
       linear_pair(s, f ? m->v : m->x, f ? m->x : m->v, inline_words(s, lw->kids[0], 0), num(s, 1, lw), coef);
-      if (s->no) return 0;
+      if (s->no) return said_no(__LINE__);
       for (int c = 0; c < 3; c++) m->law[f][c] = coef[c] ? coef[c] : num(s, 0, lw);
+    }
+    if (m->delay) {                                    /* two waves: -∇ each, one loss for both, no Δ */
+      double c0, c1, d0, d1;
+      if (round || !plain_number(s, m->law[0][0], &c0) || !plain_number(s, m->law[1][0], &c1) || c0 != -1 || c1 != -1 ||
+          !plain_number(s, m->law[0][2], &d0) || !plain_number(s, m->law[1][2], &d1) || d0 != 0 || d1 != 0) return said_no(__LINE__);
+      double g0, g1;
+      int both = plain_number(s, m->law[0][1], &g0) && plain_number(s, m->law[1][1], &g1);
+      if (both ? g0 != g1 : !same_tree(m->law[0][1], m->law[1][1])) return said_no(__LINE__);
+      m->loss = bin(s, "*", copy(s, m->law[0][1]), num(s, -1, law), law);
     }
     m->store = fresh(s, "medium");
     m->tick = fresh(s, "medium_said");
   }
-  if (!s->nm) return 0;
+  if (!s->nm) return said_no(__LINE__);
   for (int i = from; i < s->n; i++) {                  /* every line is a medium's */
     Node* d = s->v[i];
     if (d->kind == nkVar && d->nkids == 1 && d->kids[0]->kind == nkCall &&
         (!strcmp(d->kids[0]->str, "line") || !strcmp(d->kids[0]->str, "ring") || !strcmp(d->kids[0]->str, "sheet")) &&
         !medium_of(s, d->str))
-      return 0;
+      return said_no(__LINE__);
   }
 
   /* The laws: each medium's velocity law, linear; laws on plain state. */
@@ -526,40 +552,41 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
     if (m && m->pair) continue;                        /* split above */
     if (m && !strcmp(base, m->x)) continue;
     if (m) {
-      if (m->vlaw) return 0;
+      if (m->vlaw) return said_no(__LINE__);
       m->vlaw = t;
       Node* coef[5] = {0};
       linear(s, m, inline_words(s, t->kids[0], 0), num(s, 1, t), coef);
-      if (s->no) return 0;
+      if (s->no) return said_no(__LINE__);
       m->A = coef[0] ? coef[0] : num(s, 0, t);
       m->B = coef[1] ? coef[1] : num(s, 0, t);
       m->C = coef[2] ? coef[2] : num(s, 0, t);
       m->D = coef[3] ? coef[3] : num(s, 0, t);
       m->E = coef[4] ? coef[4] : num(s, 0, t);
-      if (coef[4] && (m->ends[0] != 1 || m->ends[1] != 1)) return 0;   /* a free bar's modes aren't sines: the grid, as yet */
+      if (coef[4] && (m->ends[0] != 1 || m->ends[1] != 1)) return said_no(__LINE__);   /* a free bar's modes aren't sines: the grid, as yet */
       continue;
     }
     int declared = 0;                                  /* a law on plain state, declared as a number */
     for (int k = from; k < s->n; k++)
       if (s->v[k]->kind == nkVar && !strcmp(s->v[k]->str, base) && !(s->v[k]->kids[0]->kind == nkCall &&
           !strcmp(s->v[k]->kids[0]->str, "array"))) declared = 1;
-    if (!declared || s->np == 64 || plain_of(s, base)) return 0;
+    if (!declared || s->np == 64 || plain_of(s, base)) return said_no(__LINE__);
     s->p[s->np++] = (Plain){base, t, t->kids[0]};
   }
-  for (int i = 0; i < s->nm; i++) if (!s->m[i].vlaw) return 0;
+  for (int i = 0; i < s->nm; i++) if (!s->m[i].vlaw) return said_no(__LINE__);
 
   /* The sources: forces at places, on a medium's velocity. */
   for (int i = from; i < s->n; i++) {
     Node* t = s->v[i];
     if (t->kind != nkIdxAssign) continue;
-    if (!is_source(t) || t->kids[0]->kind != nkIdent) return 0;
+    if (!is_source(t) || t->kids[0]->kind != nkIdent) return said_no(__LINE__);
     const char* base = unprimed(s, t->kids[0]->str);
     Medium* m = medium_of(s, base);
-    if (!m || m->nsrc == 64) return 0;
+    if (!m || m->nsrc == 64) return said_no(__LINE__);
     Node *place = t->kids[1], *width = NULL;
     if (place->kind == nkCall && !strcmp(place->str, "gauss") && place->nkids == 2) { width = place->kids[1]; place = place->kids[0]; }
     Node* said = t->kids[2];
     int into = m->pair ? (!strcmp(base, m->x) ? 1 : 2) : !strcmp(base, m->x);
+    if (m->delay && width) return said_no(__LINE__);                   /* spread on travelling waves: later */
     m->src[m->nsrc++] = (Source){place, width, said->kids[1], !strcmp(said->str, "-"), into};
   }
 
@@ -568,6 +595,7 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
   const Node* at = s->v[s->n - 1];
   for (int i = 0; i < s->nm; i++) {
     Medium* m = &s->m[i];
+    if (m->delay) continue;                            /* travelling waves take their whole sample after the kicks */
     Node* turn = m->pair
       ? call(s, "medium_pair_turn", at, 12, (Node*[]){
           ident(s, m->store, at), num(s, MODE_CAP, at), inside(s, m->period, 0),
@@ -596,7 +624,7 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
       spread[i][k] = src->width ? inside(s, src->width, 0) : num(s, 0, src->at);
       if (reads_system(s, src->at, 0) || (src->width && reads_system(s, src->width, 0))) s->no = 1;
     }
-  if (s->no) { free(block.v); free(s->reads.v); return 0; }
+  if (s->no) { free(block.v); free(s->reads.v); return said_no(__LINE__); }
   for (int k = 0; k < s->reads.n; k++) push(&block, s->reads.v[k]);
 
   /* The laws on plain state, RK4 over the sample. */
@@ -625,6 +653,16 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
                                        bin(s, "*", bin(s, "/", copy(s, dt), num(s, 6, at), at), sum, at), at)));
     }
   }
+  /* Travelling waves take their whole sample now, so their forces land on
+   * the sample just made, and the first sample's too (a kick needs the
+   * crossing its turn sets). */
+  for (int i = 0; i < s->nm; i++) {
+    Medium* m = &s->m[i];
+    if (!m->delay) continue;
+    push(&block, store(s, nkAssign, m->tick, call(s, "medium_line_turn", at, 6, (Node*[]){
+      ident(s, m->store, at), inside(s, m->period, 0), inside(s, m->loss, 0),
+      num(s, m->ends[0], at), num(s, m->ends[1], at), ident(s, "dt", at)})));
+  }
   /* Each force, averaged over the step (as the plain state was and is),
    * kicks its medium. */
   for (int i = 0; i < s->nm; i++) {
@@ -634,13 +672,17 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
       Node* f = s->np ? bin(s, "*", num(s, 0.5, at), bin(s, "+", f0, staged(s, f0, next), at), at) : f0;
       Node* impulse = bin(s, "*", f, copy(s, dt), at);
       if (m->src[k].minus) impulse = bin(s, "*", impulse, num(s, -1, at), at);
-      push(&block, store(s, nkAssign, m->tick, call(s, m->axes == 2 ? "medium_kick2" : "medium_kick", at, 5, (Node*[]){ident(s, m->store, at), impulse,
-                                                                                       place[i][k], spread[i][k], num(s, m->src[k].into, at)})));
+      Node* kick = m->delay
+        ? call(s, "medium_line_kick", at, 4, (Node*[]){ident(s, m->store, at), impulse, place[i][k], num(s, m->src[k].into, at)})
+        : call(s, m->axes == 2 ? "medium_kick2" : "medium_kick", at, 5, (Node*[]){ident(s, m->store, at), impulse,
+                                                                              place[i][k], spread[i][k], num(s, m->src[k].into, at)});
+      push(&block, store(s, nkAssign, m->tick, kick));
     }
   }
   for (int j = 0; j < s->np; j++) push(&block, store(s, nkAssign, now[j], ident(s, next[j], at)));
   for (int i = 0; i < s->nm; i++) {
     Medium* m = &s->m[i];
+    if (m->delay) continue;                            /* it took its sample before the kicks */
     Node* turn = m->pair
       ? call(s, "medium_pair_turn", at, 12, (Node*[]){
           ident(s, m->store, at), num(s, MODE_CAP, at), inside(s, m->period, 0),
@@ -665,7 +707,7 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
     Node* t = s->v[i];
     Medium* m = (t->kind == nkVar) ? medium_of(s, t->str) : NULL;
     if (m && t == m->xdecl) {
-      push(&kept, store(s, nkVar, m->store, call(s, "array", t, 1, (Node*[]){num(s, 24 + 10 * MODE_CAP, t)})));
+      push(&kept, store(s, nkVar, m->store, call(s, "array", t, 1, (Node*[]){num(s, m->delay ? 24 + 2 * 131072 : 24 + 10 * MODE_CAP, t)})));
       push(&kept, store(s, nkVar, m->tick, num(s, 0, t)));
       continue;
     }
@@ -677,9 +719,20 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
     if (t->kind == nkLet && t->nkids == 1 && says_field(s, t->kids[0], 0)) continue;
     push(&kept, outside(s, copy(s, t)));          /* a copy: the patch is untouched until it's taken */
   }
-  if (s->no) { free(block.v); free(kept.v); free(s->reads.v); return 0; }
+  if (s->no) { free(block.v); free(kept.v); free(s->reads.v); return said_no(__LINE__); }
   for (int k = 0; k < block.n; k++) push(&kept, block.v[k]);
   free(block.v);
+  /* What the mode cap leaves out is said, not hidden: a field slow against
+   * the rate has more modes under Nyquist than it keeps, and is band-limited
+   * to the highest it keeps. */
+  for (int i = 0; i < s->nm; i++) {
+    Medium* m = &s->m[i];
+    if (m->delay || m->T <= 0) continue;
+    double under = m->T * fields_sr() / 2.0 * (m->axes == 2 ? m->T * fields_sr() / 2.0 * 0.785 : 1.0);
+    if (under > MODE_CAP * 1.01)
+      fprintf(stderr, "[aither] $%s keeps %d of its %.0f modes under Nyquist: band-limited to about %.0f Hz\n",
+              m->x, MODE_CAP, under, m->axes == 2 ? sqrt(MODE_CAP / 0.785) / m->T : MODE_CAP / m->T);
+  }
   free(s->reads.v);
   free(*vp);
   *vp = kept.v;

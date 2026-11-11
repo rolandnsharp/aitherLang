@@ -287,6 +287,8 @@ def struck(at):
 sum(2, n => struck(n * 0.25)) - (struck(0.25) + struck(0.5))
 
 # --- ... and it is struck there
+# (held as its modes, 256 of them, the string is band-limited, so a pulse is
+# felt ahead of its front at a few parts in 10^4: the far place against the near)
 # expect at 100: 1
 def struck(at):
   $v = field(period = 1, ends = fixed)
@@ -294,7 +296,7 @@ def struck(at):
   $v' = -∇$i + (if t < 0.002 then 100 else 0) * δ(at)
   $i' = -∇$v
   $v(0.3)
-if abs(struck(0.3)) > 0.01 and abs(struck(0.8)) < 1e-6 then 1 else 0
+if abs(struck(0.3)) > 0.01 and abs(struck(0.8)) < abs(struck(0.3)) * 0.001 then 1 else 0
 
 # --- in a lambda, δ is on a field too: plain state has no places
 # error: δ is a place on a field
@@ -763,7 +765,8 @@ $x' = $v
 $x((0, 0))
 
 # --- a line's period can move, if it is a pair of equal loss: its waves are exact
-# expect at 3000: 1
+# (looked at a little past the pulse's edge, heard a sample after it is made)
+# expect at 3050: 1
 let note = 2 + 0 * midi_cc(20)
 $v = field(period = 1 / note, ends = fixed)
 $i = field(period = 1 / note, ends = free)
@@ -808,7 +811,8 @@ $i' = -∇$v
 $v
 
 # --- a def can hold a field, and each call is its own
-# expect at 3000: 1
+# (a little past the pulse's edge, heard a sample after it is made)
+# expect at 3050: 1
 def string(note, at):
   $v = field(period = 1 / note, ends = fixed)
   $i = field(period = 1 / note, ends = free)
@@ -820,7 +824,9 @@ let b = string(2 + 0 * midi_cc(20), 0.9)
 if abs(a) > 0.1 and b == 0 then 1 else 0
 
 # --- ... and each turn of a sum
-# expect at 3000: 1
+# (looked at a little past the pulse's edge, which reaches 0.5 at sample
+# 3000 and is heard a sample after, as everything outside a step is)
+# expect at 3050: 1
 def string(note, at):
   $v = field(period = 1 / note, ends = fixed)
   $i = field(period = 1 / note, ends = free)

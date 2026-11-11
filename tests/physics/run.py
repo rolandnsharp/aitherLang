@@ -198,6 +198,18 @@ def case_sheet_modes():
             worst_db = max(worst_db, abs(20 * np.log10(a / ref[0]) - 20 * np.log10(abs(amp) / ref[1])))
     return worst_c < 1 and worst_db < 0.5, 'worst %.2f cents, %.2f dB' % (worst_c, worst_db)
 
+def case_moving_pair_partials():
+    """The same pair as pair_partials, its period a signal (so on travelling
+    waves, as a slid or played string is): partials within 1 cent of n * 110
+    Hz and levels within 0.5 dB, at 48, 96 and 192 kHz."""
+    lv = lambda n: abs(np.sin(np.pi * n * 0.3) * np.sin(np.pi * n * HEAR) * sinc_of(n * F0))
+    return partials('moving_pair_partials.aither', lambda n: n * F0, lv)
+
+def case_wake_on_moving_string():
+    """On a string whose period is a signal (travelling waves): the wake's
+    note at 48, 96 and 192 kHz each within 1 cent of what it is at 384."""
+    return wake('moving_wake.aither')
+
 def case_didge_converges():
     """patches/field_didge.aither, its note at 48, 96 and 192 kHz: the same
     within 1 cent, as a model has one answer and the rate is how finely it

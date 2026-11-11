@@ -790,8 +790,15 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   (Heaviside's line), on a ring or a line with the partner's ends the others,
   is held the same way, each mode a 2x2 law stepped exactly, its losses equal
   or apart; a force on either field, a reading of either. A pair whose period
-  moves stays on delay lines, the old way: exact for it, and turning every
-  mode anew each sample cost 30 times as much. A coefficient that moves is
+  moves, of equal loss, is held as two travelling waves (d'Alembert's), delay
+  lines with cubic taps, an end turning what arrives: exact for it, where
+  turning every mode anew each sample cost 30 times as much; its laws on plain
+  state step with it by RK4, so a wake locks the same at any rate (329.8 Hz
+  within 0.1 cents from 48 to 384 kHz, where it wandered by 6). A def holding
+  a field is written out first, so each call's field is a medium of the core's.
+  When a field keeps fewer modes than it has under Nyquist (the cap, 256), it
+  says so as it loads, with the band it is limited to; held as modes, a pulse
+  is then felt ahead of its front at a few parts in 10^4. A coefficient that moves is
   followed to 1 part in 10^4 (at most 0.17 cents behind in pitch), so a drifting
   loss costs a recompute every few dozen samples. Up to 256 modes, those under Nyquist. Laws
   on plain state beside it step with it, by RK4, and everything couples within

@@ -1183,6 +1183,7 @@ static int plain_laws(Arena* a, Kids* kids, int from, char* err, int errlen) {
 /* A period the patch states plainly, in numbers and file-level lets. */
 static double field_sr = 48000.0;
 void fields_rate(double sr) { if (sr > 0) field_sr = sr; }
+double fields_sr(void) { return field_sr; }
 static int plain_number(const Node* n, Kids* kids, int from, double* v) {
   double a, b;
   if (!n) return 0;
@@ -1700,8 +1701,11 @@ Node* build_program(Arena* a, const char* stdlib_src, const char* src, const cha
     if (domain_words(a, kids.v[i], err, errlen)) { free(kids.v); return NULL; }
   /* The field core takes the patch's system when it can hold it
    * (medium/system.c); what it can't hold yet goes the old way. */
+  /* A def holding a field is written out first, each call its own, so the
+   * core sees every call's field as a medium of its own. */
+  if (field_defs(a, &kids, kept, err, errlen)) { free(kids.v); return NULL; }
   if (system_pass(a, &kids.v, &kids.n, &kids.cap, kept, err, errlen) < 0) { free(kids.v); return NULL; }
-  if (field_defs(a, &kids, kept, err, errlen) || plain_laws(a, &kids, kept, err, errlen) || fields_pass(a, &kids, kept, err, errlen)) { free(kids.v); return NULL; }
+  if (plain_laws(a, &kids, kept, err, errlen) || fields_pass(a, &kids, kept, err, errlen)) { free(kids.v); return NULL; }
   *kind = BUILD_OK;
   Node* prog = arena_alloc(a, sizeof(Node));
   prog->kind = nkBlock; prog->line = 1; prog->str = ""; prog->source = "";
