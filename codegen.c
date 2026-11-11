@@ -4958,8 +4958,8 @@ static const char* emit_program(Ctx* c, Node* program) {
   }
   bcat(c, &pre,
     "extern double n_lp1_coef(double,double);\n"
-    "extern double n_medium_turn(double*,double,double,double,double,double,double,double,double,double);\n"
-    "extern double n_medium_kick(double*,double,double);\n"
+    "extern double n_medium_turn(double*,double,double,double,double,double,double,double,double,double,double);\n"
+    "extern double n_medium_kick(double*,double,double,double,double);\n"
     "extern double n_medium_at(double*,double);\n"
     "extern double n_medium_velocity_at(double*,double);\n"
     /* The turning step: TCC calls dsp.c's, compiled at -O2; the -O2 build

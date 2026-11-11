@@ -382,12 +382,14 @@ double n_input_r(void) { return dsp_input_r; }
  * coefficients change.
  *
  * Its law, in rounds of `period` T as a field's are: v' = A Δx + B x + C v
- * + D Δv + forces. A mode of wavenumber k (phi = sin or cos of k p) has
- * Δ = -4 k^2 (a push crosses in half a period), so w^2 = (4 A k^2 - B) / T^2
- * and gamma = (4 D k^2 - C) / T a second. Ends: 1 fixed, 2 free; the shapes
+ * + D Δv + E ΔΔx + forces. A mode of wavenumber k (phi = sin or cos of k p)
+ * has Δ = -4 k^2 (a push crosses in half a period) and ΔΔ = 4 k^4 / pi^2 (a
+ * bar's period is its first mode's, SPEC "Four slopes are a bar"), so
+ * w^2 = (4 A k^2 - B - 4 E k^4 / pi^2) / T^2 and gamma = (4 D k^2 - C) / T a second. Ends: 1 fixed, 2 free; the shapes
  * are sin (fixed at 0) or cos (free at 0), k = (j + o) pi with o = 1 fixed at
  * both, 0 free at both, 1/2 one of each. Modes above Nyquist are left out. */
-enum { MD_N, MD_T, MD_A, MD_B, MD_C, MD_D, MD_EL, MD_ER, MD_H, MD_CAP, MD_HEAD = 16 };
+enum { MD_N, MD_T, MD_A, MD_B, MD_C, MD_D, MD_EL, MD_ER, MD_H, MD_CAP, MD_E, MD_AT, MD_WIDTH, MD_SPREAD,
+       MD_HEAD = 16 };   /* then N places, N velocities, 4N of the step, N of a spread force's share */
 static double md_offset(const double* m) { return m[MD_EL] == m[MD_ER] ? (m[MD_EL] == 1 ? 1.0 : 0.0) : 0.5; }
 /* phi_j(p) for every j, by turning: e^{i (j + o) pi p} = e^{i o pi p} e^{i pi p}^j. */
 static void md_shapes(const double* m, double p, double* out, long n) {
@@ -400,19 +402,20 @@ static void md_shapes(const double* m, double p, double* out, long n) {
     zr = t;
   }
 }
-double n_medium_turn(double* m, double cap, double T, double A, double B, double C, double D,
+double n_medium_turn(double* m, double cap, double T, double A, double B, double C, double D, double E,
                      double el, double er, double h) {
   long N = (long)cap;
   double* a = m + MD_HEAD;
   double *v = a + N, *p00 = v + N, *p01 = p00 + N, *p10 = p01 + N, *p11 = p10 + N;
   if (m[MD_CAP] != cap || m[MD_T] != T || m[MD_A] != A || m[MD_B] != B || m[MD_C] != C || m[MD_D] != D ||
-      m[MD_EL] != el || m[MD_ER] != er || m[MD_H] != h) {
-    m[MD_CAP] = cap; m[MD_T] = T; m[MD_A] = A; m[MD_B] = B; m[MD_C] = C; m[MD_D] = D;
+      m[MD_E] != E || m[MD_EL] != el || m[MD_ER] != er || m[MD_H] != h) {
+    m[MD_CAP] = cap; m[MD_T] = T; m[MD_A] = A; m[MD_B] = B; m[MD_C] = C; m[MD_D] = D; m[MD_E] = E;
+    m[MD_SPREAD] = 0.0;                                     /* a spread force's shares are worked out again */
     m[MD_EL] = el; m[MD_ER] = er; m[MD_H] = h;
     double o = md_offset(m), nyquist = PI_ / (2.0 * h);       /* h is half a sample */
     long used = 0;
     for (long j = 0; j < N; j++) {
-      double k = (j + o) * PI_, w2 = (4.0 * A * k * k - B) / (T * T), g = (4.0 * D * k * k - C) / T;
+      double k = (j + o) * PI_, w2 = (4.0 * A * k * k - B - 4.0 * E * k * k * k * k / (PI_ * PI_)) / (T * T), g = (4.0 * D * k * k - C) / T;
       if (w2 > nyquist * nyquist) break;
       double s2 = w2 - 0.25 * g * g, c, S;
       if (s2 > 1e-12) { double sq = sqrt(s2); c = cos(sq * h); S = sin(sq * h) / sq; }
@@ -434,17 +437,58 @@ double n_medium_turn(double* m, double cap, double T, double A, double B, double
   }
   return 0.0;
 }
-/* Every mode's velocity changes by 2 phi_j(at) times `impulse` (a force in
- * the field's units, rounds, times the seconds it acts), its place not at all. */
-double n_medium_kick(double* m, double impulse, double at) {
+/* A force at a place, `force * δ(at)`, or spread, `δ(at, width)`: a
+ * Gaussian of area 1 and standard deviation `width`, what of it lies past an
+ * end gone. Each mode takes its share, 2 times the integral over the line of
+ * the force's shape times the mode's (1 for the whole line moving, free at
+ * both ends). A Gaussian well inside the line has it exactly, e^{-k^2 w^2 / 2}
+ * phi(at), its transform; near an end it is integrated, finely enough for the
+ * highest mode, and kept while the place and the width stay as they are, as
+ * they do through a strike. `impulse` is the force, in the field's units
+ * (rounds), times the seconds it acts; `into` 0 is the velocity's rate
+ * (v' = ... + force), 1 the place's (x' = v + force). */
+static void md_shares(double* m, double at, double width, double* out, long n) {
+  double o = md_offset(m);
+  int sine = m[MD_EL] == 1, rigid = m[MD_EL] == 2 && m[MD_ER] == 2;
+  if (width <= 0.0 || (at - 8.0 * width > 0.0 && at + 8.0 * width < 1.0)) {
+    md_shapes(m, at, out, n);
+    for (long j = 0; j < n; j++) {
+      double k = (j + o) * PI_;
+      out[j] *= (rigid && j == 0 ? 1.0 : 2.0) * exp(-0.5 * k * k * width * width);
+    }
+    return;
+  }
+  double lo = max_(0.0, at - 8.0 * width), hi = min_(1.0, at + 8.0 * width);
+  double kmax = (n + o) * PI_;
+  long q = (long)ceil((hi - lo) * kmax / PI_ * 16.0) + 64;    /* sixteen points a half wave of the highest mode */
+  if (q > 1 << 16) q = 1 << 16;
+  if (q % 2) q++;
+  for (long j = 0; j < n; j++) out[j] = 0.0;
+  double dx = (hi - lo) / (double)q, norm = 1.0 / (width * sqrt(TAU_));
+  for (long i = 0; i <= q; i++) {                              /* Simpson's rule */
+    double x = lo + dx * (double)i, d = (x - at) / width;
+    double wgt = (i == 0 || i == q ? 1.0 : (i % 2 ? 4.0 : 2.0)) * dx / 3.0 * norm * exp(-0.5 * d * d);
+    double zr = cos(PI_ * o * x), zi = sin(PI_ * o * x), rr = cos(PI_ * x), ri = sin(PI_ * x);
+    for (long j = 0; j < n; j++) {
+      out[j] += wgt * (sine ? zi : zr);
+      double t = zr * rr - zi * ri;
+      zi = zr * ri + zi * rr;
+      zr = t;
+    }
+  }
+  for (long j = 0; j < n; j++) out[j] *= rigid && j == 0 ? 1.0 : 2.0;
+}
+double n_medium_kick(double* m, double impulse, double at, double width, double into) {
   long n = (long)m[MD_N], N = (long)m[MD_CAP];
-  if (n <= 0) return 0.0;
-  double* v = m + MD_HEAD + N;
-  double phi[n];
-  md_shapes(m, at, phi, n);
-  double scale = impulse / (m[MD_T] * m[MD_T]);
-  int rigid = m[MD_EL] == 2 && m[MD_ER] == 2;               /* free at both: mode 0 is the whole line moving */
-  for (long j = 0; j < n; j++) v[j] += (rigid && j == 0 ? 1.0 : 2.0) * phi[j] * scale;
+  if (n <= 0 || impulse == 0.0) return 0.0;
+  double* share = m + MD_HEAD + 6 * N;
+  if (!m[MD_SPREAD] || m[MD_AT] != at || m[MD_WIDTH] != width) {
+    md_shares(m, at, width, share, n);
+    m[MD_AT] = at; m[MD_WIDTH] = width; m[MD_SPREAD] = 1.0;
+  }
+  double* x = m + MD_HEAD + (into ? 0 : N);
+  double scale = impulse / (into ? m[MD_T] : m[MD_T] * m[MD_T]);
+  for (long j = 0; j < n; j++) x[j] += share[j] * scale;
   return 0.0;
 }
 double n_medium_at(double* m, double at) {

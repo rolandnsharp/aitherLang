@@ -15,10 +15,11 @@
  * Milestone 1 holds a `line` under a linear wave law as modes:
  *
  *   $x = line(period = T, ends = ...)    $v = line(period = T, ends = ...)
- *   $v' = A Δ$x + B $x + C $v + D Δ$v + force * δ(p) ...    $x' = $v
+ *   $v' = A Δ$x + B $x + C $v + D Δ$v + E ΔΔ$x + force * δ(p) ...    $x' = $v + ...
  *
- * with A, B, C, D from outside, plus laws on plain state, all at the file's
- * level. Anything else it leaves to the old lowering, untouched. */
+ * with A to E from outside (E, a bar, pinned at both ends), forces at a
+ * place or spread, `δ(p, width)`, on either rate, plus laws on plain state,
+ * all at the file's level. Anything else it leaves to the old lowering, untouched. */
 
 #include <math.h>
 #include <stdio.h>
@@ -34,7 +35,7 @@ static void push(Vec* k, Node* n) {
   k->v[k->n++] = n;
 }
 
-typedef struct { Node* at; Node* force; int minus; } Source;
+typedef struct { Node* at; Node* width; Node* force; int minus, into; } Source;   /* into: 0 velocity, 1 place */
 
 typedef struct {
   const char *x, *v;               /* the place and the velocity fields */
@@ -43,7 +44,7 @@ typedef struct {
   Node* period;
   double T;
   int ends[2];
-  Node *A, *B, *C, *D;             /* the law's coefficients, outside expressions */
+  Node *A, *B, *C, *D, *E;         /* the law's coefficients, outside expressions */
   Source src[64];
   int nsrc;
 } Medium;
@@ -214,17 +215,25 @@ static Node* inline_words(Sys* s, const Node* n, int depth) {
 
 static Node* add_to(Sys* s, Node* sum, Node* term, const Node* at) { return sum ? bin(s, "+", sum, term, at) : term; }
 
-/* What a field term is: Δ$x, $x, $v, Δ$v (0..3), or -1. */
+/* How many slopes deep a field is: the field, or -1. */
+static int slopes(const Node* n, const char** of) {
+  int k = 0;
+  while (n->kind == nkCall && !strcmp(n->str, "slope") && n->nkids == 1) { n = n->kids[0]; k++; }
+  if (n->kind != nkIdent) return -1;
+  *of = n->str;
+  return k;
+}
+/* What a field term is: Δ$x, $x, $v, Δ$v, ΔΔ$x (0..4), or -1. */
 static int field_term(Medium* m, const Node* n) {
-  if (is(n, nkIdent, m->x)) return 1;
-  if (is(n, nkIdent, m->v)) return 2;
-  if (n->kind == nkCall && !strcmp(n->str, "slope") && n->nkids == 1) {
-    const Node* in = n->kids[0];
-    if (in->kind == nkCall && !strcmp(in->str, "slope") && in->nkids == 1) {
-      if (is(in->kids[0], nkIdent, m->x)) return 0;
-      if (is(in->kids[0], nkIdent, m->v)) return 3;
-    }
-  }
+  const char* of;
+  int k = slopes(n, &of);
+  if (k < 0) return -1;
+  int x = !strcmp(of, m->x), v = !strcmp(of, m->v);
+  if (x && k == 0) return 1;
+  if (v && k == 0) return 2;
+  if (x && k == 2) return 0;
+  if (v && k == 2) return 3;
+  if (x && k == 4) return 4;
   return -1;
 }
 /* Split a law's right side into its four coefficients, each the sum of
@@ -404,13 +413,15 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
     if (m) {
       if (m->vlaw) return 0;
       m->vlaw = t;
-      Node* coef[4] = {0};
+      Node* coef[5] = {0};
       linear(s, m, inline_words(s, t->kids[0], 0), num(s, 1, t), coef);
       if (s->no) return 0;
       m->A = coef[0] ? coef[0] : num(s, 0, t);
       m->B = coef[1] ? coef[1] : num(s, 0, t);
       m->C = coef[2] ? coef[2] : num(s, 0, t);
       m->D = coef[3] ? coef[3] : num(s, 0, t);
+      m->E = coef[4] ? coef[4] : num(s, 0, t);
+      if (coef[4] && (m->ends[0] != 1 || m->ends[1] != 1)) return 0;   /* a free bar's modes aren't sines: later */
       continue;
     }
     int declared = 0;                                  /* a law on plain state, declared as a number */
@@ -429,10 +440,11 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
     if (!is_source(t) || t->kids[0]->kind != nkIdent) return 0;
     const char* base = unprimed(s, t->kids[0]->str);
     Medium* m = medium_of(s, base);
-    if (!m || strcmp(base, m->v) || m->nsrc == 64) return 0;
-    if (t->kids[1]->kind == nkCall && !strcmp(t->kids[1]->str, "gauss")) return 0;   /* spread: later */
+    if (!m || m->nsrc == 64) return 0;
+    Node *place = t->kids[1], *width = NULL;
+    if (place->kind == nkCall && !strcmp(place->str, "gauss") && place->nkids == 2) { width = place->kids[1]; place = place->kids[0]; }
     Node* said = t->kids[2];
-    m->src[m->nsrc++] = (Source){t->kids[1], said->kids[1], !strcmp(said->str, "-")};
+    m->src[m->nsrc++] = (Source){place, width, said->kids[1], !strcmp(said->str, "-"), !strcmp(base, m->x)};
   }
 
   /* The block, after everything. */
@@ -440,9 +452,9 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
   const Node* at = s->v[s->n - 1];
   for (int i = 0; i < s->nm; i++) {
     Medium* m = &s->m[i];
-    Node* turn = call(s, "medium_turn", at, 10, (Node*[]){
+    Node* turn = call(s, "medium_turn", at, 11, (Node*[]){
       ident(s, m->store, at), num(s, MODE_CAP, at), num(s, m->T, at),
-      inside(s, m->A, 0), inside(s, m->B, 0), inside(s, m->C, 0), inside(s, m->D, 0),
+      inside(s, m->A, 0), inside(s, m->B, 0), inside(s, m->C, 0), inside(s, m->D, 0), inside(s, m->E, 0),
       num(s, m->ends[0], at), num(s, m->ends[1], at), bin(s, "/", ident(s, "dt", at), num(s, 2, at), at)});
     push(&block, store(s, nkAssign, m->tick, turn));
   }
@@ -451,11 +463,14 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
   for (int j = 0; j < s->np; j++) rate[j] = inside(s, s->p[j].rate, 0);
   Node* force[16][64];
   Node* place[16][64];
+  Node* spread[16][64];
   for (int i = 0; i < s->nm; i++)
     for (int k = 0; k < s->m[i].nsrc; k++) {
-      force[i][k] = inside(s, s->m[i].src[k].force, 0);
-      place[i][k] = inside(s, s->m[i].src[k].at, 0);
-      if (reads_system(s, s->m[i].src[k].at, 0)) s->no = 1;
+      Source* src = &s->m[i].src[k];
+      force[i][k] = inside(s, src->force, 0);
+      place[i][k] = inside(s, src->at, 0);
+      spread[i][k] = src->width ? inside(s, src->width, 0) : num(s, 0, src->at);
+      if (reads_system(s, src->at, 0) || (src->width && reads_system(s, src->width, 0))) s->no = 1;
     }
   if (s->no) { free(block.v); free(s->reads.v); return 0; }
   for (int k = 0; k < s->reads.n; k++) push(&block, s->reads.v[k]);
@@ -495,15 +510,16 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
       Node* f = s->np ? bin(s, "*", num(s, 0.5, at), bin(s, "+", f0, staged(s, f0, next), at), at) : f0;
       Node* impulse = bin(s, "*", f, copy(s, dt), at);
       if (m->src[k].minus) impulse = bin(s, "*", impulse, num(s, -1, at), at);
-      push(&block, store(s, nkAssign, m->tick, call(s, "medium_kick", at, 3, (Node*[]){ident(s, m->store, at), impulse, place[i][k]})));
+      push(&block, store(s, nkAssign, m->tick, call(s, "medium_kick", at, 5, (Node*[]){ident(s, m->store, at), impulse,
+                                                                                       place[i][k], spread[i][k], num(s, m->src[k].into, at)})));
     }
   }
   for (int j = 0; j < s->np; j++) push(&block, store(s, nkAssign, now[j], ident(s, next[j], at)));
   for (int i = 0; i < s->nm; i++) {
     Medium* m = &s->m[i];
-    Node* turn = call(s, "medium_turn", at, 10, (Node*[]){
+    Node* turn = call(s, "medium_turn", at, 11, (Node*[]){
       ident(s, m->store, at), num(s, MODE_CAP, at), num(s, m->T, at),
-      inside(s, m->A, 0), inside(s, m->B, 0), inside(s, m->C, 0), inside(s, m->D, 0),
+      inside(s, m->A, 0), inside(s, m->B, 0), inside(s, m->C, 0), inside(s, m->D, 0), inside(s, m->E, 0),
       num(s, m->ends[0], at), num(s, m->ends[1], at), bin(s, "/", ident(s, "dt", at), num(s, 2, at), at)});
     push(&block, store(s, nkAssign, m->tick, turn));
   }
@@ -517,7 +533,7 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
     Node* t = s->v[i];
     Medium* m = (t->kind == nkVar) ? medium_of(s, t->str) : NULL;
     if (m && t == m->xdecl) {
-      push(&kept, store(s, nkVar, m->store, call(s, "array", t, 1, (Node*[]){num(s, 16 + 6 * MODE_CAP, t)})));
+      push(&kept, store(s, nkVar, m->store, call(s, "array", t, 1, (Node*[]){num(s, 16 + 7 * MODE_CAP, t)})));
       push(&kept, store(s, nkVar, m->tick, num(s, 0, t)));
       continue;
     }
