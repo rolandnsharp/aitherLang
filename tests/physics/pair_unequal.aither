@@ -1,0 +1,6 @@
+# pair_unequal: the same line with leak and resistance apart, as Heaviside's (run.py)
+$v = field(period = 1 / 110, ends = fixed)
+$i = field(period = 1 / 110, ends = free)
+$v' = -∇$i - $v * 0.02 + (if t < 0.0005 then 2 else 0) * δ(0.3)
+$i' = -∇$v - $i * 0.002
+[$v(0.13), 0]

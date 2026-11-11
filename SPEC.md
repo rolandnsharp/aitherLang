@@ -781,7 +781,15 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   `fixed`, `free` or `round` (E, a bar, pinned at both), is held as its modes:
   each turned exactly, so its partials are exact at any rate, and a force or a
   reading at a place is exact there. A spread force, `δ(p, width)`, gives each
-  mode the Gaussian's exact share, round wrapped, what lies past an end gone. Up to 256 modes, those under Nyquist. Laws
+  mode the Gaussian's exact share, round wrapped, what lies past an end gone.
+  A pair, `$v' = Cv ∇$i + Gv $v + Dv Δ$v` and `$i' = Ci ∇$v + Gi $i + Di Δ$i`
+  (Heaviside's line), on a ring or a line with the partner's ends the others,
+  is held the same way, each mode a 2x2 law stepped exactly, its losses equal
+  or apart; a force on either field, a reading of either. A pair whose period
+  moves stays on delay lines, the old way: exact for it, and turning every
+  mode anew each sample cost 30 times as much. A coefficient that moves is
+  followed to 1 part in 10^4 (at most 0.17 cents behind in pitch), so a drifting
+  loss costs a recompute every few dozen samples. Up to 256 modes, those under Nyquist. Laws
   on plain state beside it step with it, by RK4, and everything couples within
   one step: each medium turns half a sample, the laws and forces act at the
   midpoint, it turns the other half. The patch's own lines read the media and

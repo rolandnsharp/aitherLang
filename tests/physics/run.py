@@ -149,6 +149,22 @@ def case_bar_pinned():
     lv = lambda n: abs(np.sin(np.pi * n * 0.3) * np.sin(np.pi * n * HEAR) * sinc_of(n * n * F0) / (n * n * F0))
     return partials('bar_pinned.aither', lambda n: n * n * F0, lv, n_max=8)
 
+def case_pair_partials():
+    """Heaviside's line, v' = -∇i - v g, i' = -∇v - i g, v fixed, i free:
+    partials at n * 110 Hz, struck on v's own rate, so levels as a kick of
+    the field: the strike's and the pickup's shapes, no 1 / w."""
+    lv = lambda n: abs(np.sin(np.pi * n * 0.3) * np.sin(np.pi * n * HEAR) * sinc_of(n * F0))
+    return partials('pair_partials.aither', lambda n: n * F0, lv)
+
+def case_pair_unequal():
+    """The same with the losses apart (G 0.02, R 0.002 a round): each mode's
+    frequency the exact one of its 2x2 law, sqrt(w^2 - ((G - R) / 2)^2)."""
+    def f_of(n):
+        w = 2 * np.pi * n * F0; d = 0.5 * (0.02 - 0.002) * F0
+        return np.sqrt(w * w - d * d) / (2 * np.pi)
+    lv = lambda n: abs(np.sin(np.pi * n * 0.3) * np.sin(np.pi * n * HEAR) * sinc_of(n * F0))
+    return partials('pair_unequal.aither', f_of, lv, bound_db=1.0)
+
 def case_didge_converges():
     """patches/field_didge.aither, its note at 48, 96 and 192 kHz: the same
     within 1 cent, as a model has one answer and the rate is how finely it

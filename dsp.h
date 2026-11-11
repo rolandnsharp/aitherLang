@@ -41,6 +41,9 @@ double n_medium_turn(double* m, double cap, double T, double A, double B, double
 double n_medium_kick(double* m, double impulse, double at, double width, double into);
 double n_medium_at(double* m, double at);
 double n_medium_velocity_at(double* m, double at);
+double n_medium_pair_turn(double* m, double cap, double T, double Cv, double Gv, double Dv,
+                          double Ci, double Gi, double Di, double el, double er, double h);
+double n_medium_partner_at(double* m, double at);
 double n_wave(DspState* s, long site, double freq, double* values, int n);
 
 /* What codegen calls itself: hoisted coefficients and their steps, the

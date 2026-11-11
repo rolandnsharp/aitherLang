@@ -1,0 +1,6 @@
+# pair_partials: Heaviside's line, v fixed and i free, 110 Hz, struck at 0.3, heard at 0.13 (run.py)
+$v = field(period = 1 / 110, ends = fixed)
+$i = field(period = 1 / 110, ends = free)
+$v' = -∇$i - $v * 0.002 + (if t < 0.0005 then 2 else 0) * δ(0.3)
+$i' = -∇$v - $i * 0.002
+[$v(0.13), 0]
