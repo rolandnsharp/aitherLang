@@ -107,7 +107,7 @@ out, both fields:
    exponential window, newest loudest: a bank of damped resonators, as
    the ear's are. It is local and linear, so the core holds it as modes,
    once it has a first-order law. One number, `loss`, trades time against
-   pitch: a tenth of a second's memory is about 10 Hz between what it
+   pitch: a memory that fades over a tenth of a second is about 3 Hz wide (1 / (π · 0.1 s)) in what it
    tells apart. This is the field-native spectrum.
 2. **An exact frame:** the write takes the place of what comes back round,
    as a tape head records over the loop. That is the sliding DFT's
