@@ -187,7 +187,7 @@ aither patches/duffing.aither | tools/tv --fold 220 --gain 2 | tools/play hw:roc
 aither set.aither 30 > take.raw               offline: 30 s from t=0, then exit (sox makes the WAV)
 AITHER_RATE=192000 aither fm.aither | sdr-tx  the rate is yours; the reader agrees
 aither rx.aither | tools/rate 2400000 44100 | tools/play hw:…   a radio's rate to the speaker's (make tools/rate)
-aither song.aither --solo horn | tools/fft 1024 | AITHER_SOCK=/tmp/s.sock aither patches/spectrum_freeze.aither | tools/ifft 1024 | tools/play
+aither song.aither --solo horn | tools/fft 4096 | AITHER_SOCK=/tmp/s.sock aither patches/spectrum_freeze.aither | tools/ifft 4096 | tools/play
                                               one play's spectrum through a patch: a bin a sample, as pairs (make tools/fft tools/ifft)
 tools/add --delay 512 <(aither song.aither --mute horn) <(aither song.aither --solo horn | …) | tools/play
                                               streams added in step (make tools/add); notes/spectrum-2026-11-06.md
