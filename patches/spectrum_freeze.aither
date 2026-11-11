@@ -5,12 +5,13 @@
 # 2048 bins a frame, 11 Hz apart.
 #
 #   cd ~/aitherLang; pgrep -x pad > /dev/null || { tools/pad & sleep 1; }
-#   aither song.aither --solo horn | tools/fft 4096 \
+#   aither patches/field_didge.aither | tools/fft 4096 \
 #     | AITHER_SOCK=/tmp/freeze.sock AITHER_MIDI=aither-pad aither patches/spectrum_freeze.aither \
 #     | tools/ifft 4096 | tools/play
 #
-# Holding A on the uConsole's pad (tools/pad, note 36), or knob 20 past
-# half, holds the spectrum. Held, each bin is an oscillator ringing on at
+# X with up on the uConsole's pad (tools/pad, knob 24) holds the spectrum,
+# until X with down: A, B and the arrows stay free to play the field going
+# in (field_didge, scanned_ring, string_keys use those). Held, each bin is an oscillator ringing on at
 # the frequency the sound had there: how far the bin turned from one frame
 # to the next says how far its frequency lies from the bin's. A harmonic
 # lies across a few bins, and they turn together, at the speed of the
@@ -26,7 +27,7 @@ $turn = array(frame, 0, every = frame)       # where its oscillator points
 $speed = array(frame, 0, every = frame)      # how far it turns in a frame
 $heard = array(frame, (0, 0), every = frame) # the bin as it came, a frame ago
 
-let frozen = midi_note(36) > 0 or midi_cc(20) > 0.5
+let frozen = midi_cc(24) > 0
 
 let [in_re, in_im] = input()
 let here = (in_re, in_im)                    # a spectrum's bin: one complex number
