@@ -775,12 +775,16 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   It works with `Δ$x` and pairs, not the squeeze and twist, which
   go at two speeds.
 - **The field core holds what it can exactly** (`medium/`,
-  notes/one-system-2026-11-11.md). A field with two ends or round, under a
+  notes/one-system-2026-11-11.md). A field with two ends, round, or a square
+  sheet (`period = [T, T]`, its edge all `fixed` or all `free`), under a
   linear wave law at the file's level, `$v' = A Δ$x + B $x + C $v + D Δ$v + E
   ΔΔ$x + force * δ(p)` and `$x' = $v + ...` with A to E from outside, ends
   `fixed`, `free` or `round` (E, a bar, pinned at both), is held as its modes:
   each turned exactly, so its partials are exact at any rate, and a force or a
-  reading at a place is exact there. A spread force, `δ(p, width)`, gives each
+  reading at a place is exact there. The core knows no shapes, only axes: an
+  interval with its two ends, or a circle, each with modes of its own, and a
+  domain of two axes has their products, the lowest under Nyquist (a square
+  fixed all round: sqrt(m^2 + n^2) / T, exact). A spread force, `δ(p, width)`, gives each
   mode the Gaussian's exact share, round wrapped, what lies past an end gone.
   A pair, `$v' = Cv ∇$i + Gv $v + Dv Δ$v` and `$i' = Ci ∇$v + Gi $i + Di Δ$i`
   (Heaviside's line), on a ring or a line with the partner's ends the others,

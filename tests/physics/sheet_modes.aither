@@ -1,0 +1,6 @@
+# sheet_modes: a square, fixed all round, its first mode 100 Hz, struck at (0.31, 0.42), heard at (0.27, 0.61) (run.py)
+$x = field(period = [1.4142135623730951 / 100, 1.4142135623730951 / 100], ends = fixed)
+$v = field(period = [1.4142135623730951 / 100, 1.4142135623730951 / 100], ends = fixed)
+$v' = Δ$x - $v * 0.002 + (if t < 0.0005 then 2 else 0) * δ((0.31, 0.42))
+$x' = $v
+[$x((0.27, 0.61)), 0]

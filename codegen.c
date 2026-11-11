@@ -3518,7 +3518,11 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
     if (!sa) fail(c, "%s takes a medium's state array first %s", name, err_loc(c, n));
     Buf args = {0};
     badd(c, &args, "s->pool + %s + 1 + %ld", sa->a, sa->wo);
-    for (int i = 1; i < n->nkids; i++) badd(c, &args, ", %s", emit1(c, sc, n->kids[i], pre, "a number"));
+    for (int i = 1; i < n->nkids; i++) {               /* a pair, a place on a sheet, is its two numbers */
+      V a = emit(c, sc, n->kids[i], pre);
+      if (is_pair(a)) badd(c, &args, ", %s, %s", at(a, 0), at(a, 1));
+      else badd(c, &args, ", %s", at(a, 0));
+    }
     const char* t = fresh(c, "md");
     badd(c, pre, "  double %s = n_%s(%s);\n", t, name, bstr(&args));
     return mono(t);
@@ -4958,7 +4962,10 @@ static const char* emit_program(Ctx* c, Node* program) {
   }
   bcat(c, &pre,
     "extern double n_lp1_coef(double,double);\n"
-    "extern double n_medium_turn(double*,double,double,double,double,double,double,double,double,double,double);\n"
+    "extern double n_medium_turn(double*,double,double,double,double,double,double,double,double,double,double,double,double);\n"
+    "extern double n_medium_kick2(double*,double,double,double,double,double);\n"
+    "extern double n_medium_at2(double*,double,double);\n"
+    "extern double n_medium_velocity_at2(double*,double,double);\n"
     "extern double n_medium_kick(double*,double,double,double,double);\n"
     "extern double n_medium_at(double*,double);\n"
     "extern double n_medium_velocity_at(double*,double);\n"

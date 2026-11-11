@@ -37,7 +37,10 @@ double n_impulse(DspState* s, long site, double freq);
 double n_discharge(DspState* s, long site, double sig, double rate);
 /* A medium held as its modes, on a state array of the voice (dsp.c). */
 double n_medium_turn(double* m, double cap, double T, double A, double B, double C, double D, double E,
-                     double el, double er, double h);
+                     double el, double er, double el2, double er2, double h);
+double n_medium_kick2(double* m, double impulse, double at, double at2, double width, double into);
+double n_medium_at2(double* m, double at, double at2);
+double n_medium_velocity_at2(double* m, double at, double at2);
 double n_medium_kick(double* m, double impulse, double at, double width, double into);
 double n_medium_at(double* m, double at);
 double n_medium_velocity_at(double* m, double at);

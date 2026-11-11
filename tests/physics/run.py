@@ -165,6 +165,39 @@ def case_pair_unequal():
     lv = lambda n: abs(np.sin(np.pi * n * 0.3) * np.sin(np.pi * n * HEAR) * sinc_of(n * F0))
     return partials('pair_unequal.aither', f_of, lv, bound_db=1.0)
 
+def case_sheet_modes():
+    """A square sheet, fixed all round, each axis's period T (there and back
+    along it, as a line's): modes at sqrt(m^2 + n^2) / T, here (1, 1) at 100
+    Hz, struck at (0.31, 0.42), heard at (0.27, 0.61). Each frequency within 1
+    cent, its level (the sum over the modes that share it) within 0.5 dB, at
+    48, 96 and 192 kHz."""
+    T = 1.4142135623730951 / 100
+    sp, sq, hp, hq = 0.31, 0.42, 0.27, 0.61
+    groups = {}
+    for m_ in range(1, 6):
+        for n_ in range(1, 6):
+            f = np.sqrt(m_ * m_ + n_ * n_) / T
+            amp = (np.sin(np.pi * m_ * sp) * np.sin(np.pi * n_ * sq) * np.sin(np.pi * m_ * hp) * np.sin(np.pi * n_ * hq) *
+                   sinc_of(f) / f)
+            key = m_ * m_ + n_ * n_
+            groups[key] = (f, groups.get(key, (f, 0.0))[1] + amp)
+    keys = sorted(groups)[:8]
+    worst_c = worst_db = 0
+    for rate in (48000, 96000, 192000):
+        L, _, said = render('sheet_modes.aither', rate, 4)
+        if said: return False, said[0]
+        x = L[int(0.1 * rate):]
+        ref = None
+        for key in keys:
+            f, amp = groups[key]
+            if abs(amp) < 1e-9 * abs(groups[keys[0]][1]): continue
+            g, a = peak(x, rate, f, span=2.0)
+            if ref is None: ref = (a, abs(amp))
+            if abs(amp) / ref[1] < 0.05: continue
+            worst_c = max(worst_c, abs(cents(g, f)))
+            worst_db = max(worst_db, abs(20 * np.log10(a / ref[0]) - 20 * np.log10(abs(amp) / ref[1])))
+    return worst_c < 1 and worst_db < 0.5, 'worst %.2f cents, %.2f dB' % (worst_c, worst_db)
+
 def case_didge_converges():
     """patches/field_didge.aither, its note at 48, 96 and 192 kHz: the same
     within 1 cent, as a model has one answer and the rate is how finely it

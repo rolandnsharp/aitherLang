@@ -391,21 +391,40 @@ double n_input_r(void) { return dsp_input_r; }
  * round in T): mode 0 the whole ring, then cos and sin of 2 pi n p for each
  * n, k = n pi. Modes above Nyquist are left out. */
 enum { MD_N, MD_T, MD_A, MD_B, MD_C, MD_D, MD_EL, MD_ER, MD_H, MD_CAP, MD_E, MD_AT, MD_WIDTH, MD_SPREAD,
-       MD_PAIR, MD_DI, MD_HEAD = 24 };
+       MD_PAIR, MD_DI, MD_AXES, MD_EL2, MD_ER2, MD_AT2, MD_HEAD = 24 };
 /* then N places, N velocities (a pair: N of the first field, N of its
- * partner), 4N of the step, N of a spread force's share, and N more, the
- * share on the partner's shape (a pair). */
-static double md_offset(const double* m) { return m[MD_EL] == m[MD_ER] ? (m[MD_EL] == 1 ? 1.0 : 0.0) : 0.5; }
-static int md_round(const double* m) { return m[MD_EL] == 0; }
-static double md_k(const double* m, long j) {               /* mode j's wavenumber */
-  return md_round(m) ? (double)((j + 1) / 2) * PI_ : ((double)j + md_offset(m)) * PI_;
+ * partner), 4N of the step, N of a spread force's share, N more for the
+ * partner's shape (a pair), and, a domain of two axes, each mode's index on
+ * each axis (2N). */
+#define MD_SLOTS(N) (MD_HEAD + 10 * (N))
+
+/* ---- an axis: an interval with its two ends, or a circle ----
+ * A domain is a product of axes, and each axis has modes of its own:
+ *   an interval, its ends fixed (1) or free (2): k = (j + o) pi, o = 1 fixed at
+ *     both, 0 free at both, 1/2 one of each; shape sin (fixed at 0) or cos
+ *     (free at 0);
+ *   a circle (round, 0): the whole round, then cos and sin of 2 pi n p, k = n pi.
+ * Nothing else about a shape is a special case: a line is one interval, a ring
+ * one circle, a sheet two intervals, and their modes are products. */
+typedef struct { double el, er; } Axis;
+static int ax_round(Axis a) { return a.el == 0; }
+static double ax_offset(Axis a) { return a.el == a.er ? (a.el == 1 ? 1.0 : 0.0) : 0.5; }
+static double ax_k(Axis a, long j) {                         /* mode j's wavenumber */
+  return ax_round(a) ? (double)((j + 1) / 2) * PI_ : ((double)j + ax_offset(a)) * PI_;
 }
+/* The sign of ∇ on mode j's first shape: sin goes to +cos, cos to -sin. */
+static double ax_sign(Axis a, long j) {
+  if (ax_round(a)) return j == 0 ? 0.0 : (j % 2 ? -1.0 : 1.0);
+  return a.el == 1 ? 1.0 : -1.0;
+}
+/* Whether mode j is the whole axis moving (its share 1, not 2). */
+static int ax_rigid(Axis a, long j, int partner) { return j == 0 && (ax_round(a) || (!partner && a.el == 2 && a.er == 2)); }
 /* phi_j(p) for every j, by turning: e^{i (j + o) pi p} = e^{i o pi p} e^{i pi p}^j.
  * `partner`: the shapes of a pair's other field, psi_j, each the other trig
  * function of phi_j's wavenumber (where ∇ takes phi_j), so ∇ phi_j = 2 k s_j
- * psi_j and ∇ psi_j = -2 k s_j phi_j, s_j its sign (md_sign). */
-static void md_shapes_of(const double* m, double p, double* out, long n, int partner) {
-  if (md_round(m)) {                                        /* 1, then cos and sin of 2 pi n p */
+ * psi_j and ∇ psi_j = -2 k s_j phi_j, s_j its sign (ax_sign). */
+static void ax_shapes(Axis a, double p, double* out, long n, int partner) {
+  if (ax_round(a)) {                                        /* 1, then cos and sin of 2 pi n p */
     double rr = cos(TAU_ * p), ri = sin(TAU_ * p), zr = 1.0, zi = 0.0;
     if (n > 0) out[0] = 1.0;
     for (long j = 1; j < n; j += 2) {
@@ -417,8 +436,8 @@ static void md_shapes_of(const double* m, double p, double* out, long n, int par
     }
     return;
   }
-  double o = md_offset(m), zr = cos(PI_ * o * p), zi = sin(PI_ * o * p), rr = cos(PI_ * p), ri = sin(PI_ * p);
-  int sine = (m[MD_EL] == 1) != (partner != 0);
+  double o = ax_offset(a), zr = cos(PI_ * o * p), zi = sin(PI_ * o * p), rr = cos(PI_ * p), ri = sin(PI_ * p);
+  int sine = (a.el == 1) != (partner != 0);
   for (long j = 0; j < n; j++) {
     out[j] = sine ? zi : zr;
     double t = zr * rr - zi * ri;
@@ -426,73 +445,20 @@ static void md_shapes_of(const double* m, double p, double* out, long n, int par
     zr = t;
   }
 }
-static void md_shapes(const double* m, double p, double* out, long n) { md_shapes_of(m, p, out, n, 0); }
-/* A coefficient that moves is followed to 1 part in 10^4: the steps are
- * worked out again when one has moved further, so a law whose loss drifts
- * (heaviside_line's, every sample) costs a recompute every few dozen
- * samples, not every one. In pitch that is at most 0.17 cents behind. */
-#define MD_FOLLOW 1e-4
-static int md_near(double now, double was) { return now == was || fabs(now - was) <= MD_FOLLOW * fabs(was); }
-/* The sign of ∇ on mode j's first shape: sin goes to +cos, cos to -sin. */
-static double md_sign(const double* m, long j) {
-  if (md_round(m)) return j == 0 ? 0.0 : (j % 2 ? -1.0 : 1.0);
-  return m[MD_EL] == 1 ? 1.0 : -1.0;
-}
-double n_medium_turn(double* m, double cap, double T, double A, double B, double C, double D, double E,
-                     double el, double er, double h) {
-  long N = (long)cap;
-  double* a = m + MD_HEAD;
-  double *v = a + N, *p00 = v + N, *p01 = p00 + N, *p10 = p01 + N, *p11 = p10 + N;
-  if (m[MD_CAP] != cap || m[MD_EL] != el || m[MD_ER] != er || m[MD_H] != h || !md_near(T, m[MD_T]) ||
-      !md_near(A, m[MD_A]) || !md_near(B, m[MD_B]) || !md_near(C, m[MD_C]) || !md_near(D, m[MD_D]) || !md_near(E, m[MD_E])) {
-    m[MD_CAP] = cap; m[MD_T] = T; m[MD_A] = A; m[MD_B] = B; m[MD_C] = C; m[MD_D] = D; m[MD_E] = E;
-    m[MD_SPREAD] = 0.0;                                     /* a spread force's shares are worked out again */
-    m[MD_EL] = el; m[MD_ER] = er; m[MD_H] = h;
-    double nyquist = PI_ / (2.0 * h);                        /* h is half a sample */
-    long used = 0;
-    for (long j = 0; j < N; j++) {
-      double k = md_k(m, j), w2 = (4.0 * A * k * k - B - 4.0 * E * k * k * k * k / (PI_ * PI_)) / (T * T), g = (4.0 * D * k * k - C) / T;
-      if (w2 > nyquist * nyquist) break;
-      double s2 = w2 - 0.25 * g * g, c, S;
-      if (s2 > 1e-12) { double sq = sqrt(s2); c = cos(sq * h); S = sin(sq * h) / sq; }
-      else if (s2 < -1e-12) { double sq = sqrt(-s2); c = cosh(sq * h); S = sinh(sq * h) / sq; }
-      else { c = 1.0; S = h; }
-      double e = exp(-0.5 * g * h);
-      p00[j] = e * (c + 0.5 * g * S); p01[j] = e * S;
-      p10[j] = -e * w2 * S;           p11[j] = e * (c - 0.5 * g * S);
-      used = j + 1;
-    }
-    for (long j = used; j < N; j++) a[j] = v[j] = 0.0;
-    m[MD_N] = (double)used;
-  }
-  long n = (long)m[MD_N];
-  for (long j = 0; j < n; j++) {
-    double x = a[j], y = v[j];
-    a[j] = p00[j] * x + p01[j] * y;
-    v[j] = p10[j] * x + p11[j] * y;
-  }
-  return 0.0;
-}
-/* A force at a place, `force * δ(at)`, or spread, `δ(at, width)`: a
- * Gaussian of area 1 and standard deviation `width`, what of it lies past an
- * end gone. Each mode takes its share, 2 times the integral over the line of
- * the force's shape times the mode's (1 for the whole line moving, free at
- * both ends). A Gaussian well inside the line has it exactly, e^{-k^2 w^2 / 2}
- * phi(at), its transform; near an end it is integrated, finely enough for the
- * highest mode, and kept while the place and the width stay as they are, as
- * they do through a strike. `impulse` is the force, in the field's units
- * (rounds), times the seconds it acts; `into` 0 is the velocity's rate
- * (v' = ... + force), 1 the place's (x' = v + force). */
-static void md_shares(double* m, double at, double width, double* out, long n, int partner) {
-  double o = md_offset(m);
-  int sine = (m[MD_EL] == 1) != (partner != 0), rigid = md_round(m) || (!partner && m[MD_EL] == 2 && m[MD_ER] == 2);
-  /* Round, the Gaussian wraps round, its copies summed, and its transform
-   * is exact at any width; well inside a line, so is it. */
-  if (md_round(m) || width <= 0.0 || (at - 8.0 * width > 0.0 && at + 8.0 * width < 1.0)) {
-    md_shapes_of(m, at, out, n, partner);
+/* A force spread at `at`, a Gaussian of area 1 and standard deviation `width`,
+ * what of it lies past an end gone: each mode's share, 2 times the integral
+ * along the axis of the force's shape times the mode's (1 for the whole axis
+ * moving). Round, the Gaussian wraps and its transform is exact at any width;
+ * well inside an interval, so is it; near an end it is integrated, finely
+ * enough for the highest mode. A point is width 0. */
+static void ax_shares(Axis a, double at, double width, double* out, long n, int partner) {
+  double o = ax_offset(a);
+  int sine = (a.el == 1) != (partner != 0);
+  if (ax_round(a) || width <= 0.0 || (at - 8.0 * width > 0.0 && at + 8.0 * width < 1.0)) {
+    ax_shapes(a, at, out, n, partner);
     for (long j = 0; j < n; j++) {
-      double k = md_k(m, j) * (md_round(m) ? 2.0 : 1.0);      /* the shape's own wavenumber in p */
-      out[j] *= (rigid && j == 0 ? 1.0 : 2.0) * exp(-0.5 * k * k * width * width);
+      double k = ax_k(a, j) * (ax_round(a) ? 2.0 : 1.0);     /* the shape's own wavenumber in p */
+      out[j] *= (ax_rigid(a, j, partner) ? 1.0 : 2.0) * exp(-0.5 * k * k * width * width);
     }
     return;
   }
@@ -514,20 +480,140 @@ static void md_shares(double* m, double at, double width, double* out, long n, i
       zr = t;
     }
   }
-  for (long j = 0; j < n; j++) out[j] *= rigid && j == 0 ? 1.0 : 2.0;
+  for (long j = 0; j < n; j++) out[j] *= ax_rigid(a, j, partner) ? 1.0 : 2.0;
 }
-/* `into` 0 a wave's velocity, 1 a wave's place or a pair's first field, 2 a
- * pair's partner (a field's own rate: impulse / T, as a place's is). */
-double n_medium_kick(double* m, double impulse, double at, double width, double into) {
+
+/* ---- a medium: one axis, or a product of two ---- */
+static Axis md_axis(const double* m, int which) {
+  return which ? (Axis){m[MD_EL2], m[MD_ER2]} : (Axis){m[MD_EL], m[MD_ER]};
+}
+static int md_two(const double* m) { return m[MD_AXES] == 2.0; }
+/* Mode j's shape at a place, for every mode: one axis's own, or the product
+ * of two axes' at (p, q). */
+static void md_shapes_at(const double* m, double p, double q, double* out, long n, int partner) {
+  if (!md_two(m)) { ax_shapes(md_axis(m, 0), p, out, n, partner); return; }
+  long N = (long)m[MD_CAP], top = 0;
+  const double *i1 = m + MD_HEAD + 8 * N, *i2 = i1 + N;
+  for (long j = 0; j < n; j++) top = (long)max_((double)top, max_(i1[j], i2[j]) + 1.0);
+  double a1[top], a2[top];
+  ax_shapes(md_axis(m, 0), p, a1, top, 0);
+  ax_shapes(md_axis(m, 1), q, a2, top, 0);
+  for (long j = 0; j < n; j++) out[j] = a1[(long)i1[j]] * a2[(long)i2[j]];
+}
+static void md_shares_at(const double* m, double p, double q, double width, double* out, long n, int partner) {
+  if (!md_two(m)) { ax_shares(md_axis(m, 0), p, width, out, n, partner); return; }
+  long N = (long)m[MD_CAP], top = 0;                         /* a Gaussian is a product of one an axis */
+  const double *i1 = m + MD_HEAD + 8 * N, *i2 = i1 + N;
+  for (long j = 0; j < n; j++) top = (long)max_((double)top, max_(i1[j], i2[j]) + 1.0);
+  double a1[top], a2[top];
+  ax_shares(md_axis(m, 0), p, width, a1, top, 0);
+  ax_shares(md_axis(m, 1), q, width, a2, top, 0);
+  for (long j = 0; j < n; j++) out[j] = a1[(long)i1[j]] * a2[(long)i2[j]];
+}
+/* A coefficient that moves is followed to 1 part in 10^4: the steps are
+ * worked out again when one has moved further, so a law whose loss drifts
+ * (heaviside_line's, every sample) costs a recompute every few dozen
+ * samples, not every one. In pitch that is at most 0.17 cents behind. */
+#define MD_FOLLOW 1e-4
+static int md_near(double now, double was) { return now == was || fabs(now - was) <= MD_FOLLOW * fabs(was); }
+
+/* The exact step of one mode of a wave, its Δ eigenvalue -lam (rounds), for h. */
+static void md_wave_step(double* p00, double* p01, double* p10, double* p11, double w2, double g, double h) {
+  double s2 = w2 - 0.25 * g * g, c, S;
+  if (s2 > 1e-12) { double sq = sqrt(s2); c = cos(sq * h); S = sin(sq * h) / sq; }
+  else if (s2 < -1e-12) { double sq = sqrt(-s2); c = cosh(sq * h); S = sinh(sq * h) / sq; }
+  else { c = 1.0; S = h; }
+  double e = exp(-0.5 * g * h);
+  *p00 = e * (c + 0.5 * g * S); *p01 = e * S;
+  *p10 = -e * w2 * S;           *p11 = e * (c - 0.5 * g * S);
+}
+/* A wave, `$v' = A Δx + B x + C v + D Δv + E ΔΔx`: one axis, or two (el2 >= 0,
+ * the second axis's ends; each axis's period T, a square). A mode's Δ is
+ * -4 (k1^2 + k2^2); a bar's ΔΔ (one axis) 4 k^4 / pi^2. Two axes keep the
+ * modes under Nyquist with the smallest k1^2 + k2^2, up to `cap`. */
+double n_medium_turn(double* m, double cap, double T, double A, double B, double C, double D, double E,
+                     double el, double er, double el2, double er2, double h) {
+  long N = (long)cap;
+  double* a = m + MD_HEAD;
+  double *v = a + N, *p00 = v + N, *p01 = p00 + N, *p10 = p01 + N, *p11 = p10 + N;
+  double axes = el2 >= 0 ? 2.0 : 1.0;
+  if (m[MD_CAP] != cap || m[MD_AXES] != axes || m[MD_EL] != el || m[MD_ER] != er || m[MD_EL2] != el2 ||
+      m[MD_ER2] != er2 || m[MD_H] != h || !md_near(T, m[MD_T]) || !md_near(A, m[MD_A]) || !md_near(B, m[MD_B]) ||
+      !md_near(C, m[MD_C]) || !md_near(D, m[MD_D]) || !md_near(E, m[MD_E])) {
+    int same_modes = m[MD_CAP] == cap && m[MD_AXES] == axes && m[MD_EL] == el && m[MD_ER] == er &&
+                     m[MD_EL2] == el2 && m[MD_ER2] == er2;
+    m[MD_CAP] = cap; m[MD_T] = T; m[MD_A] = A; m[MD_B] = B; m[MD_C] = C; m[MD_D] = D; m[MD_E] = E;
+    m[MD_SPREAD] = 0.0;                                     /* a spread force's shares are worked out again */
+    m[MD_EL] = el; m[MD_ER] = er; m[MD_EL2] = el2; m[MD_ER2] = er2; m[MD_H] = h; m[MD_AXES] = axes;
+    double nyquist = PI_ / (2.0 * h);                        /* h is half a sample */
+    long used = 0;
+    if (axes == 1.0) {
+      Axis x = md_axis(m, 0);
+      for (long j = 0; j < N; j++) {
+        double k = ax_k(x, j), w2 = (4.0 * A * k * k - B - 4.0 * E * k * k * k * k / (PI_ * PI_)) / (T * T), g = (4.0 * D * k * k - C) / T;
+        if (w2 > nyquist * nyquist) break;
+        md_wave_step(&p00[j], &p01[j], &p10[j], &p11[j], w2, g, h);
+        used = j + 1;
+      }
+    } else {
+      Axis x = md_axis(m, 0), y = md_axis(m, 1);
+      double *i1 = m + MD_HEAD + 8 * N, *i2 = i1 + N;
+      /* the largest k1^2 + k2^2 under Nyquist: 4 A lam / T^2 < nyquist^2 */
+      double most = A > 0 ? nyquist * nyquist * T * T / (4.0 * A) : 0.0;
+      /* the cut that keeps at most `cap`: the k^2 a count first passes it at */
+      double lo = 0.0, hi = most;
+      for (int it = 0; it < 60; it++) {
+        double mid = 0.5 * (lo + hi);
+        long count = 0;
+        for (long j1 = 0; j1 < N && count <= N; j1++) {
+          double k1 = ax_k(x, j1);
+          if (k1 * k1 > mid) break;
+          for (long j2 = 0; j2 < N; j2++) { double k2 = ax_k(y, j2); if (k1 * k1 + k2 * k2 > mid) break; count++; }
+        }
+        if (count <= N) lo = mid; else hi = mid;
+      }
+      if (!same_modes) for (long j = 0; j < N; j++) a[j] = v[j] = 0.0;
+      for (long j1 = 0; j1 < N && used < N; j1++) {
+        double k1 = ax_k(x, j1);
+        if (k1 * k1 > lo) break;
+        for (long j2 = 0; j2 < N && used < N; j2++) {
+          double k2 = ax_k(y, j2), l = k1 * k1 + k2 * k2;
+          if (l > lo) break;
+          double w2 = (4.0 * A * l - B - 4.0 * E * l * l / (PI_ * PI_)) / (T * T), g = (4.0 * D * l - C) / T;
+          md_wave_step(&p00[used], &p01[used], &p10[used], &p11[used], w2, g, h);
+          i1[used] = (double)j1; i2[used] = (double)j2;
+          used++;
+        }
+      }
+    }
+    for (long j = used; j < N; j++) a[j] = v[j] = 0.0;
+    m[MD_N] = (double)used;
+  }
+  long n = (long)m[MD_N];
+  for (long j = 0; j < n; j++) {
+    double x = a[j], y = v[j];
+    a[j] = p00[j] * x + p01[j] * y;
+    v[j] = p10[j] * x + p11[j] * y;
+  }
+  return 0.0;
+}
+/* A force at a place, `force * δ(at)`, or spread, `δ(at, width)`: each mode
+ * takes its share (ax_shares; a product of axes takes the product), kept
+ * while the place and the width stay as they are, as they do through a
+ * strike; a kick of nothing costs nothing. `impulse` is the force, in the
+ * field's units (rounds), times the seconds it acts; `into` 0 a wave's
+ * velocity, 1 a wave's place or a pair's first field, 2 a pair's partner (a
+ * field's own rate: impulse / T, as a place's is). */
+static double md_kick(double* m, double impulse, double at, double at2, double width, double into) {
   long n = (long)m[MD_N], N = (long)m[MD_CAP];
   if (n <= 0 || impulse == 0.0) return 0.0;
   int partner = into == 2;
   double* share = m + MD_HEAD + (partner ? 7 : 6) * N;
   int flag = partner ? 2 : 1;                                /* MD_SPREAD's bits: each shape's shares are worked out */
-  if (!((int)m[MD_SPREAD] & flag) || m[MD_AT] != at || m[MD_WIDTH] != width) {
-    if (m[MD_AT] != at || m[MD_WIDTH] != width) m[MD_SPREAD] = 0.0;
-    md_shares(m, at, width, share, n, partner);
-    m[MD_AT] = at; m[MD_WIDTH] = width;
+  if (!((int)m[MD_SPREAD] & flag) || m[MD_AT] != at || m[MD_AT2] != at2 || m[MD_WIDTH] != width) {
+    if (m[MD_AT] != at || m[MD_AT2] != at2 || m[MD_WIDTH] != width) m[MD_SPREAD] = 0.0;
+    md_shares_at(m, at, at2, width, share, n, partner);
+    m[MD_AT] = at; m[MD_AT2] = at2; m[MD_WIDTH] = width;
     m[MD_SPREAD] = (double)((int)m[MD_SPREAD] | flag);
   }
   double* x = m + MD_HEAD + (into == 0 || into == 2 ? N : 0);
@@ -535,23 +621,28 @@ double n_medium_kick(double* m, double impulse, double at, double width, double 
   for (long j = 0; j < n; j++) x[j] += share[j] * scale;
   return 0.0;
 }
-double n_medium_at(double* m, double at) {
-  long n = (long)m[MD_N];
-  if (n <= 0) return 0.0;
-  double phi[n], x = 0.0;
-  md_shapes(m, at, phi, n);
-  for (long j = 0; j < n; j++) x += m[MD_HEAD + j] * phi[j];
-  return x;
+double n_medium_kick(double* m, double impulse, double at, double width, double into) {
+  return md_kick(m, impulse, at, 0.0, width, into);
 }
-/* A pair's partner at a place: its own shapes, psi_j. */
-double n_medium_partner_at(double* m, double at) {
+double n_medium_kick2(double* m, double impulse, double at, double at2, double width, double into) {
+  return md_kick(m, impulse, at, at2, width, into);
+}
+static double md_read(const double* m, double at, double at2, int which) {   /* 0 place, 1 velocity, 2 partner */
   long n = (long)m[MD_N], N = (long)m[MD_CAP];
   if (n <= 0) return 0.0;
   double phi[n], x = 0.0;
-  md_shapes_of(m, at, phi, n, 1);
-  for (long j = 0; j < n; j++) x += m[MD_HEAD + N + j] * phi[j];
-  return x;
+  md_shapes_at(m, at, at2, phi, n, which == 2);
+  const double* f = m + MD_HEAD + (which ? N : 0);
+  for (long j = 0; j < n; j++) x += f[j] * phi[j];
+  return which == 1 ? x * m[MD_T] : x;
 }
+double n_medium_at(double* m, double at) { return md_read(m, at, 0.0, 0); }
+double n_medium_at2(double* m, double at, double at2) { return md_read(m, at, at2, 0); }
+/* The velocity a field's law means, in rounds: T times the velocity a second. */
+double n_medium_velocity_at(double* m, double at) { return md_read(m, at, 0.0, 1); }
+double n_medium_velocity_at2(double* m, double at, double at2) { return md_read(m, at, at2, 1); }
+/* A pair's partner at a place: its own shapes, psi_j. */
+double n_medium_partner_at(double* m, double at) { return md_read(m, at, 0.0, 2); }
 /* A pair, ∇ each the other's, as Heaviside's line is:
  *   v' = Cv ∇i + Gv v + Dv Δv,   i' = Ci ∇v + Gi i + Di Δi   (+ forces), in rounds.
  * Mode j holds v = a_j phi_j, i = b_j psi_j, and ∇ turns each into the other:
@@ -577,19 +668,19 @@ double n_medium_pair_turn(double* m, double cap, double T, double Cv, double Gv,
     long used = 0;
     int fast = Gv == Gi && Dv == 0.0 && Di == 0.0 && fabs(Cv) == fabs(Ci) && Cv != 0.0;
     double decay = exp(Gv / T * h), turn = 2.0 * fabs(Cv) * PI_ / T * h;   /* a wavenumber of pi turns this much */
-    double o = md_round(m) ? 0.0 : md_offset(m);
+    double o = ax_round(md_axis(m, 0)) ? 0.0 : ax_offset(md_axis(m, 0));
     /* the turn of wavenumber (j + o) pi, by multiplying: start at o, step one */
     double cr = cos(turn * o), ci = sin(turn * o), sr = cos(turn), si = sin(turn);
     double rr = 1.0, ri = 0.0;                                /* a ring's: n pi, n = (j + 1) / 2 */
     for (long j = 0; j < N; j++) {
-      double k = md_k(m, j), sgn = md_sign(m, j);
+      double k = ax_k(md_axis(m, 0), j), sgn = ax_sign(md_axis(m, 0), j);
       double w = 2.0 * fabs(Cv) * k / T;
       if (w > nyquist) break;
       double q = -2.0 * k * sgn * Cv / T, r = 2.0 * k * sgn * Ci / T;
       double pp = (Gv - 4.0 * k * k * Dv) / T, ss = (Gi - 4.0 * k * k * Di) / T;
       if (fast) {
         double c, sn;
-        if (md_round(m)) {
+        if (ax_round(md_axis(m, 0))) {
           if (j > 0 && j % 2) { double t = rr * sr - ri * si; ri = rr * si + ri * sr; rr = t; }
           c = rr; sn = ri;
         } else {
@@ -621,16 +712,6 @@ double n_medium_pair_turn(double* m, double cap, double T, double Cv, double Gv,
   }
   return 0.0;
 }
-/* The velocity a field's law means, in rounds: T times the velocity a second. */
-double n_medium_velocity_at(double* m, double at) {
-  long n = (long)m[MD_N], N = (long)m[MD_CAP];
-  if (n <= 0) return 0.0;
-  double phi[n], x = 0.0;
-  md_shapes(m, at, phi, n);
-  for (long j = 0; j < n; j++) x += m[MD_HEAD + N + j] * phi[j];
-  return x * m[MD_T];
-}
-
 const NativeSpec dsp_natives[] = {
   {"lp1", "signal,cut", 1, -1, (void*)n_lp1},
   {"hp1", "signal,cut", 1, -1, (void*)n_hp1},
