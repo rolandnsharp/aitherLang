@@ -1,12 +1,13 @@
 # spectrum_freeze — hold a sound's spectrum and let it go on sounding.
 #
 # This patch hears a spectrum, not a sound: it goes between tools/fft and
-# tools/ifft, with 1024 samples a frame, so input() is a bin at a time, 512
-# bins a frame.
+# tools/ifft, with 8192 samples a frame, so input() is a bin at a time,
+# 4096 bins a frame: long frames, so the held sound is turned anew 11
+# times a second and not 86, and comes out smooth rather than grainy.
 #
-#   aither song.aither --solo horn | tools/fft 1024 \
+#   aither song.aither --solo horn | tools/fft 8192 \
 #     | AITHER_SOCK=/tmp/freeze.sock aither patches/spectrum_freeze.aither \
-#     | tools/ifft 1024 | tools/play
+#     | tools/ifft 8192 | tools/play
 #
 # Holding A on the uConsole's pad (tools/pad, note 36), or knob 20 past
 # half, holds the spectrum. A held frame played back as it
@@ -15,7 +16,7 @@
 # in time doesn't. A frame is a row and a bin a pixel, so the array that
 # holds it steps once a frame, as a picture's does.
 
-let frame = 512
+let frame = 4096
 let bin = pixel_index(frame, 1)
 
 $held = array(frame, (0, 0), every = frame)

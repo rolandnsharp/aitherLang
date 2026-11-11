@@ -1,13 +1,15 @@
 # spectrum_smear — a sound's colour left ringing after it, and rising.
 #
 # Like spectrum_freeze, this patch hears a spectrum: it goes between
-# tools/fft and tools/ifft, 1024 samples a frame, so input() is a bin at
-# a time, 512 bins a frame.
+# tools/fft and tools/ifft, 8192 samples a frame, so input() is a bin at
+# a time, 4096 bins a frame. A long frame is a fine one: bins 5 Hz apart,
+# turned anew 11 times a second, where 1024 samples turn 43 Hz bins 86
+# times a second and the tail comes out grainy.
 #
 #   cd ~/aitherLang; pgrep -x pad > /dev/null || { tools/pad & sleep 1; }
-#   aither song.aither --solo horn | tools/fft 1024 \
+#   aither song.aither --solo horn | tools/fft 8192 \
 #     | AITHER_SOCK=/tmp/smear.sock AITHER_MIDI=aither-pad aither patches/spectrum_smear.aither \
-#     | tools/ifft 1024 | tools/play
+#     | tools/ifft 8192 | tools/play
 #
 # Each bin keeps a tail: how loud it was, falling away a little every
 # frame. The playing always passes as it came; where it is quieter than
@@ -24,7 +26,7 @@
 # stops taking the playing in and goes on as it is, climbing if it climbs,
 # with the playing on top.
 
-let frame = 512
+let frame = 4096
 let bin = pixel_index(frame, 1)
 let frames = sr / frame                      # frames a second
 
