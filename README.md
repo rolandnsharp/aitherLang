@@ -98,12 +98,14 @@ the medium does, and the engine works out the rest.
 ```
 $x = ring(period = 1.66)                  # a push goes round in 1.66 s
 $v = ring(period = 1.66)
-$v' = slope(slope($x)) - $v * 0.7
+$v' = Δ$x - $v * 0.7 + force * δ(where)  # bent, it pulls straight; pushed at a place
 $x' = $v
-
-$v'[where] += force                       # the outside pushes in at a point
-spin(110) * (0.45 + $x[phasor(110)])      # and reads out at a point
+spin(110) * (0.45 + $x(phasor(110)))      # and read out at a place
 ```
+
+`Δ` is del squared, how bent the field is, `δ(where)` a force at one
+place, and `$x(p)` the field at p, a function of place: the wave equation
+as it is printed.
 
 That is a whole instrument: a ring of masses read round at pitch, heard
 as a note whose harmonics move, and on a scope a circle a strike bends.

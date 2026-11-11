@@ -30,16 +30,15 @@
 def string(note, wind, thin, at, loss):
   $v = line(period = 1 / note, ends = fixed)
   $i = line(period = 1 / note, ends = free)
-  $v' = -slope($i) - $v * loss
-  $i' = -slope($v) - $i * loss
   let shed = TAU * note * (0.5 + wind * 11.5) * thin       # vortices a second, as the wind
-  let moving = $v[at]                                      # the string where the wind meets it
+  let moving = $v(at)                                      # the string where the wind meets it
   $q = 0.1
   $r = 0
   $r' = -$q * shed ^ 2 + shed * 0.1 * (1 - $q ^ 2) * $r + moving * 0.5 * shed ^ 2
   $q' = $r
-  $v'[at] += $q * 0.01
-  [$v[0.13], $v[0.71]]
+  $v' = -∇$i - $v * loss + $q * 0.01 * δ(at)                # the wake's lift, where the wind meets it
+  $i' = -∇$v - $i * loss
+  [$v(0.13), $v(0.71)]
 
 # ---------------------------------------------------------------- the harp
 

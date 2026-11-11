@@ -265,6 +265,12 @@ static Toks tokenize(Ctx* c, const char* src) {
       }
     } else if (ch == '^') {
       EMIT(tkOp, "^", 0); i++; col++;
+    } else if ((unsigned char)ch == 0xE2 && i + 2 < n && (unsigned char)src[i + 1] == 0x88 && (unsigned char)src[i + 2] == 0x87) {
+      EMIT(tkOp, "∇", 0); i += 3; col++;                /* ∇, del: how steep a field is */
+    } else if ((unsigned char)ch == 0xCE && i + 1 < n && (unsigned char)src[i + 1] == 0x94) {
+      EMIT(tkOp, "Δ", 0); i += 2; col++;                /* Δ, del squared: how bent */
+    } else if ((unsigned char)ch == 0xCE && i + 1 < n && (unsigned char)src[i + 1] == 0xB4) {
+      EMIT(tkIdent, "δ", 0); i += 2; col++;             /* δ(p), a source at p */
     } else if (ch == '%') {
       fail_at(c, "'%%' is spelled `mod` in aither (`a mod b`) at %d:%d", line, col);
     } else {
@@ -522,6 +528,10 @@ static Node* parse_if(P* p) {
   return node3(p, nkIf, cond, thn, NULL, line);
 }
 
+static int has_delta(const Node* n);
+static Node* law_sources(P* p, const char* name, Node* v, int line);
+static void settle_sources(Vec* v);
+
 /* A lambda's body, past the `=>`: lets and $state in any order, ended by
  * an expression (or, for `each`, by the closing paren). */
 static Node* parse_lambda_body(P* p, int line, Vec* params) {
@@ -539,10 +549,11 @@ static Node* parse_lambda_body(P* p, int line, Vec* params) {
       int sl = peek(p).line;
       const char* name = advance(p).str;
       expect(p, tkAssign, NULL);
-      Node* rhs = parse_expr(p);
+      Node* rhs = law_sources(p, name, parse_expr(p), sl);
       NodeKind k = seen(p, name) ? nkAssign : nkVar;
       if (k == nkVar) mark_seen(p, name);
       push(&stmts, node1(p, k, name, rhs, sl));
+      drain_extra(p, &stmts);
       while (peek(p).kind == tkSemi) advance(p);
     } else if (peek(p).kind == tkRParen && stmts.n > 0) {
       /* Statements only (an `each` body): the value is 0. */
@@ -555,6 +566,11 @@ static Node* parse_lambda_body(P* p, int line, Vec* params) {
       Node* lhs = parse_expr(p);
       Token nx = peek(p);
       if ((nx.kind == tkAssign || nx.kind == tkAugAssign) && lhs->kind == nkIdx) {
+        if (lhs->kids[0]->kind == nkIdent && lhs->kids[0]->str[strlen(lhs->kids[0]->str) - 1] == '\'') {
+          char m[300];
+          snprintf(m, sizeof m, "a source is a term of the law now, a force at a place: `$%s = ... + force * δ(p)`", lhs->kids[0]->str);
+          fail(p, m);
+        }
         advance(p);
         Node* rhs = parse_expr(p);
         if (nx.kind == tkAugAssign) {
@@ -572,6 +588,8 @@ static Node* parse_lambda_body(P* p, int line, Vec* params) {
     }
   }
   pop_scope(p);
+  settle_sources(&stmts);
+  if (has_delta(final)) fail(p, "δ is a source, a term of a field's law: `$v' = ... + force * δ(p)`");
   Node* body;
   if (stmts.n == 0) { free(stmts.v); body = final; }
   else {
@@ -648,6 +666,8 @@ static Node* parse_primary(P* p) {
     return NULL;
   case tkIdent:
     advance(p);
+    if (eq(t.str, "slope") && peek(p).kind == tkLParen)
+      fail(p, "`slope` is written ∇ now: `$v' = -∇$i`, and twice is Δ, `$v' = Δ$x`");
     if (peek(p).kind == tkLParen && same_line(p)) {
       Vec args = {0};
       parse_arg_list(p, &args);
@@ -675,10 +695,28 @@ static Node* parse_primary(P* p) {
     }
     Node* n = node(p, nkIdent, t.line);
     n->str = t.str;
+    if (peek(p).kind == tkLParen && same_line(p)) {   /* `$v(p)`: a field at p, a function of place */
+      Vec args = {0};
+      parse_arg_list(p, &args);
+      if (args.n < 1 || args.n > 2) { free(args.v); fail(p, "a field is read at one place: `$v(p)`, or `$v(p, q)` on a sheet"); }
+      Node* at = args.n == 1 ? args.v[0] : node2(p, nkArr, "()", args.v[0], args.v[1], t.line);
+      free(args.v);
+      Node* r = node2(p, nkIdx, "", n, at, t.line);
+      r->num = 2;                                     /* called, not indexed: imports.c holds it to a field */
+      return r;
+    }
     return n;
   }
   case tkOp:
     if (eq(t.str, "-")) { advance(p); return negate(p, parse_primary(p), t.line); }
+    if (eq(t.str, "∇") || eq(t.str, "Δ")) {           /* ∇x is slope(x), Δx slope(slope(x)): tighter than ^ */
+      advance(p);
+      Node* of = parse_primary(p);
+      if (of->kind == nkIdx && of->num == 2)
+        fail(p, "∇ and Δ are of a field, not of a value at a point: `∇$v`, then read it where a law uses it");
+      Node* n = node1(p, nkCall, "slope", of, t.line);
+      return eq(t.str, "Δ") ? node1(p, nkCall, "slope", n, t.line) : n;
+    }
     { char m[200]; snprintf(m, sizeof m, "unexpected operator '%s'", t.str); fail(p, m); }
     return NULL;
   default:
@@ -826,6 +864,7 @@ static Node* parse_body(P* p, int line, const char* what) {
     if (!is_binding(s)) break;
   }
   p->body_depth--;
+  settle_sources(&stmts);
   if (stmts.n == 1) { Node* s = stmts.v[0]; free(stmts.v); return s; }
   Node* b = node(p, nkBlock, line);
   set_kids(p, b, &stmts);
@@ -874,6 +913,85 @@ static Node* parse_play(P* p) {
   return n;
 }
 
+/* δ in a law. A term with a δ in it is a force at a place, `force * δ(p)`,
+ * or spread, `force * δ(p, width)`: it is taken out of the law and said as
+ * a source after it, the tree `$v'[p] += force` was. */
+static int has_delta(const Node* n) {
+  if (!n) return 0;
+  if (n->kind == nkCall && eq(n->str, "δ")) return 1;
+  for (int i = 0; i < n->nkids; i++) if (has_delta(n->kids[i])) return 1;
+  return 0;
+}
+static Node* delta_force(P* p, Node* n, Node** at) {
+  if (n->kind == nkCall && eq(n->str, "δ")) {
+    if (n->nkids < 1 || n->nkids > 2) fail(p, "δ is at a place: `δ(p)`, or spread, `δ(p, width)`");
+    *at = n->nkids == 1 ? n->kids[0] : node2(p, nkCall, "gauss", n->kids[0], n->kids[1], n->line);
+    if (n->nkids == 2) { (*at)->kids[0] = n->kids[0]; (*at)->kids[1] = n->kids[1]; }
+    Node* one = node(p, nkNum, n->line); one->num = 1;
+    return one;
+  }
+  if (n->kind == nkUnary && eq(n->str, "-")) { n->kids[0] = delta_force(p, n->kids[0], at); return n; }
+  if (n->kind == nkBinOp && eq(n->str, "*")) {
+    int a = has_delta(n->kids[0]), b = has_delta(n->kids[1]);
+    if (a && b) fail(p, "one δ to a term: a force is at one place");
+    n->kids[a ? 0 : 1] = delta_force(p, n->kids[a ? 0 : 1], at);
+    return n;
+  }
+  if (n->kind == nkBinOp && eq(n->str, "/") && !has_delta(n->kids[1])) { n->kids[0] = delta_force(p, n->kids[0], at); return n; }
+  fail(p, "δ multiplies a term of the law, a force at a place: `$v' = ... + force * δ(p)`");
+  return NULL;
+}
+static Node* split_deltas(P* p, Node* n, const char* rate, int sign, int line) {
+  if (!has_delta(n)) return n;
+  if (n->kind == nkBinOp && (eq(n->str, "+") || eq(n->str, "-"))) {
+    Node* l = split_deltas(p, n->kids[0], rate, sign, line);
+    Node* r = split_deltas(p, n->kids[1], rate, eq(n->str, "-") ? -sign : sign, line);
+    if (!l && !r) return NULL;
+    if (!l) return eq(n->str, "-") ? negate(p, r, line) : r;
+    if (!r) return l;
+    n->kids[0] = l; n->kids[1] = r;
+    return n;
+  }
+  Node* at = NULL;
+  Node* force = delta_force(p, n, &at);
+  Node* target = node(p, nkIdent, line); target->str = rate;
+  Node* read = node2(p, nkIdx, "", target, at, line);
+  Node* sum = node2(p, nkBinOp, sign < 0 ? "-" : "+", read, force, line);
+  sum->num = 1;                                   /* a source adds: imports.c reads it as `+=` */
+  Node* src = node3(p, nkIdxAssign, target, at, sum, line);
+  src->num = 3;                                   /* a law's, settled after the block's last law */
+  push(&p->extra, src);
+  return NULL;
+}
+
+/* A law's δ terms, taken out as its sources (queued in p->extra). */
+static Node* law_sources(P* p, const char* name, Node* v, int line) {
+  if (name[strlen(name) - 1] != '\'' || !has_delta(v)) return v;
+  v = split_deltas(p, v, name, 1, line);
+  if (!v) { v = node(p, nkNum, line); v->num = 0; }
+  return v;
+}
+
+/* A block's laws are one system, written in any order, so its sources come
+ * after the last of them, wherever their own law stands. */
+static int is_law_stmt(const Node* n) {
+  return n && (n->kind == nkVar || n->kind == nkAssign) && n->str[0] && n->str[strlen(n->str) - 1] == '\'';
+}
+static void settle_sources(Vec* v) {
+  int last = -1;
+  for (int i = 0; i < v->n; i++) if (is_law_stmt(v->v[i])) last = i;
+  if (last < 0) return;
+  void* moved[v->n];
+  int nm = 0, k = 0;
+  for (int i = 0; i <= last; i++) {
+    Node* n = v->v[i];
+    if (n->kind == nkIdxAssign && n->num == 3) moved[nm++] = n;
+    else v->v[k++] = n;
+  }
+  for (int i = 0; i < nm; i++) v->v[k++] = moved[i];
+  /* k is now last + 1: the rest stay where they are */
+}
+
 static Node* parse_stmt(P* p) {
   Token t = peek(p);
   Node* n;
@@ -883,6 +1001,7 @@ static Node* parse_stmt(P* p) {
     advance(p);
     expect(p, tkAssign, NULL);
     Node* v = parse_expr(p);
+    v = law_sources(p, t.str, v, t.line);
     NodeKind k = seen(p, t.str) ? nkAssign : nkVar;
     if (k == nkVar) mark_seen(p, t.str);
     n = node1(p, k, t.str, v, t.line);
@@ -904,9 +1023,9 @@ static Node* parse_stmt(P* p) {
     p->rate_target = rate;
     Node* lhs = parse_expr(p);
     Token nx = peek(p);
-    if (rate && (lhs->kind != nkIdx || (nx.kind != tkAssign && nx.kind != tkAugAssign))) {
-      char m[200];
-      snprintf(m, sizeof m, "`$%s[p]` is a source: said, `$%s[p] += ...`, not read", t.str, t.str);
+    if (rate) {
+      char m[300];
+      snprintf(m, sizeof m, "a source is a term of the law now, a force at a place: `$%s = ... + force * δ(p)`", t.str);
       fail(p, m);
     }
     if (nx.kind == tkAssign) {
@@ -927,6 +1046,8 @@ static Node* parse_stmt(P* p) {
       n = lhs;
     }
   }
+  if (has_delta(n))
+    fail(p, "δ is a source, a term of a field's law: `$v' = ... + force * δ(p)`");
   while (peek(p).kind == tkNewline || peek(p).kind == tkSemi) advance(p);
   return n;
 }
@@ -966,6 +1087,7 @@ Node* parse_program(Arena* a, const char* source, char* err, int errlen) {
     skip_newlines(p);
   }
   pop_scope(p);
+  settle_sources(&p->top);
   Node* prog = alloc(a, sizeof(Node));
   prog->kind = nkBlock; prog->line = 1; prog->str = ""; prog->source = "";
   prog->nkids = p->top.n;

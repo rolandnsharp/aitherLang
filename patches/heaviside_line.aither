@@ -38,8 +38,6 @@ let leak = loss * (1 - balance)
 $v = ring(period = 4)                                      # a pulse goes round in 4 s
 $i = ring(period = 4)
 
-$v' = -slope($i) - $v * leak
-$i' = -slope($v) - $i * resist
 
 # ---------------------------------------------------------------- the pulse
 
@@ -56,12 +54,12 @@ let stroke = 0.003                                         # how long a blow tak
 let way = if back < forward then -1 else 1
 let landed = if own < stroke then floor(sweep / 6) * golden else $where
 let blow = if min(forward, back) < stroke then 0.06 / stroke else 0
-$v'[gauss(landed, 0.03)] += blow
-$i'[gauss(landed, 0.03)] += blow * way
+$v' = -∇$i - $v * leak + blow * δ(landed, 0.03)
+$i' = -∇$v - $i * resist + blow * way * δ(landed, 0.03)
 
 # ---------------------------------------------------------------- reading
 
 # Round the line at the note, its size the voltage: a circle, bent where
 # the pulse is.
 let note = 110 * pow(2, floor(midi_cc(21) * 25) / 12)
-spin(note) * (0.45 + $v[phasor(note)])
+spin(note) * (0.45 + $v(phasor(note)))

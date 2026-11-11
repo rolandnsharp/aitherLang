@@ -26,9 +26,8 @@ let soften = 0.0001                                        # ... and more the hi
 $x = line(period = 1 / 220, ends = free)
 $v = line(period = 1 / 220, ends = free)
 
-let curve = slope(slope($x))                               # how bent it is here
-let bend = slope(slope(curve))                             # how its bending changes: what pushes back
-$v' = -bend - $v * loss + slope(slope($v)) * soften
+let curve = Δ$x                                            # how bent it is here
+let bend = Δcurve                                          # how its bending changes: what pushes back
 $x' = $v
 
 # ---------------------------------------------------------------- the strike
@@ -40,8 +39,8 @@ let near_end = min(own, since(pad_a))
 let middle = since(pad_b)
 let stroke = 0.0005                                        # how long a blow takes
 let where = if middle < near_end then 0.5 else 0.2
-$v'[gauss(where, 0.03)] += if min(near_end, middle) < stroke then 0.5 / stroke * 0.001 else 0
+$v' = -bend - $v * loss + Δ$v * soften + (if min(near_end, middle) < stroke then 0.5 / stroke * 0.001 else 0) * δ(where, 0.03)
 
 # ---------------------------------------------------------------- reading
 
-[$v[0.28], $v[0.72]]
+[$v(0.28), $v(0.72)]

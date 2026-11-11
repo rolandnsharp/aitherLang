@@ -25,16 +25,14 @@
 $x = ring(period = 2)
 $v = ring(period = 2)
 
-let pull = slope(slope($x))                                # how far its neighbours stand above it
-$v' = pull - $v * (0.2 + $x ^ 2 * 16)
-$x' = $v
+let pull = Δ$x                                             # how far its neighbours stand above it
 
 let drift = (0.5 + 0.5 * cos(TAU * phasor(1 / 60))) * (1 - midi_cc(20))   # the slow turning, 1 to 0 and back
 let hand = phasor(0.5 * pow(3, drift))                     # the ring goes round at 0.5 a second
 let push = 0.4 + 0.8 * midi_cc(22)
 
-$v'[hand] += push
-$v'[hand + 0.5] -= push
+$v' = pull - $v * (0.2 + $x ^ 2 * 16) + push * δ(hand) - push * δ(hand + 0.5)
+$x' = $v
 
 let note = 110 * pow(2, floor(midi_cc(21) * 25) / 12)
-spin(note) * (0.45 + $x[phasor(note)])
+spin(note) * (0.45 + $x(phasor(note)))

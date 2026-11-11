@@ -62,10 +62,9 @@ TEST(laws_have_no_order) {
     "$x = ring(period = 0.5)\n"
     "$v = ring(period = 0.5)\n";
   const char* tail =
-    "$v'[0.3] += if t < 0.01 then 10 else 0\n"
-    "$x[0.5]\n";
-  const char* laws[2] = {"$v' = slope(slope($x)) - $x * 60\n$x' = $v\n",
-                         "$x' = $v\n$v' = slope(slope($x)) - $x * 60\n"};
+    "$x(0.5)\n";
+  const char* laws[2] = {"$v' = Δ$x - $x * 60 + (if t < 0.01 then 10 else 0) * δ(0.3)\n$x' = $v\n",
+                         "$x' = $v\n$v' = Δ$x - $x * 60 + (if t < 0.01 then 10 else 0) * δ(0.3)\n"};
   Rendered r[2] = {{0}, {0}};
   for (int k = 0; k < 2; k++) {
     char src[512], err[4096];
@@ -96,10 +95,9 @@ TEST(shaped_strike_lands_whole) {
   const char* src =
     "$x = ring(period = 1.66)\n"
     "$v = ring(period = 1.66)\n"
-    "$v' = slope(slope($x)) * 5 - $x * 200 - $v * 0.68\n"
+    "$v' = Δ$x * 5 - $x * 200 - $v * 0.68 + (if t < 0.002 then 660 else 0) * δ(0.4, 0.022)\n"
     "$x' = $v\n"
-    "$v'[gauss(0.4, 0.022)] += if t < 0.002 then 660 else 0\n"
-    "$x[0.37]\n";
+    "$x(0.37)\n";
   double peak[3];
   for (int k = 0; k < 3; k++) {
     Rendered r = {0};
@@ -128,9 +126,8 @@ TEST(shaped_source_has_area_one) {
       char src[512], err[4096];
       snprintf(src, sizeof src,
         "$x = ring(period = 1)\n"
-        "$x' = 0\n"
-        "$x'[gauss(%g, %g)] += if t < 0.00051 then 1920 else 0\n"
-        "$x[phasor(1)]\n", centres[k], widths[w]);
+        "$x' = (if t < 0.00051 then 1920 else 0) * δ(%g, %g)\n"
+        "$x(phasor(1))\n", centres[k], widths[w]);
       Rendered r = {0};
       int rc = render_src(src, 2.0, 48000, &r, err, sizeof err);
       CHECK(rc == 0, "doesn't render: %s", err);
@@ -151,10 +148,9 @@ static double pulse_width(const char* first, const char* second, double r, doubl
   char src[640], err[4096];
   snprintf(src, sizeof src,
     "%s\n%s\n"
-    "$v' = -slope($i) - $v * %g\n"
-    "$i' = -slope($v) - $i * %g\n"
-    "$v'[gauss(0.3, 0.03)] += if t < 0.002 then 8 else 0\n"
-    "$v[0.55]\n", first, second, g, r);
+    "$v' = -∇$i - $v * %g + (if t < 0.002 then 8 else 0) * δ(0.3, 0.03)\n"
+    "$i' = -∇$v - $i * %g\n"
+    "$v(0.55)\n", first, second, g, r);
   Rendered o = {0};
   if (render_src(src, rounds + 0.25, 48000, &o, err, sizeof err)) { CHECK(0, "doesn't render: %s", err); return -1; }
   long from = (long)((rounds - 0.25) * 48000), to = o.n;
@@ -184,13 +180,23 @@ TEST(heavisides_line) {
   CHECK(resistive > 1.5 * balanced, "R alone didn't smear it: %g against %g", resistive, balanced);
 }
 
+/* A source is a term of its field's law: `term` added to the end of the
+ * line of `decl` that says `law`. */
+static const char* with_term(const char* decl, const char* law, const char* term, char* out, size_t n) {
+  const char* at = strstr(decl, law);
+  if (!at) { snprintf(out, n, "%s", decl); return out; }
+  const char* end = strchr(at, '\n');
+  if (!end) end = at + strlen(at);
+  snprintf(out, n, "%.*s %s%s", (int)(end - decl), decl, term, end);
+  return out;
+}
+
 /* A line's period is there and back, and its pitch is exact: the strongest
  * frequency near the one it should have. */
 static double line_pitch(const char* decl, double expect) {
-  char src[640], err[4096];
+  char src[640], err[4096], d[512];
   snprintf(src, sizeof src, "%s\n"
-    "$v'[gauss(0.3, 0.05)] += if t < 0.002 then 2 else 0\n"
-    "$x[0.17]\n", decl);
+    "$x(0.17)\n", with_term(decl, "$v' = ", "+ (if t < 0.002 then 2 else 0) * δ(0.3, 0.05)", d, sizeof d));
   Rendered r = {0};
   if (render_src(src, 12.0, 48000, &r, err, sizeof err)) { CHECK(0, "doesn't render: %s", err); return -1; }
   double best = 0, top = 0, mean = 0;
@@ -209,15 +215,15 @@ static double line_pitch(const char* decl, double expect) {
 }
 TEST(line_tunes) {
   const char* fixed = "$x = line(period = 0.5, ends = fixed)\n$v = line(period = 0.5, ends = fixed)\n"
-                      "$v' = slope(slope($x))\n$x' = $v";
+                      "$v' = Δ$x\n$x' = $v";
   const char* mixed = "$x = line(period = 0.5, ends = [fixed, free])\n$v = line(period = 0.5, ends = [fixed, free])\n"
-                      "$v' = slope(slope($x))\n$x' = $v";
+                      "$v' = Δ$x\n$x' = $v";
   const char* mixed2 = "$x = line(period = 0.5, ends = [free, fixed])\n$v = line(period = 0.5, ends = [free, fixed])\n"
-                       "$v' = slope(slope($x))\n$x' = $v";
+                       "$v' = Δ$x\n$x' = $v";
   const char* open = "$v = line(period = 0.5, ends = free)\n$x = line(period = 0.5, ends = fixed)\n"
-                     "$v' = -slope($x)\n$x' = -slope($v)";
+                     "$v' = -∇$x\n$x' = -∇$v";
   const char* shorted = "$v = line(period = 0.5, ends = fixed)\n$x = line(period = 0.5, ends = free)\n"
-                        "$v' = -slope($x)\n$x' = -slope($v)";
+                        "$v' = -∇$x\n$x' = -∇$v";
   double f[5] = {line_pitch(fixed, 2), line_pitch(mixed, 1), line_pitch(mixed2, 1), line_pitch(open, 2), line_pitch(shorted, 2)};
   double want[5] = {2, 1, 1, 2, 2};
   printf("  fixed %.3f Hz, fixed-free %.3f, free-fixed %.3f, open pair %.3f, shorted pair %.3f\n", f[0], f[1], f[2], f[3], f[4]);
@@ -227,10 +233,10 @@ TEST(line_tunes) {
 /* What comes back from the far end, against what went out: a pulse is read
  * going past 0.75, and again where it would return. */
 static double echo_db(const char* decl, double width) {
-  char src[640], err[4096];
+  char src[640], err[4096], d[512], term[100];
+  snprintf(term, sizeof term, "+ (if t < 0.002 then 100 else 0) * δ(0.5, %g)", width);
   snprintf(src, sizeof src, "%s\n"
-    "$v'[gauss(0.5, %g)] += if t < 0.002 then 100 else 0\n"
-    "$v[0.75]\n", decl, width);
+    "$v(0.75)\n", with_term(decl, "$v' = ", term, d, sizeof d));
   Rendered r = {0};
   if (render_src(src, 1.4, 48000, &r, err, sizeof err)) { CHECK(0, "doesn't render: %s", err); return 0; }
   double out = 0, back = 0;                /* period 2: across in 1 s, 0.75 at 0.25 s, back at 0.75 s */
@@ -243,8 +249,8 @@ static double echo_db(const char* decl, double width) {
   return 20 * log10((back + 1e-12) / out);
 }
 TEST(matched_end_takes_it_all) {
-  const char* wave = "$x = line(period = 2, ends = %s)\n$v = line(period = 2, ends = %s)\n$v' = slope(slope($x))\n$x' = $v";
-  const char* pair = "$v = line(period = 2, ends = %s)\n$i = line(period = 2, ends = %s)\n$v' = -slope($i)\n$i' = -slope($v)";
+  const char* wave = "$x = line(period = 2, ends = %s)\n$v = line(period = 2, ends = %s)\n$v' = Δ$x\n$x' = $v";
+  const char* pair = "$v = line(period = 2, ends = %s)\n$i = line(period = 2, ends = %s)\n$v' = -∇$i\n$i' = -∇$v";
   char d[300];
   snprintf(d, sizeof d, wave, "[free, free]", "[free, free]");
   double free_end = echo_db(d, 0.03);
@@ -265,10 +271,9 @@ TEST(matched_end_takes_it_all) {
 /* A field short enough for a note: a line at 110 Hz, its first partials
  * true, a wave or a pair, and bounded. */
 static double fine_pitch(const char* decl, double want) {
-  char src[640], err[4096];
+  char src[640], err[4096], d[512];
   snprintf(src, sizeof src, "%s\n"
-    "$v'[gauss(0.3, 0.05)] += if t < 0.0005 then 2 else 0\n"
-    "$x[0.13]\n", decl);
+    "$x(0.13)\n", with_term(decl, "$v' = ", "+ (if t < 0.0005 then 2 else 0) * δ(0.3, 0.05)", d, sizeof d));
   Rendered r = {0};
   if (render_src(src, 1.0, 48000, &r, err, sizeof err)) { CHECK(0, "doesn't render: %s", err); return -1; }
   double best = 0, top = 0, mean = 0, peak = 0;
@@ -288,9 +293,9 @@ static double fine_pitch(const char* decl, double want) {
 }
 TEST(fine_fields_hold_a_note) {
   const char* wave = "$x = line(period = 1 / 110, ends = fixed)\n$v = line(period = 1 / 110, ends = fixed)\n"
-                     "$v' = slope(slope($x)) - $v * 0.05\n$x' = $v";
+                     "$v' = Δ$x - $v * 0.05\n$x' = $v";
   const char* pair = "$v = line(period = 1 / 110, ends = free)\n$x = line(period = 1 / 110, ends = fixed)\n"
-                     "$v' = -slope($x) - $v * 0.05\n$x' = -slope($v) - $x * 0.05";
+                     "$v' = -∇$x - $v * 0.05\n$x' = -∇$v - $x * 0.05";
   double w1 = fine_pitch(wave, 110), w3 = fine_pitch(wave, 330), p1 = fine_pitch(pair, 110), p3 = fine_pitch(pair, 330);
   printf("  a line at 110 Hz: wave %.1f, %.1f Hz; pair %.1f, %.1f Hz\n", w1, w3, p1, p3);
   CHECK(fabs(w1 / 110 - 1) < 0.01 && fabs(p1 / 110 - 1) < 0.01, "%g, %g", w1, p1);
@@ -304,10 +309,9 @@ static double bore_mode(const char* width, double near) {
   snprintf(src, sizeof src,
     "$p = line(period = 0.5, ends = [free, fixed], width = p => %s)\n"
     "$u = line(period = 0.5, ends = [fixed, free])\n"
-    "$p' = -slope($u) - $p * 0.02\n"
-    "$u' = -slope($p) - $u * 0.02\n"
-    "$p'[0.01] += if t < 0.01 then 0.05 else 0\n"
-    "$p[0.02]\n", width);
+    "$p' = -∇$u - $p * 0.02 + (if t < 0.01 then 0.05 else 0) * δ(0.01)\n"
+    "$u' = -∇$p - $u * 0.02\n"
+    "$p(0.02)\n", width);
   Rendered r = {0};
   if (render_src(src, 20.0, 12000, &r, err, sizeof err)) { CHECK(0, "doesn't render: %s", err); return -1; }
   double best = 0, top = 0, mean = 0;
@@ -360,8 +364,8 @@ static double bar_mode(const char* ends, double near) {
   char src[640], err[4096];
   snprintf(src, sizeof src,
     "$x = line(period = 1 / 220, ends = %s)\n$v = line(period = 1 / 220, ends = %s)\n"
-    "$v' = -slope(slope(slope(slope($x)))) - $v * 0.05\n$x' = $v\n"
-    "$v'[gauss(0.37, 0.03)] += if t < 0.0005 then 1 else 0\n$v[0.23]\n", ends, ends);
+    "$v' = -ΔΔ$x - $v * 0.05 + (if t < 0.0005 then 1 else 0) * δ(0.37, 0.03)\n$x' = $v\n"
+    "$v(0.23)\n", ends, ends);
   Rendered r = {0};
   if (render_src(src, 0.5, 48000, &r, err, sizeof err)) { CHECK(0, "doesn't render: %s", err); return -1; }
   double best = 0, top = 0, peak = 0;
@@ -418,8 +422,8 @@ static double bar_left(double soften, double f) {
   char src[640], err[4096];
   snprintf(src, sizeof src,
     "$x = line(period = 1 / 220, ends = free)\n$v = line(period = 1 / 220, ends = free)\n"
-    "$v' = -slope(slope(slope(slope($x)))) - $v * 0.012 + slope(slope($v)) * %g\n$x' = $v\n"
-    "$v'[gauss(0.2, 0.03)] += if t < 0.0005 then 1 else 0\n$v[0.28]\n", soften);
+    "$v' = -ΔΔ$x - $v * 0.012 + Δ$v * %g + (if t < 0.0005 then 1 else 0) * δ(0.2, 0.03)\n$x' = $v\n"
+    "$v(0.28)\n", soften);
   Rendered r = {0};
   if (render_src(src, 0.5, 48000, &r, err, sizeof err)) { CHECK(0, "doesn't render: %s", err); return -1; }
   double amp[2];
@@ -451,8 +455,8 @@ static double sheet_mode(const char* law, const char* period, double near, doubl
   char src[640], err[4096];
   snprintf(src, sizeof src,
     "$x = sheet(period = %s, ends = fixed)\n$v = sheet(period = %s, ends = fixed)\n"
-    "$v' = %s - $v * 0.01\n$x' = $v\n"
-    "$v'[gauss((0.31, 0.42), 0.08)] += if t < 0.001 then 1 else 0\n$x[(0.27, 0.61)]\n", period, period, law);
+    "$v' = %s - $v * 0.01 + (if t < 0.001 then 1 else 0) * δ((0.31, 0.42), 0.08)\n$x' = $v\n"
+    "$x((0.27, 0.61))\n", period, period, law);
   Rendered r = {0};
   double f0 = near;
   if (render_src(src, rounds / f0, 48000, &r, err, sizeof err)) { CHECK(0, "doesn't render: %s", err); return -1; }
@@ -472,8 +476,8 @@ static double sheet_mode(const char* law, const char* period, double near, doubl
   return best;
 }
 TEST(sheets_ring_as_they_should) {
-  const char* wave = "slope(slope($x))";
-  const char* plate = "-slope(slope(slope(slope($x))))";
+  const char* wave = "Δ$x";
+  const char* plate = "-ΔΔ$x";
   double slow = sheet_mode(wave, "2", 0.5, 12), slow2 = sheet_mode(wave, "2", 0.79, 12);
   double drum = sheet_mode(wave, "1 / 100", 100, 40), drum2 = sheet_mode(wave, "1 / 100", 158, 40);
   double pl = sheet_mode(plate, "1 / 100", 100, 40), pl2 = sheet_mode(plate, "1 / 100", 250, 40);
@@ -502,8 +506,8 @@ static double partial(const Rendered* r, double near) {
 TEST(a_moving_line_is_exact) {
   char src[640], err[4096];
   const char* law = "$v = line(period = 1 / note, ends = fixed)\n$i = line(period = 1 / note, ends = free)\n"
-    "$v' = -slope($i) - $v * 0.01\n$i' = -slope($v) - $i * 0.01\n"
-    "$v'[0.3] += if t < 0.0004 then 8 else 0\n$v[0.13]\n";
+    "$v' = -∇$i - $v * 0.01 + (if t < 0.0004 then 8 else 0) * δ(0.3)\n$i' = -∇$v - $i * 0.01\n"
+    "$v(0.13)\n";
   Rendered w = {0}, p = {0};
   snprintf(src, sizeof src, "let note = 110 + 0 * midi_cc(20)\n%s", law);
   CHECK(render_src(src, 1.0, 48000, &w, err, sizeof err) == 0, "%s", err);
@@ -540,10 +544,10 @@ static double harp_harmonic(double hz) {
   snprintf(src, sizeof src,
     "let shed = TAU * %g\nlet note = 110 + 0 * midi_cc(20)\n"
     "$v = line(period = 1 / note, ends = fixed)\n$i = line(period = 1 / note, ends = free)\n"
-    "$v' = -slope($i) - $v * 0.02\n$i' = -slope($v) - $i * 0.02\n"
-    "let moving = $v[0.37]\n$q = 0.1\n$r = 0\n"
+    "let moving = $v(0.37)\n$q = 0.1\n$r = 0\n"
     "$r' = -$q * shed ^ 2 + shed * 0.1 * (1 - $q ^ 2) * $r + moving * 0.5 * shed ^ 2\n$q' = $r\n"
-    "$v'[0.37] += $q * 0.01\n$v[0.13]\n", hz);
+    "$v' = -∇$i - $v * 0.02 + $q * 0.01 * δ(0.37)\n$i' = -∇$v - $i * 0.02\n"
+    "$v(0.13)\n", hz);
   Rendered r = {0};
   if (render_src(src, 1.0, 48000, &r, err, sizeof err)) { CHECK(0, "doesn't render: %s", err); return -1; }
   double best = 0, top = 0;
@@ -572,10 +576,9 @@ TEST(ring_keeps_its_period) {
   const char* src =
     "$x = ring(period = 0.8)\n"
     "$v = ring(period = 0.8)\n"
-    "$v' = slope(slope($x))\n"
+    "$v' = Δ$x + (if t < 0.01 then 1280 else 0) * δ(0.1 * (phasor(1000) * 0.2 - 0.1))\n"
     "$x' = $v\n"
-    "$v'[0.1 * (phasor(1000) * 0.2 - 0.1)] += if t < 0.01 then 1280 else 0\n"
-    "$x[0.25]\n";
+    "$x(0.25)\n";
   double when[3];
   for (int k = 0; k < 3; k++) {
     Rendered r = {0};

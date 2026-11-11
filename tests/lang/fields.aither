@@ -9,7 +9,7 @@
 # expect at 8: 2
 $x = array(4)
 $x = $x + 1
-$x[0.25]
+$x(0.25)
 
 # --- a later line at the place sees what was stored
 # expect at 2: 10
@@ -17,33 +17,33 @@ $a = array(2)
 $b = array(2)
 $a = $a + 1
 $b = $a * 10
-$b[0]
+$b(0)
 
 # --- a number is everywhere
 # expect at 4: 7
 $x = array(4)
 $x = 7
-$x[0.5]
+$x(0.5)
 
 # --- two slopes: how much a place's neighbours stand above it
 # expect at 4: 2, -1
 $x = array(4, i => if i == 1 then 1 else 0)
 $y = array(4)
 $x = $x
-$y = -slope(slope($x))
-[$y[0.25], $y[0]]
+$y = -Δ$x
+[$y(0.25), $y(0)]
 
 # --- read from outside, between places
 # expect: 0.5
 $x = array(4, i => i)
 $x = $x
-$x[0.125]
+$x(0.125)
 
 # --- ... and round past the last
 # expect: 1.5
 $x = array(4, i => i)
 $x = $x
-$x[0.875]
+$x(0.875)
 
 # --- a push from outside lands as the field reaches that place
 # expect: 0
@@ -51,7 +51,7 @@ $x[0.875]
 $v = array(4)
 $v = $v
 $v[0.5] += if t < dt then 1 else 0
-$v[0.5]
+$v(0.5)
 
 # --- pushes add
 # expect at 4: 3
@@ -59,22 +59,22 @@ $v = array(4)
 $v = $v
 $v[0.5] += if t < dt then 1 else 0
 $v[0.5] += if t < dt then 2 else 0
-$v[0.5]
+$v(0.5)
 
 # --- a field of values: turned at each place
 # expect at 2: 0, 1
 # expect at 4: -1, 0
 $z = array(2, (1, 0))
 $z = $z * (0, 1)
-$z[0]
+$z(0)
 
 # --- squeeze: a bump along the line, the slope of its convergence 2 there, and no twist
 # expect at 4: 2, 0
 $d = array(4, n => if n == 1 then ((0, 1), (0, 0)) else ((0, 0), (0, 0)))
 $p = array(4, ((0, 0), (0, 0)))
 $d = $d
-$p = slope(convergence($d))
-let ((_, along), (across, _)) = $p[0.25]
+$p = ∇(convergence($d))
+let ((_, along), (across, _)) = $p(0.25)
 [along, across]
 
 # --- twist: a bump across the line, the curl of its curl 2 there, and no squeeze
@@ -83,7 +83,7 @@ $d = array(4, n => if n == 1 then ((0, 0), (1, 0)) else ((0, 0), (0, 0)))
 $p = array(4, ((0, 0), (0, 0)))
 $d = $d
 $p = curl(curl($d))
-let ((_, along), (across, _)) = $p[0.25]
+let ((_, along), (across, _)) = $p(0.25)
 [along, across]
 
 # --- a field in a play is the file's
@@ -92,7 +92,7 @@ $x = array(4)
 play a:
   $x = $x + 2
   0
-$x[0] + a * 0
+$x(0) + a * 0
 
 # --- an array never assigned bare stays data, indexed by whole places
 # expect: 3
@@ -109,43 +109,43 @@ len($x)
 # error: a ring's period has to be known
 $x = ring(period = 1 + t)
 $x = $x
-$x[0]
+$x(0)
 
 # --- `$x'` is its rate, a round: 1 a round is 1 after a round, whatever its places
 # expect at 47999: 1
 $x = ring(period = 1)
 $x' = 1
-floor($x[0] + 0.02)
+floor($x(0) + 0.02)
 
 # --- ... so on a ring of twice the period, a second is half a round
 # expect at 47999: 0
 $x = ring(period = 2)
 $x' = 1
-floor($x[0] + 0.02)
+floor($x(0) + 0.02)
 
 # --- a ring's line has no time: dt
 # error: `dt` in a ring's line
 $x = ring(period = 1)
 $x' = dt
-$x[0]
+$x(0)
 
 # --- ... nor t
 # error: `t` in a ring's line
 $x = ring(period = 1)
 $x' = sin(t)
-$x[0]
+$x(0)
 
 # --- `+=` on a ring is its rate, said as one
 # error: `+=` on a ring
 $x = ring(period = 1)
 $x += 1
-$x[0]
+$x(0)
 
 # --- ... and so is `*=`
 # error: `*=` on a ring
 $x = ring(period = 1)
 $x *= 0.9
-$x[0]
+$x(0)
 
 # --- a rate is said, not read
 # error: is a law's left side
@@ -157,7 +157,7 @@ $x'
 # error: one prime
 $x = ring(period = 1)
 $x'' = 1
-$x[0]
+$x(0)
 
 # --- a rate is of a ring's field: not an array's
 # error: a rate is of state or a ring's field
@@ -170,7 +170,7 @@ $x[0]
 $x = ring(period = 1)
 $x' = 1
 $x' = 2
-$x[0]
+$x(0)
 
 # --- a field's law belongs in the file's lines
 # error: not in a def
@@ -184,154 +184,163 @@ f(1)
 # expect at 4: 1
 $x = array(4)
 $x += 1
-$x[0]
+$x(0)
 
 # --- a ring of values starts as it says
 # expect: 3, 4
 $z = ring(period = 1, start = (3, 4))
 $z = $z
-$z[0]
+$z(0)
 
 # --- a source is added to a ring's rate at a point
 # expect at 47999: 1
 $x = ring(period = 1)
-$x' = 0
-$x'[0.5] += if t < 0.5 then 2 else 0
-ceil(max(0, $x[0.5]) * 0.0001)
+$x' = (if t < 0.5 then 2 else 0) * δ(0.5)
+ceil(max(0, $x(0.5)) * 0.0001)
 
 # --- ... and a source is taken away the same way
 # expect at 47999: 0
 $x = ring(period = 1)
-$x' = 0
-$x'[0.5] += if t < 0.5 then 2 else 0
-$x'[0.5] -= if t < 0.5 then 2 else 0
-$x[0.5]
+$x' = (if t < 0.5 then 2 else 0) * δ(0.5) - (if t < 0.5 then 2 else 0) * δ(0.5)
+$x(0.5)
 
 # --- a push on a ring is a change to its rate
 # error: a push on a ring is a change to its rate
 $x = ring(period = 1)
 $x' = 0
 $x[0.5] += 1
-$x[0]
+$x(0)
 
 # --- ... whichever way it's said
 # error: a push on a ring is a change to its rate
 $x = ring(period = 1)
 $x' = 0
 $x[0.5] = 1
-$x[0]
+$x(0)
 
-# --- a source adds: it doesn't replace the law there
-# error: a push adds
+# --- a source is a term of its law, not a line of its own
+# error: a source is a term of the law now
+$x = ring(period = 1)
+$x' = 0
+$x'[0.5] += 1
+$x(0)
+
+# --- ... said any other way, too
+# error: a source is a term of the law now
 $x = ring(period = 1)
 $x' = 0
 $x'[0.5] = 1
-$x[0]
+$x(0)
 
-# --- ... nor scale it
-# error: a push adds
+# --- a field is a function of place: called, not indexed
+# error: a field is a function of place
 $x = ring(period = 1)
 $x' = 0
-$x'[0.5] *= 2
-$x[0]
+$x[0.5]
+
+# --- ... and an array is indexed, not called
+# error: is no field
+$a = [1, 2]
+$a(0)
+
+# --- ∇ is of a field, not of its value at a point
+# error: are of a field
+$v = ring(period = 1)
+$i = ring(period = 1)
+$v' = -∇$i(0.5)
+$i' = -∇$v
+$v(0)
+
+# --- δ is a source: it stands in a law
+# error: δ is a source
+$x = ring(period = 1)
+$x' = 0
+δ(0.5)
+
+# --- ... multiplying a term of it
+# error: δ multiplies a term of the law
+$x = ring(period = 1)
+$x' = sin(δ(0.5))
+$x(0)
+
+# --- ... at one place to a term
+# error: one δ to a term
+$x = ring(period = 1)
+$x' = δ(0.5) * δ(0.6)
+$x(0)
+
+# --- ... on a field: plain state is one number
+# error: δ is a place on a field
+$r = 0
+$r' = 1 * δ(0.5)
+$r
+
+# --- a source taken away is a force pushing the other way
+# expect until 4800: 0
+$x = ring(period = 1)
+$y = ring(period = 1)
+$x' = 0 - (if t < 0.001 then 1000 else 0) * δ(0.5)
+$y' = (if t < 0.001 then -1000 else 0) * δ(0.5)
+$x(0.5) - $y(0.5)
 
 # --- a push on an array's field adds too
 # error: a push adds
 $x = array(4)
 $x = $x
 $x[0.5] = 1
-$x[0]
-
-# --- a source is said, not read
-# error: is a source
-$x = ring(period = 1)
-$x' = 0
-$x'[0.5]
-
-# --- a ring with no law has nowhere for a push to land
-# error: has no law
-$x = ring(period = 1)
-$x'[0.5] += 1
-$x[0]
-
-# --- a source is a ring's
-# error: a rate is of a ring's field
-$x = array(4)
-$x = $x
-$x'[0.5] += 1
-$x[0]
-
-# --- a source belongs in the file's lines
-# error: not in a def
-$x = ring(period = 1)
-$x' = 0
-def f(a):
-  $x'[0.5] += a
-  a
-f(1)
+$x(0)
 
 # --- a shaped source: a Gaussian of area 1, so a blow of area 1 stands 1 / (w sqrt(TAU)) high
 # expect at 2000: 7
 $x = ring(period = 1)
-$x' = 0
-$x'[gauss(0.5, 0.05)] += if t < 0.001 then 1000 else 0
-floor($x[0.5])
+$x' = (if t < 0.001 then 1000 else 0) * δ(0.5, 0.05)
+floor($x(0.5))
 
 # --- ... a blow far shorter than a sweep lands whole, all the way across it
 # expect at 2000: 4
 $x = ring(period = 1)
-$x' = 0
-$x'[gauss(0.5, 0.05)] += if t < dt then 48000 else 0
-floor($x[0.55])
+$x' = (if t < dt then 48000 else 0) * δ(0.5, 0.05)
+floor($x(0.55))
 
 # --- ... and nothing lands far from it
 # expect at 2000: 0
 $x = ring(period = 1)
-$x' = 0
-$x'[gauss(0.5, 0.05)] += if t < 0.001 then 1000 else 0
-$x[0.1]
+$x' = (if t < 0.001 then 1000 else 0) * δ(0.5, 0.05)
+$x(0.1)
 
 # --- it wraps: a bump on the join shows on both sides
 # expect at 2000: 7
 $x = ring(period = 1)
-$x' = 0
-$x'[gauss(0, 0.05)] += if t < 0.001 then 1000 else 0
-floor($x[0])
+$x' = (if t < 0.001 then 1000 else 0) * δ(0, 0.05)
+floor($x(0))
 
 # --- `-=` takes away
 # expect at 2000: 0
 $x = ring(period = 1)
-$x' = 0
-$x'[gauss(0.5, 0.05)] += if t < 0.001 then 1000 else 0
-$x'[gauss(0.5, 0.05)] -= if t < 0.001 then 1000 else 0
-$x[0.5]
+$x' = (if t < 0.001 then 1000 else 0) * δ(0.5, 0.05) - (if t < 0.001 then 1000 else 0) * δ(0.5, 0.05)
+$x(0.5)
 
 # --- width 0 is the point: it lands as `$x'[p]` does, off a place as on one
 # expect at 2000: 1
 $x = ring(period = 1)
 $y = ring(period = 1)
-$x' = 0
-$y' = 0
-$x'[gauss(0.503, 0)] += if t < 0.001 then 1000 else 0
-$y'[0.503] += if t < 0.001 then 1000 else 0
-if abs($x[0.5] - $y[0.5]) < 0.000001 and $x[0.5] > 10 then 1 else 0
+$x' = (if t < 0.001 then 1000 else 0) * δ(0.503, 0)
+$y' = (if t < 0.001 then 1000 else 0) * δ(0.503)
+if abs($x(0.5) - $y(0.5)) < 0.000001 and $x(0.5) > 10 then 1 else 0
 
 # --- very wide it is flat all round, with the same blow
 # expect at 2000: 1
 $x = ring(period = 1)
-$x' = 0
-$x'[gauss(0.5, 2)] += if t < 0.00051 then 1920 else 0
-if abs($x[0.1] - 1) < 0.0001 and abs($x[0.5] - 1) < 0.0001 then 1 else 0
+$x' = (if t < 0.00051 then 1920 else 0) * δ(0.5, 2)
+if abs($x(0.1) - 1) < 0.0001 and abs($x(0.5) - 1) < 0.0001 then 1 else 0
 
 # --- where the copies give way to the series, nothing shows
 # expect at 2000: 1
 $x = ring(period = 1)
 $y = ring(period = 1)
-$x' = 0
-$y' = 0
-$x'[gauss(0.5, 0.24999)] += if t < 0.001 then 1000 else 0
-$y'[gauss(0.5, 0.25001)] += if t < 0.001 then 1000 else 0
-if abs($x[0.5] - $y[0.5]) < 0.001 then 1 else 0
+$x' = (if t < 0.001 then 1000 else 0) * δ(0.5, 0.24999)
+$y' = (if t < 0.001 then 1000 else 0) * δ(0.5, 0.25001)
+if abs($x(0.5) - $y(0.5)) < 0.001 then 1 else 0
 
 # --- erf is the integral of a Gaussian
 # expect: 0.8427007922
@@ -340,52 +349,41 @@ erf(1)
 # --- which side of the law it stands doesn't matter
 # expect at 2000: 7
 $x = ring(period = 1)
-$x'[gauss(0.5, 0.05)] += if t < 0.001 then 1000 else 0
-$x' = 0
-floor($x[0.5])
+$x' = (if t < 0.001 then 1000 else 0) * δ(0.5, 0.05)
+floor($x(0.5))
 
 # --- a blow lands where it was struck, though the centre jumps as it ends
 # expect at 2000: 7
 $x = ring(period = 1)
-$x' = 0
 let striking = t < 0.001
-$x'[gauss(if striking then 0.5 else 0.1, 0.05)] += if striking then 1000 else 0
-floor($x[0.5])
+$x' = (if striking then 1000 else 0) * δ(if striking then 0.5 else 0.1, 0.05)
+floor($x(0.5))
 
 # --- ... and nothing lands where the centre went
 # expect at 2000: 0
 $x = ring(period = 1)
-$x' = 0
 let striking = t < 0.001
-$x'[gauss(if striking then 0.5 else 0.1, 0.05)] += if striking then 1000 else 0
-$x[0.1]
+$x' = (if striking then 1000 else 0) * δ(if striking then 0.5 else 0.1, 0.05)
+$x(0.1)
 
 # --- a width held the same way
 # expect at 2000: 7
 $x = ring(period = 1)
-$x' = 0
 let striking = t < 0.001
-$x'[gauss(0.5, if striking then 0.05 else 0.3)] += if striking then 1000 else 0
-floor($x[0.5])
+$x' = (if striking then 1000 else 0) * δ(0.5, if striking then 0.05 else 0.3)
+floor($x(0.5))
 
 # --- it's a shape, so it isn't a value
-# error: is a shape
+# error: a spread source is `δ(p, width)`
 $x = ring(period = 1)
 $x' = 0
 gauss(0.5, 0.1)
 
 # --- ... nor a place to read
-# error: is a shape
+# error: a spread source is `δ(p, width)`
 $x = ring(period = 1)
 $x' = 0
-$x[gauss(0.5, 0.1)]
-
-# --- ... and a source adds
-# error: a push adds
-$x = ring(period = 1)
-$x' = 0
-$x'[gauss(0.5, 0.1)] = 1
-$x[0]
+$x(gauss(0.5, 0.1))
 
 # --- a patch's own gauss stays its own
 # expect: 3
@@ -396,73 +394,73 @@ gauss(1, 2)
 # expect at 12000: 1
 $v = ring(period = 1)
 $i = ring(period = 1)
-$v' = -slope($i)
-$i' = -slope($v)
-$v'[gauss(0.25, 0.02)] += if t < 0.001 then 1000 else 0
-if abs($v[0.5]) > abs($v[0.75]) then 1 else 0
+$i' = -∇$v
+$v' = -∇$i + (if t < 0.001 then 1000 else 0) * δ(0.25, 0.02)
+if abs($v(0.5)) > abs($v(0.75)) then 1 else 0
 
 # --- a slope needs its partner
 # error: needs its partner
 $v = ring(period = 1)
 $i = ring(period = 1)
-$v' = -slope($i)
+$v' = -∇$i
 $i' = 0
-$v[0]
+$v(0)
 
 # --- ... not itself
 # error: needs its partner
 $v = ring(period = 1)
-$v' = -slope($v)
-$v[0]
+$v' = -∇$v
+$v(0)
 
 # --- a law reads one partner
-# error: `slope` joins two fields
+# error: ∇ joins two fields
 $a = ring(period = 1)
 $b = ring(period = 1)
 $c = ring(period = 1)
-$a' = slope($b) + slope($c)
-$b' = slope($a)
-$c' = slope($a)
-$a[0]
+$a' = ∇$b + ∇$c
+$b' = ∇$a
+$c' = ∇$a
+$a(0)
 
 # --- a pair shares one period
 # error: share one period
 $v = ring(period = 1)
 $i = ring(period = 2)
-$v' = -slope($i)
-$i' = -slope($v)
-$v[0]
+$v' = -∇$i
+$i' = -∇$v
+$v(0)
 
 # --- `slope` is a law's word
 # error: is a law's word
 $v = ring(period = 1)
 $i = ring(period = 1)
-$v' = -slope($i)
-$i' = -slope($v)
-slope($v)
+$v' = -∇$i
+$i' = -∇$v
+∇$v
 
-# --- a patch's own slope, of a number, is its own
-# expect: 2
-def slope(a): a * 2
-slope(1)
+# --- slope is spelled ∇
+# error: is written ∇ now
+$v = ring(period = 1)
+$i = ring(period = 1)
+$v' = -slope($i)
+$i' = -∇$v
+$v(0)
 
 # --- a line: a pulse sent along it comes back there and back in a period
 # expect at 12000: 1
 $x = line(period = 1, ends = fixed)
 $v = line(period = 1, ends = fixed)
-$v' = slope(slope($x))
 $x' = $v
-$v'[gauss(0.25, 0.03)] += if t < 0.001 then 1000 else 0
-if abs($v[0.75]) > 1 and abs($v[0.75]) > abs($v[0.5]) * 2 then 1 else 0
+$v' = Δ$x + (if t < 0.001 then 1000 else 0) * δ(0.25, 0.03)
+if abs($v(0.75)) > 1 and abs($v(0.75)) > abs($v(0.5)) * 2 then 1 else 0
 
 # --- a fixed end holds it at 0
 # expect at 3000: 0
 $x = line(period = 1, ends = fixed)
 $v = line(period = 1, ends = fixed)
-$v' = slope(slope($x))
 $x' = $v
-$v'[gauss(0.1, 0.03)] += if t < 0.001 then 1000 else 0
-$x[0]
+$v' = Δ$x + (if t < 0.001 then 1000 else 0) * δ(0.1, 0.03)
+$x(0)
 
 # --- fixed flips a pulse coming back, free doesn't
 # expect at 24000: 1
@@ -470,62 +468,59 @@ $a = line(period = 1, ends = fixed)
 $p = line(period = 1, ends = fixed)
 $b = line(period = 1, ends = free)
 $q = line(period = 1, ends = free)
-$p' = slope(slope($a)) - $a
 $a' = $p
-$q' = slope(slope($b)) - $b
 $b' = $q
-$p'[gauss(0.5, 0.03)] += if t < 0.001 then 1000 else 0
-$q'[gauss(0.5, 0.03)] += if t < 0.001 then 1000 else 0
-if $p[0.5] < -1 and $q[0.5] > 1 then 1 else 0
+$p' = Δ$a - $a + (if t < 0.001 then 1000 else 0) * δ(0.5, 0.03)
+$q' = Δ$b - $b + (if t < 0.001 then 1000 else 0) * δ(0.5, 0.03)
+if $p(0.5) < -1 and $q(0.5) > 1 then 1 else 0
 
 # --- a line says its ends
 # error: a line says its ends
 $x = line(period = 1)
 $x' = 0
-$x[0]
+$x(0)
 
 # --- an end is fixed or free
 # error: an end is `fixed`, `free` or `matched`
 $x = line(period = 1, ends = sticky)
 $x' = 0
-$x[0]
+$x(0)
 
 # --- a ring has none
 # error: a ring has no ends
 $x = ring(period = 1, ends = fixed)
 $x' = 0
-$x[0]
+$x(0)
 
 # --- at each end of a pair one is fixed and the other free
 # error: one is fixed and the other free
 $v = line(period = 1, ends = fixed)
 $i = line(period = 1, ends = fixed)
-$v' = -slope($i)
-$i' = -slope($v)
-$v[0]
+$v' = -∇$i
+$i' = -∇$v
+$v(0)
 
 # --- a pair is on one kind of field
 # error: on one ring or line
 $v = line(period = 1, ends = free)
 $i = ring(period = 1)
-$v' = -slope($i)
-$i' = -slope($v)
-$v[0]
+$v' = -∇$i
+$i' = -∇$v
+$v(0)
 
 # --- a point past a line's end lands on the end place, and reads of a line clamp
 # expect at 2000: 1
 $x = line(period = 1, ends = free)
-$x' = 0
-$x'[1.5] += if t < 0.001 then 1000 else 0
-if $x[1] > 1 and $x[0] == 0 then 1 else 0
+$x' = (if t < 0.001 then 1000 else 0) * δ(1.5)
+if $x(1) > 1 and $x(0) == 0 then 1 else 0
 
 # --- a matched end needs to know how the field moves
 # error: a matched end takes what arrives as it moves
 $x = line(period = 1, ends = matched)
 $v = line(period = 1, ends = matched)
-$v' = slope(slope($x))
+$v' = Δ$x
 $x' = $v * 2
-$x[0]
+$x(0)
 
 # --- ... and is for one speed
 # error: a matched end is for two slopes or a pair
@@ -533,55 +528,55 @@ $d = line(period = 1, ends = matched, start = ((0, 0), (0, 0)))
 $v = line(period = 1, ends = matched, start = ((0, 0), (0, 0)))
 $v' = -curl(curl($d))
 $d' = $v
-$d[0]
+$d(0)
 
 # --- of a pair, matched is both
 # error: or both matched
 $v = line(period = 1, ends = matched)
 $i = line(period = 1, ends = free)
-$v' = -slope($i)
-$i' = -slope($v)
-$v[0]
+$v' = -∇$i
+$i' = -∇$v
+$v(0)
 
 # --- a width is of a pair
 # error: a width is of a pair
 $x = line(period = 1, ends = fixed, width = p => 1 + p)
 $v = line(period = 1, ends = fixed)
-$v' = slope(slope($x))
+$v' = Δ$x
 $x' = $v
-$x[0]
+$x(0)
 
 # --- it says itself along the line
 # error: a width says itself along the line
 $p = line(period = 1, ends = free, width = 2)
 $u = line(period = 1, ends = fixed)
-$p' = -slope($u)
-$u' = -slope($p)
-$p[0]
+$p' = -∇$u
+$u' = -∇$p
+$p(0)
 
 # --- only the pressure says it
 # error: the one that is pressure says its width
 $p = line(period = 1, ends = free, width = p => 1 + p)
 $u = line(period = 1, ends = fixed, width = p => 1 + p)
-$p' = -slope($u)
-$u' = -slope($p)
-$p[0]
+$p' = -∇$u
+$u' = -∇$p
+$p(0)
 
 # --- a ring is one width
 # error: a ring has one width
 $p = ring(period = 1, width = p => 1 + p)
 $u = ring(period = 1)
-$p' = -slope($u)
-$u' = -slope($p)
-$p[0]
+$p' = -∇$u
+$u' = -∇$p
+$p(0)
 
 # --- matched is for one width
 # error: a matched end is for a line of one width
 $p = line(period = 1, ends = matched, width = p => 1 + p)
 $u = line(period = 1, ends = matched)
-$p' = -slope($u)
-$u' = -slope($p)
-$p[0]
+$p' = -∇$u
+$u' = -∇$p
+$p(0)
 
 # --- a law on plain state: a rate a second, as it has no round
 # expect at 23999: 0.5
@@ -635,36 +630,36 @@ sum(2, n =>
   $y)
 
 # --- concentration is slope of slope now
-# error: is `-slope(slope($x))` now
+# error: is `-Δ$x` now
 $x = ring(period = 1)
 $v = ring(period = 1)
 $v' = concentration($x)
 $x' = $v
-$x[0]
+$x(0)
 
 # --- slopes come one, two or four
 # error: slopes come one, for a pair
 $x = ring(period = 1)
 $v = ring(period = 1)
-$v' = slope(slope(slope($x)))
+$v' = ∇Δ$x
 $x' = $v
-$x[0]
+$x(0)
 
 # --- four slopes are a bar: a line
 # error: four slopes are a bar or a plate
 $x = ring(period = 1)
 $v = ring(period = 1)
-$v' = -slope(slope(slope(slope($x))))
+$v' = -ΔΔ$x
 $x' = $v
-$x[0]
+$x(0)
 
 # --- ... whose ends are fixed or free
 # error: four slopes are a bar or a plate
 $x = line(period = 1, ends = matched)
 $v = line(period = 1, ends = matched)
-$v' = -slope(slope(slope(slope($x))))
+$v' = -ΔΔ$x
 $x' = $v
-$x[0]
+$x(0)
 
 # --- a slope with a name is the words, in every law
 # expect at 12000: 1
@@ -672,14 +667,12 @@ $x = line(period = 1, ends = fixed)
 $v = line(period = 1, ends = fixed)
 $y = line(period = 1, ends = fixed)
 $w = line(period = 1, ends = fixed)
-let pull = slope(slope($x))
-$v' = pull
+let pull = Δ$x
 $x' = $v
-$w' = slope(slope($y))
 $y' = $w
-$v'[gauss(0.25, 0.03)] += if t < 0.001 then 1000 else 0
-$w'[gauss(0.25, 0.03)] += if t < 0.001 then 1000 else 0
-if $v[0.75] == $w[0.75] and abs($v[0.75]) > 1 then 1 else 0
+$v' = pull + (if t < 0.001 then 1000 else 0) * δ(0.25, 0.03)
+$w' = Δ$y + (if t < 0.001 then 1000 else 0) * δ(0.25, 0.03)
+if $v(0.75) == $w(0.75) and abs($v(0.75)) > 1 then 1 else 0
 
 # --- ... and a slope of a named slope is a slope more
 # expect at 2400: 1
@@ -687,96 +680,91 @@ $x = line(period = 1, ends = free)
 $v = line(period = 1, ends = free)
 $y = line(period = 1, ends = free)
 $w = line(period = 1, ends = free)
-let curve = slope(slope($x))
-let bend = slope(slope(curve))
-$v' = -bend
+let curve = Δ$x
+let bend = ∇(∇curve)
 $x' = $v
-$w' = -slope(slope(slope(slope($y))))
 $y' = $w
-$v'[gauss(0.3, 0.05)] += if t < 0.001 then 100 else 0
-$w'[gauss(0.3, 0.05)] += if t < 0.001 then 100 else 0
-if $v[0.7] == $w[0.7] and $v[0.3] != 0 then 1 else 0
+$v' = -bend + (if t < 0.001 then 100 else 0) * δ(0.3, 0.05)
+$w' = -ΔΔ$y + (if t < 0.001 then 100 else 0) * δ(0.3, 0.05)
+if $v(0.7) == $w(0.7) and $v(0.3) != 0 then 1 else 0
 
 # --- a sheet says its edge
 # error: a sheet says its edge
 $x = sheet(period = 1)
 $x' = 0
-$x[(0, 0)]
+$x((0, 0))
 
 # --- ... all round
 # error: a sheet says its edge
 $x = sheet(period = 1, ends = [fixed, free])
 $x' = 0
-$x[(0, 0)]
+$x((0, 0))
 
 # --- a point on a sheet is one value, and a blow lands there
 # expect at 3000: 1
 $x = sheet(period = 1, ends = fixed)
-$x' = 0
-$x'[gauss((0.3, 0.6), 0.05)] += if t < 0.001 then 1000 else 0
-if $x[(0.3, 0.6)] > 10 * abs($x[(0.7, 0.2)]) and $x[(0.3, 0.6)] > 1 then 1 else 0
+$x' = (if t < 0.001 then 1000 else 0) * δ((0.3, 0.6), 0.05)
+if $x((0.3, 0.6)) > 10 * abs($x((0.7, 0.2))) and $x((0.3, 0.6)) > 1 then 1 else 0
 
 # --- one slope has no direction on a sheet
-# error: one slope needs a direction
+# error: one slope (∇) needs a direction
 $v = sheet(period = 1, ends = fixed)
 $i = sheet(period = 1, ends = free)
-$v' = -slope($i)
-$i' = -slope($v)
-$v[(0, 0)]
+$v' = -∇$i
+$i' = -∇$v
+$v((0, 0))
 
 # --- four slopes on a sheet are a plate, pinned
 # error: four slopes are a bar or a plate
 $x = sheet(period = 1, ends = free)
 $v = sheet(period = 1, ends = free)
-$v' = -slope(slope(slope(slope($x))))
+$v' = -ΔΔ$x
 $x' = $v
-$x[(0, 0)]
+$x((0, 0))
 
 # --- a line's period can move, if it is a pair of equal loss: its waves are exact
 # expect at 3000: 1
 let note = 2 + 0 * midi_cc(20)
 $v = line(period = 1 / note, ends = fixed)
 $i = line(period = 1 / note, ends = free)
-$v' = -slope($i)
-$i' = -slope($v)
-$v'[0.25] += if t < 0.002 then 100 else 0
-if abs($v[0.5]) > 0.1 and $v[0.9] == 0 then 1 else 0
+$i' = -∇$v
+$v' = -∇$i + (if t < 0.002 then 100 else 0) * δ(0.25)
+if abs($v(0.5)) > 0.1 and $v(0.9) == 0 then 1 else 0
 
 # --- a wave doesn't stay two travelling waves here
 # error: a line whose period moves is a pair
 let note = 2 + 0 * midi_cc(20)
 $x = line(period = 1 / note, ends = fixed)
 $v = line(period = 1 / note, ends = fixed)
-$v' = slope(slope($x))
+$v' = Δ$x
 $x' = $v
-$x[0.5]
+$x(0.5)
 
 # --- nor does a pair out of balance
 # error: keeps its losses equal
 let note = 2 + 0 * midi_cc(20)
 $v = line(period = 1 / note, ends = fixed)
 $i = line(period = 1 / note, ends = free)
-$v' = -slope($i) - $v * 0.1
-$i' = -slope($v)
-$v[0.5]
+$v' = -∇$i - $v * 0.1
+$i' = -∇$v
+$v(0.5)
 
 # --- a shaped blow is a shorter one, here
 # error: a line whose period moves takes a point
 let note = 2 + 0 * midi_cc(20)
 $v = line(period = 1 / note, ends = fixed)
 $i = line(period = 1 / note, ends = free)
-$v' = -slope($i)
-$i' = -slope($v)
-$v'[gauss(0.5, 0.1)] += 1
-$v[0.5]
+$i' = -∇$v
+$v' = -∇$i + 1 * δ(0.5, 0.1)
+$v(0.5)
 
 # --- read at a point
-# error: is read at a point
+# error: is read at a place
 let note = 2 + 0 * midi_cc(20)
 $v = line(period = 1 / note, ends = fixed)
 $i = line(period = 1 / note, ends = free)
-$v' = -slope($i)
-$i' = -slope($v)
+$v' = -∇$i
+$i' = -∇$v
 $v
 
 # --- a def can hold a field, and each call is its own
@@ -784,10 +772,9 @@ $v
 def string(note, at):
   $v = line(period = 1 / note, ends = fixed)
   $i = line(period = 1 / note, ends = free)
-  $v' = -slope($i)
-  $i' = -slope($v)
-  $v'[at] += if t < 0.002 then 100 else 0
-  $v[0.5]
+  $i' = -∇$v
+  $v' = -∇$i + (if t < 0.002 then 100 else 0) * δ(at)
+  $v(0.5)
 let a = string(2 + 0 * midi_cc(20), 0.25)
 let b = string(2 + 0 * midi_cc(20), 0.9)
 if abs(a) > 0.1 and b == 0 then 1 else 0
@@ -797,10 +784,9 @@ if abs(a) > 0.1 and b == 0 then 1 else 0
 def string(note, at):
   $v = line(period = 1 / note, ends = fixed)
   $i = line(period = 1 / note, ends = free)
-  $v' = -slope($i)
-  $i' = -slope($v)
-  $v'[at] += if t < 0.002 then 100 else 0
-  $v[0.5]
+  $i' = -∇$v
+  $v' = -∇$i + (if t < 0.002 then 100 else 0) * δ(at)
+  $v(0.5)
 let one = string(2 + 0 * midi_cc(20), 0.25)
 if abs(sum(2, n => string(2 + 0 * midi_cc(20), 0.25)) - one * 2) < 0.000001 and abs(one) > 0.1 then 1 else 0
 
@@ -809,9 +795,9 @@ if abs(sum(2, n => string(2 + 0 * midi_cc(20), 0.25)) - one * 2) < 0.000001 and 
 def string(note):
   $v = line(period = 1 / note, ends = fixed)
   $i = line(period = 1 / note, ends = free)
-  $v' = -slope($i)
-  $i' = -slope($v)
-  $v[0.5]
+  $v' = -∇$i
+  $i' = -∇$v
+  $v(0.5)
 play a:
   string(2)
 a
@@ -821,9 +807,9 @@ a
 def string(note):
   $v = line(period = 1 / note, ends = fixed)
   $i = line(period = 1 / note, ends = free)
-  $v' = -slope($i)
-  $i' = -slope($v)
-  $v[0.5]
+  $v' = -∇$i
+  $i' = -∇$v
+  $v(0.5)
 let f = n => string(n)
 f(2)
 
@@ -834,10 +820,8 @@ $v = line(period = 1 / 110, ends = fixed)
 $y = line(period = 1 / 110, ends = fixed)
 $w = line(period = 1 / 110, ends = fixed)
 let back = $x * 3000
-$v' = slope(slope($x)) - back
 $x' = $v
-$w' = slope(slope($y)) - $y * 3000
 $y' = $w
-$v'[gauss(0.3, 0.05)] += if t < 0.0005 then 2 else 0
-$w'[gauss(0.3, 0.05)] += if t < 0.0005 then 2 else 0
-if $x[0.13] == $y[0.13] and $x[0.13] != 0 then 1 else 0
+$v' = Δ$x - back + (if t < 0.0005 then 2 else 0) * δ(0.3, 0.05)
+$w' = Δ$y - $y * 3000 + (if t < 0.0005 then 2 else 0) * δ(0.3, 0.05)
+if $x(0.13) == $y(0.13) and $x(0.13) != 0 then 1 else 0

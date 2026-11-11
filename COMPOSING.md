@@ -1177,23 +1177,26 @@ twentieth of stepping them all every sample.
 ```
 $x = ring(period = 1.66)                       # each line is at each place,
 $v = ring(period = 1.66)                       # as a line on [l, r] is
-$v' = slope(slope($x)) - $v * loss
+$v' = Δ$x - $v * loss + force * δ(where)       # a source, a force at a place
 $x' = $v
-$v'[where] += force                            # a source, at a point
-$v'[gauss(where, 0.02)] += force               # ... or with a shape: the same blow, spread
-let height = $x[phasor(note)]                  # read at a point
+let height = $x(phasor(note))                  # the field at a place
 ```
 
 Say what the medium does, a push going round in 1.66 s, and the engine
 picks the places. `$x'` is x's rate, so those two lines are the equations
 themselves, in either order, and rates are a round: the ring is its own
-clock.
+clock. They are written as printed: `∇` (del) is how steep a field is, `Δ`
+(del squared) how bent, `force * δ(p)` a force at p, and `δ(p, width)` the
+same blow, spread. `$x(p)` reads the field at p, a fraction of the way along:
+a field is a function of place. Name a force before the law when it is long,
+`let blow = if age < stroke then 1.32 / stroke else 0`, so the law stays one
+line you can read.
 
 `patches/aether_ring.aither` is the same with a direction at each place,
 so a squeeze and a twist travel at their own speeds, from one product.
 
 `patches/heaviside_line.aither` is a pair, voltage and current, each changed
-by the other's `slope`: Heaviside's telegraph line. Its two losses in balance
+by the other's slope, `$v' = -∇$i`, `$i' = -∇$v`: Heaviside's telegraph line. Its two losses in balance
 keep a pulse's shape as it dies, so every harmonic fades together.
 
 `line(period = T, ends = fixed)` is a ring opened up, each end `fixed` or
@@ -1206,21 +1209,21 @@ A short field holds a note, the engine stepping several places a sample, and
 a bore of two laws and a width, played by `dho` lips reading and pushing it
 at one point, so a field and the rest of the language mix freely.
 
-**Slopes compose, and it helps to name them.** `slope($x)` is how steep a field
-is. Take it twice and you have how bent it is, which is what a string pulls
-against. Take it four times and you have how its bending changes, which is what
-a bar pushes back with. So one law, three instruments:
+**Slopes compose, and it helps to name them.** `∇$x` is how steep a field
+is. Take it twice, `Δ$x`, and you have how bent it is, which is what a string
+pulls against. Take it four times, `ΔΔ$x`, and you have how its bending changes,
+which is what a bar pushes back with. So one law, three instruments:
 
 ```
-let curve = slope(slope($x))        # how bent it is here
+let curve = Δ$x                     # how bent it is here
 $v' = curve                         # a string: it pulls straight
 
-let bend = slope(slope(curve))      # how its bending changes
+let bend = Δcurve                   # how its bending changes
 $v' = -bend                         # a bar: it resists bending
 ```
 
-Names are the way to read these: `-slope(slope(slope(slope($x))))` is correct
-and tells you nothing. Pick the word for what it does in your instrument: `pull`
+Names are the way to read these: `-ΔΔ$x` is correct and says only the
+operation. Pick the word for what it does in your instrument: `pull`
 on a string, `bend` on a bar. `patches/field_bar.aither`.
 
 A pair's period can move, so a line can be slid and played

@@ -27,9 +27,7 @@ let loss = 3 * midi_cc(22)                                 # what it loses, a ro
 $x = line(period = 5, ends = [fixed, matched])             # there and back in 5 s
 $v = line(period = 5, ends = [fixed, matched])
 
-let pull = slope(slope($x))                                # how far its neighbours stand above it
-$v' = pull - $v * loss
-$x' = $v
+let pull = Δ$x                                             # how far its neighbours stand above it
 
 # ---------------------------------------------------------------- the pluck
 
@@ -45,11 +43,13 @@ $where = ($where + (pad_a + pad_b) * golden) mod 1
 let stroke = 0.003                                         # how long a blow takes
 let way = if down < up then -1 else 1
 let landed = 0.2 + 0.6 * (if own < stroke then (floor(sweep / 10) * golden) mod 1 else $where)
-$x'[gauss(landed, 0.04)] += if min(up, down) < stroke then way * 0.4 / stroke else 0
+let blow = if min(up, down) < stroke then way * 0.4 / stroke else 0
+$v' = pull - $v * loss
+$x' = $v + blow * δ(landed, 0.04)
 
 # ---------------------------------------------------------------- reading
 
 # Across and back at the note: the sweep, and the line where it is.
 let note = 110 * pow(2, floor(midi_cc(21) * 25) / 12)
 let along = 1 - abs(2 * phasor(note) - 1)
-[(2 * along - 1) * 0.7, $x[along]]
+[(2 * along - 1) * 0.7, $x(along)]

@@ -29,9 +29,7 @@ let soften = 0.0005                                        # ... and more the fi
 $x = sheet(period = 2.5, ends = fixed)
 $v = sheet(period = 2.5, ends = fixed)
 
-let pull = slope(slope($x))                                # how far its neighbours stand above it
-$v' = pull - $v * loss + slope(slope($v)) * soften
-$x' = $v
+let pull = Δ$x                                             # how far its neighbours stand above it
 
 # ---------------------------------------------------------------- the rain
 
@@ -42,7 +40,9 @@ $drops = 0.0
 $drops = $drops + pad + (if own < dt then 1 else 0)
 let stroke = 0.004
 let fall = (0.15 + 0.7 * (($drops * 0.381966) mod 1), 0.15 + 0.7 * (($drops * 0.754878) mod 1))
-$x'[gauss(fall, 0.04)] += if age < stroke then 0.014 / stroke else 0
+let drop = if age < stroke then 0.014 / stroke else 0
+$v' = pull - $v * loss + Δ$v * soften
+$x' = $v + drop * δ(fall, 0.04)
 
 # ---------------------------------------------------------------- reading
 
@@ -51,4 +51,4 @@ $x'[gauss(fall, 0.04)] += if age < stroke then 0.014 / stroke else 0
 let note = 110 * pow(2, floor(midi_cc(21) * 25) / 12)
 let turn = spin(note)
 let wide = 0.2 + 0.25 * midi_cc(20)
-turn * (0.45 + $x[turn * wide + (0.5, 0.5)])
+turn * (0.45 + $x(turn * wide + (0.5, 0.5)))

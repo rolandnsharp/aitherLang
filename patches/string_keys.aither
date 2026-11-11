@@ -53,30 +53,27 @@ def string(voice, root, blow, speed, bridge):
   let loss = if held > 0 then 0.004 else 0.08              # what it loses, a round: felt when let go
   $v = line(period = 1 / note, ends = fixed)
   $i = line(period = 1 / note, ends = free)
-  $v' = -slope($i) - $v * loss
-  $i' = -slope($v) - $i * loss
   let shed = TAU * note * (1 + speed * 7)                    # the wind's vortices, against the note
-  let moving = $v[0.37]
+  let moving = $v(0.37)
   $q = 0.1
   $r = 0
   $r' = -$q * shed ^ 2 + shed * 0.1 * (1 - $q ^ 2) * $r + moving * 0.5 * shed ^ 2
   $q' = $r
-  $v'[0.37] += $q * 0.04 * blow                             # lift, growing with the blow
+  let lift = $q * 0.04 * blow                              # the wake's push, growing with the blow
   let age = since(midi_voice_on(voice))
-  $v'[0.27] += if age < 0.0005 and held > 0 then 0.0012 / 0.0005 else 0
-  $v'[0.13] += bridge                                       # the bridge, felt where it feels the string
-  $v'[0.71] += bridge
-  [$v[0.13], $v[0.71]]
+  let pluck = if age < 0.0005 and held > 0 then 0.0012 / 0.0005 else 0
+  # the wake lifts it, a key plucks it, and the bridge moves it where it feels it
+  $v' = -∇$i - $v * loss + lift * δ(0.37) + pluck * δ(0.27) + bridge * δ(0.13) + bridge * δ(0.71)
+  $i' = -∇$v - $i * loss
+  [$v(0.13), $v(0.71)]
 
 # A string nobody plays: tuned, open, moved by the bridge alone.
 def open_string(note, bridge):
   $v = line(period = 1 / note, ends = fixed)
   $i = line(period = 1 / note, ends = free)
-  $v' = -slope($i) - $v * 0.003
-  $i' = -slope($v) - $i * 0.003
-  $v'[0.13] += bridge
-  $v'[0.71] += bridge
-  [$v[0.13], $v[0.71]]
+  $v' = -∇$i - $v * 0.003 + bridge * δ(0.13) + bridge * δ(0.71)
+  $i' = -∇$v - $i * 0.003
+  [$v(0.13), $v(0.71)]
 
 let open = [0, 2, 4, 7, 9]                                 # A C E A C under the strings you play
 let played = sum(6, n => string(n, root, blow, speed, bridge))

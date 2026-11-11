@@ -31,9 +31,6 @@ let soften = 0.001                                         # ... and more the hi
 $p = line(period = 1 / 97, ends = [free, fixed], width = p => 0.03 + 0.06 * p ^ 3)
 $u = line(period = 1 / 97, ends = [fixed, free])
 
-$p' = -slope($u) - $p * wall + slope(slope($p)) * soften
-$u' = -slope($p) - $u * wall
-
 # ---------------------------------------------------------------- the lips
 
 let cycle = phasor(1 / 5.3)                                # a breath in, every 5.3 s
@@ -44,19 +41,21 @@ $drop = 0.0                                                # the pressure across
 let lip_f = 60 + 30 * midi_cc(21)                          # how hard the lips are held
 let (lip, _) = dho($drop * 0.63 * (TAU * lip_f) ^ 2, lip_f, 0.1)
 let gap = clamp(0.05 + lip, 0, 1)
-$p'[0] += gap * (if $drop >= 0 then sqrt($drop) else -sqrt(-$drop)) * 0.5
-$drop = lp1(mouth - $p[0], 840)
+let lips = gap * (if $drop >= 0 then sqrt($drop) else -sqrt(-$drop)) * 0.5
+$p' = -∇$u - $p * wall + Δ$p * soften + lips * δ(0)
+$u' = -∇$p - $u * wall
+$drop = lp1(mouth - $p(0), 840)
 
 # ---------------------------------------------------------------- the mouth
 
 def formant(x, f, res): bpf(x, f, res) * (2 * (1 - res))
 
 let jaw = midi_cc(20) + 0.3 * (0.5 + 0.5 * sin(TAU * phasor(0.31)))
-let bell = hpf($u[1] * 500, 40, 0.7)
+let bell = hpf($u(1) * 500, 40, 0.7)
 let f1 = slew(320 + jaw * 420, 0.02)
 let f2 = slew(850 + jaw * 350, 0.02)
 let f3 = slew(2300 + jaw * 300, 0.02)
 let tract = formant(bell, f1, 0.93) + formant(bell, f2, 0.94) * 0.7 + formant(bell, f3, 0.95) * 0.35
 let breath = (noise() |> bpf(1800, 0.8)) * gulp * 0.03
 
-[(tract * 0.9 + bell * 0.35 + breath) |> tanh, ($p[0] * 0.5) |> tanh]
+[(tract * 0.9 + bell * 0.35 + breath) |> tanh, ($p(0) * 0.5) |> tanh]

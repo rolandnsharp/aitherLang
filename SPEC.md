@@ -710,12 +710,30 @@ happens at one place, and arithmetic is at each place:
 $x = ring(period = 1.66)                       # a push goes round in 1.66 s
 $v = ring(period = 1.66)
 
-$v' = slope(slope($x)) - $x * held - $v * loss
+$v' = Δ$x - $x * held - $v * loss + force * δ(where)
 $x' = $v
 
-$v'[where] += force                            # a source, at a point
-let height = $x[phasor(note)]                  # read at a point
+let height = $x(phasor(note))                  # the field at a place
 ```
+
+It is written as the equations are printed, in three symbols and a call:
+
+| Written | Said | What it is |
+|---------|------|------------|
+| `∇$i` | del i | how steep the field is here: one slope |
+| `Δ$x` | del squared x | how bent it is: two slopes, the Laplacian |
+| `force * δ(p)` | delta at p | a force at one place, a term of a law: a source |
+| `$x(p)` | x at p | the field at p: a field is a function of place, and this calls it |
+
+`∇` and `Δ` bind tighter than anything but a call: `-∇$i * k` is
+`-((∇$i) * k)`, and `ΔΔ$x` is four slopes. Of a field only: `∇$v(0.3)`, the
+slope of a number, is an error. `δ` stands only in a law, multiplying a term
+of it; there is no other way to push a ring, line or sheet, and no `$v'[p] += ...`. A
+place `p` is a fraction of the field, 0 to 1 from end to end (once round on
+a ring, and `(p, q)` on a sheet), as a field has a period, not a length: a
+pluck at 1/7 of a string, its node, where the 7th harmonic isn't. Brackets
+are for arrays: `$x[p]` on a field is an error, and so is `$a(i)` on an
+array that isn't one. The symbols are UTF-8; aither's names stay ASCII.
 
 Inside a field there is no here and no now, only what changes and what
 it touches (notes/nabla-and-medium-2026-11-06.md). **The patch says what
@@ -743,10 +761,10 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   free end with a dashpot, and needs the law `$x' = $v` to know what moves;
   on a pair both fields are `matched` there. About 2% of a pulse comes back,
   -35 dB, and -26 dB for one a few places wide, which is the grain. It is
-  matched to the line as declared: `slope(slope($x)) * firm` moves the
+  matched to the line as declared: `Δ$x * firm` moves the
   speed and not the match, a `held` is a line no end can match, and a pair
-  matches `$v' = -slope($i)`, `$i' = -slope($v)`, as written with the minus.
-  It works with `slope(slope($x))` and pairs, not the squeeze and twist, which
+  matches `$v' = -∇$i`, `$i' = -∇$v`, as written with the minus.
+  It works with `Δ$x` and pairs, not the squeeze and twist, which
   go at two speeds.
 - **`width = p => ...` gives a pair a shape**: how wide the line is at p, 0
   to 1 along it, stated where the line is, so a where stays out of the law.
@@ -759,22 +777,22 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   against theory's 1.82, 3.67, 5.54, 7.45. Only a pair has one, and a
   `matched` end is for a line of one width.
 - **A line's period can move**: `line(period = 1 / note, ends = fixed)`, with
-  any signal for `note`. Such a line is a pair of equal loss, `$v' = -slope($i)
-  - $v * loss`, `$i' = -slope($v) - $i * loss`, and anything else is an error,
+  any signal for `note`. Such a line is a pair of equal loss, `$v' = -∇$i
+  - $v * loss`, `$i' = -∇$v - $i * loss`, and anything else is an error,
   as only that stays two travelling waves. The engine holds it as those, d'Alembert's
   solution, each a delay, so it has no places: its partials are exact, up to
   a period of 2.7 s, and it costs about a tenth of a uConsole core. Held still
   it matches the same line on places in level, where the places run flat at the
-  top. Ends do as they do; a `gauss` is an error, as a shorter blow at a
-  point is a sharper one; and it is read at a point, `$v[p]`, not bare. Its
+  top. Ends do as they do; a spread `δ(p, width)` is an error, as a shorter blow at a
+  point is a sharper one; and it is read at a place, `$v(p)`, not bare. Its
   losses have to be the same expression. Moved fast, the highs dull a little.
 - **`sheet(period = T, ends = fixed)` is the same field on a surface**: a
   square, `ends` one word for its whole edge, `fixed` or `free`. Two slopes
   are how far the neighbours all round stand above this place, so the law is
   a string's, and four are a plate, pinned, so `fixed` only. One slope has no
   direction here, and is an error. A point on it is one value, `(p, q)`, each
-  0 to 1, so `$x[(0.3, 0.6)]` reads, `$v'[gauss((p, q), width)] += force`
-  strikes, and reading round a circle is `$x[spin(note) * 0.3 + (0.5, 0.5)]`.
+  0 to 1, so `$x((0.3, 0.6))` reads, a term `force * δ((p, q), width)`
+  strikes, and reading round a circle is `$x(spin(note) * 0.3 + (0.5, 0.5))`.
   T is the first mode's period: 0.500 Hz at 2 s and 99.8 Hz at `1 / 100`, the
   next at 0.790 and 157.4 where theory has 0.79 and 158; a plate 99.0 and 241.5
   of 100 and 250. It is as fine as a place a sample allows, about 31 a side at
@@ -782,23 +800,21 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   at 12 a side, about a third of a uConsole core at 100 Hz, and a plate 8. The
   period has to be plain numbers and file-level lets.
 - **Two slopes of a field's own motion lose more the higher it is**:
-  `$v' = ... + slope(slope($v)) * soften`, or on a pair `$p' = ... +
-  slope(slope($p)) * soften`. `- $v * loss` takes the same from every mode;
+  `$v' = ... + Δ$v * soften`, or on a pair `$p' = ... + Δ$p * soften`. `- $v * loss` takes the same from every mode;
   this takes more from each mode up, as a real bar or pipe does. On
   `field_bar` a `soften` of 0.0001 gives its first three modes 27, 44 and 64
   dB a second, where `loss` alone gives them 11.5 each. It is a small number,
   and too much goes unstable, with no warning: on that bar past about 0.1, on
   `field_didge`'s bore past about 0.003. A law smoothing itself doesn't change
   the order laws step in.
-- **Four slopes are a bar**: `$v' = -slope(slope(slope(slope($x))))`, `$x'
-  = $v`. A `fixed` end is pinned, a `free` one is free to bend, and `period`
+- **Four slopes are a bar**: `$v' = -ΔΔ$x`, `$x' = $v`. A `fixed` end is pinned, a `free` one is free to bend, and `period`
   is the first mode's: 220 Hz at `1 / 220`, whichever ends. The modes come
   of the law: pinned 1 : 3.9, free 1 : 2.7 : 5.1 at 220 Hz, nearer the
   textbook's 2.76 and 5.40 the slower the bar, as a short one has few
   places: its highest mode, not a crossing, sets the step, and that sets
   how many. A free bar drifts as it's struck, so read `$v`, or hold it. A
   multiplier on the word moves the pitch and can go unstable. About a
-  quarter of a uConsole core at 220 Hz, and more for a `gauss`. The period
+  quarter of a uConsole core at 220 Hz, and more for a spread source. The period
   has to be plain numbers and file-level lets.
 - A bare `$x` is the field at this place, and `$x = ...` stores there. A
   later line at the place sees what was stored; a neighbour sees the last
@@ -817,13 +833,13 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   last, on the rates just found: force before motion. By hand one order
   of a wave's two lines rings and the other blows up; a law can't get this
   wrong.
-- **`slope($i)` makes a pair**: two fields, each changed by the other's
+- **`∇$i` makes a pair**: two fields, each changed by the other's
   slope, as voltage and current on a line are, and Heaviside's equations
   are the laws themselves:
 
   ```
-  $v' = -slope($i) - $v * leak
-  $i' = -slope($v) - $i * resist
+  $v' = -∇$i - $v * leak
+  $i' = -∇$v - $i * resist
   ```
 
   A pair steps staggered, the second declared a place behind the first, so
@@ -844,36 +860,36 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   stepping as many a sample as that needs, so `line(period = 1 / 110, ends
   = fixed)` holds a note: 110 Hz, its third harmonic 329 Hz. The patch says
   nothing different. It costs: about 11 places a sample there, a tenth of a
-  uConsole core for the law, and more for a shaped source; a shorter period
+  uConsole core for the law, and more for a spread source; a shorter period
   costs more. A push then goes half a place a step, so only four times
   stiffer is safe. The period has to be plain numbers and file-level lets
   for the engine to see it; anything else stays at a place a sample.
-**Slopes compose.** `slope` is the one word for reaching a neighbour: how much
-a field changes from here to the next place. Taken again it is how much *that*
-changes, and each slope says something physical:
+**Slopes compose.** `∇` is the one way to reach a neighbour: how much a field
+changes from here to the next place. Taken again it is how much *that* changes,
+`Δ`, and each says something physical:
 
 | Slopes | Written | What it is | What it makes |
 |--------|---------|------------|---------------|
-| 1 | `slope($i)` | how steep the field is here | a pair: voltage and current, pressure and flow |
-| 2 | `slope(slope($x))` | how bent it is: how far its neighbours stand above it | a wave: a string, a ring, a membrane |
-| 4 | `slope(slope(slope(slope($x))))` | how its bending changes | stiffness: a bar, a plate |
+| 1 | `∇$i` | how steep the field is here | a pair: voltage and current, pressure and flow |
+| 2 | `Δ$x` | how bent it is: how far its neighbours stand above it | a wave: a string, a ring, a membrane |
+| 4 | `ΔΔ$x` | how its bending changes | stiffness: a bar, a plate |
 
 A string pulls towards straight, so its force is its bend, two slopes. A bar
 resists being bent, so its force is how the bend changes, four. That is the only
 difference in their laws. Slopes come in ones, twos and fours: one lands between
 places, so it needs a partner stepping there; two and four land back on them,
-so a field can read itself. Name them, as a name reads better than the
-brackets:
+so a field can read itself (`∇∇$x` is `Δ$x`, which is how to write it). Name
+them, as a name says what they are in your instrument:
 
 ```
-let curve = slope(slope($x))        # how bent it is here
-let bend = slope(slope(curve))      # how its bending changes
+let curve = Δ$x                     # how bent it is here
+let bend = Δcurve                   # how its bending changes
 $v' = -bend - $v * loss
 $x' = $v
 ```
 
 A name here stands for the words, not a value: a law happens at every place, so
-`curve` goes into the law as if written there, and `slope(curve)` is one slope
+`curve` goes into the law as if written there, and `∇curve` is one slope
 more. A slope with a name is for laws: anywhere else it is an unknown name. A
 let that reads a field bare, `let back = $x * held`, goes into a law the same
 way, being what it says at each place, and stays a let everywhere else. Two
@@ -884,46 +900,46 @@ slopes of a field's own motion are a loss that grows with pitch, below.
 
   | Word                          | What it is                               |
   |-------------------------------|------------------------------------------|
-  | `slope(slope($x))`            | a wave's: how much the neighbours stand above this place. Two slopes land back on the places, so a field can read itself |
-  | `slope(slope(slope(slope($x))))` | a bar's bending: four slopes, on a `line` |
-  | `slope(convergence($d))`      | of a field of directions: the slope of its squeeze, the scalar part of nabla |
+  | `Δ$x`                         | a wave's: how much the neighbours stand above this place. Two slopes land back on the places, so a field can read itself |
+  | `ΔΔ$x`                        | a bar's bending: four slopes, on a `line` |
+  | `∇(convergence($d))`          | of a field of directions: the slope of its squeeze, the scalar part of nabla |
   | `curl(curl($d))`              | ... the curl of its twist, the vector part |
-  | `slope($i)`                   | of one of a pair: how it changes along the ring, a half place from here |
+  | `∇$i`                         | of one of a pair: how it changes along the ring, a half place from here |
 
   Along a line nabla is Hamilton's `i` times a difference, a step ahead
   and a step behind. Two speeds are one period and a ratio: `curl(curl($d))
   * 0.17`, slower by its square root.
-- From outside a field has two touch points. `$x[p]` reads at a point, p
-  from 0 to 1 round, between places. **`$v'[p] += force` is a source**: it
-  adds to v's rate at that point, the term F δ(s − p) on the end of the
-  equation, kept out of the law as a where belongs at the edge. It lands
-  at the nearest place when the field reaches it, and is sized as a delta
-  should be. Sources sum, in any order; `-=` takes away.
-- **`$v'[gauss(p, width)] += force` is a source with a shape**: a Gaussian
-  of area 1 and standard deviation `width`, in rounds, wrapped round the
-  ring, its copies summed. A place is a stretch of ring, so each holds the
-  curve's integral over that stretch, and the places sum to 1 at any width
-  and any centre: a wider blow is the same blow, spread, out to flat all
-  round the ring, and as `width` goes to 0 it all falls in the nearest
-  place, so `gauss(p, 0)` lands as `$v'[p]` does. The width you write is the
-  width computed, with no floor; a ring's resolution is a place, 1/N of a
-  round, and a bump narrower than that sits in one place. The ring reaches a
-  place once a sweep, so the engine keeps the running total of the force
-  and gives each place all that came since it last passed: a blow shorter
-  than a sweep lands whole at any rate, whichever side of the law the line
-  stands. The shape is held as the force stops, so all of a blow lands
-  where it was struck, even if the centre jumps the moment it ends. While
-  force is flowing the shape is laid where the centre is at each visit, so
-  a centre moving fast against a sweep shears the bump and changes its
-  total, and a new blow within a sweep of the last, at a new place, carries
-  what hadn't landed there with it. `gauss` means this only in
-  a source's brackets; anywhere else it is an error, unless the patch has
-  its own `gauss`.
-- The rest of `[ ]` on a ring: `$v'[p] = ...` is an
-  error, as it would claim to replace the law there, and so are `$v[p] =
-  ...` and `$v[p] += ...` on a ring, a source on a field with no law, and
-  reading one. This is the one way `[ ]` differs on a field: p is how far
-  round, not a place number.
+- From outside a field has two touch points. `$x(p)` reads it at p, between
+  places. **`force * δ(p)` is a source**: a term of v's law, F δ(s − p), as
+  the equation is printed, so a force is said where the field's change is.
+  Take it away with `-`; it may stand anywhere among the law's terms, and a
+  law may have several, each its own. A term is the δ times what it
+  multiplies (`*`, a numerator, a sign), one δ to a term, and its force can
+  read lets and state the law can. It lands at the nearest place when the
+  field reaches it, and is sized as a delta should be. However the laws of
+  a block are written, their sources are pushed after the last of them, so
+  the order they're written in still means nothing.
+- **`force * δ(p, width)` is a source spread**: a Gaussian of area 1 and
+  standard deviation `width`, in rounds, wrapped round the ring, its copies
+  summed. A place is a stretch of ring, so each holds the curve's integral
+  over that stretch, and the places sum to 1 at any width and any centre: a
+  wider blow is the same blow, spread, out to flat all round the ring, and
+  as `width` goes to 0 it all falls in the nearest place, so `δ(p, 0)` lands
+  as `δ(p)` does. The width you write is the width computed, with no floor;
+  a ring's resolution is a place, 1/N of a round, and a bump narrower than
+  that sits in one place. The ring reaches a place once a sweep, so the
+  engine keeps the running total of the force and gives each place all
+  that came since it last passed: a blow shorter than a sweep lands whole at
+  any rate, whichever side of the law the line stands. The shape is held as
+  the force stops, so all of a blow lands where it was struck, even if the
+  centre jumps the moment it ends. While force is flowing the shape is laid
+  where the centre is at each visit, so a centre moving fast against a
+  sweep shears the bump and changes its total, and a new blow within a
+  sweep of the last, at a new place, carries what hadn't landed there with
+  it.
+- `δ` is a source only: outside a law, not multiplying a term (`sin(δ(p))`),
+  two to a term, or on plain state, which has no places, it is an error.
+  So is `$v[p] = ...` on a ring, which would claim to replace the law there.
 
 **A law on plain state** is the same thing at one place, with no neighbours:
 
@@ -948,10 +964,11 @@ An array assigned bare (`$x = array(128)`, `$x = $x + ...`) is a field too,
 with the size in the patch: a push then takes `N² / (sqrt(stiff) * sr)`
 seconds to go round, the words carry no speed, and `+=` is plain, a
 step's worth, with the order its lines are in. A push on one has no rate
-to join, so it is an amount, `$v[p] += e`, each sample. Use
+to join, so it is an amount, `$v[p] += e`, each sample: a store, so in
+brackets, though the field is read `$v(p)`. Use
 `ring`, unless a number of places is the point. Fields are at the file's
 level, in its plays too. **A def can hold a field**, and each call is its own:
-`def string(note, at): $v = line(...) ... $v[0.13]` and `sum(5, n => string(...))`
+`def string(note, at): $v = line(...) ... $v(0.13)` and `sum(5, n => string(...))`
 are five strings. A call is written out where it stands, its names made its own,
 so it is called in the file's lines, or in a `sum` of a known count with a
 one-line body, not in a play or another lambda. Its fields see what it is given,
@@ -1976,6 +1993,12 @@ wrote, offline. Being plain is what lets any tool write one.
 | `status`                         | `list` plus the master level               |
 | `sweep <voice> [seconds]`        | where the voice's sweep is; with seconds, set it (0: from the top) |
 | `kill`                           | shut down engine                           |
+
+**An error never stops the music.** A `send` whose patch doesn't parse or
+compile is refused with the error, and the version playing plays on; one
+that compiles but blows up within 20 s rolls back to it. So a set is one
+engine, started once, and every change a `send` to it: a mistake costs
+nothing but the edit.
 
 `send`'s `--mute` names plays of the patch, commas between and no
 spaces (`send harbour.aither 3 --mute tension,danger`). A voice that is

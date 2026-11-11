@@ -40,9 +40,7 @@ let loss = 0.68                                            # what it loses, a ro
 $x = ring(period = 1.66)                                   # a push goes round in 1.66 s
 $v = ring(period = 1.66)
 
-let pull = slope(slope($x))                                # how far its neighbours stand above it
-$v' = pull * firm - $x * held - $v * loss
-$x' = $v
+let pull = Δ$x                                             # how far its neighbours stand above it
 
 # ---------------------------------------------------------------- the strike
 
@@ -63,11 +61,13 @@ let stroke = 0.003                                         # how long a blow tak
 let age = min(narrow, broad)
 let landed = if own < stroke then floor(sweep / 5) * golden else $where
 let width = if broad < narrow then 0.078 else 0.022        # of the way round
-$v'[gauss(landed, width)] += if age < stroke then 1.32 / stroke else 0
+let blow = if age < stroke then 1.32 / stroke else 0       # all of it in a stroke
+$v' = pull * firm - $x * held - $v * loss + blow * δ(landed, width)
+$x' = $v
 
 # ---------------------------------------------------------------- reading
 
 # Round the ring at the note, its size the ring: a circle, bent where the
 # ring is.
 let note = 110 * pow(2, floor(midi_cc(21) * 25) / 12)
-spin(note) * (0.45 + $x[phasor(note)])
+spin(note) * (0.45 + $x(phasor(note)))

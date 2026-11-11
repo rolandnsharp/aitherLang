@@ -313,7 +313,7 @@ static Node* field_expr(Fields* fs, Node* n) {
   if (n->kind == nkIdent) {
     Field* moving = field_named(fs, n->str);
     if (moving && moving->waves) {
-      field_fail(fs, n, "a line whose period moves is read at a point: `$v[p]`");
+      field_fail(fs, n, "a line whose period moves is read at a place: `$v(p)`");
       return n;
     }
     if (fs->in_ring && (!strcmp(n->str, "dt") || !strcmp(n->str, "t")) && !fs->failed) {
@@ -348,10 +348,10 @@ static Node* field_expr(Fields* fs, Node* n) {
     int rate = primed(n->kids[0]->str);
     char why[200];
     if (f->period && !rate) {
-      snprintf(why, sizeof why, "a push on a ring is a change to its rate: `$%s'[p] += ...`", f->name);
+      snprintf(why, sizeof why, "a push on a ring is a change to its rate, a term of its law: `$%s' = ... + force * δ(p)`", f->name);
       field_fail(fs, n, why);
     } else if (!adds) {
-      snprintf(why, sizeof why, "a push adds: `$%s%s[p] += ...`", f->name, rate ? "'" : "");
+      snprintf(why, sizeof why, "a push adds, a term of the law: `$%s%s = ... + force * δ(p)`", f->name, rate ? "'" : "");
       field_fail(fs, n, why);
     }
     if (fs->failed) return n;
@@ -372,17 +372,17 @@ static Node* field_expr(Fields* fs, Node* n) {
     if (!strcmp(n->str, "len")) return n;
     Field* f = n->nkids == 1 ? bare_field(fs, n->kids[0]) : NULL;
     if (f && !strcmp(n->str, "concentration")) {
-      field_fail(fs, n, "`concentration($x)` is `-slope(slope($x))` now");
+      field_fail(fs, n, "`concentration($x)` is `-Δ$x` now");
       return n;
     }
     Field* of;
     int depth = slopes(fs, n, &of);
     if (depth == 3 || depth > 4) {
-      field_fail(fs, n, "slopes come one, for a pair, two, for a wave, or four, for a bar");
+      field_fail(fs, n, "slopes come one, for a pair (∇), two, for a wave (Δ), or four, for a bar (ΔΔ)");
       return n;
     }
     if (depth == 1 && of->sheet) {
-      field_fail(fs, n, "one slope needs a direction, and a sheet has two: two slopes or four");
+      field_fail(fs, n, "one slope (∇) needs a direction, and a sheet has two: Δ or ΔΔ");
       return n;
     }
     if (depth == 4) {
@@ -412,7 +412,7 @@ static Node* field_expr(Fields* fs, Node* n) {
     }
     if (f && !strcmp(n->str, "slope")) {                      /* of a pair: where they meet, a half place between */
       if (!fs->law) {
-        field_fail(fs, n, "`slope($x)` is a law's word: it says how one of a pair changes the other");
+        field_fail(fs, n, "∇ is a law's word: `∇$x` says how one of a pair changes the other");
         return n;
       }
       Node* word = f->trails                                  /* the leader reads behind it, the trailer the fresh place ahead */
@@ -723,9 +723,9 @@ static void field_stmts(Fields* fs, Node** in, int n, Kids* out, int top) {
       Field* w = pushed_field(fs, s->kids[0]);
       const Node* said = s->kids[2];
       if (is_gauss(fs, s->kids[1]))
-        field_fail(fs, s, "a line whose period moves takes a point: a shorter blow is a sharper one, `$v'[p] += force`");
+        field_fail(fs, s, "a line whose period moves takes a point: a shorter blow is a sharper one, `force * δ(p)`");
       else if (!primed(s->kids[0]->str) || said->kind != nkBinOp || said->num != 1.0 || (strcmp(said->str, "+") && strcmp(said->str, "-")))
-        field_fail(fs, s, "a push on a line is a change to its rate: `$v'[p] += ...`");
+        field_fail(fs, s, "a push on a line is a change to its rate, a term of its law: `$v' = ... + force * δ(p)`");
       else wave_source(fs, w, s, out);
       continue;
     }
@@ -901,7 +901,7 @@ static void find_slopes(Fields* fs, const Node* n, Field* law) {
   if (slopes(fs, n, &of) > 1) return;                        /* an even number lands back on the places */
   if (n->kind == nkCall && !strcmp(n->str, "slope") && n->nkids == 1 && bare_field(fs, n->kids[0])) {
     Field* f = bare_field(fs, n->kids[0]);
-    if (law->reads && law->reads != f) field_fail(fs, n, "`slope` joins two fields: a law reads the slope of one partner");
+    if (law->reads && law->reads != f) field_fail(fs, n, "∇ joins two fields: a law reads the slope of one partner");
     law->reads = f;
   }
   for (int i = 0; i < n->nkids; i++) find_slopes(fs, n->kids[i], law);
@@ -921,9 +921,9 @@ static void find_pairs(Fields* fs, const Node* at) {
     if (!g) continue;
     char why[200];
     if (f->sheet || g->sheet) {
-      field_fail(fs, at, "one slope needs a direction, and a sheet has two: two slopes or four");
+      field_fail(fs, at, "one slope (∇) needs a direction, and a sheet has two: Δ or ΔΔ");
     } else if (g == f || g->reads != f) {
-      snprintf(why, sizeof why, "`slope($%s)` in `$%s'`'s law needs its partner: `$%s' = ... slope($%s) ...`",
+      snprintf(why, sizeof why, "`∇$%s` in `$%s'`'s law needs its partner: `$%s' = ... ∇$%s ...`",
                g->name, f->name, g->name, f->name);
       field_fail(fs, at, why);
     } else if (!same_tree(f->period, g->period) || !f->length != !g->length) {
@@ -951,7 +951,7 @@ static void find_pairs(Fields* fs, const Node* at) {
     }
   }
   for (int i = 0; i < fs->n; i++)
-    if (fs->f[i].width && !fs->f[i].reads) field_fail(fs, at, "a width is of a pair: pressure and flow, `$p' = -slope($u)`, `$u' = -slope($p)`");
+    if (fs->f[i].width && !fs->f[i].reads) field_fail(fs, at, "a width is of a pair: pressure and flow, `$p' = -∇$u`, `$u' = -∇$p`");
 }
 
 /* Where a line's places stand. Past a fixed end the field is 0 a whole
@@ -998,7 +998,7 @@ static void check_waves(Fields* fs, Node** list, int count) {
   for (int i = 0; i < fs->n; i++) {
     Field* f = &fs->f[i];
     if (!f->waves || fs->failed) continue;
-    const char* odd = "a line whose period moves is a pair, `$v' = -slope($i) - $v * loss` and `$i' = -slope($v) - $i * loss`: nothing else stays two travelling waves";
+    const char* odd = "a line whose period moves is a pair, `$v' = -∇$i - $v * loss` and `$i' = -∇$v - $i * loss`: nothing else stays two travelling waves";
     Field* g = f->reads;
     if (!g || !g->waves) { field_fail(fs, list[0], odd); return; }
     Node* mine = NULL;
@@ -1041,10 +1041,10 @@ static void check_laws(Fields* fs, Node* n, int stands, char* said) {
     if (!fs->pair_at) fs->pair_at = n;
   }
   if (n->kind == nkIdxAssign && n->kids[0]->kind == nkIdent && primed(n->kids[0]->str)) {
-    if (!rate_of(fs, n->kids[0]->str)) field_fail(fs, n, "a rate is of a ring's field: `$x = ring(period = 1)`");
+    if (!rate_of(fs, n->kids[0]->str)) field_fail(fs, n, "δ is a place on a field, and this is one number: a source is on a ring, line or sheet, `$x = ring(period = 1)`");
     else if (fs->in_def) field_fail(fs, n, "a source belongs in the file's lines or a play's, not in a def");
   }
-  if (is_gauss(fs, n)) field_fail(fs, n, "`gauss(p, width)` is a shape: it belongs in a source's brackets, `$v'[gauss(p, width)] += force`");
+  if (is_gauss(fs, n)) field_fail(fs, n, "a spread source is `δ(p, width)`, a term of a law: `$v' = ... + force * δ(p, width)`");
   if (n->kind == nkIdxAssign && n->kids[0]->kind == nkIdent && primed(n->kids[0]->str) && is_gauss(fs, n->kids[1])) {
     for (int i = 0; i < n->kids[1]->nkids; i++) check_laws(fs, n->kids[1]->kids[i], 0, said);   /* the one place it stands */
     const Node* v = n->kids[2];
@@ -1244,6 +1244,29 @@ static void fine_grain(Field* f, double across) {
 /* A slope with a name: `let curve = slope(slope($x))`. A law is a line at each
  * place, so the name stands for the words, not for a value at one of them,
  * and goes into the laws as if written there; `slope(curve)` is a slope more. */
+/* A field is a function of place, read `$v(p)`; an array is indexed,
+ * `$a[i]`. Each spelling is held to its own. */
+static void check_reads(Fields* fs, const Node* n) {
+  if (!n || fs->failed) return;
+  if (n->kind == nkIdx && n->kids[0]->kind == nkIdent) {
+    Field* f = bare_field(fs, n->kids[0]);
+    char why[300];
+    if (n->num == 2 && !f) {
+      snprintf(why, sizeof why, "`$%s(p)` reads a field at a place, and `$%s` is no field (a ring, a line, a sheet, or an array assigned bare): an array is indexed, `$%s[i]`",
+               n->kids[0]->str, n->kids[0]->str, n->kids[0]->str);
+      field_fail(fs, n, why);
+    } else if (n->num != 2 && f) {
+      snprintf(why, sizeof why, "a field is a function of place, read `$%s(p)`: brackets index an array", f->name);
+      field_fail(fs, n, why);
+    }
+  }
+  if (n->kind == nkIdxAssign && n->kids[2]->kind == nkBinOp && n->kids[2]->num == 1.0) {   /* `$x[p] += ...`: a store, not a read */
+    for (int i = 0; i < 2; i++) check_reads(fs, n->kids[i]);
+    check_reads(fs, n->kids[2]->kids[1]);
+    return;
+  }
+  for (int i = 0; i < n->nkids; i++) check_reads(fs, n->kids[i]);
+}
 static Node* copy_tree(Fields* fs, const Node* n) {
   Node* c = arena_alloc(fs->a, sizeof(Node));
   *c = *n;
@@ -1533,13 +1556,14 @@ static int fields_pass(Arena* a, Kids* kids, int from, char* err, int errlen) {
   int kept = 0;                                              /* only what is assigned bare is a field */
   for (int i = 0; i < fs.n; i++) if (fs.f[i].place) fs.f[kept++] = fs.f[i];
   fs.n = kept;
+  for (int i = from; i < kids->n; i++) check_reads(&fs, kids->v[i]);
   named_slopes(&fs, kids, from);
   char* said = arena_alloc(a, fs.n + 1);
   memset(said, 0, fs.n + 1);
   for (int i = from; i < kids->n; i++) check_laws(&fs, kids->v[i], 1, said);
   for (int i = from; i < kids->n; i++) find_bars(&fs, kids->v[i], kids, from);
   for (int i = 0; i < fs.n; i++)
-    if (fs.f[i].width && !fs.pair_at) field_fail(&fs, kids->v[from], "a width is of a pair: pressure and flow, `$p' = -slope($u)`, `$u' = -slope($p)`");
+    if (fs.f[i].width && !fs.pair_at) field_fail(&fs, kids->v[from], "a width is of a pair: pressure and flow, `$p' = -∇$u`, `$u' = -∇$p`");
   if (fs.pair_at) find_pairs(&fs, fs.pair_at);
   check_waves(&fs, kids->v + from, kids->n - from);
   place_lines(&fs);

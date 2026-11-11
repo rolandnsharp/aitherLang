@@ -43,9 +43,6 @@ let loss = 0.26                                            # what it loses, a ro
 $d = ring(period = 0.63, start = ((0, 0), (0, 0)))         # a squeeze goes round in 0.63 s
 $v = ring(period = 0.63, start = ((0, 0), (0, 0)))
 
-$v' = -slope(convergence($d)) * squeeze - curl(curl($d)) * twist - $d * held - $v * loss
-$d' = $v
-
 # ---------------------------------------------------------------- the strike
 
 # A strike is a function of its age (COMPOSING, "How long since"). The ring
@@ -66,14 +63,16 @@ $where = ($where + (pad_a + pad_b + pad_x) * golden) mod 1
 let stroke = 0.003                                         # how long a blow takes
 let way = (if own < stroke then (i + j) * sqrt(0.5) else 0) + (if age_a < stroke then i else 0) + (if age_b < stroke then j else 0) + (if age_x < stroke then k else 0)
 let landed = if own < stroke then floor(sweep / 7) * golden else $where
-$v'[gauss(landed, 0.022)] += way * 0.19 / stroke
+let blow = way * 0.19 / stroke
+$v' = -∇(convergence($d)) * squeeze - curl(curl($d)) * twist - $d * held - $v * loss + blow * δ(landed, 0.022)
+$d' = $v
 
 # ---------------------------------------------------------------- reading
 
 # Round the ring at the note.
 let note = 110 * pow(2, floor(midi_cc(21) * 25) / 12)
 let round = phasor(note)
-let ((_, along), (out, height)) = $d[round]
+let ((_, along), (out, height)) = $d(round)
 
 # Each point of the ring where it has gone, seen a little from the side.
 let (x, y) = rotate((0.45 + out, 0), TAU * round + along * 3)

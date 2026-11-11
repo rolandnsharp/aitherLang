@@ -541,6 +541,14 @@ TEST(engine_live) {
     CHECK(ask_starts(cmd, "ERR"), "no such play");
     frame(&l, &r);
     CHECK(fabsf(l - 0.25f) < 1e-4f, "after the refused send the voice plays on: %g", l);
+    /* A patch that doesn't compile, here one in the old spelling, is refused
+     * too, and the music playing stays: an error never stops a voice. */
+    write_file("sm.aither", "$v = ring(period = 1)\n$v' = slope(slope($v))\n[$v[0.5], 0]\n");
+    snprintf(cmd, sizeof cmd, "send %s/sm.aither", dir);
+    CHECK(ask_starts(cmd, "ERR"), "a patch with an error is refused");
+    frame(&l, &r);
+    CHECK(fabsf(l - 0.25f) < 1e-4f, "after the broken send the voice plays on: %g", l);
+    write_file("sm.aither", "play a: 0.25\nplay b: 0.25\n[(a + b)[0], 0]\n");
     snprintf(cmd, sizeof cmd, "send %s/sm.aither soon", dir);
     CHECK(ask_starts(cmd, "ERR"), "a word that is neither a fade nor --mute");
     snprintf(cmd, sizeof cmd, "send %s/sm.aither --mute", dir);
