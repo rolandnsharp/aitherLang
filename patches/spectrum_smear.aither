@@ -1,36 +1,42 @@
 # spectrum_smear — a sound's colour left ringing after it, and rising.
 #
 # Like spectrum_freeze, this patch hears a spectrum: it goes between
-# tools/fft and tools/ifft, 8192 samples a frame, so input() is a bin at
-# a time, 4096 bins a frame. A long frame is a fine one: bins 5 Hz apart,
-# turned anew 11 times a second, where 1024 samples turn 43 Hz bins 86
-# times a second and the tail comes out grainy.
+# tools/fft and tools/ifft, 4096 samples a frame, so input() is a bin at
+# a time, 2048 bins a frame, 11 Hz apart.
 #
 #   cd ~/aitherLang; pgrep -x pad > /dev/null || { tools/pad & sleep 1; }
-#   aither song.aither --solo horn | tools/fft 8192 \
+#   aither song.aither --solo horn | tools/fft 4096 \
 #     | AITHER_SOCK=/tmp/smear.sock AITHER_MIDI=aither-pad aither patches/spectrum_smear.aither \
-#     | tools/ifft 8192 | tools/play
+#     | tools/ifft 4096 | tools/play
 #
 # Each bin keeps a tail: how loud it was, falling away a little every
 # frame. The playing always passes as it came; where it is quieter than
-# the tail, the difference is added, turned by a new angle every frame (as
-# spectrum_freeze's held frame is), so it is the sound's colour without its
-# pattern in time. A note leaves its own harmonics ringing behind it.
+# the tail, the difference is added. The tail is an oscillator in each
+# bin, ringing on at the frequency the playing had there: how far the bin
+# turned from one frame to the next says how far its frequency lies from
+# the bin's. A harmonic lies across a few bins, and they turn together, at
+# the speed of the loudest, so they ring as the one wave they are. So a
+# note leaves its own harmonics ringing behind it, waves going on, where a
+# new angle every frame (as this patch first had it) left noise in the
+# note's colour.
 #
 # On tools/pad, no button held: up and down is how long the tail rings,
 # from none (where the knob starts: the sound passes as it is) through a
 # tenth of a second to twenty, and endless at the top. Left and right is
 # how fast the tail climbs, up to an octave a second. It climbs in pitch,
-# a bin's tail moving to a bin a little higher each frame, so a note's
-# harmonics stay its harmonics as they rise. Holding A freezes: the tail
-# stops taking the playing in and goes on as it is, climbing if it climbs,
-# with the playing on top.
+# a bin's tail moving to a bin a little higher each frame and turning
+# faster with it, so a note's harmonics stay its harmonics as they rise.
+# Holding A freezes: the tail stops taking the playing in and goes on as
+# it is, climbing if it climbs, with the playing on top.
 
-let frame = 4096
+let frame = 2048
 let bin = pixel_index(frame, 1)
 let frames = sr / frame                      # frames a second
 
-$tail = array(frame, 0, every = frame)       # each bin's tail: how loud, a number
+$tail = array(frame, 0, every = frame)       # each bin's tail: how loud
+$turn = array(frame, 0, every = frame)       # where its oscillator points
+$speed = array(frame, 0, every = frame)      # how far it turns in a frame
+$heard = array(frame, (0, 0), every = frame) # the bin as it came, a frame ago
 
 let length = midi_cc(28)
 let seconds = 0.1 * 200 ^ length
@@ -39,16 +45,36 @@ let climb = midi_cc(29)                      # octaves a second
 let frozen = midi_note(36) > 0
 
 # where this bin's tail was a frame ago: a little lower, between two bins
-let from = bin * 2 ^ (-climb / frames)
+let rise = 2 ^ (climb / frames)
+let from = bin / rise
 let low = floor(from)
 let part = from - low
 let was = $tail[low] * (1 - part) + $tail[min(low + 1, frame - 1)] * part
+let near = min(floor(from + 0.5), frame - 1)
 
 let [in_re, in_im] = input()
 let here = (in_re, in_im)                    # a spectrum's bin: one complex number
 let loud = amplitude(here)
-let fading = was * keep
-let missing = if frozen then was else max(0, fading - loud)
 
+# how far the playing turned in this bin since the last frame: half a turn
+# a bin, as the frame steps half its length, and what it strays from that
+# is how far its frequency lies from the bin's
+let strayed = phase(here * conj($heard[bin]) * (if bin mod 2 == 1 then -1 else 1))
+let measured = PI * bin + strayed
+
+let fading = was * keep
+let following = not frozen and loud >= fading         # the playing is at least the tail: it leads
+let missing = if bin == 0 or following then 0 else if frozen then was else fading - loud
+# a harmonic lies across a few bins: they turn together, at the speed of
+# the loudest of them, so they ring as the one wave they are
+let below = max(near - 1, 0)
+let above = min(near + 1, frame - 1)
+let lead_low = if $tail[below] > $tail[near] then below else near
+let lead = if $tail[above] > $tail[lead_low] then above else lead_low
+let turned = ($turn[near] + $speed[lead] * rise) mod TAU
+
+$heard[bin] = here
 $tail[bin] = if frozen then was else max(loud, fading)
-here + rotate((missing, 0), TAU * noise())
+$speed[bin] = if following then measured else $speed[near] * rise
+$turn[bin] = if following then phase(here) else turned
+here + rotate((missing, 0), turned)
