@@ -1,0 +1,6 @@
+# string_spread_end: a line, fixed ends, 110 Hz, struck, heard at 0.13 (tests/physics/run.py)
+$x = line(period = 1 / 110, ends = fixed)
+$v = line(period = 1 / 110, ends = fixed)
+$v' = Δ$x - $v * 0.002 + (if t < 0.0005 then 2 else 0) * δ(0.03, 0.02)
+$x' = $v 
+[$x(0.13), 0]

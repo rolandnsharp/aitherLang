@@ -99,6 +99,56 @@ def case_string_partials():
             worst_db = max(worst_db, abs(20 * np.log10(a / P[0][1]) - 20 * np.log10(exact(n) / exact(1))))
     return worst_c < 1 and worst_db < 0.5, 'worst %.2f cents, %.1f dB' % (worst_c, worst_db)
 
+def partials(patch, f_of, level_of, n_max=12, bound_c=1.0, bound_db=0.5):
+    """Partials of a struck line against exact: pitch within bound_c cents,
+    level against the first within bound_db dB, away from nodes, at 48, 96
+    and 192 kHz."""
+    worst_c = worst_db = 0
+    for rate in (48000, 96000, 192000):
+        L, _, said = render(patch, rate, 4)
+        if said: return False, said[0]
+        x = L[int(0.1 * rate):]
+        P = [peak(x, rate, f_of(n), span=min(3.0, f_of(n) * 0.01)) for n in range(1, n_max + 1)]
+        for n, (f, a) in enumerate(P, 1):
+            if level_of(n) / level_of(1) < 0.05: continue
+            worst_c = max(worst_c, abs(cents(f, f_of(n))))
+            worst_db = max(worst_db, abs(20 * np.log10(a / P[0][1]) - 20 * np.log10(level_of(n) / level_of(1))))
+    return worst_c < bound_c and worst_db < bound_db, 'worst %.2f cents, %.2f dB' % (worst_c, worst_db)
+
+F0, TAU_STRIKE, HEAR = 110.0, 0.0005, 0.13
+def sinc_of(f): return np.sinc(f * TAU_STRIKE)
+def share_spread(n, at, w):
+    """2 times the integral over the line of a Gaussian (area 1, sd w, at)
+    times sin(n pi s): what of it lies past an end is gone."""
+    s = np.linspace(max(0, at - 10 * w), min(1, at + 10 * w), 200001)
+    g = np.exp(-0.5 * ((s - at) / w) ** 2) / (w * np.sqrt(2 * np.pi))
+    return 2 * np.trapezoid(g * np.sin(np.pi * n * s), s)
+
+def case_string_spread():
+    """A string struck spread, δ(0.3, 0.02): each partial's level scaled by
+    the Gaussian's transform, e^{-(n pi w)^2 / 2}, exactly."""
+    lv = lambda n: abs(np.sin(np.pi * n * 0.3) * np.exp(-0.5 * (np.pi * n * 0.02) ** 2) * np.sin(np.pi * n * HEAR) *
+                       sinc_of(n * F0) / (n * F0))
+    return partials('string_spread.aither', lambda n: n * F0, lv)
+
+def case_string_spread_end():
+    """Struck spread near an end, δ(0.03, 0.02): what lies past the end is
+    gone, each mode's share the integral over the line."""
+    lv = lambda n: abs(share_spread(n, 0.03, 0.02) * np.sin(np.pi * n * HEAR) * sinc_of(n * F0) / (n * F0))
+    return partials('string_spread_end.aither', lambda n: n * F0, lv)
+
+def case_string_place():
+    """Struck on the place's rate, $x' = $v + force * δ(0.3): a kick of the
+    place, so a partial's level doesn't fall as 1 / w."""
+    lv = lambda n: abs(np.sin(np.pi * n * 0.3) * np.sin(np.pi * n * HEAR) * sinc_of(n * F0))
+    return partials('string_place.aither', lambda n: n * F0, lv)
+
+def case_bar_pinned():
+    """A bar, $v' = -ΔΔ$x, pinned at both ends (fixed), period 1 / 110: its
+    first mode at 110 Hz and the rest at n^2 times it, the textbook's."""
+    lv = lambda n: abs(np.sin(np.pi * n * 0.3) * np.sin(np.pi * n * HEAR) * sinc_of(n * n * F0) / (n * n * F0))
+    return partials('bar_pinned.aither', lambda n: n * n * F0, lv, n_max=8)
+
 def case_didge_converges():
     """patches/field_didge.aither, its note at 48, 96 and 192 kHz: the same
     within 1 cent, as a model has one answer and the rate is how finely it
