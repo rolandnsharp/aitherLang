@@ -352,6 +352,24 @@ in 2, so the suite's `string_partials` and `wake_on_grid` pass from the patches.
    so codegen, hot reload and export keep working as they are.
 4. A mode cap per medium, said when it bites.
 
+## Milestone 1, from patches (2026-11-11)
+
+`medium/system.c` finds the system and writes its step after everything else;
+dsp.c's `n_medium_*` hold a `line` as modes on a state array of the voice.
+The physics suite (`make physics`), through the patches themselves:
+
+| case | before | now |
+|---|---|---|
+| `string_partials` | 9.68 cents, partials 6 up gone | 0.00 cents, 0.0 dB |
+| `wake_on_grid` (48, 96, 192, 384 kHz) | 335.03 329.14 329.34 335.39 Hz | 329.84 329.79 329.76 329.76 Hz, 0.4 cents |
+
+3 of 6 pass. Still failing, each a later step: `springs_as_dho` (memory as
+laws), `didge_converges` (a pair with a width), `wake_on_modes` (no field, so
+not taken, and its wake still steps first order: passes once laws on plain
+state alone are the core's). No patch in `patches/` is taken yet (each has a
+ring, a spread source, a pair, a `matched` end, a sheet or a field in a def),
+so all render as before; `make test` passes.
+
 ## Plan
 
 1. **The suite**: known answers and convergence, run on today's engine first,

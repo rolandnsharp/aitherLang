@@ -5,9 +5,9 @@ CFLAGS := -std=gnu23 -O3 -march=native -flto -fno-plt -fno-stack-protector \
           -fno-math-errno -ffp-contract=off -pthread
 LIBS   := -ltcc -ldl -lasound -lm
 ENGINE := engine.c voice.c render.c analysis.c cli_output.c midi.c midi_state.c alsa_midi.c realtime.c pool.c \
-          codegen.c parser.c imports.c dsp.c stdlib.c export.c export_text.c
+          codegen.c parser.c imports.c dsp.c stdlib.c export.c export_text.c medium/system.c
 HDR    := engine.h voice.h render.h analysis.h cli_output.h midi.h codegen.h parser.h \
-          imports.h dsp.h pool.h export.h export/aither_rt.h export/glue.c
+          imports.h dsp.h pool.h export.h export/aither_rt.h export/glue.c medium/system.h
 
 all: aither
 

@@ -371,6 +371,100 @@ double n_input_r(void) { return dsp_input_r; }
 /* reverb's slots depend on the rate (its room is in seconds):
  * native_slot_size asks dsp_reverb_slots. */
 
+/* ------------------------------------------------- a medium held as modes
+ * The field core's (notes/one-system-2026-11-11.md; medium/modes.c is the
+ * prototype these were proved on). A line under a linear law is the sum of
+ * its modes, each a(t) phi(p) with a'' = -w^2 a - gamma a' + 2 phi(at) F:
+ * stepped exactly, whatever the rate, so its partials are exact and a force
+ * or a reading at a place is exact there. The voice keeps one state array a
+ * medium: a header, then each mode's place and velocity and the four numbers
+ * of its exact step for the half sample, worked out again only when the law's
+ * coefficients change.
+ *
+ * Its law, in rounds of `period` T as a field's are: v' = A Δx + B x + C v
+ * + D Δv + forces. A mode of wavenumber k (phi = sin or cos of k p) has
+ * Δ = -4 k^2 (a push crosses in half a period), so w^2 = (4 A k^2 - B) / T^2
+ * and gamma = (4 D k^2 - C) / T a second. Ends: 1 fixed, 2 free; the shapes
+ * are sin (fixed at 0) or cos (free at 0), k = (j + o) pi with o = 1 fixed at
+ * both, 0 free at both, 1/2 one of each. Modes above Nyquist are left out. */
+enum { MD_N, MD_T, MD_A, MD_B, MD_C, MD_D, MD_EL, MD_ER, MD_H, MD_CAP, MD_HEAD = 16 };
+static double md_offset(const double* m) { return m[MD_EL] == m[MD_ER] ? (m[MD_EL] == 1 ? 1.0 : 0.0) : 0.5; }
+/* phi_j(p) for every j, by turning: e^{i (j + o) pi p} = e^{i o pi p} e^{i pi p}^j. */
+static void md_shapes(const double* m, double p, double* out, long n) {
+  double o = md_offset(m), zr = cos(PI_ * o * p), zi = sin(PI_ * o * p), rr = cos(PI_ * p), ri = sin(PI_ * p);
+  int sine = m[MD_EL] == 1;
+  for (long j = 0; j < n; j++) {
+    out[j] = sine ? zi : zr;
+    double t = zr * rr - zi * ri;
+    zi = zr * ri + zi * rr;
+    zr = t;
+  }
+}
+double n_medium_turn(double* m, double cap, double T, double A, double B, double C, double D,
+                     double el, double er, double h) {
+  long N = (long)cap;
+  double* a = m + MD_HEAD;
+  double *v = a + N, *p00 = v + N, *p01 = p00 + N, *p10 = p01 + N, *p11 = p10 + N;
+  if (m[MD_CAP] != cap || m[MD_T] != T || m[MD_A] != A || m[MD_B] != B || m[MD_C] != C || m[MD_D] != D ||
+      m[MD_EL] != el || m[MD_ER] != er || m[MD_H] != h) {
+    m[MD_CAP] = cap; m[MD_T] = T; m[MD_A] = A; m[MD_B] = B; m[MD_C] = C; m[MD_D] = D;
+    m[MD_EL] = el; m[MD_ER] = er; m[MD_H] = h;
+    double o = md_offset(m), nyquist = PI_ / (2.0 * h);       /* h is half a sample */
+    long used = 0;
+    for (long j = 0; j < N; j++) {
+      double k = (j + o) * PI_, w2 = (4.0 * A * k * k - B) / (T * T), g = (4.0 * D * k * k - C) / T;
+      if (w2 > nyquist * nyquist) break;
+      double s2 = w2 - 0.25 * g * g, c, S;
+      if (s2 > 1e-12) { double sq = sqrt(s2); c = cos(sq * h); S = sin(sq * h) / sq; }
+      else if (s2 < -1e-12) { double sq = sqrt(-s2); c = cosh(sq * h); S = sinh(sq * h) / sq; }
+      else { c = 1.0; S = h; }
+      double e = exp(-0.5 * g * h);
+      p00[j] = e * (c + 0.5 * g * S); p01[j] = e * S;
+      p10[j] = -e * w2 * S;           p11[j] = e * (c - 0.5 * g * S);
+      used = j + 1;
+    }
+    for (long j = used; j < N; j++) a[j] = v[j] = 0.0;
+    m[MD_N] = (double)used;
+  }
+  long n = (long)m[MD_N];
+  for (long j = 0; j < n; j++) {
+    double x = a[j], y = v[j];
+    a[j] = p00[j] * x + p01[j] * y;
+    v[j] = p10[j] * x + p11[j] * y;
+  }
+  return 0.0;
+}
+/* Every mode's velocity changes by 2 phi_j(at) times `impulse` (a force in
+ * the field's units, rounds, times the seconds it acts), its place not at all. */
+double n_medium_kick(double* m, double impulse, double at) {
+  long n = (long)m[MD_N], N = (long)m[MD_CAP];
+  if (n <= 0) return 0.0;
+  double* v = m + MD_HEAD + N;
+  double phi[n];
+  md_shapes(m, at, phi, n);
+  double scale = impulse / (m[MD_T] * m[MD_T]);
+  int rigid = m[MD_EL] == 2 && m[MD_ER] == 2;               /* free at both: mode 0 is the whole line moving */
+  for (long j = 0; j < n; j++) v[j] += (rigid && j == 0 ? 1.0 : 2.0) * phi[j] * scale;
+  return 0.0;
+}
+double n_medium_at(double* m, double at) {
+  long n = (long)m[MD_N];
+  if (n <= 0) return 0.0;
+  double phi[n], x = 0.0;
+  md_shapes(m, at, phi, n);
+  for (long j = 0; j < n; j++) x += m[MD_HEAD + j] * phi[j];
+  return x;
+}
+/* The velocity a field's law means, in rounds: T times the velocity a second. */
+double n_medium_velocity_at(double* m, double at) {
+  long n = (long)m[MD_N], N = (long)m[MD_CAP];
+  if (n <= 0) return 0.0;
+  double phi[n], x = 0.0;
+  md_shapes(m, at, phi, n);
+  for (long j = 0; j < n; j++) x += m[MD_HEAD + N + j] * phi[j];
+  return x * m[MD_T];
+}
+
 const NativeSpec dsp_natives[] = {
   {"lp1", "signal,cut", 1, -1, (void*)n_lp1},
   {"hp1", "signal,cut", 1, -1, (void*)n_hp1},

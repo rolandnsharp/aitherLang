@@ -3509,6 +3509,20 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
     if (eq(name, "amplitude")) return mono(F(c, "sqrt(%s * %s + %s * %s)", a[0], a[0], a[1], a[1]));
     return mono(F(c, "atan2(%s, %s)", a[1], a[0]));
   }
+  /* A medium's natives (dsp.c, the field core's): the first argument is
+   * the medium's state array, passed as a pointer to its elements, the rest
+   * numbers. The core writes these (medium/system.c); a patch doesn't. */
+  if (!strncmp(name, "medium_", 7)) {
+    Node* arr = n->nkids ? n->kids[0] : NULL;
+    Ent* sa = arr && arr->kind == nkIdent ? lookup_sarray(c, sc, arr->str) : NULL;
+    if (!sa) fail(c, "%s takes a medium's state array first %s", name, err_loc(c, n));
+    Buf args = {0};
+    badd(c, &args, "s->pool + %s + 1 + %ld", sa->a, sa->wo);
+    for (int i = 1; i < n->nkids; i++) badd(c, &args, ", %s", emit1(c, sc, n->kids[i], pre, "a number"));
+    const char* t = fresh(c, "md");
+    badd(c, pre, "  double %s = n_%s(%s);\n", t, name, bstr(&args));
+    return mono(t);
+  }
   if (eq(name, "wave")) {
     if (n->nkids != 2) fail(c, "wave takes 2 args %s", err_loc(c, n));
     V freq = emit(c, sc, n->kids[0], pre);
@@ -3806,6 +3820,11 @@ static void uses(Ctx* c, Node* n, Map* bound, Use* u, Map* defs_seen, int in_def
     break;
   case nkCall:
     def_uses(c, n->str, u, defs_seen);
+    /* A medium's step and kick change its state array, and a reading must see
+     * it sample by sample, not as a block left it: each counts as a write, so
+     * every line that touches a medium is one task, in order. */
+    if (!strncmp(n->str, "medium_", 7) && n->nkids && n->kids[0]->kind == nkIdent && shared_name(c, n->kids[0]->str))
+      incl(c, &u->writes, n->kids[0]->str);
     break;
   case nkLet:
     /* its value is read before its name is bound */
@@ -4939,6 +4958,10 @@ static const char* emit_program(Ctx* c, Node* program) {
   }
   bcat(c, &pre,
     "extern double n_lp1_coef(double,double);\n"
+    "extern double n_medium_turn(double*,double,double,double,double,double,double,double,double,double);\n"
+    "extern double n_medium_kick(double*,double,double);\n"
+    "extern double n_medium_at(double*,double);\n"
+    "extern double n_medium_velocity_at(double*,double);\n"
     /* The turning step: TCC calls dsp.c's, compiled at -O2; the -O2 build
      * inlines the same code (dsp.c's turn_step, kept identical), so the
      * two give the same bits. */

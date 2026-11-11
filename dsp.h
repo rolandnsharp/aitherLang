@@ -35,6 +35,12 @@ double n_tape(DspState* s, long site, double sig, double on, double w, double r,
 double n_reverb(DspState* s, long site, double sig, double rt60, double wet);
 double n_impulse(DspState* s, long site, double freq);
 double n_discharge(DspState* s, long site, double sig, double rate);
+/* A medium held as its modes, on a state array of the voice (dsp.c). */
+double n_medium_turn(double* m, double cap, double T, double A, double B, double C, double D,
+                     double el, double er, double h);
+double n_medium_kick(double* m, double impulse, double at);
+double n_medium_at(double* m, double at);
+double n_medium_velocity_at(double* m, double at);
 double n_wave(DspState* s, long site, double freq, double* values, int n);
 
 /* What codegen calls itself: hoisted coefficients and their steps, the

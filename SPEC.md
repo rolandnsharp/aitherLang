@@ -766,6 +766,17 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   matches `$v' = -∇$i`, `$i' = -∇$v`, as written with the minus.
   It works with `Δ$x` and pairs, not the squeeze and twist, which
   go at two speeds.
+- **The field core holds what it can exactly** (`medium/`,
+  notes/one-system-2026-11-11.md). A `line` under a linear wave law at the
+  file's level, `$v' = A Δ$x + B $x + C $v + D Δ$v + force * δ(p)` and `$x' =
+  $v` with A to D from outside, `fixed` or `free` ends, is held as its modes:
+  each turned exactly, so its partials are exact at any rate, and a force or a
+  reading at a place is exact there. Up to 256 modes, those under Nyquist. Laws
+  on plain state beside it step with it, by RK4, and everything couples within
+  one step: each medium turns half a sample, the laws and forces act at the
+  midpoint, it turns the other half. The patch's own lines read the media and
+  that state as they are at the sample's start, wherever they stand. Anything
+  else, for now, goes the old way; `AITHER_CORE=0` sends everything the old way.
 - **`width = p => ...` gives a pair a shape**: how wide the line is at p, 0
   to 1 along it, stated where the line is, so a where stays out of the law.
   The field that says it is the pressure, and its partner takes it as flow:

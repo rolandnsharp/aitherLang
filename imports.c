@@ -11,6 +11,7 @@
 #include <string.h>
 #include <unistd.h>
 #include "imports.h"
+#include "medium/system.h"
 
 static char* read_file(const char* path) {
   FILE* f = fopen(path, "rb");
@@ -1629,6 +1630,9 @@ Node* build_program(Arena* a, const char* stdlib_src, const char* src, const cha
   memmove(kids.v + kept, kids.v + std->nkids, (kids.n - std->nkids) * sizeof(Node*));
   kids.n -= std->nkids - kept;
   *kind = BUILD_PARSE;
+  /* The field core takes the patch's system when it can hold it
+   * (medium/system.c); what it can't hold yet goes the old way. */
+  if (system_pass(a, &kids.v, &kids.n, &kids.cap, kept, err, errlen) < 0) { free(kids.v); return NULL; }
   if (field_defs(a, &kids, kept, err, errlen) || plain_laws(a, &kids, kept, err, errlen) || fields_pass(a, &kids, kept, err, errlen)) { free(kids.v); return NULL; }
   *kind = BUILD_OK;
   Node* prog = arena_alloc(a, sizeof(Node));
