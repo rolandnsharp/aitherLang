@@ -1862,7 +1862,16 @@ static void check_named(const char* list, const char* flag) {
   free(copy);
 }
 
-/* --mute and --solo, from the first sample. */
+static int listed(char** list, int n, const char* name) {
+  for (int i = 0; i < n; i++)
+    if (!strcmp(list[i], name)) return 1;
+  return 0;
+}
+
+/* --mute and --solo, from the first sample. A play --solo leaves out is
+ * parked, so it costs nothing, when nothing else reads it but its sound
+ * (the compiler's `apart`): silent either way, and the rest hears the
+ * same. One a heard play reads runs on silent. */
 static void apply_start_parts(void) {
   check_named(start_mute, "--mute");
   check_named(start_solo, "--solo");
@@ -1870,8 +1879,23 @@ static void apply_start_parts(void) {
     Voice* v = slots[i].voice;
     mute_named(v, start_mute, 1, 0.0);
     if (!start_solo) continue;
-    for (int p = 0; p < v->cur.nparts; p++)
-      if (!names(start_solo, v->cur.part_names[p])) set_part_gain_target(v, p, 0.0, 0.0);
+    Buf on = {0};
+    int parked = 0;
+    for (int p = 0; p < v->cur.nparts; p++) {
+      const char* nm = v->cur.part_names[p];
+      if (names(start_solo, nm)) continue;
+      set_part_gain_target(v, p, 0.0, 0.0);
+      if (listed(v->cur.apart, v->cur.napart, nm)) {
+        v->part_parked[p] = 1.0;
+        v->part_park_pending[p] = 0;
+        parked++;
+      } else {
+        bprintf(&on, "%s%s", on.n ? ", " : "", nm);
+      }
+    }
+    fprintf(stderr, "[aither] --solo: %d plays of %s parked%s%s\n", parked, slots[i].name,
+            on.n ? "; running silent, as a heard play reads them: " : "", on.n ? on.s : "");
+    free(on.s);
   }
 }
 

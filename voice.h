@@ -78,6 +78,7 @@ typedef struct {
   char**      var_names;   int nvars;
   char**      part_names;  int nparts;
   char**      unheard;     int nunheard;
+  char**      apart;       int napart;     /* plays nothing else reads but their sound */
   VRegion*    regions;     int nregions;
   char*       csrc;
   int         optimized;

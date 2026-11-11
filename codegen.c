@@ -77,7 +77,7 @@ struct Ctx {
   Strs top_var_names;
   Map top_var_set, top_lets, lets_done, let_lines;
   Scope* top;               /* the file's scope: its constants */
-  Strs play_names, unheard;
+  Strs play_names, unheard, apart;
   int hoist_on;
   Strs hoist_decls, hoist_inits;
   Map hoist_seen;
@@ -4751,6 +4751,25 @@ static const char* emit_program(Ctx* c, Node* program) {
     for (int i = 0; i < c->play_names.n; i++)
       if (!has(&reached, c->play_names.v[i])) spush(c, &c->unheard, c->play_names.v[i]);
   }
+  /* The plays nothing else reads but their sound: skipping one changes
+   * nothing else, so --solo can park it rather than run it silent. */
+  c->apart = (Strs){0};
+  for (int i = 0; i < program->nkids; i++) {
+    Node* p = program->kids[i];
+    if (p->kind != nkPlay) continue;
+    Map w = {{0}, 0};
+    for (int k = 0; k < c->nunits; k++)
+      if (c->units[k].play == p)
+        for (int b = 0; b < NBUCKETS; b++)
+          for (Ent* e = c->use[k].writes.b[b]; e; e = e->next)
+            if (!eq(e->key, p->str)) incl(c, &w, e->key);
+    int read = 0;
+    for (int k = 0; k < c->nunits && !read; k++)
+      if (c->units[k].play != p)
+        for (int b = 0; b < NBUCKETS && !read; b++)
+          for (Ent* e = c->use[k].reads.b[b]; e && !read; e = e->next) read = has(&w, e->key);
+    if (!read) spush(c, &c->apart, p->str);
+  }
 
   /* The tasks, in an order that runs each after the tasks it needs (the
    * lowest-numbered ready one first, so the file's order where it can). */
@@ -5310,6 +5329,7 @@ int generate_full(Arena* a, Node* program, const char* patch_path, double sr,
   out->var_names = c->top_var_names.v; out->nvars = c->top_var_names.n;
   out->part_names = c->play_names.v; out->nparts = c->play_names.n;
   out->unheard = c->unheard.v; out->nunheard = c->unheard.n;
+  out->apart = c->apart.v; out->napart = c->apart.n;
   out->regions = c->regions; out->nregions = c->nregions;
   free(c);
   return 0;

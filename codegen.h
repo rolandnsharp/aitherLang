@@ -24,6 +24,7 @@ typedef struct {
   const char** var_names; int nvars;       /* file-level state, in order */
   const char** part_names; int nparts;     /* play blocks, in order */
   const char** unheard; int nunheard;      /* plays the output never reaches */
+  const char** apart; int napart;          /* plays nothing else reads but their sound */
   Region* regions; int nregions;
 } Generated;
 

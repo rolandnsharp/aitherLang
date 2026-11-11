@@ -1929,8 +1929,12 @@ block: `AITHER_BUFFER=2048` makes the pipe 2048 frames.
 A run on the command line can start with only some plays heard, from
 its first sample: `--solo a,b` silences every other play, `--mute a,b`
 silences those, as `solo` and `mute` do (they keep computing, and the
-final line still runs). A name that isn't a play stops the engine. So
-one instrument can go down a pipe of its own:
+final line still runs). A play `--solo` leaves out is parked instead,
+costing nothing, when nothing else reads it but its sound: silent
+either way, and what is heard is the same to the bit. One a heard play
+reads (its `$state`, say) runs on silent; the engine says which. A name
+that isn't a play stops the engine. So one instrument can go down a
+pipe of its own, at about its own cost:
 
 ```
 ./aither song.aither --solo horn | tools/fft 1024 \

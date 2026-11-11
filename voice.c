@@ -140,6 +140,7 @@ static void free_version(Version* v) {
   free_list(v->var_names, v->nvars);
   free_list(v->part_names, v->nparts);
   free_list(v->unheard, v->nunheard);
+  free_list(v->apart, v->napart);
   free_regions(v->regions, v->nregions);
   free(v->csrc);
   memset(v, 0, sizeof *v);
@@ -192,6 +193,7 @@ Prepared* voice_prepare(const char* stdlib_src, const char* src, const char* tag
   v->var_names = sdup_list(g.var_names, g.nvars);   v->nvars = g.nvars;
   v->part_names = sdup_list(g.part_names, g.nparts); v->nparts = g.nparts;
   v->unheard = sdup_list(g.unheard, g.nunheard);     v->nunheard = g.nunheard;
+  v->apart = sdup_list(g.apart, g.napart);           v->napart = g.napart;
   v->regions = calloc(g.nregions ? g.nregions : 1, sizeof(VRegion));
   v->nregions = g.nregions;
   for (int i = 0; i < g.nregions; i++) {
@@ -675,6 +677,7 @@ void voice_snapshot_into(Voice* src, Voice* dst, void* buf) {
   d->var_names = sdup_list((const char**)s->var_names, s->nvars); d->nvars = s->nvars;
   d->part_names = sdup_list((const char**)s->part_names, s->nparts); d->nparts = s->nparts;
   d->unheard = sdup_list((const char**)s->unheard, s->nunheard); d->nunheard = s->nunheard;
+  d->apart = sdup_list((const char**)s->apart, s->napart); d->napart = s->napart;
   d->regions = calloc(s->nregions ? s->nregions : 1, sizeof(VRegion));
   d->nregions = s->nregions;
   for (int i = 0; i < s->nregions; i++) {

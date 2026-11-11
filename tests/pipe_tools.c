@@ -57,6 +57,13 @@ static void write_text(const char* path, const char* text) {
   fclose(f);
 }
 
+static char* read_text(const char* path) {
+  FILE* f = fopen(path, "r");
+  char* s = calloc(1, 1 << 16);
+  if (f) { fread(s, 1, (1 << 16) - 1, f); fclose(f); }
+  return s;
+}
+
 /* Every frame size, whole frames or not, gives the signal back N / 2 late. */
 TEST(fft_and_ifft_give_the_signal_back) {
   in_temp();
@@ -113,6 +120,33 @@ TEST(add_sums_and_delays) {
   }
   CHECK(worst < 1e-6, "off by %g", worst);
   free(x); free(y);
+}
+
+/* --solo parks a play it leaves out when nothing else reads it, and runs
+ * one on silent when a heard play does: the solo is the same either way,
+ * bit for bit, as muting the rest. */
+TEST(solo_parks_only_what_nothing_hears) {
+  in_temp();
+  write_text(at("three.aither"),
+             "$depth = 0\n"
+             "play wobble:\n  $depth = 0.5 + 0.5 * sin(TAU * phasor(3))\n  sin(TAU * phasor(5000)) * 0.1\n"
+             "play hiss:\n  noise() * 0.05\n"
+             "play tone:\n  sin(TAU * phasor(220)) * 0.3 * $depth\n"
+             "wobble + hiss + tone\n");
+  const char* run = "AITHER_RT=0 AITHER_RATE=48000 ./aither %1$s 0.25 %2$s </dev/null 2>%3$s.err > %3$s";
+  CHECK(sh(run, at("three.aither"), "--solo tone", at("solo")) == 0, "--solo");
+  CHECK(sh(run, at("three.aither"), "--mute wobble,hiss", at("mute")) == 0, "--mute");
+  char* said = read_text(at("solo.err"));
+  CHECK(strstr(said, "1 plays of three parked; running silent, as a heard play reads them: wobble") != NULL,
+        "it says what it parked: %s", said);
+  float *a = NULL, *b = NULL;
+  long n = load(at("solo"), &a);
+  CHECK(n == 12000 && load(at("mute"), &b) == n, "the same length");
+  CHECK(memcmp(a, b, 2 * n * sizeof(float)) == 0, "the solo is the same bits as muting the rest");
+  double some = 0;
+  for (long i = 0; i < 2 * n; i++) some = fmax(some, fabs(a[i]));
+  CHECK(some > 0.1, "the solo sounds, wobbling: %g", some);
+  free(a); free(b); free(said);
 }
 
 /* --solo and --mute hold from the first sample, and split a patch in two
