@@ -1232,11 +1232,13 @@ A pair's period can move, so a line can be slid and played
 of physics a string, against `patches/aeolian.aither`'s hand-built waveguides. A
 def can hold a field, each call its own, so the harp is `sum(5, n => string(...))`.
 `patches/string_keys.aither` is six of them played from the number keys, which
-`tools/pad` sends as notes 60 to 69, in a just A minor. Five open strings under them share a
-bridge with the six, one `$board` as in "Coupling", and ring where their
-harmonics meet the played ones'. A bridge on fields has to give way, a load
-(`-$board * k`): pushing back with the strings' motion feeds every
-resonance and runs away.
+`tools/pad` sends as notes 60 to 69, in a just A minor. Five open strings under them are moved by
+a bridge the six move, and ring where their harmonics meet the played ones'.
+It goes one way, a `let`: written as "Coupling" has it, one `$board` every
+string writes and reads, the bridge has to give way (`-$board * k`), as
+pushing back with the strings' motion feeds every resonance and runs away,
+and then all eleven step together sample by sample, one piece the engine
+can't spread over its cores, too heavy for its slow first build.
 
 `sheet(period = T, ends = fixed)` is the same field on a surface, with the same
 two slopes. `patches/pond.aither` reads round a circle on it at pitch, so ripples

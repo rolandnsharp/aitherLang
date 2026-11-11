@@ -21,21 +21,22 @@
 # The keys 1 to 0 are A minor up from A3: A B C D E F G A B C.
 #
 # Under them, five open strings nobody plays, tuned A C E A C, as a sitar's
-# sympathetic strings are. All eleven share a bridge, one sample of state:
-# each string moves it and it moves them all, and it gives way as they push,
-# a load they share, so it carries energy between them but never makes any.
-# (Pushing back instead feeds each string's resonance and runs away.) It
-# feels a string where you hear it, at the two points sent left and right,
-# and pushes it there. So the open strings ring only where their harmonics
-# meet a played one's: hold A and they sing 220, 440, 660 and 880, with C and
-# E's own notes 50 to 60 dB under; let go, and they ring on, ten times the
-# felted A. With no string played the bridge is still.
+# sympathetic strings are. The played strings move a bridge, and the bridge
+# moves the open ones, where you hear them, at the two points sent left and
+# right. So the open strings ring only where their harmonics meet a played
+# one's: hold A and they sing 220, 440, 660 and 880, with C and E's own notes
+# 55 to 63 dB under; let go, and they ring on after the felt has stopped the
+# A. With no string played the bridge is still.
 #
-# Eleven strings sharing one sample cost about four times the six alone
-# (0.42 of a core, against 0.11), and the fast build takes about half a
-# minute to land, so the opening may crackle until it does.
+# One way only, a liberty: on a real bridge the open strings push back too.
+# Written so (one `$board` every string writes and reads, giving way as they
+# push), all eleven step together sample by sample, one piece the engine
+# can't share among its cores, and live the slow build ran dry 951 times in
+# its first 50 s. One way, the strings are their own pieces again. A strong
+# wind pulls the strings about 40 cents flat (215 Hz for 220), and an open
+# string tuned true answers that less.
 #
-#   cd ~/aitherLang; pgrep -x pad > /dev/null || { tools/pad & sleep 1; }; AITHER_MIDI=aither-pad ./aither patches/string_keys.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
+#   cd ~/aitherLang; pgrep -x pad > /dev/null || { tools/pad & sleep 1; }; (sleep 2; ./aither send patches/string_keys.aither > /dev/null) & AITHER_MIDI=aither-pad ./aither < /dev/null | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
 
 let scale = [1, 9 / 8, 6 / 5, 4 / 3, 3 / 2, 8 / 5, 9 / 5, 2, 9 / 4, 12 / 5]            # just
 # let scale = [1, 9 / 8, 32 / 27, 4 / 3, 3 / 2, 128 / 81, 16 / 9, 2, 9 / 4, 64 / 27]  # Pythagorean
@@ -43,10 +44,7 @@ let root = 220                                             # A3
 let blow = slew(midi_cc(28) ^ 2, 0.15)                     # up and down: how hard, gentle at first
 let speed = slew(floor(midi_cc(29) * 8) / 8, 0.3)          # left and right: how fast, a harmonic a step or so
 
-$board = 0.0                                               # the bridge, as the strings moved it last sample
-let bridge = -$board * 0.003                               # it gives way to them, a load they all share
-
-def string(voice, root, blow, speed, bridge):
+def string(voice, root, blow, speed):
   let key = clamp(midi_voice_key(voice) - 60, 0, 9)
   let note = root * scale[key]
   let held = midi_voice_gate(voice)
@@ -62,8 +60,8 @@ def string(voice, root, blow, speed, bridge):
   let lift = $q * 0.04 * blow                              # the wake's push, growing with the blow
   let age = since(midi_voice_on(voice))
   let pluck = if age < 0.0005 and held > 0 then 0.0012 / 0.0005 else 0
-  # the wake lifts it, a key plucks it, and the bridge moves it where it feels it
-  $v' = -∇$i - $v * loss + lift * δ(0.37) + pluck * δ(0.27) + bridge * δ(0.13) + bridge * δ(0.71)
+  # the wake lifts it, and a key plucks it
+  $v' = -∇$i - $v * loss + lift * δ(0.37) + pluck * δ(0.27)
   $i' = -∇$v - $i * loss
   [$v(0.13), $v(0.71)]
 
@@ -76,7 +74,7 @@ def open_string(note, bridge):
   [$v(0.13), $v(0.71)]
 
 let open = [0, 2, 4, 7, 9]                                 # A C E A C under the strings you play
-let played = sum(6, n => string(n, root, blow, speed, bridge))
+let played = sum(6, n => string(n, root, blow, speed))
+let bridge = -mono(played) * 0.0015                        # the played strings move it, and it moves the open ones
 let rung = sum(5, n => open_string(root * scale[open[n - 1]], bridge))
-$board = mono(played) + mono(rung)                         # what every string did to it, felt by all next sample
 (played + rung) * 0.25 |> tanh
