@@ -275,6 +275,46 @@ $r = 0
 $r' = 1 * δ(0.5)
 $r
 
+# --- δ in a def's law: each call its own string, struck at its own place,
+# --- from a sum as from the file's lines
+# expect until 4800: 0
+def struck(at):
+  $v = line(period = 1, ends = fixed)
+  $i = line(period = 1, ends = free)
+  $v' = -∇$i + (if t < 0.002 then 100 else 0) * δ(at)
+  $i' = -∇$v
+  $v(0.3)
+sum(2, n => struck(n * 0.25)) - (struck(0.25) + struck(0.5))
+
+# --- ... and it is struck there
+# expect at 100: 1
+def struck(at):
+  $v = line(period = 1, ends = fixed)
+  $i = line(period = 1, ends = free)
+  $v' = -∇$i + (if t < 0.002 then 100 else 0) * δ(at)
+  $i' = -∇$v
+  $v(0.3)
+if abs(struck(0.3)) > 0.01 and abs(struck(0.8)) < 1e-6 then 1 else 0
+
+# --- in a lambda, δ is on a field too: plain state has no places
+# error: δ is a place on a field
+sum(2, n =>
+  $r = 0
+  $r' = 1 * δ(0.5)
+  $r)
+
+# --- ... a lambda's source is a term of a law as well
+# error: a source is a term of the law now
+$x = ring(period = 1)
+$x' = 0
+sum(1, n =>
+  $x'[0.5] += 1
+  n)
+
+# --- ... and δ is no lambda's value
+# error: δ is a source
+sum(1, n => δ(0.5))
+
 # --- a source taken away is a force pushing the other way
 # expect until 4800: 0
 $x = ring(period = 1)

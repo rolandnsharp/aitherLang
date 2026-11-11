@@ -689,8 +689,11 @@ static Node* parse_primary(P* p) {
     advance(p);
     if (t.str[strlen(t.str) - 1] == '\'' && p->rate_target) p->rate_target = 0;
     else if (t.str[strlen(t.str) - 1] == '\'') {
-      char m[200];
-      snprintf(m, sizeof m, "`$%s` is a law's left side: a rate is said, `$%s = ...`, not read", t.str, t.str);
+      char m[300];
+      if (peek(p).kind == tkLBracket)                 /* the old spelling of a source */
+        snprintf(m, sizeof m, "a source is a term of the law now, a force at a place: `$%s = ... + force * δ(p)`", t.str);
+      else
+        snprintf(m, sizeof m, "`$%s` is a law's left side: a rate is said, `$%s = ...`, not read", t.str, t.str);
       fail(p, m);
     }
     Node* n = node(p, nkIdent, t.line);

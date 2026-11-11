@@ -710,13 +710,29 @@ static void shaped_source(Fields* fs, const Node* s, Kids* out) {
 }
 
 /* A list of statements, as the lines they stand for. */
+/* Which call of a def a law came from: its lines are written out with names
+ * ending in that call's number (`__v_string_3'`), -1 for the file's own. */
+static int law_call(const Node* s) {
+  const char* name = s->str;
+  if (strncmp(name, "__", 2)) return -1;
+  const char* u = strrchr(name, '_');
+  return u && u[1] >= '0' && u[1] <= '9' ? atoi(u + 1) : -1;
+}
 static void field_stmts(Fields* fs, Node** in, int n, Kids* out, int top) {
-  int laws_end = -1;
-  for (int i = 0; i < n; i++) if (is_law(in[i])) laws_end = i;
+  /* A block's laws are one system, stepped where the last of them stands;
+   * each call of a def holding a field is a system of its own, stepped where
+   * its own last law stands, so every call is the string a lone one is. */
   for (int i = 0; i < n; i++) {
     Node* s = in[i];
     if (is_law(s)) {
-      if (i == laws_end) step_laws(fs, in, n, out);
+      int call = law_call(s), last = 1;
+      for (int k = i + 1; k < n && last; k++) if (is_law(in[k]) && law_call(in[k]) == call) last = 0;
+      if (last) {
+        Node** mine = arena_alloc(fs->a, (n + 1) * sizeof(Node*));
+        int m = 0;
+        for (int k = 0; k <= i; k++) if (is_law(in[k]) && law_call(in[k]) == call) mine[m++] = in[k];
+        step_laws(fs, mine, m, out);
+      }
       continue;
     }
     if (s->kind == nkIdxAssign && pushed_field(fs, s->kids[0]) && pushed_field(fs, s->kids[0])->waves) {
@@ -1447,6 +1463,9 @@ static int field_defs(Arena* a, Kids* kids, int from, char* err, int errlen) {
     Node* s = kids->v[i];
     if (field_def(s)) continue;
     if (s->kind == nkPlay && calls_field_def(s, kids, from)) field_fail(&fs, s, "a def with a field is called in the file's lines, not a play");
+    else if (s->kind != nkDef && s->kind != nkLet && s->kind != nkVar && s->kind != nkAssign &&
+             s->kind != nkIdxAssign && s->kind != nkImport && s->kind != nkPlay)
+      s = write_out(&fs, s, kids, from, &out);              /* the file's expression: a `sum` may be it */
     else if (s->kind != nkDef)
       for (int k = 0; k < s->nkids; k++) s->kids[k] = write_out(&fs, s->kids[k], kids, from, &out);
     kid(&out, s);

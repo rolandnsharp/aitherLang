@@ -972,7 +972,8 @@ level, in its plays too. **A def can hold a field**, and each call is its own:
 are five strings. A call is written out where it stands, its names made its own,
 so it is called in the file's lines, or in a `sum` of a known count with a
 one-line body, not in a play or another lambda. Its fields see what it is given,
-as a def does. Not built: a round sheet, and a voice each for the keyboard.
+as a def does, and its laws are a system of their own, stepped where its own
+last law stands, so each call is the string a lone one would be. Not built: a round sheet, and a voice each for the keyboard.
 
 ### Arrays are data, not a map
 
