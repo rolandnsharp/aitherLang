@@ -248,6 +248,110 @@ for nonlinear laws, and the splitting for what couples.
 Cost: a mode is about six multiplies a step; the 100-mode loop ran at 0.02 of
 a core. The wake's RK4 is four evaluations of its law a sample.
 
+## The boundary: how a patch reaches the core (a design, 2026-11-11)
+
+The prototype is C on its own; this is how a patch's laws get to it and how its
+step runs inside a voice, so that `grid_string.aither` and `grid_wake.aither`
+themselves pass. Nothing here changes what a patch says.
+
+### 1. The system is found, not marked
+
+The compiler takes the patch apart into two sides, from what reads what:
+
+- **Inside, the system**: every field (`ring`, `line`, `sheet`) and every law,
+  on a field or on plain state, and every expression a law uses that reads
+  the system's state, directly or through `let`s. `let moving = $v(0.37)`,
+  read by the wake's law, is inside: it is coupling, and the core evaluates it
+  where its step needs it. So is the wake's `$q` in the string's δ term.
+- **Outside, everything else**: what a law uses that doesn't read the system
+  (`blow`, a key's gate, `phasor`, MIDI, a `dho` that isn't a law). It is
+  forcing, worked out once a sample before the step.
+
+Nobody writes the line between them; it falls out of the reads. A `let` can
+be inside for one law and outside for another only if it reads nothing of the
+system, so a `let` is on one side.
+
+### 2. One moment a sample, and one place it happens
+
+Each sample the voice runs, in order the core sets and the patch can't
+change:
+
+1. **Outside, before**: the forcing (outside expressions laws read), with every
+   read of a field or of a law's state seeing **the start of the moment**.
+2. **The step**, the whole system together, Strang split:
+   - each medium turns half a sample on its own, exactly (modes; or delay
+     lines, or a grid's own step, below);
+   - the inside expressions are evaluated on that midpoint state, the laws on
+     plain state step by RK4 (exactly, when linear with fixed coefficients),
+     and every force between them lands as one kick;
+   - each medium turns the other half.
+3. **Outside, after**: everything else, the output among it, again reading
+   the start of the moment.
+
+So everything outside the system sees one state, the moment's start, wherever
+its line stands. The sound is the system a sample after it was made, which no
+ear or test can hear. Where outside code has memory and closes a loop through
+the system (today's didge: an `lp1` reading the bore, a `dho` lips pushing it),
+that loop has one sample of lag, and SPEC says so, with what it costs (a
+lagged lossless pair gains energy, 79 dB in 2 s at 48 kHz in the prototype;
+a damped one shifts its pitch). The cure is to write that memory as a law:
+then it is inside.
+
+### 3. What the core makes of a medium
+
+For each medium the core reads its laws and picks:
+
+| the law | ends | held as |
+|---|---|---|
+| linear in the fields, coefficients from outside | `fixed` or `free`, a `ring`, a rectangular `sheet` | **modes**, exact |
+| the same, `width` set (a horn) | as above | modes, worked out numerically once (Sturm-Liouville) |
+| a uniform pair whose period moves | any but `matched` | **delay lines**, as now (exact, cheaper than modes that retune) |
+| nonlinear in the fields (`$x ^ 2`), or a `matched` end | any | **a grid**, its places chosen for the accuracy asked and the same at every rate |
+
+"Linear" is checked on the tree: each term is an outside factor times a field,
+a slope of one (`∇`, `Δ`, `ΔΔ`), or a δ term. A coefficient that changes in time
+(a key's felt changing the loss) keeps modes: the loss factor is one `exp` a
+sample shared by all modes, the turn precomputed. A period that moves goes to
+delay lines. The engine can say which it chose (`aither check`), and the patch
+never has to know.
+
+How many modes: those under Nyquist, at most the cap a patch can afford
+(`modes = n` on the domain, a default from cost). Modes left out are said, not
+hidden: they are the part of the spectrum not simulated.
+
+### 4. How it is built
+
+- A new pass, `system_pass`, replaces `fields_pass`, `plain_laws` and the
+  def write-out's stepping. It splits the program as in 1, builds the system
+  as data (media, laws, inside expressions, sources, reads), and hands it to
+  `medium/`.
+- `medium/` decides the representations (3) and returns **one block**: the
+  step, as aither tree with calls into native helpers (`modes_step`,
+  `modes_kick`, `modes_at`, RK4's stages written out). It goes in one place,
+  between the outside-before and outside-after code. Positions in the user's
+  file stop meaning anything to it.
+- The natives live in `medium/`, claim their state from the voice's pool as
+  `dsp.c`'s do, and name their regions (`modes:string:v`), so a hot reload
+  keeps a string ringing when it is edited: modes carry over by index, places
+  by position, live coding as it is.
+- Codegen doesn't change: it compiles the block like any other aither.
+
+### 5. What stays out of milestone 1
+
+Delay lines and grids stay as they are (the old lowering, behind the new
+pass); defs holding fields stay written out; sheets and bars wait. Milestone 1
+is: a `line` under a linear law, as modes, and laws on plain state, coupled as
+in 2, so the suite's `string_partials` and `wake_on_grid` pass from the patches.
+
+### Decisions this asks for
+
+1. Everything outside the system reads the start of the moment, the output
+   included (a sample later than today).
+2. The inside/outside line falls out of the reads; nothing marks it.
+3. The core returns an aither block with native helpers, rather than raw C,
+   so codegen, hot reload and export keep working as they are.
+4. A mode cap per medium, said when it bites.
+
 ## Plan
 
 1. **The suite**: known answers and convergence, run on today's engine first,
