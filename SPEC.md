@@ -1909,7 +1909,12 @@ reads that pipe whatever the patch does; offline (with `seconds`)
 and under `audit`, it reads standard input only if the patch calls
 `input()`, so a render started with an idle pipe on stdin (over
 `ssh`, from a script) doesn't wait. A live engine given an idle pipe
-waits for it: run it with `</dev/null`. The engine is
+waits for it: run it with `</dev/null`. **Input that runs out ends a live
+engine**, as a filter's does: once audio has come in on stdin and its source
+ends, the engine writes the block that last input made, says so and exits,
+so `./aither fx.aither < take.raw > wet.raw` is as long as the take (give
+`seconds` for a tail to ring past it). Input that never came, `</dev/null`
+or a pipe closed before anything arrived, is silence and plays on. The engine is
 lockstep on the pipe: it reads one block of input, then writes one
 block of output, and holds nothing back, so a program on both ends
 (`tools/card`, which runs a command between a sound card's input and

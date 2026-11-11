@@ -1731,6 +1731,12 @@ static void pump_pipe(void) {
    * render started with an idle pipe on stdin (ssh, a script) can't wait. */
   int have_input = !isatty(0) && (pipe_limit == 0 || input_used);
   int input_open = have_input;
+  /* Input that runs out ends a live run, as a filter's does: once audio has
+   * come in and its source ends, the engine writes what that last block made
+   * and stops, where before it played silence on forever (into a file, as fast
+   * as it could). Input that never came, `</dev/null` or a pipe closed
+   * unused, is silence, as ever; offline a run is as long as it was asked. */
+  int input_seen = 0, input_over = 0;
   while (running && (pipe_limit == 0 || pipe_frames < pipe_limit)) {
     int want = pipe_limit > 0 && pipe_limit - pipe_frames < frames ? (int)(pipe_limit - pipe_frames)
                                                                    : frames;
@@ -1749,9 +1755,11 @@ static void pump_pipe(void) {
         if (k < 0 && errno == EINTR) continue;
         if (k <= 0) {
           input_open = 0;
+          input_over = input_seen && pipe_limit == 0;
           break;
         }
         got += k;
+        input_seen = 1;
       }
       for (long i = got / (long)sizeof(float); i < want * 2; i++) in_buf[i] = 0.0f;
     }
@@ -1772,6 +1780,10 @@ static void pump_pipe(void) {
     }
     if (put < bytes) break;
     pipe_frames += want;
+    if (input_over) {
+      fprintf(stderr, "[aither] the input has ended, and so does the engine\n");
+      break;
+    }
   }
   running = 0;
 }

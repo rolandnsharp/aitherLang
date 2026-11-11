@@ -599,7 +599,29 @@ TEST(engine_live) {
     close_all(&o);
   }
 
-  /* --- 15. AITHER_MIDI names the port to listen to, and a 14-bit
+  /* --- 15. Input that runs out ends the engine, as a filter's does, its
+   * last block written; input that never came (stdin closed unused, as
+   * every engine above has it) is silence and plays on. */
+  {
+    write_file("thru.aither", "input()\n");
+    Proc f = start("thru.aither", NULL);
+    long block = 512 * 2 * (long)sizeof(float);
+    long sent = block * 4 + 1000;                  /* not a whole number of blocks */
+    char* in = malloc(sent);
+    for (long i = 0; i < sent / (long)sizeof(float); i++) ((float*)in)[i] = 0.5f;
+    MUST(write(f.in, in, sent) == sent, "the input written");
+    close_in(&f);
+    long n;
+    char* out = read_all(f.out, &n);
+    CHECK(wait_exit(&f, 10000) == 0, "the engine ends with its input, cleanly");
+    CHECK(n >= sent && n <= sent + block, "what came in went out, and no more than a block of silence: %ld of %ld", n, sent);
+    CHECK(n >= block && f32_at(out, 0, 0) == 0.5f, "and it was the input");
+    free(in);
+    free(out);
+    close_all(&f);
+  }
+
+  /* --- 16. AITHER_MIDI names the port to listen to, and a 14-bit
    * controller arrives whole: a port of our own sends controller 20 as
    * a pair (coarse 100, fine 37), and the engine started with
    * AITHER_MIDI set to it plays midi_cc(20) at (100 * 128 + 37) / 16383.
