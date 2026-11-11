@@ -222,6 +222,32 @@ a pair of pairs.
 checkout isn't switched under it. `main` takes it when it beats the lowering
 on the suite and plays every field patch; only then does the old code go.
 
+## Milestone 1: the numerics, proved (2026-11-11)
+
+A prototype of the core in C (`medium/modes.c`, on `field-core`): a line held
+as modes, each a pair stepped exactly (its 2x2 exponential worked out once),
+and everything else coupled to it by **Strang splitting**: each medium turns
+half a step on its own, exactly; the forces between them (and any law on
+plain state, by RK4) act as one kick; each medium turns the other half.
+
+| case | today's engine | the prototype |
+|---|---|---|
+| struck string, 12 partials (`string_proto`) | 9.68 cents off, partials 6 up gone | 0.0000 cents, within 0.011 dB, 218 modes at 48 kHz |
+| two springs, lossless (`springs_proto split`) | `dho` pair blows up | energy flat to 0.0000 dB, modes within 0.003 cents |
+| wake on the string, 48 to 384 kHz (`wake_proto kick`) | 335.3 to 329.8 Hz: 28.8 cents | 329.757 Hz at every rate: 0.01 cents |
+
+**What the wake's trouble really was.** The prototype with aither's step for a
+law on plain state (velocity, then place: `wake_proto lag-euler`) gives 335.28,
+334.43, 329.81, 329.79 Hz, aither's own numbers to the hertz; with RK4 and the
+same one-sample lag, 0.03 cents. So the lock was lost to a first-order step on
+a nonlinear law, not to the sample between the wake and the string. The lag
+does matter for a lossless linear pair (two exact springs, lagged, gain 79 dB
+in 2 s at 48 kHz); split, they hold. The core needs both: a high-order step
+for nonlinear laws, and the splitting for what couples.
+
+Cost: a mode is about six multiplies a step; the 100-mode loop ran at 0.02 of
+a core. The wake's RK4 is four evaluations of its law a sample.
+
 ## Plan
 
 1. **The suite**: known answers and convergence, run on today's engine first,

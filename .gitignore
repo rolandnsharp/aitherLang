@@ -28,3 +28,5 @@ __pycache__/
 
 # a binary mid-link (the Makefile renames it into place)
 *.tmp
+# the field core's prototypes, built from medium/*.c
+medium/*_proto
