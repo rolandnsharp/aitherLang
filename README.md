@@ -192,7 +192,7 @@ aither song.aither --solo horn | tools/fft 4096 | AITHER_SOCK=/tmp/s.sock aither
 tools/fft 4096 <(aither a.aither) <(AITHER_SOCK=/tmp/b.sock aither b.aither) | AITHER_SOCK=/tmp/x.sock aither patches/spectrum_cross.aither | tools/ifft 4096 | tools/play
                                               two spectra side by side in a frame: b heard in a's colour
 tools/add --delay 512 <(aither song.aither --mute horn) <(aither song.aither --solo horn | …) | tools/play
-                                              streams added in step (make tools/add); notes/spectrum-2026-11-06.md
+                                              streams added in step (make tools/add); SPECTRAL.md
 arecord -f FLOAT_LE -c 2 -r 48000 | aither fx.aither | tools/play    input() reads stdin
 tools/card -- aither fx.aither                the card on both ends: input() hears it, the output plays,
                                               at a fixed loop delay; sets the rate itself (make tools/card)
@@ -449,6 +449,8 @@ high-quality reverb tails simultaneously, use a DAW.
   what a trace can show
 - [TV.md](TV.md) — drawing with pixels: the output as a raster of
   complex values, and what a picture can show
+- [SPECTRAL.md](SPECTRAL.md) — a sound's spectrum through a patch: the
+  fft pipe, the spectral patches, and how to write one
 - [ARCHITECTURE.md](ARCHITECTURE.md) — implementation overview
 - [BUGS_AND_ISSUES.md](BUGS_AND_ISSUES.md) — known issues + session logs
 - [stdlib.aither](stdlib.aither) — the starter kits, in aither
