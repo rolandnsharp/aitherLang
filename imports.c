@@ -799,19 +799,19 @@ static void field_stmts(Fields* fs, Node** in, int n, Kids* out, int top) {
           fkids(fs, across, 1, (Node*[]){fnum(fs, f->side + f->extra, s)});
           kid(out, across);
         }
-        if (f->sheet && f->bar) {                            /* a plate's first mode a period: pinned, omega = (1 / pi) k^2 */
+        /* Four slopes are Δ twice: Δ here is speed^2 times two slopes of
+         * places, so ΔΔ is speed^4 times four. A bar's or a plate's pitch is
+         * its stiffness in the law (SPEC "Four slopes are a bar"). */
+        if (f->sheet && f->bar) {                            /* a plate: speed across sqrt 2, pinned */
           Node* lc = fident(fs, f->across, s);
           Node* bend = fnode(fs, nkLet, f->bend, s);
-          fkids(fs, bend, 1, (Node*[]){fbin(fs, "*", fbin(fs, "*", fbin(fs, "*", lc, lc, s), fbin(fs, "*", lc, lc, s), s), fnum(fs, 1 / (M_PI * M_PI), s), s)});
+          fkids(fs, bend, 1, (Node*[]){fbin(fs, "*", fbin(fs, "*", fbin(fs, "*", lc, lc, s), fbin(fs, "*", lc, lc, s), s), fnum(fs, 4, s), s)});
           kid(out, bend);
         }
-        if (f->bar && !f->sheet) {                           /* its first mode a period: by its ends, classically */
-          int free_ends = (f->ends[0] == 2) + (f->ends[1] == 2);
-          double first = free_ends == 2 ? 2.26669 : free_ends == 1 ? 1.5625 : 1;
-          double c = 2 / M_PI / first;
+        if (f->bar && !f->sheet) {                           /* a bar: speed twice its length */
           Node* lc = fident(fs, f->length, s);
           Node* bend = fnode(fs, nkLet, f->bend, s);
-          fkids(fs, bend, 1, (Node*[]){fbin(fs, "*", fbin(fs, "*", fbin(fs, "*", lc, lc, s), fbin(fs, "*", lc, lc, s), s), fnum(fs, c * c, s), s)});
+          fkids(fs, bend, 1, (Node*[]){fbin(fs, "*", fbin(fs, "*", fbin(fs, "*", lc, lc, s), fbin(fs, "*", lc, lc, s), s), fnum(fs, 16, s), s)});
           kid(out, bend);
         }
         Node* speed = fnode(fs, nkLet, f->speed, s);

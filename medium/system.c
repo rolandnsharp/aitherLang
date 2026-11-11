@@ -536,7 +536,7 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
       m->C = coef[2] ? coef[2] : num(s, 0, t);
       m->D = coef[3] ? coef[3] : num(s, 0, t);
       m->E = coef[4] ? coef[4] : num(s, 0, t);
-      if (coef[4] && (m->ends[0] != 1 || m->ends[1] != 1 || m->axes == 2)) return 0;   /* a free bar's modes aren't sines; a plate: later */
+      if (coef[4] && (m->ends[0] != 1 || m->ends[1] != 1)) return 0;   /* a free bar's modes aren't sines: the grid, as yet */
       continue;
     }
     int declared = 0;                                  /* a law on plain state, declared as a number */

@@ -364,8 +364,9 @@ static double bar_mode(const char* ends, double near) {
   char src[640], err[4096];
   snprintf(src, sizeof src,
     "$x = field(period = 1 / 220, ends = %s)\n$v = field(period = 1 / 220, ends = %s)\n"
-    "$v' = -ΔΔ$x - $v * 0.05 + (if t < 0.0005 then 1 else 0) * δ(0.37, 0.03)\n$x' = $v\n"
-    "$v(0.23)\n", ends, ends);
+    "$v' = -ΔΔ$x * %s - $v * 0.05 + (if t < 0.0005 then 1 else 0) * δ(0.37, 0.03)\n$x' = $v\n"
+    "$v(0.23)\n", ends, ends,                       /* its stiffness: its first mode a period */
+    !strcmp(ends, "free") ? "0.004929242983150253" : "0.025330295910584444");
   Rendered r = {0};
   if (render_src(src, 0.5, 48000, &r, err, sizeof err)) { CHECK(0, "doesn't render: %s", err); return -1; }
   double best = 0, top = 0, peak = 0;
@@ -422,7 +423,7 @@ static double bar_left(double soften, double f) {
   char src[640], err[4096];
   snprintf(src, sizeof src,
     "$x = field(period = 1 / 220, ends = free)\n$v = field(period = 1 / 220, ends = free)\n"
-    "$v' = -ΔΔ$x - $v * 0.012 + Δ$v * %g + (if t < 0.0005 then 1 else 0) * δ(0.2, 0.03)\n$x' = $v\n"
+    "$v' = -ΔΔ$x * 0.004929242983150253 - $v * 0.012 + Δ$v * %g + (if t < 0.0005 then 1 else 0) * δ(0.2, 0.03)\n$x' = $v\n"
     "$v(0.28)\n", soften);
   Rendered r = {0};
   if (render_src(src, 0.5, 48000, &r, err, sizeof err)) { CHECK(0, "doesn't render: %s", err); return -1; }
@@ -478,7 +479,7 @@ static double sheet_mode(const char* law, const char* period, double near, doubl
 }
 TEST(sheets_ring_as_they_should) {
   const char* wave = "Δ$x";
-  const char* plate = "-ΔΔ$x";
+  const char* plate = "-ΔΔ$x * 0.012665147955292222";       /* 1 / (8 pi^2): its first mode 1 / T */
   double slow = sheet_mode(wave, "2", 0.5, 12), slow2 = sheet_mode(wave, "2", 0.79, 12);
   double drum = sheet_mode(wave, "1 / 100", 100, 40), drum2 = sheet_mode(wave, "1 / 100", 158, 40);
   double pl = sheet_mode(plate, "1 / 100", 100, 40), pl2 = sheet_mode(plate, "1 / 100", 250, 40);

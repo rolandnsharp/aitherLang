@@ -28,6 +28,7 @@ $v = field(period = 1 / 220, ends = free)
 
 let curve = Δ$x                                            # how bent it is here
 let bend = Δcurve                                          # how its bending changes: what pushes back
+let stiff = 0.004929242983150253                           # (pi / (2 b^2))^2, b = 4.73004 (cos b cosh b = 1): its first mode a period
 $x' = $v
 
 # ---------------------------------------------------------------- the strike
@@ -39,7 +40,7 @@ let near_end = min(own, since(pad_a))
 let middle = since(pad_b)
 let stroke = 0.0005                                        # how long a blow takes
 let where = if middle < near_end then 0.5 else 0.2
-$v' = -bend - $v * loss + Δ$v * soften + (if min(near_end, middle) < stroke then 0.5 / stroke * 0.001 else 0) * δ(where, 0.03)
+$v' = -bend * stiff - $v * loss + Δ$v * soften + (if min(near_end, middle) < stroke then 0.5 / stroke * 0.001 else 0) * δ(where, 0.03)
 
 # ---------------------------------------------------------------- reading
 

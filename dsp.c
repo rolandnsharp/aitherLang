@@ -383,9 +383,8 @@ double n_input_r(void) { return dsp_input_r; }
  *
  * Its law, in rounds of `period` T as a field's are: v' = A Δx + B x + C v
  * + D Δv + E ΔΔx + forces. A mode of wavenumber k (phi = sin or cos of k p)
- * has Δ = -4 k^2 (a push crosses in half a period) and ΔΔ = 4 k^4 / pi^2 (a
- * bar's period is its first mode's, SPEC "Four slopes are a bar"), so
- * w^2 = (4 A k^2 - B - 4 E k^4 / pi^2) / T^2 and gamma = (4 D k^2 - C) / T a second. Ends: 1 fixed, 2 free; the shapes
+ * has Δ = -4 k^2 (a push crosses in half a period) and ΔΔ = 16 k^4, Δ twice,
+ * so w^2 = (4 A k^2 - B - 16 E k^4) / T^2 and gamma = (4 D k^2 - C) / T a second. Ends: 1 fixed, 2 free; the shapes
  * are sin (fixed at 0) or cos (free at 0), k = (j + o) pi with o = 1 fixed at
  * both, 0 free at both, 1/2 one of each. Round (ends 0, a ring, a push going
  * round in T): mode 0 the whole ring, then cos and sin of 2 pi n p for each
@@ -529,8 +528,9 @@ static void md_wave_step(double* p00, double* p01, double* p10, double* p11, dou
 }
 /* A wave, `$v' = A Δx + B x + C v + D Δv + E ΔΔx`: one axis, or two (el2 >= 0,
  * the second axis's ends; each axis's period T, a square). A mode's Δ is
- * -4 (k1^2 + k2^2); a bar's ΔΔ (one axis) 4 k^4 / pi^2. Two axes keep the
- * modes under Nyquist with the smallest k1^2 + k2^2, up to `cap`. */
+ * -4 (k1^2 + k2^2) = -lam, its ΔΔ lam^2, Δ twice, a bar's or a plate's.
+ * Two axes keep the modes under Nyquist with the smallest k1^2 + k2^2, up to
+ * `cap`. */
 double n_medium_turn(double* m, double cap, double T, double A, double B, double C, double D, double E,
                      double el, double er, double el2, double er2, double h) {
   long N = (long)cap;
@@ -550,7 +550,7 @@ double n_medium_turn(double* m, double cap, double T, double A, double B, double
     if (axes == 1.0) {
       Axis x = md_axis(m, 0);
       for (long j = 0; j < N; j++) {
-        double k = ax_k(x, j), w2 = (4.0 * A * k * k - B - 4.0 * E * k * k * k * k / (PI_ * PI_)) / (T * T), g = (4.0 * D * k * k - C) / T;
+        double k = ax_k(x, j), w2 = (4.0 * A * k * k - B - 16.0 * E * k * k * k * k) / (T * T), g = (4.0 * D * k * k - C) / T;
         if (w2 > nyquist * nyquist) break;
         md_wave_step(&p00[j], &p01[j], &p10[j], &p11[j], w2, g, h);
         used = j + 1;
@@ -558,8 +558,15 @@ double n_medium_turn(double* m, double cap, double T, double A, double B, double
     } else {
       Axis x = md_axis(m, 0), y = md_axis(m, 1);
       double *i1 = m + MD_HEAD + 8 * N, *i2 = i1 + N;
-      /* the largest k1^2 + k2^2 under Nyquist: 4 A lam / T^2 < nyquist^2 */
-      double most = A > 0 ? nyquist * nyquist * T * T / (4.0 * A) : 0.0;
+      /* the largest k1^2 + k2^2 under Nyquist, from the whole law: Δ, ΔΔ */
+      double ny2 = nyquist * nyquist, most = 1.0;
+      #define MD_W2(l) ((4.0 * A * (l) - B - 16.0 * E * (l) * (l)) / (T * T))
+      while (MD_W2(most) <= ny2 && most < 1e30) most *= 2.0;
+      for (double lo2 = 0.0, it = 0; it < 80; it++) {
+        double mid = 0.5 * (lo2 + most);
+        if (MD_W2(mid) <= ny2) lo2 = mid; else most = mid;
+      }
+      #undef MD_W2
       /* the cut that keeps at most `cap`: the k^2 a count first passes it at */
       double lo = 0.0, hi = most;
       for (int it = 0; it < 60; it++) {
@@ -579,7 +586,7 @@ double n_medium_turn(double* m, double cap, double T, double A, double B, double
         for (long j2 = 0; j2 < N && used < N; j2++) {
           double k2 = ax_k(y, j2), l = k1 * k1 + k2 * k2;
           if (l > lo) break;
-          double w2 = (4.0 * A * l - B - 4.0 * E * l * l / (PI_ * PI_)) / (T * T), g = (4.0 * D * l - C) / T;
+          double w2 = (4.0 * A * l - B - 16.0 * E * l * l) / (T * T), g = (4.0 * D * l - C) / T;
           md_wave_step(&p00[used], &p01[used], &p10[used], &p11[used], w2, g, h);
           i1[used] = (double)j1; i2[used] = (double)j2;
           used++;

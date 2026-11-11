@@ -822,15 +822,16 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
 - **`field(period = [T, T], ends = fixed)` is the same field on a surface**: a
   square, `ends` one word for its whole edge, `fixed` or `free`. Two slopes
   are how far the neighbours all round stand above this place, so the law is
-  a string's, and four are a plate, pinned, so `fixed` only. One slope has no
+  a string's, and four a plate ("Four slopes are a bar"), pinned, so `fixed` only. One slope has no
   direction here, and is an error. A point on it is one value, `(p, q)`, each
   0 to 1, so `$x((0.3, 0.6))` reads, a term `force * δ((p, q), width)`
   strikes, and reading round a circle is `$x(spin(note) * 0.3 + (0.5, 0.5))`.
   Each period is its axis's, there and back along it as a line's, so a square
   fixed all round sounds first at sqrt 2 / T: measured (in the old spelling,
   whose period was that first mode's) 0.500 Hz where theory has 0.5, 99.8 Hz of
-  100, the next at 0.790 and 157.4 of 0.79 and 158; a plate 99.0 and 241.5 of
-  100 and 250. Two axes have one period as yet, a square. It is as fine as a place a sample allows, about 31 a side at
+  100, the next at 0.790 and 157.4 of 0.79 and 158; on the field core now 100.0
+  and 158.0, and a plate, its stiffness 1 / (8 pi^2), 100.0 and 250.0 of 100
+  and 250. Two axes have one period as yet, a square. It is as fine as a place a sample allows, about 31 a side at
   2 s, for a place of cost. Too short for 12 a side, it takes several a sample
   at 12 a side, about a third of a uConsole core at 100 Hz, and a plate 8. The
   period has to be plain numbers and file-level lets.
@@ -842,15 +843,21 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   and too much goes unstable, with no warning: on that bar past about 0.1, on
   `field_didge`'s bore past about 0.003. A law smoothing itself doesn't change
   the order laws step in.
-- **Four slopes are a bar**: `$v' = -ΔΔ$x`, `$x' = $v`. A `fixed` end is pinned, a `free` one is free to bend, and `period`
-  is the first mode's: 220 Hz at `1 / 220`, whichever ends. The modes come
-  of the law: pinned 1 : 3.9, free 1 : 2.7 : 5.1 at 220 Hz, nearer the
-  textbook's 2.76 and 5.40 the slower the bar, as a short one has few
-  places: its highest mode, not a crossing, sets the step, and that sets
-  how many. A free bar drifts as it's struck, so read `$v`, or hold it. A
-  multiplier on the word moves the pitch and can go unstable. About a
-  quarter of a uConsole core at 220 Hz, and more for a spread source. The period
-  has to be plain numbers and file-level lets.
+- **Four slopes are a bar**: `$v' = -ΔΔ$x * stiff`, `$x' = $v`. `ΔΔ` is
+  exactly `Δ` twice, on any domain, and `period` means what it does for every
+  field, the time a `Δ` wave takes there and back: a bar has no one speed, so
+  its pitch is its stiffness, as in physics. A `fixed` end is pinned, a `free`
+  one is free to bend. Pinned at both ends the modes are sines, n^2 apart, the
+  first at `2 pi sqrt(stiff) / T`: `stiff = 1 / (4 pi^2)` puts it at 1 / T,
+  exactly, on the field core. Free at both, the first is at `2 b^2 sqrt(stiff)
+  / (pi T)`, b = 4.73004 (cos b cosh b = 1), so `stiff = 0.004929242983150253`
+  puts it at 1 / T; a free bar's modes aren't sines, so it is on places as yet:
+  1 : 2.7 : 5.1 at 220 Hz, nearer the textbook's 2.76 and 5.40 the slower the
+  bar, its highest mode setting the step. There a stiffness much past what
+  puts the first mode at 1 / T goes unstable. A free bar drifts as it's struck,
+  so read `$v`, or hold it. A plate is the same on a square, pinned all round:
+  `stiff = 1 / (8 pi^2)` puts its first mode at 1 / T, the next at 2.5 times,
+  exactly. The period has to be plain numbers and file-level lets.
 - A bare `$x` is the field at this place, and `$x = ...` stores there. A
   later line at the place sees what was stored; a neighbour sees the last
   step. A number or a value is everywhere.
