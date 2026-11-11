@@ -1,0 +1,12 @@
+# a wake locked to a grid string at 0.37 (field_harp's numbers, as a wave)
+let shed = TAU * 110 * 3.05
+$x = line(period = 1 / 110, ends = fixed)
+$v = line(period = 1 / 110, ends = fixed)
+let moving = $v(0.37)
+$q = 0.1
+$r = 0
+$r' = -$q * shed ^ 2 + shed * 0.1 * (1 - $q ^ 2) * $r + moving * 0.5 * shed ^ 2
+$q' = $r
+$v' = Δ$x - $v * 0.002 + $q * 0.01 * δ(0.37)
+$x' = $v
+[$x(0.13), $q]

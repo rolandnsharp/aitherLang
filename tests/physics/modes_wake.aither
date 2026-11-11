@@ -1,0 +1,22 @@
+# the same wake on the modal string: the string's rates are a second here,
+# so its velocity is read a round's worth (times 1/110) and the wake's push
+# is the grid's per round, times 110 squared
+let f0 = 110
+let gamma = 0.002 * f0
+let shed = TAU * f0 * 3.05
+$moving = 0.0
+$q = 0.1
+$r = 0
+$r' = -$q * shed ^ 2 + shed * 0.1 * (1 - $q ^ 2) * $r + $moving * 0.5 * shed ^ 2
+$q' = $r
+let push = $q * 0.01 * f0 ^ 2
+def mode(n, push):
+  let w = TAU * f0 * n
+  let d = gamma / (2 * w)
+  let (x, q) = dho(push * 2 * sin(TAU / 2 * n * 0.37), f0 * n, d)
+  let wd = w * sqrt(1 - d * d)
+  let v = -(wd * q + d * w * x)
+  (x * sin(TAU / 2 * n * 0.13), v * sin(TAU / 2 * n * 0.37) / f0)
+let (heard, vel) = sum(60, n => mode(n, push))
+$moving = vel
+[heard, $q]

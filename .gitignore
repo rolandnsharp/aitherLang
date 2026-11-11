@@ -23,6 +23,7 @@ tests/*
 !tests/*.aither
 !tests/corpus.golden
 !tests/lang/
+!tests/physics/
 __pycache__/
 
 # a binary mid-link (the Makefile renames it into place)

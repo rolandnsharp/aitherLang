@@ -1,0 +1,10 @@
+# the same two springs as two dho, coupled through one sample of state
+let w = TAU * 440
+let k = ((TAU * 466.16) ^ 2 - w ^ 2) / 2
+$was = (0, 0)
+let (a, b) = $was
+let kick = if sweep < dt / 2 then w / dt else 0
+let (x1, _) = dho(kick - (a - b) * k, 440, 0)
+let (x2, _) = dho(-(b - a) * k, 440, 0)
+$was = (x1, x2)
+[x1, x2]

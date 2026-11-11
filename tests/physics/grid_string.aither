@@ -1,0 +1,6 @@
+# a string on today's grid: fixed ends, 110 Hz, struck at 0.3, heard at 0.13
+$x = line(period = 1 / 110, ends = fixed)
+$v = line(period = 1 / 110, ends = fixed)
+$v' = Δ$x - $v * 0.002 + (if t < 0.0005 then 2 else 0) * δ(0.3)
+$x' = $v
+[$x(0.13), 0]

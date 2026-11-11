@@ -63,6 +63,11 @@ test: aither tests/run tools/fft tools/ifft tools/add
 
 # Every tracked patch rendered and fingerprinted against tests/corpus.golden
 # (tests/corpus.c). After an intended change: make corpus-update.
+# The physics suite: fields against known answers and convergence. It fails
+# where today's engine misses the physics, so it isn't part of `test`.
+physics: aither
+	python3 tests/physics/run.py
+
 corpus: tests/corpus
 	tests/corpus
 
@@ -87,4 +92,4 @@ blocks: tests/blocks
 clean:
 	rm -rf aither *.tmp tools/*.tmp tests/*.tmp nimcache/ tests/run tests/corpus tests/exact tests/temporal_audit tests/bench tests/blocks tools/play tools/card tools/pad tools/scope tools/tv tools/rate tools/fft tools/ifft tools/add
 
-.PHONY: all clean test corpus corpus-update exact bench blocks
+.PHONY: all clean test corpus corpus-update exact bench blocks physics
