@@ -78,6 +78,45 @@ So: the semantics is a field (a ring holding the sound, read by its
 modes, or a bank of resonators, which is the same thing); the evaluation
 is an FFT every hop. The pipe was the evaluation without the semantics.
 
+## It fits `field()` as it is (the field core's view, 2026-11-11)
+
+From the session building the field core: a spectrum needs no new kind of
+field, and `period` keeps its meaning. A frame on a ring is a field of
+transport, the sound going in at one place and carried round one place a
+sample:
+
+```
+$s = field(period = N / sr, ends = round)
+$s' = -∇$s + x * δ(0)                 # a one-way wave: a push goes round in N / sr seconds
+```
+
+So the period is still how long a push takes to go round. N is not a
+parameter of its own: it is the period at the rate. The law's modes are
+the ring's modes the core already uses, cos and sin of 2πnp. Each turns at
+n · sr / N and is driven by the sound: the resonator bank above, the
+sliding DFT. Its bins are those modes, and `spectrum(x, N)` is a reading
+of a ring field by its modes, not a different thing.
+
+One condition, checked against the sliding DFT: the write must take the
+place of what comes back round, as a tape head records over the loop, not
+add to it. Added, place 0 after a turn holds x(t) + x(t − N) + ..., and
+the bins every turn ever written, not the last frame. The sliding DFT's
+− x(t − N) is that erasure. As a law it is a sink at the write head, a
+matched end opened in the ring at 0, or the source written as a
+replacement; which of these is cleanest is the core's to choose.
+
+What the core lacks for it:
+
+1. **A first-order law on one field**, `$s' = c ∇$s`, whose modes are pure
+   complex turns, simpler than the pairs (`$v`, `$x`) it holds now.
+2. **A reading of a field's modes**, not only its value at a place.
+
+The FFT a hop is then the engine's cheap way to compute that field (an
+N-point FFT a hop against N turns a sample), the same kind of choice the
+core already makes between modes, delay lines and grids: the patch says
+the law, the engine picks the method. The two natives below are stand-ins
+for that reading, named and shaped for it.
+
 ## What it could look like
 
 Only a sketch; the spelling is the field core's to settle.
@@ -131,11 +170,11 @@ written now.
   It touches codegen.c and the field core, where the field-core work is
   going on.
 - **A field's period means time, here.** In `field(period = T, ends)`, T
-  is how long a push takes to go round, and the engine picks the places
-  from it. A spectrum's places are fixed by N and its axis is frequency,
-  stepped a hop at a time. Either a spectrum is a different kind of field,
-  or `period` grows a second meaning. That has to be argued out, not
-  slipped in.
+  is how long a push takes to go round. A spectrum's places looked fixed
+  by N and its axis frequency, which seemed to want a different kind of
+  field or a second meaning of `period`. The field core's answer above
+  says neither is needed, but its two missing pieces (a first-order law,
+  a reading by modes) are work in the core.
 - **The pipe is Unix, and that has uses.** `tools/fft` reads any float
   stream: a radio's, a sound card's (`tools/card`), a recording. Inside
   the language, a spectrum is only of what aither makes or hears through
@@ -171,7 +210,8 @@ average. Keep the tools for sounds from outside.
    own number (as `every` is), not the engine's block?
 2. Should a spectrum be a field from the start (C), or a stepped array
    first (B) and a field once the field core can hold it?
-3. Is a spectrum's axis frequency, a new kind of field, or should
-   `period` mean "round in N places" as well as "round in T seconds"?
+3. ~~Is a spectrum a new kind of field, or does `period` grow a second
+   meaning?~~ Neither, on the field core's reading above: a frame is a
+   transport ring of period N / sr, and its spectrum is the ring's modes.
 4. The window: the sine as now (and the pipe's results), or a choice in
    the patch?
