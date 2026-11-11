@@ -97,13 +97,30 @@ n · sr / N and is driven by the sound: the resonator bank above, the
 sliding DFT. Its bins are those modes, and `spectrum(x, N)` is a reading
 of a ring field by its modes, not a different thing.
 
-One condition, checked against the sliding DFT: the write must take the
-place of what comes back round, as a tape head records over the loop, not
-add to it. Added, place 0 after a turn holds x(t) + x(t − N) + ..., and
-the bins every turn ever written, not the last frame. The sliding DFT's
-− x(t − N) is that erasure. As a law it is a sink at the write head, a
-matched end opened in the ring at 0, or the source written as a
-replacement; which of these is cleanest is the core's to choose.
+One condition, checked against the sliding DFT: a lossless ring keeps
+every turn. Place 0 after a turn holds x(t) + x(t − N) + ..., and the
+bins add up all of history, not the last frame. There are two clean ways
+out, both fields:
+
+1. **A loss on the ring:** `$s' = -∇$s - $s * loss + x * δ(0)`. Each turn
+   comes back weaker, so the bins are the spectrum of the past under an
+   exponential window, newest loudest: a bank of damped resonators, as
+   the ear's are. It is local and linear, so the core holds it as modes,
+   once it has a first-order law. One number, `loss`, trades time against
+   pitch: a tenth of a second's memory is about 10 Hz between what it
+   tells apart. This is the field-native spectrum.
+2. **An exact frame:** the write takes the place of what comes back round,
+   as a tape head records over the loop. That is the sliding DFT's
+   − x(t − N), a sink at 0 that reads the field there, `- $s(0) * δ(0)` at
+   one sample's strength. It is still linear, but not mode by mode: the
+   field at a place is the sum of every mode, so the sink ties each mode
+   to all the others. The core would need the field at a place inside a
+   law. Every spectral patch so far uses this kind (with a sine window).
+
+An FFT a hop computes either: the second exactly, and the first to within
+where its window is cut off (an exponential cut at -100 dB is a frame of
+about 11.5 time constants). So the choice between them is the patch's,
+of what it wants to hear, and not the engine's, of what it can afford.
 
 What the core lacks for it:
 
