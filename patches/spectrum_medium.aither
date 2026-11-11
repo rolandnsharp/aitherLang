@@ -1,0 +1,70 @@
+# spectrum_medium — a sound's spectrum as a string, stretched along pitch.
+#
+# Like spectrum_freeze, this patch hears a spectrum: it goes between
+# tools/fft and tools/ifft, 4096 samples a frame, so input() is a bin at
+# a time, 2048 bins a frame, 11 Hz apart.
+#
+#   cd ~/aitherLang
+#   ./aither patches/field_didge.aither | tools/fft 4096 \
+#     | AITHER_SOCK=/tmp/medium.sock ./aither patches/spectrum_medium.aither \
+#     | tools/ifft 4096 | tools/play
+#
+# The bins are the places of a medium, one after another up the
+# spectrum, and how loud each one sounds is how far the medium is
+# displaced there. Each place is a mass held by a spring to the sound
+# coming in, and pulled by its neighbours as a string's places are: so
+# the sound pushes the medium into its own colour, and the medium, being a
+# string, carries that colour on, up and down in pitch, as waves. A loud
+# partial sends ripples out to either side that travel, pass through each
+# other and come back off the ends of the spectrum; a colour that changes
+# shakes the string, and the string rings on after it.
+#
+# The sound always passes as it came; where the medium is louder than the
+# sound, what it holds beyond the sound is added, each bin an oscillator, ringing at the frequency the sound last had there (as
+# spectrum_smear's tail does), and a few bins together turn at the speed
+# of the loudest, so a ripple through a harmonic stays one tone.
+#
+# The medium's three numbers are the patch's, below: how hard the sound
+# holds it, how fast its waves travel along the spectrum, and how fast
+# they die.
+
+let frame = 2048
+let bin = pixel_index(frame, 1)
+
+let grip = 0.15         # the spring to the sound: 0 lets the medium go, 1 holds it hard
+let speed2 = 0.8        # the waves' speed squared, bins a frame (0.9 bins, 200 Hz a second; past about 0.94 it blows up)
+let loss = 0.04         # how much of its motion the medium loses a frame
+
+$u = array(frame, 0, every = frame)          # the medium: how far displaced, at each bin
+$v = array(frame, 0, every = frame)          # the medium a frame ago
+$turn = array(frame, 0, every = frame)       # where each bin's oscillator points
+$speed = array(frame, 0, every = frame)      # how far it turns in a frame
+$heard = array(frame, (0, 0), every = frame) # the bin as it came, a frame ago
+
+let [in_re, in_im] = input()
+let here = (in_re, in_im)
+let loud = amplitude(here)
+
+# the string's law, at this place: its own motion, kept but for the loss;
+# its neighbours' pull; and the spring to the sound
+let now = $u[bin]
+let pull = $u[bin - 1] - 2 * now + $u[bin + 1]
+let next = now + (1 - loss) * (now - $v[bin]) + speed2 * pull + grip * (loud - now)
+let level = abs(next)
+
+# how far the sound turned in this bin since the last frame (see spectrum_smear)
+let strayed = phase(here * conj($heard[bin]) * (if bin mod 2 == 1 then -1 else 1))
+let measured = PI * bin + strayed
+let following = loud >= level                # the sound is at least the medium: it leads
+let below = max(bin - 1, 0)
+let above = min(bin + 1, frame - 1)
+let lead_low = if $u[below] > $u[bin] then below else bin
+let lead = if $u[above] > $u[lead_low] then above else lead_low
+let turned = ($turn[bin] + $speed[lead]) mod TAU
+
+$u[bin] = next
+$v[bin] = now
+$heard[bin] = here
+$speed[bin] = if following then measured else $speed[bin]
+$turn[bin] = if following then phase(here) else turned
+if following or bin == 0 then here else here + rotate((level - loud, 0), turned)
