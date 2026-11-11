@@ -189,6 +189,8 @@ AITHER_RATE=192000 aither fm.aither | sdr-tx  the rate is yours; the reader agre
 aither rx.aither | tools/rate 2400000 44100 | tools/play hw:…   a radio's rate to the speaker's (make tools/rate)
 aither song.aither --solo horn | tools/fft 4096 | AITHER_SOCK=/tmp/s.sock aither patches/spectrum_freeze.aither | tools/ifft 4096 | tools/play
                                               one play's spectrum through a patch: a bin a sample, as pairs (make tools/fft tools/ifft)
+tools/fft 4096 <(aither a.aither) <(AITHER_SOCK=/tmp/b.sock aither b.aither) | AITHER_SOCK=/tmp/x.sock aither patches/spectrum_cross.aither | tools/ifft 4096 | tools/play
+                                              two spectra side by side in a frame: b heard in a's colour
 tools/add --delay 512 <(aither song.aither --mute horn) <(aither song.aither --solo horn | …) | tools/play
                                               streams added in step (make tools/add); notes/spectrum-2026-11-06.md
 arecord -f FLOAT_LE -c 2 -r 48000 | aither fx.aither | tools/play    input() reads stdin

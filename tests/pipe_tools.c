@@ -106,6 +106,35 @@ TEST(fft_puts_a_sine_in_its_bin) {
   free(b);
 }
 
+/* Two files: each one's spectrum in its half of the frame, its own bins. */
+TEST(fft_puts_two_streams_side_by_side) {
+  in_temp();
+  static const char* names[2] = {"low", "high"};
+  static const int bins[2] = {8, 40};
+  for (int s = 0; s < 2; s++) {
+    FILE* f = fopen(at(names[s]), "wb");
+    for (long i = 0; i < 4096; i++) {
+      float v = (float)(0.5 * sin(2 * M_PI * bins[s] * i / 256.0)), pair[2] = {v, v};
+      fwrite(pair, sizeof pair, 1, f);
+    }
+    fclose(f);
+  }
+  CHECK(sh("tools/fft 256 %s %s > %s", at("low"), at("high"), at("bins")) == 0, "fft ran");
+  float* b = NULL;
+  long n = load(at("bins"), &b);
+  CHECK(n >= 128 * 8, "frames came: %ld", n);
+  const float* frame = b + 2 * 128 * 4;
+  for (int s = 0; s < 2; s++) {
+    const float* half = frame + 2 * 64 * s;
+    int top = 0;
+    for (int k = 0; k < 64; k++)
+      if (hypot(half[2 * k], half[2 * k + 1]) > hypot(half[2 * top], half[2 * top + 1])) top = k;
+    CHECK(top == bins[s], "stream %d's loudest bin is %d", s, top);
+    NEAR(hypot(half[2 * top], half[2 * top + 1]), 0.5 * 2 / M_PI, 0.05, "its level");
+  }
+  free(b);
+}
+
 TEST(add_sums_and_delays) {
   in_temp();
   save_noise(at("a"), 2000);
