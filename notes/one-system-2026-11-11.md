@@ -387,11 +387,16 @@ its `ends`.
   | `ring(period = T)` | `field(period = T, ends = round)` |
   | `line(period = T, ends = fixed)` | `field(period = T, ends = fixed)` |
   | `line(period = T, ends = [fixed, free])` | `field(period = T, ends = [fixed, free])` |
-  | `sheet(period = T, ends = fixed)` | `field(period = T, ends = [fixed, fixed])` (one end word an axis) |
-  | (new) a cylinder, a torus | `ends = [round, [fixed, free]]`, `ends = [round, round]` |
+  | `sheet(period = T, ends = fixed)` | `field(period = [T * sqrt 2, T * sqrt 2], ends = fixed)` |
+  | (new) a rectangle, a cylinder, a torus | `period = [T1, T2]` with `ends` one entry an axis: `[fixed, round]`, `[round, round]` |
 
-  The dimension is how many pieces `ends` has: a word or a pair of ends is
-  one, a list of those is one each. A place is a fraction along each.
+  **The dimension is how many periods there are**, one an axis, each there and
+  back along it as a line's (so a square fixed all round sounds first at sqrt 2
+  / T); `ends` is one word for every edge, or one entry an axis, each a word or
+  a `[left, right]` pair. That keeps `ends = [fixed, free]` one line's two ends,
+  where counting pieces in `ends` couldn't tell it from a sheet's two axes. A
+  place is a fraction along each. Built (d4ab512): one piece, and a square
+  with one word for its edge.
 - **Any other shape, later**: a region given by a function (`inside = (p, q)
   => ...`, as rough as the function is) or a mesh read from a file (a scanned
   bell, a measured bore), its boundary condition a function along the edge;
