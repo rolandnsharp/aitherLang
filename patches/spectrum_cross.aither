@@ -1,0 +1,55 @@
+# spectrum_cross — one field heard through another's colour.
+#
+# Two sounds go in, side by side in one spectrum stream: tools/fft with
+# two files puts each one's lowest 1024 bins in a frame of 2048, the
+# first's then the second's.
+#
+#   cd ~/aitherLang
+#   tools/fft 4096 <(./aither patches/field_didge.aither) \
+#                  <(AITHER_SOCK=/tmp/ring.sock ./aither patches/scanned_ring.aither) \
+#     | AITHER_SOCK=/tmp/cross.sock ./aither patches/spectrum_cross.aither \
+#     | tools/ifft 4096 | tools/play
+#
+# The second sound is what moves: its waves, its partials, how each one
+# turns from frame to frame, all go through. The first is the colour: how
+# loud it is across the spectrum, smoothed so its own partials blur into
+# the body that sounds them, its resonances. Each bin of the second is
+# taken out of its own body (divided by its smoothed loudness) and put
+# into the first's (multiplied by the first's). So the ring rings in the
+# didge's throat, and when the didge's mouth moves the ring's resonances
+# move with it. Swap the two files and the didge drones in the ring's
+# body. No knobs: what it does is which two fields go in.
+#
+# Both sounds are heard a frame late (46 ms at 44.1 kHz): a bin's body
+# is the bins around it, above as well as below, so the frame is whole
+# before it's used. The spectrum stops at a quarter of the rate, 11 kHz,
+# as two streams share the pipe, and the highest of that comes out a
+# little quieter than the colour asks (the window's spill from the loud
+# low partials is most of what's up there, and it doesn't add back).
+
+let frame = 2048
+let share = frame / 2                        # each sound's bins
+let pixel = pixel_index(frame, 1)
+let second = pixel >= share
+let bin = pixel - (if second then share else 0)
+
+$heard = array(frame, (0, 0), every = frame) # both spectra, a frame ago
+$sum = array(frame, 0, every = frame)        # how loud, added up the bins
+$run = 0                                     # the sum so far, this frame
+
+let [in_re, in_im] = input()
+let here = (in_re, in_im)
+$run = (if bin == 0 then 0 else $run) + amplitude(here)
+$heard[pixel] = here
+$sum[pixel] = $run
+
+# a bin's body: the mean loudness of the bins around it, a band that
+# widens with the frequency (a sixth of an octave, and a hundred hertz
+# at the bottom), so the colour is the resonances and not the partials
+let wide = 9 + floor(bin / 16)
+let low = max(bin - wide, 0)
+let high = min(bin + wide, share - 1)
+let across = high - low + 1
+let colour = ($sum[high] - (if low == 0 then 0 else $sum[low - 1])) / across
+let own = ($sum[share + high] - (if low == 0 then 0 else $sum[share + low - 1])) / across
+if second or bin == 0 then (0, 0) else $heard[share + bin] * (colour / (own + 0.000001))

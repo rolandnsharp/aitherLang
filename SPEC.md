@@ -1954,7 +1954,11 @@ patch reads it through `input()` a bin at a time: `pixel_index(N / 2, 1)`
 is the bin, and an array stepped `every = N / 2` steps once a frame.
 `tools/ifft N` turns it back, the signal N / 2 samples later, whatever
 the engine's block. Such a patch starts with the stream, on the command
-line. `tools/add [--delay M] FILE ...` adds streams in step. See
+line. `tools/fft N FILE FILE ...` hears several streams at once: a
+frame holds each one's lowest N / 2 / K bins, one after another (pixel
+s·N/2/K + k is stream s's bin k), so a patch hears one sound through
+another, as `patches/spectrum_cross.aither` does; each stream's band
+stops at a K-th of the half rate. `tools/add [--delay M] FILE ...` adds streams in step. See
 notes/spectrum-2026-11-06.md.
 
 An offline run takes its keys and knobs from a script with `--play`:
