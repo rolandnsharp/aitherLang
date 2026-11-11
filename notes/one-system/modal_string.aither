@@ -1,0 +1,10 @@
+# the same string as its modes: each a dho at n * 110 Hz, struck and heard
+# by its own shape, sin(n pi p), the same loss a second for every mode
+let f0 = 110
+let gamma = 0.002 * f0
+let strike = if t < 0.0005 then 1 else 0
+def mode(n, strike):
+  let w = TAU * f0 * n
+  let (x, _) = dho(strike * 2 * sin(TAU / 2 * n * 0.3), f0 * n, gamma / (2 * w))
+  x * sin(TAU / 2 * n * 0.13)
+[sum(100, n => mode(n, strike)), 0]

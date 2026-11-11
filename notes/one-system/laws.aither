@@ -1,0 +1,12 @@
+# two coupled springs as laws on plain state, kicked: spring 1 starts moving
+let w = TAU * 440
+let k = ((TAU * 466.16) ^ 2 - w ^ 2) / 2
+$x1 = 0
+$v1 = w
+$x2 = 0
+$v2 = 0
+$v1' = -$x1 * w ^ 2 - ($x1 - $x2) * k
+$x1' = $v1
+$v2' = -$x2 * w ^ 2 - ($x2 - $x1) * k
+$x2' = $v2
+[$x1, $x2]

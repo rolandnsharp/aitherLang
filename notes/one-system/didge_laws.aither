@@ -1,0 +1,65 @@
+# field_didge: a didgeridoo as a field: a flared bore, and lips that play it
+# (notes/field-by-its-period-2026-11-06.md).
+#
+# The bore is pressure and flow along a line, closed at the lips and open
+# at the bell, and it flares: its width is said where the line is, and the
+# laws are the same two as a telegraph line's (SPEC "Fields"). Nothing
+# is tuned but `period`, how long the bore is: the flare says where its
+# modes fall, and that they aren't harmonics. Blown, the lips lock to the
+# strongest and drive the rest, and it drones at 75 Hz.
+#
+# The lips are a valve: a mass on a spring (dho) pushed open by the pressure
+# drop across them, with Bernoulli flow through the gap, all the same as
+# didge_minor's. They read the field at one point and push it at one point,
+# so the bore plays them back, and the drone starts by itself.
+#
+# After the bell a mouth: three formants the jaw moves, and circular
+# breathing. On the scope, the bell against the pressure at the lips.
+#
+#   ./aither patches/field_didge.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
+#
+# The gamepad (tools/pad): hold A and press up and down for the jaw (CC 20),
+# left and right for how hard the lips are held (CC 21); hold B and press
+# up and down for how hard it's blown (CC 22).
+#   tools/pad & AITHER_MIDI=aither-pad ./aither patches/field_didge.aither | tools/scope --decay 0.9 | tools/play hw:rockchipes8388c 20
+
+# ---------------------------------------------------------------- the bore
+
+let wall = 0.1                                             # what it loses, a round
+let soften = 0.001                                         # ... and more the higher it is
+
+$p = line(period = 1 / 97, ends = [free, fixed], width = p => 0.03 + 0.06 * p ^ 3)
+$u = line(period = 1 / 97, ends = [fixed, free])
+
+# ---------------------------------------------------------------- the lips
+
+let cycle = phasor(1 / 5.3)                                # a breath in, every 5.3 s
+let gulp = ease((cycle - 0.93) * 20) * (1 - ease((cycle - 0.985) * 60))
+let mouth = max(0.05, (0.75 + 0.5 * midi_cc(22)) * (1 - gulp * 0.5))
+
+$drop = 0.0                                                # the pressure across the lips
+let lip_f = 60 + 30 * midi_cc(21)                          # how hard the lips are held
+let lw = TAU * lip_f
+$lx = 0
+$lv = 0
+$lv' = -$lx * lw ^ 2 - $lv * 2 * 0.1 * lw + $drop * 0.63 * lw ^ 2
+$lx' = $lv
+let gap = clamp(0.05 + $lx, 0, 1)
+let lips = gap * (if $drop >= 0 then sqrt($drop) else -sqrt(-$drop)) * 0.5
+$p' = -∇$u - $p * wall + Δ$p * soften + lips * δ(0)
+$u' = -∇$p - $u * wall
+$drop' = (mouth - $p(0) - $drop) * TAU * 840
+
+# ---------------------------------------------------------------- the mouth
+
+def formant(x, f, res): bpf(x, f, res) * (2 * (1 - res))
+
+let jaw = midi_cc(20) + 0.3 * (0.5 + 0.5 * sin(TAU * phasor(0.31)))
+let bell = hpf($u(1) * 500, 40, 0.7)
+let f1 = slew(320 + jaw * 420, 0.02)
+let f2 = slew(850 + jaw * 350, 0.02)
+let f3 = slew(2300 + jaw * 300, 0.02)
+let tract = formant(bell, f1, 0.93) + formant(bell, f2, 0.94) * 0.7 + formant(bell, f3, 0.95) * 0.35
+let breath = (noise() |> bpf(1800, 0.8)) * gulp * 0.03
+
+[(tract * 0.9 + bell * 0.35 + breath) |> tanh, ($p(0) * 0.5) |> tanh]
