@@ -1,0 +1,77 @@
+# struck_plate: a square steel plate you strike from the gamepad, and,
+# with struck_plate_eye, its Chladni figures on tv, found in what you hear.
+#
+# The plate is the field core's: a square, pinned all round, its law a
+# plate's, four slopes (it resists being bent, where a membrane resists
+# being stretched), so its modes are exact. Mode (m, n), m half-waves
+# across and n down, rings at (m² + n²) / 2 times the lowest, here D4: the
+# next at 2.5 times it, then 4, 5, 6.5 (SPEC, "Four slopes are a bar"). Not
+# a harmonic among them; that is what makes a plate sound like metal.
+#
+# Where you strike sets which modes ring: each takes as much as its shape
+# moves at that point, so struck in the middle only the odd-odd modes
+# sound, and struck on a mode's nodal line that mode is silent. A hard
+# mallet is small and quick and reaches the high modes, a soft one only
+# the low. The higher a mode, the quicker it dies, as in a real plate.
+#
+# Two pickups, left and right, listen at (0.4, 0.81) and (0.2, 0.4). On a
+# square, modes (m, n) and (n, m) ring at the same pitch; two pickups are
+# two equations, so struck_plate_eye can tell them apart and draw the
+# plate's figure from what it hears.
+#
+# The gamepad: the d-pad moves where you strike, a tenth of the plate a
+# press; A strikes with a hard mallet, B a soft one; tap X to step the
+# vibrator to the next resonance and hold X to drive it; hold Y to lay a
+# hand on it.
+#
+# Sound alone:
+#   tools/pad --notes & ./aither patches/struck_plate.aither | tools/play hw:rockchipes8388c 20 >/dev/null
+# With the figures (the picture engine hears the plate through play):
+#   tools/pad --notes & ./aither patches/struck_plate.aither | tools/play hw:rockchipes8388c 20 |
+#     AITHER_SOCK=/tmp/aither-picture.sock ./aither patches/struck_plate_eye.aither | tools/tv --size 48x27 --smooth
+
+let lowest = 293.66                                  # D4: mode (1, 1)
+let side = 1 / lowest
+
+# Where the mallet lands, a tenth a press, kept off the pinned edge.
+$sp = 0.3
+$sq = 0.3
+$sp = clamp($sp + 0.1 * (midi_trig(43) - midi_trig(42)), 0.1, 0.9)
+$sq = clamp($sq + 0.1 * (midi_trig(41) - midi_trig(40)), 0.1, 0.9)
+
+# A stroke: hard is half a millisecond on a spot 2% of the plate wide,
+# soft two milliseconds on 8%.
+let hard = midi_trig(36)
+let soft = midi_trig(37)
+let sinceHard = since(hard)
+let sinceSoft = since(soft)
+let force = if sinceHard < 0.0005 then 1.6 / 0.0005 else if sinceSoft < 0.002 then 0.9 / 0.002 else 0
+
+# The vibrator, as under a modern Chladni plate: a tap of X steps it to
+# the plate's next resonance, (m² + n²) / 2 times the lowest, and holding
+# X drives the plate there at the mallet's place. It rings up over a
+# second or so into that mode alone, unless the place is on the mode's
+# nodal line, where it can't take hold.
+let resonances = [1, 2.5, 4, 5, 6.5, 8.5, 9, 10, 12.5, 16]
+$mode = 9
+$mode = if midi_trig(38) > 0 then ($mode + 1) mod 10 else $mode
+$hum = 0.0
+$hum = $hum + ((if midi_note(38) > 0 then 1 else 0) - $hum) * dt * 6
+let vibrate = $hum * sin(TAU * phasor(lowest * resonances[$mode])) * 5
+let wide = if sinceHard < sinceSoft then 0.02 else 0.08    # the vibrator's foot is the last mallet's
+
+# A hand on it takes a third of what it holds every round.
+let loss = 0.004 + (if midi_note(39) > 0 then 0.3 else 0)
+
+# A square plate's (1, 1) mode bends both ways, so it rings at twice a
+# bar's pitch: 1 / (16 pi^2) puts it at 1 / side.
+let stiff = 0.006332573977646111
+
+$x = field(period = [side, side], ends = fixed)
+$v = field(period = [side, side], ends = fixed)
+$v' = -ΔΔ$x * stiff - $v * loss + Δ$v * 0.00003 + (force + vibrate) * δ(($sp, $sq), wide)
+$x' = $v
+
+# The pickups: the plate's velocity at two points, which is what a
+# plate radiates.
+($v((0.4, 0.81)), $v((0.2, 0.4))) * 0.0012 |> tanh
