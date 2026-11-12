@@ -1714,9 +1714,17 @@ static int dw_same(const Node* x, const Node* y) {
   for (int i = 0; i < x->nkids; i++) if (!dw_same(x->kids[i], y->kids[i])) return 0;
   return 1;
 }
+/* The patch's own defs: a def of its own named `ring` is its own (field.aither's, chladni's),
+ * not the old domain word. */
+static _Thread_local const char* const* dw_own;
+static _Thread_local int dw_nown;
+static int dw_is_own(const char* name) {
+  for (int i = 0; i < dw_nown; i++) if (!strcmp(dw_own[i], name)) return 1;
+  return 0;
+}
 static int domain_words(Arena* a, Node* n, char* err, int errlen) {
   if (!n) return 0;
-  if (n->kind == nkCall && (!strcmp(n->str, "ring") || !strcmp(n->str, "line") || !strcmp(n->str, "sheet"))) {
+  if (n->kind == nkCall && (!strcmp(n->str, "ring") || !strcmp(n->str, "line") || !strcmp(n->str, "sheet")) && !dw_is_own(n->str)) {
     snprintf(err, errlen, "a field's domain is its ends now (%s:%d): `field(period = 1, ends = round)` goes round, "
              "`field(period = 2, ends = [fixed, free])` has two ends, `field(period = [2, 2], ends = fixed)` is a sheet",
              n->source, n->line);
@@ -1787,8 +1795,13 @@ Node* build_program(Arena* a, const char* stdlib_src, const char* src, const cha
   kids.n -= std->nkids - kept;
   *kind = BUILD_PARSE;
   /* `field(...)`: a domain is its ends, not a name (domain_words). */
+  const char* own[kids.n > 0 ? kids.n : 1];
+  dw_nown = 0;
+  for (int i = kept; i < kids.n; i++) if (kids.v[i]->kind == nkDef) own[dw_nown++] = kids.v[i]->str;
+  dw_own = own;
   for (int i = kept; i < kids.n; i++)
-    if (domain_words(a, kids.v[i], err, errlen)) { free(kids.v); return NULL; }
+    if (domain_words(a, kids.v[i], err, errlen)) { free(kids.v); dw_own = NULL; dw_nown = 0; return NULL; }
+  dw_own = NULL; dw_nown = 0;
   /* The field core takes the patch's system when it can hold it
    * (medium/system.c); what it can't hold yet goes the old way. */
   /* A def holding a field is written out first, each call its own, so the
