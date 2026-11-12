@@ -7,6 +7,9 @@
 #pragma GCC optimize("fp-contract=off")
 
 #include <math.h>
+#include <pthread.h>
+#include <stdlib.h>
+#include <string.h>
 #include "dsp.h"
 
 #define PI_ 3.141592653589793
@@ -792,6 +795,287 @@ double n_medium_line_at(double* m, double at, double which) {
   double r = ln_tap(R, head, at * cross) * exp(-decay * at * cross);
   double l = ln_tap(L, head, (1.0 - at) * cross) * exp(-decay * (1.0 - at) * cross);
   return which == 2 ? r - l : r + l;
+}
+
+/* ---- a horn: a pair with a width, held as Webster's modes ----
+ * The law, the first field the pressure p, its partner the flow u, S the
+ * area (width^2): p' = Cp (1/S) ∇u + Gp p + Dp Δ_W p, u' = Cu S ∇p + Gu u, in
+ * rounds; Δ_W = 4 (1/S) d/dx (S d/dx), Webster's, the horn's own Laplacian.
+ * Its modes (horn_modes, below) turn mode by mode as a uniform pair's do:
+ * a' = (Gp - Dp mu) a - Cp w b, b' = Cu w a + Gu b, w = sqrt(mu), each stepped
+ * by its exponential. Working them out takes about half a second, so it
+ * runs on a thread of its own, and the horn is silent until they come, once:
+ * kept across a reload while the width stays the same. (medium/horn.c is
+ * the same solver, proved on a cylinder and a cone: 0.22 cents at the 256th
+ * mode.) */
+/* The tridiagonal of the symmetrised operator on G cells: diagonal d, off e. */
+static int horn_matrix(const double* S_node, const double* S_mid, int G, int el, int er, double* d, double* e, double* wt) {
+  /* nodes 0..G; a fixed end's node is dropped (p = 0 there) */
+  double h = 1.0 / G;
+  int lo = el == 1 ? 1 : 0, hi = er == 1 ? G - 1 : G, n = hi - lo + 1;
+  for (int k = 0; k < n; k++) {
+    int i = lo + k;
+    double vol = (i == 0 || i == G) ? 0.5 * h : h;              /* a free end's node holds half a cell */
+    double left = i > 0 ? S_mid[i - 1] / h : 0.0, right = i < G ? S_mid[i] / h : 0.0;
+    wt[k] = S_node[i] * vol;                                     /* the weight, S times the cell */
+    d[k] = 4.0 * (left + right);                                 /* -Δ_W times the weight: a flux each side */
+    if (k + 1 < n) e[k] = -4.0 * right;
+  }
+  /* symmetrise: W^{-1/2} K W^{-1/2} */
+  for (int k = 0; k < n; k++) d[k] /= wt[k];
+  for (int k = 0; k + 1 < n; k++) e[k] /= sqrt(wt[k] * wt[k + 1]);
+  return n;
+}
+/* How many eigenvalues of the tridiagonal are under x (Sturm). */
+static int sturm(const double* d, const double* e, int n, double x) {
+  int count = 0;
+  double q = d[0] - x;
+  if (q < 0) count++;
+  for (int k = 1; k < n; k++) {
+    if (q == 0) q = 1e-300;
+    q = d[k] - x - e[k - 1] * e[k - 1] / q;
+    if (q < 0) count++;
+  }
+  return count;
+}
+static double kth(const double* d, const double* e, int n, int k, double from, double top) {   /* the k-th smallest, from 0 */
+  double lo = from, hi = top;                                 /* above the one before it */
+  for (int it = 0; it < 200 && hi - lo > 1e-12 * (1.0 + lo); it++) {
+    double mid = 0.5 * (lo + hi);
+    if (sturm(d, e, n, mid) > k) hi = mid; else lo = mid;
+  }
+  return 0.5 * (lo + hi);
+}
+static void widths(const double* width, int W, int G, double* S_node, double* S_mid) {
+  /* the width given at W + 1 evenly spaced places, linear between */
+  for (int i = 0; i <= G; i++) {
+    double x = (double)i / G * W;
+    int j = (int)floor(x); if (j >= W) j = W - 1;
+    double f = x - j, w = width[j] * (1 - f) + width[j + 1] * f;
+    S_node[i] = w * w;
+  }
+  for (int i = 0; i < G; i++) {
+    double x = (i + 0.5) / G * W;
+    int j = (int)floor(x); if (j >= W) j = W - 1;
+    double f = x - j, w = width[j] * (1 - f) + width[j + 1] * f;
+    S_mid[i] = w * w;
+  }
+}
+
+static int horn_modes(const double* width, int W, int el, int er, int want, double* mu, double* phi, int G) {
+  double *S_node = malloc(sizeof(double) * (2 * G + 1)), *S_mid = malloc(sizeof(double) * 2 * G);
+  double *d = malloc(sizeof(double) * (2 * G + 1)), *e = malloc(sizeof(double) * (2 * G + 1)), *wt = malloc(sizeof(double) * (2 * G + 1));
+  double* coarse = malloc(sizeof(double) * want);
+  int got = 0;
+  /* eigenvalues at G and 2G, then extrapolated */
+  for (int pass = 0; pass < 2; pass++) {
+    int g = pass ? 2 * G : G;
+    widths(width, W, g, S_node, S_mid);
+    int n = horn_matrix(S_node, S_mid, g, el, er, d, e, wt);
+    double top = 0;
+    for (int k = 0; k < n; k++) top = fmax(top, d[k] + 2 * fabs(k ? e[k - 1] : 0) + 2 * fabs(k + 1 < n ? e[k] : 0));
+    int m = want < n ? want : n;
+    double before = -1e-9, ceiling = top;
+    for (int k = 0; k < m; k++) {
+      double v = kth(d, e, n, k, before, ceiling);
+      before = v * (1.0 - 1e-9);
+      /* the next one's ceiling: a guess above it if the count says so, else all of them */
+      double guess = v * 4.0 + 100.0;
+      ceiling = guess < top && sturm(d, e, n, guess) > k + 1 ? guess : top;
+      if (pass == 0) coarse[k] = v; else mu[k] = (4.0 * v - coarse[k]) / 3.0;
+    }
+    got = m;
+  }
+  /* shapes at G, by inverse iteration on the coarse eigenvalue, back through W^{-1/2} */
+  widths(width, W, G, S_node, S_mid);
+  int n = horn_matrix(S_node, S_mid, G, el, er, d, e, wt);
+  int lo = el == 1 ? 1 : 0;
+  double *x = malloc(sizeof(double) * n), *c = malloc(sizeof(double) * n), *r = malloc(sizeof(double) * n);
+  for (int k = 0; k < got; k++) {
+    double shift = coarse[k] * (1.0 + 1e-10) + 1e-12;
+    for (int i = 0; i < n; i++) x[i] = 1.0 + 0.001 * sin(1.0 + i * 0.7 + k);
+    for (int it = 0; it < 4; it++) {                             /* solve (A - shift) y = x, Thomas */
+      double b0 = d[0] - shift;
+      c[0] = (n > 1 ? e[0] : 0) / b0; r[0] = x[0] / b0;
+      for (int i = 1; i < n; i++) {
+        double den = d[i] - shift - e[i - 1] * c[i - 1];
+        if (den == 0) den = 1e-300;
+        c[i] = i + 1 < n ? e[i] / den : 0;
+        r[i] = (x[i] - e[i - 1] * r[i - 1]) / den;
+      }
+      x[n - 1] = r[n - 1];
+      for (int i = n - 2; i >= 0; i--) x[i] = r[i] - c[i] * x[i + 1];
+      double norm = 0;
+      for (int i = 0; i < n; i++) norm += x[i] * x[i];
+      norm = sqrt(norm);
+      for (int i = 0; i < n; i++) x[i] /= norm;
+    }
+    /* phi = W^{-1/2} y, on all G + 1 nodes (0 at a fixed end), sign: positive near 0 */
+    double* out = phi + (size_t)k * (G + 1);
+    memset(out, 0, sizeof(double) * (G + 1));
+    for (int i = 0; i < n; i++) out[lo + i] = x[i] / sqrt(wt[i]);
+    int first = el == 1 ? 1 : 0;
+    if (out[first + (el == 1)] < 0) for (int i = 0; i <= G; i++) out[i] = -out[i];
+  }
+  free(S_node); free(S_mid); free(d); free(e); free(wt); free(coarse); free(x); free(c); free(r);
+  return got;
+}
+
+#define HN_W 512                                               /* the width, at W + 1 places */
+#define HN_G 1024                                              /* each mode's shape, at G + 1 places */
+enum { HN_N, HN_T, HN_GP, HN_DP, HN_GU, HN_EL, HN_ER, HN_H, HN_CAP, HN_STATE, HN_JOB, HN_HASH, HN_GOT, HN_CP, HN_CU,
+       HN_HEAD = 24 };
+/* then N of p, N of u, 4N of the step, N of mu, the width (W + 1), N shapes of
+ * p and N of u at G + 1 places each */
+#define HN_WIDTH(N) (HN_HEAD + 7 * (N))
+#define HN_PHI(N) (HN_WIDTH(N) + HN_W + 1)
+#define HN_PSI(N) (HN_PHI(N) + (N) * (HN_G + 1))
+typedef struct { int used, done, orphan; double width[HN_W + 1]; int el, er, want, got; double* mu; double* phi; } HornJob;
+static HornJob hn_jobs[32];
+static pthread_mutex_t hn_lock = PTHREAD_MUTEX_INITIALIZER;
+static void* hn_work(void* arg) {
+  HornJob* j = arg;
+  j->got = horn_modes(j->width, HN_W, j->el, j->er, j->want, j->mu, j->phi, HN_G);
+  pthread_mutex_lock(&hn_lock);
+  j->done = 1;
+  if (j->orphan) { free(j->mu); free(j->phi); j->used = 0; }     /* nobody waits: let it go */
+  pthread_mutex_unlock(&hn_lock);
+  return NULL;
+}
+static double hn_hash(const double* w, double el, double er) {
+  double h = el * 7.0 + er * 13.0;
+  for (int i = 0; i <= HN_W; i++) h = h * 1.000003 + w[i] * (i + 1.5);
+  return h;
+}
+static double hn_area(const double* w, double x) {               /* S at x, from the width */
+  double f = x * HN_W;
+  int j = (int)floor(f);
+  if (j < 0) j = 0;
+  if (j >= HN_W) j = HN_W - 1;
+  f -= j;
+  double v = w[j] * (1 - f) + w[j + 1] * f;
+  return v * v;
+}
+double n_medium_horn_turn(double* m, double cap, double T, double Cp, double Gp, double Dp, double Cu, double Gu,
+                          double el, double er, double h) {
+  long N = (long)cap;
+  double *a = m + HN_HEAD, *b = a + N, *p00 = b + N, *p01 = p00 + N, *p10 = p01 + N, *p11 = p10 + N, *mu = p11 + N;
+  double *width = m + HN_WIDTH(N), *phi = m + HN_PHI(N), *psi = m + HN_PSI(N);
+  double hash = hn_hash(width, el, er);
+  if (m[HN_CAP] != cap || m[HN_HASH] != hash || m[HN_STATE] == 0) {   /* a new horn: its modes, on a thread */
+    pthread_mutex_lock(&hn_lock);
+    if (m[HN_STATE] == 1) {                                       /* the one on its way is for another width */
+      HornJob* old = &hn_jobs[(int)m[HN_JOB]];
+      if (old->done) { free(old->mu); free(old->phi); old->used = 0; } else old->orphan = 1;
+    }
+    int k = -1;
+    for (int i = 0; i < 32 && k < 0; i++) if (!hn_jobs[i].used) k = i;
+    if (k >= 0) {
+      HornJob* j = &hn_jobs[k];
+      memset(j, 0, sizeof *j);
+      j->used = 1; j->el = (int)el; j->er = (int)er; j->want = (int)N;
+      memcpy(j->width, width, sizeof j->width);
+      j->mu = malloc(sizeof(double) * N);
+      j->phi = malloc(sizeof(double) * N * (HN_G + 1));
+      pthread_t th;
+      if (j->mu && j->phi && pthread_create(&th, NULL, hn_work, j) == 0) {
+        pthread_detach(th);
+        m[HN_STATE] = 1; m[HN_JOB] = k;
+      } else { free(j->mu); free(j->phi); j->used = 0; m[HN_STATE] = 0; }
+    }
+    pthread_mutex_unlock(&hn_lock);
+    m[HN_CAP] = cap; m[HN_HASH] = hash; m[HN_N] = 0; m[HN_GOT] = 0;
+    for (long i = 0; i < N; i++) a[i] = b[i] = 0.0;
+  }
+  if (m[HN_STATE] == 1) {                                         /* are they in? */
+    HornJob* j = &hn_jobs[(int)m[HN_JOB]];
+    int done;
+    pthread_mutex_lock(&hn_lock);
+    done = j->done;
+    pthread_mutex_unlock(&hn_lock);
+    if (!done) return 0.0;
+    int got = j->got;
+    memcpy(mu, j->mu, sizeof(double) * got);
+    memcpy(phi, j->phi, sizeof(double) * got * (HN_G + 1));
+    for (int k = 0; k < got; k++) {                               /* psi = S ∇phi / w, ∇ = 2 d/dx */
+      double w = sqrt(fmax(mu[k], 1e-30));
+      const double* f = phi + (size_t)k * (HN_G + 1);
+      double* g = psi + (size_t)k * (HN_G + 1);
+      for (int i = 0; i <= HN_G; i++) {
+        double x = (double)i / HN_G, dx = 1.0 / HN_G;
+        double slope = i == 0 ? (f[1] - f[0]) / dx : i == HN_G ? (f[i] - f[i - 1]) / dx : (f[i + 1] - f[i - 1]) / (2 * dx);
+        g[i] = hn_area(width, x) * 2.0 * slope / w;
+      }
+    }
+    pthread_mutex_lock(&hn_lock);
+    free(j->mu); free(j->phi); j->used = 0;
+    pthread_mutex_unlock(&hn_lock);
+    m[HN_STATE] = 2; m[HN_GOT] = got; m[HN_T] = -1;              /* its steps, worked out below */
+  }
+  if (m[HN_STATE] != 2) return 0.0;
+  if (m[HN_EL] != el || m[HN_ER] != er || m[HN_H] != h || !md_near(T, m[HN_T]) || !md_near(Gp, m[HN_GP]) ||
+      !md_near(Dp, m[HN_DP]) || !md_near(Gu, m[HN_GU]) || !md_near(Cp, m[HN_CP]) || !md_near(Cu, m[HN_CU])) {
+    m[HN_T] = T; m[HN_GP] = Gp; m[HN_DP] = Dp; m[HN_GU] = Gu; m[HN_CP] = Cp; m[HN_CU] = Cu;
+    m[HN_EL] = el; m[HN_ER] = er; m[HN_H] = h;
+    double nyquist = PI_ / (2.0 * h);
+    long used = 0, got = (long)m[HN_GOT];
+    for (long k = 0; k < got; k++) {
+      double w = sqrt(fmax(mu[k], 0.0));
+      if (w / T > nyquist) break;
+      double q = -Cp * w / T, r = Cu * w / T, pp = (Gp - Dp * mu[k]) / T, ss = Gu / T;
+      double tau = 0.5 * (pp + ss), del = 0.5 * (pp - ss), disc = del * del + q * r, c, S;
+      if (disc < -1e-12) { double sq = sqrt(-disc); c = cos(sq * h); S = sin(sq * h) / sq; }
+      else if (disc > 1e-12) { double sq = sqrt(disc); c = cosh(sq * h); S = sinh(sq * h) / sq; }
+      else { c = 1.0; S = h; }
+      double e = exp(tau * h);
+      p00[k] = e * (c + del * S); p01[k] = e * q * S;
+      p10[k] = e * r * S;         p11[k] = e * (c - del * S);
+      used = k + 1;
+    }
+    m[HN_N] = (double)used;
+  }
+  long n = (long)m[HN_N];
+  for (long k = 0; k < n; k++) {
+    double x = a[k], y = b[k];
+    a[k] = p00[k] * x + p01[k] * y;
+    b[k] = p10[k] * x + p11[k] * y;
+  }
+  return 0.0;
+}
+static double hn_shape(const double* f, double at) {             /* a mode's shape at a place, linear */
+  double x = fmin(fmax(at, 0.0), 1.0) * HN_G;
+  int i = (int)floor(x);
+  if (i >= HN_G) i = HN_G - 1;
+  double t = x - i;
+  return f[i] * (1 - t) + f[i + 1] * t;
+}
+/* The pressure at a place (which 1), or the flow (2). */
+double n_medium_horn_at(double* m, double at, double which) {
+  long N = (long)m[HN_CAP], n = (long)m[HN_N];
+  if (n <= 0) return 0.0;
+  const double* amp = m + HN_HEAD + (which == 2 ? N : 0);
+  const double* shapes = m + (which == 2 ? HN_PSI(N) : HN_PHI(N));
+  double x = 0.0;
+  for (long k = 0; k < n; k++) x += amp[k] * hn_shape(shapes + (size_t)k * (HN_G + 1), at);
+  return x;
+}
+/* A force at a place on the pressure's rate (into 1) or the flow's (2): each
+ * mode takes S phi there, or psi / S, of impulse / T. */
+double n_medium_horn_kick(double* m, double impulse, double at, double into) {
+  long N = (long)m[HN_CAP], n = (long)m[HN_N];
+  if (n <= 0 || impulse == 0.0) return 0.0;
+  const double* width = m + HN_WIDTH(N);
+  double S = hn_area(width, fmin(fmax(at, 0.0), 1.0)), scale = impulse / m[HN_T];
+  if (into == 2) {
+    double* b = m + HN_HEAD + N;
+    const double* psi = m + HN_PSI(N);
+    for (long k = 0; k < n; k++) b[k] += scale * hn_shape(psi + (size_t)k * (HN_G + 1), at) / S;
+  } else {
+    double* a = m + HN_HEAD;
+    const double* phi = m + HN_PHI(N);
+    for (long k = 0; k < n; k++) a[k] += scale * S * hn_shape(phi + (size_t)k * (HN_G + 1), at);
+  }
+  return 0.0;
 }
 
 const NativeSpec dsp_natives[] = {

@@ -97,6 +97,8 @@ static void register_natives(TCCState* s) {
     {"n_medium_kick2", (const void*)n_medium_kick2}, {"n_medium_at2", (const void*)n_medium_at2},
     {"n_medium_velocity_at2", (const void*)n_medium_velocity_at2},
     {"n_medium_line_turn", (const void*)n_medium_line_turn}, {"n_medium_line_kick", (const void*)n_medium_line_kick}, {"n_medium_line_at", (const void*)n_medium_line_at},
+    {"n_medium_horn_turn", (const void*)n_medium_horn_turn}, {"n_medium_horn_at", (const void*)n_medium_horn_at},
+    {"n_medium_horn_kick", (const void*)n_medium_horn_kick},
     {NULL, NULL}};
   for (int i = 0; extra[i].name; i++) tcc_add_symbol(s, extra[i].name, extra[i].fn);
 }

@@ -47,6 +47,10 @@ double n_medium_velocity_at(double* m, double at);
 double n_medium_pair_turn(double* m, double cap, double T, double Cv, double Gv, double Dv,
                           double Ci, double Gi, double Di, double el, double er, double h);
 double n_medium_partner_at(double* m, double at);
+double n_medium_horn_turn(double* m, double cap, double T, double Cp, double Gp, double Dp, double Cu, double Gu,
+                          double el, double er, double h);
+double n_medium_horn_at(double* m, double at, double which);
+double n_medium_horn_kick(double* m, double impulse, double at, double into);
 double n_medium_line_turn(double* m, double T, double g, double el, double er, double dt);
 double n_medium_line_kick(double* m, double impulse, double at, double into);
 double n_medium_line_at(double* m, double at, double which);
