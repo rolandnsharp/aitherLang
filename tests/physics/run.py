@@ -276,6 +276,32 @@ def case_wake_on_modes():
     return wake('modes_wake.aither')
 case_wake_on_modes.__doc__ = 'On a string of 60 dho modes, through $state. ' + wake.__doc__
 
+def case_bowed_string():
+    """tests/physics/bowed_string.aither, a string bowed by stick-slip
+    friction, a contact: Helmholtz motion (Helmholtz 1863; McIntyre,
+    Schumacher & Woodhouse 1983). Bowed at 0.12, the string under the bow is
+    stuck, moving with it, for 88% of each period and slips back once, at
+    -vb (1 - 0.12) / 0.12 = -0.733, at 196 Hz. Read from the place under the
+    bow, its slope a sample against the bow's speed. At 48 and 96 kHz: stuck
+    80 to 92%, one slip a period, slipping at -0.733 within 10%, pitch within
+    1 cent. A friction solved explicitly, from the last sample's speed,
+    hardly sticks at all."""
+    said_ = []
+    ok = True
+    for rate in (48000, 96000):
+        X, _, said = render('bowed_string.aither', rate, 3)
+        if said: return False, said[0]
+        x = X[2 * rate:]
+        slope = np.diff(x) * rate / 196.0                 # the law's velocity, in rounds
+        stuck = np.abs(slope - 0.1) < 0.005
+        sliding = slope < -0.3
+        slips = np.sum(np.diff(sliding.astype(int)) == 1) / (len(slope) / rate) / 196.0
+        slip = np.median(slope[slope < -0.3])
+        f = strongest(x - x.mean(), rate, 100, 300)
+        ok &= 0.80 < stuck.mean() < 0.92 and abs(slips - 1) < 0.05 and abs(slip / -0.733 - 1) < 0.1 and abs(cents(f, 196.0)) < 1
+        said_.append('%d kHz: stuck %.1f%%, %.2f slips a period at %.3f, %.2f Hz' % (rate // 1000, 100 * stuck.mean(), slips, slip, f))
+    return ok, '; '.join(said_)
+
 # -------------------------------------------------------------------- run
 
 if __name__ == '__main__':

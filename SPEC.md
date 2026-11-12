@@ -810,6 +810,34 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   midpoint, it turns the other half. The patch's own lines read the media and
   that state as they are at the sample's start, wherever they stand. Anything
   else, for now, goes the old way; `AITHER_CORE=0` sends everything the old way.
+- **A contact is a force that reads its own field where it acts**: a bow's
+  friction, `friction(vb - $v(0.12), N) * δ(0.12)`, is a function of the very
+  velocity it changes. The field core solves it within the step, as the
+  equation means, not from the last sample's reading. With every other force
+  in, u0 is the field there; a unit kick, read and taken back out, gives the
+  medium's admittance there, Y (exact, the medium being linear); and the force
+  meets the step's mean, halfway through its own kick, so the speed it sees is
+  u = u0 + Y dt f(u) / 2. That has to be solved: a friction curve that falls as
+  the string slides crosses the line three times (McIntyre, Schumacher &
+  Woodhouse 1983), and which root is the state. The core takes the nearest
+  root from the last one, in the way G(u) = u - u0 - Y dt f(u) / 2 points:
+  a bow stuck stays stuck while sticking is a root and slips when it's gone,
+  and slipping waits likewise, the hysteresis of stick and slip. The root is
+  bracketed, stepping out from the last (half again Newton's step at first, 8
+  times further each step, up to 8^8) and closed by regula falsi the Illinois
+  way, each other step a halving, until G is within 10^-14 (40 steps at
+  most). The search is a loop, a `def rec` the core adds to the patch, one
+  evaluation of the force a step, so a bow holding its state costs a few a
+  sample: a bowed string about a sixth of a uConsole core more than the
+  string alone. Bowed at 0.12 with a static coefficient
+  of 0.65 falling to 0.25, a string sings in Helmholtz motion: stuck 86% of a
+  period (88% ideal) and slipping back once, at -0.733 for a bow at 0.1 (the
+  ideal, -vb (1 - β) / β), at its pitch within 1 cent, at 48 and 96 kHz
+  (tests/physics/bowed_string.aither). It needs the string to lose more as it
+  goes higher, as a real one does (a `Δ$v` term): with no such loss the
+  corner stays sharp to the last mode and its ripple trips the bow early.
+  A contact is found by its reading: a force whose term reads, at its own
+  place, the field it drives.
 - **`width = p => ...` gives a pair a shape**: how wide the line is at p, 0
   to 1 along it, stated where the line is (on the first field, the pressure),
   so a where stays out of the law. Its partner takes it as flow: flow changes
