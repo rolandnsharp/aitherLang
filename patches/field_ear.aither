@@ -56,27 +56,35 @@ $lowest_turn = array(count, k => rotate((1, 0), TAU * lowest * step ^ (k - 1) / 
 # 1 / (π × width) seconds, longer at the bottom, and the sound pushes it as
 # much as it forgets, so a sine at its pitch swings it as far as itself
 $hearing = array(count, k => exp(-PI * lowest * step ^ k * (step - 1) / sr))
-$push = array(count, k => 1 - exp(-PI * lowest * step ^ k * (step - 1) / sr))
 
 let length = midi_cc(26)
 let frozen = midi_cc(24) > 0
-let seconds = 0.1 * 200 ^ length              # how long a ring lasts, at least
-# the knob makes a resonator ring longer than hearing needs, and the top
-# of the knob, or a freeze, lose nothing at all
+let seconds = 0.1 * 200 ^ length              # how long a ring lasts
+# how much of its swing a ringing resonator keeps a sample: none at the
+# bottom of the knob, all of it at the top, or frozen
 let tail = if frozen or length >= 1 then 1 else if length == 0 then 0 else exp(-1 / (seconds * sr))
 
 let x = mono(input())
 
 each(count, k =>
-  let keep = max($hearing[k], tail)
-  let drive = if frozen then 0 else $push[k]
+  let hear = $hearing[k]
   # frozen, it goes on at the speed it was swinging, which a driven
   # resonator takes from what drives it, even where its tuning can't reach
   let spin = if frozen then $swinging[k] else $turn[k]
-  let first = $y[k] * spin * keep + drive * x
+  # it listens a twelfth of an octave wide, pushed as much as it forgets,
+  # so a sine at its pitch swings it as far as the sine
+  let first = $y[k] * spin * hear + (1 - hear) * x
   let was = $z[k]
   let guess = was * spin                      # where it would be, turning as it does
-  let now = guess * keep + drive * first
+  let heard = guess * hear + (1 - hear) * first
+  # and where the sound has fallen below what it holds, it doesn't follow
+  # it down: it rings on, losing only the tail's loss, a damper that
+  # lifts as the sound goes (the sound pushes it up at once, it falls slowly)
+  let rung = guess * tail
+  let (rung2, _) = rung * conj(rung)
+  let (heard2, _) = heard * conj(heard)
+  let now = if frozen then guess else if rung2 > heard2 then rung else heard
+  let drive = if frozen then 0 else 1 - hear
   # how far what it hears turned it past its own turn, and how far it is
   # from home: it turns toward the first, and a little toward the second
   let (big, _) = guess * conj(guess) + first * conj(first) * drive ^ 2   # sizes squared, with no roots

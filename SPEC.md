@@ -575,9 +575,9 @@ let r = array(len(a), j => if j == 0 then 0 else (a[j - 1] - a[j]) / (a[j - 1] +
 let z = array(8, k => rotate((1, 0), k * TAU / 8))           # eight directions: pairs
 ```
 
-The index is bound as `each` binds it, a number known when the patch
-compiles, so `if j == 0` and `a[j - 1]` cost nothing at run time; the
-rule is unrolled once an element. It takes one parameter. Its body may
+The index is bound as `each` binds it: one element after another, a
+number at each, so `if j == 0` and `a[j - 1]` are what they read. The
+rule runs on the sample the array is born. It takes one parameter. Its body may
 be `let`s ended by an expression. The elements are what it returns:
 numbers, or pairs if any element is one (a number then fills both
 sides). A rule is for one array made by one formula; `each` is for a
@@ -638,10 +638,14 @@ each(12, i => $z[i] = law($z[i], $z[i - 1], $z[i + 1]))   # the medium's law, at
 each(N, i => stmts)
 ```
 
-Unrolls like `sum` (so `N` must be a compile-time integer), with
-`i` running from 0 to N−1 (an index; `sum`'s `n` runs from 1 to N,
-a harmonic number), but the body is statements — element stores, `let`s, `$state` — and the
-value is 0. Every store to a **state array** inside an `each` is
+One step at every place at once: `N` places, a whole number known when
+the patch compiles, with `i` running from 0 to N−1 (an index; `sum`'s `n`
+runs from 1 to N, a harmonic number), but the body is statements —
+element stores, `let`s, `$state` — and the value is 0. A `$x = ...` in
+the body is each place's own state, as in any lambda ("`$state` inside
+lambda body"), not the `$x` outside: `$total = $total + v` in an `each`
+gives every place a `$total` of its own and leaves the outer one as it
+was. To add the places up, `sum(N, n => ...)` after the step. Every store to a **state array** inside an `each` is
 held back and lands when the `each` ends, so each body reads the
 arrays as they were before the step: section `i + 1` sees section
 `i`'s wave from the last sample, not the one just written. Stores
@@ -2213,6 +2217,21 @@ the voices added in the same order, so the bits are the unrolled
 sum's (`AITHER_LOOP=0` unrolls it). Nothing in the language
 changes; the C of a keyboard patch is several times smaller, so its
 `cc -O2` build lands sooner (notes/loops-2026-10-30.md).
+An `each`, and an array's rule, is a C loop over its places in the same
+way wherever its index is only ever a run-time number: where it, or
+what is made from it, goes only into arithmetic, comparisons, `if`,
+maths, a value, a `let`, a store, the index of a state or local array,
+or a def whose body passes the same test. A power whose exponent comes
+from the index (`step ^ k`) is computed as the compiler folds one, the
+products for a whole power from 0 to 4 and `pow` otherwise. The stores
+an `each` holds back go through scratch arrays, one a store, and land
+after the loop, place by place, in the copies' order. A rule's element
+is computed in its loop when the array is born, not hoisted to every
+block. Anywhere else (a count, an array's size, a built-in that holds
+state, a nested `sum` or lambda, a field's calls) it unrolls as before.
+Every place's bits are the unrolled copies' (`AITHER_LOOP=0` unrolls
+all of it): `patches/field_ear.aither`'s hundred resonators went from
+1.2 MB of C and a minute of gcc to 43 KB.
 Numeric literals propagate through `let` and `def` parameters
 so `additive(f, shape, 16)` resolves `max_n = 16` at compile
 time.
