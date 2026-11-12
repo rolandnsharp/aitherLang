@@ -1,0 +1,61 @@
+# bowed_string_eye: the bowed string's shape on the scope, slowed down,
+# found in what you hear. It listens to bowed_string through input().
+#
+# A string's shape is a sum of its harmonics' shapes: the n-th is n
+# half-waves of a sine along it, and moves at n times the note. A lock-in
+# tuned to each harmonic (the sound turned back by a spin at its pitch,
+# smoothed: how a radio finds a station) says how far it swings and in
+# what phase, at each pickup; a pickup at p hears the n-th times
+# sin(n π p), so dividing that out (the two pickups together, least
+# squares) gives the harmonic itself. The first 20, put back together,
+# are the string.
+#
+# It moves 196 times a second, far too fast to see, so this draws it as
+# a stroboscope would: the motion of one period, played out over two
+# seconds, every harmonic's phase turned by n times the slow clock. What
+# shows is Helmholtz motion: two straight lines meeting at a corner, the
+# corner racing round a lens between the ends, along the top one way and
+# back along the bottom (the scope's afterglow draws the lens). A bow too
+# light shows two corners; too heavy, a corner that shakes.
+#
+# The beam sweeps the string end to end and back, 40 times a second, so
+# it is a line with no jumps. The height is scaled to the largest swing
+# of the last second or so.
+#
+#   ./aither patches/bowed_string.aither | tools/play hw:rockchipes8388c 20 |
+#     AITHER_SOCK=/tmp/aither-picture.sock ./aither patches/bowed_string_eye.aither | tools/scope --decay 0.85 > /dev/null
+
+let note = 196.0
+let (l, r) = input()
+
+# The sweep: s from 0 to 1 and back.
+let s = 1 - abs(2 * phasor(40) - 1)
+let ph = TAU * phasor(note)                         # the reference all harmonics turn by
+let slow = TAU * t / 2                              # one period, slowed to two seconds
+
+# A lock-in: the sound turned back by the harmonic's spin, smoothed twice
+# over 15 ms.
+def hear(sig, back):
+  $a = (0, 0)
+  $b = (0, 0)
+  $a = $a + (back * sig - $a) * (dt / 0.015)
+  $b = $b + ($a - $b) * (dt / 0.015)
+  $b * 2
+
+# The n-th harmonic found in both pickups, turned to the strobe's moment,
+# its height at s.
+def harmonic(n, ph, l, r, s, slow):
+  let back = (cos(n * ph), 0 - sin(n * ph))
+  let a1 = sin(n * PI * 0.174)
+  let a2 = sin(n * PI * 0.434)
+  let found = (hear(l, back) * a1 + hear(r, back) * a2) / (a1 * a1 + a2 * a2)
+  let (re, _) = found * (cos(n * slow), sin(n * slow))
+  re * sin(n * PI * s)
+
+let y = sum(20, n => harmonic(n, ph, l, r, s, slow))
+
+# Scaled to the largest swing lately, so the shape fills the screen
+# whatever the bow is doing, until the string is all but still.
+$top = 0.001
+$top = max(abs(y), $top * (1 - dt * 0.7))
+(s * 1.8 - 0.9, y / max($top, 0.002) * 0.6)

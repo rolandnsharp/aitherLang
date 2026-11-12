@@ -1,0 +1,71 @@
+# bowed_string: a string you bow from the gamepad, and, with
+# bowed_string_eye, its motion on the scope in slow motion.
+#
+# A bow doesn't push a string to and fro. Rosin grips: the string sticks
+# to the hair and rides along with the bow, until the string's pull back
+# outweighs the grip and it slips, flies back, and is caught again. Once
+# a period, at the string's own pitch: the stick-slip of a bowed string.
+# Helmholtz worked out what shape that leaves the string in (1863): two
+# straight lines meeting at a corner, and the corner races round a
+# lens-shaped path between the ends, once a period, one way along the
+# top and back along the bottom. Where the corner passes the bow, the bow
+# lets go; when it comes back, the bow catches it. That is Helmholtz
+# motion, and bowed_string_eye draws it.
+#
+# The string is the field core's: a line, fixed at both ends, 196 Hz (a
+# violin's open G), its law a string's, losing more the higher it goes
+# as a real one does. The bow's friction reads the string where it acts,
+# so the core solves it within each sample as a contact (SPEC,
+# "A contact is a force that reads its own field where it acts"): a grip
+# of 0.65 at rest falling to 0.25 as the string slides.
+#
+# Whether you get Helmholtz motion depends on the bow's force against its
+# place and speed (Schelleng's window): too light and the string slips
+# more than once a period, a thin whistling tone, the corner doubled; too
+# heavy and it can't get free cleanly, a raucous crunch. Near the bridge
+# the window narrows and the tone brightens; further out it is sweeter
+# and forgiving.
+#
+# The gamepad:
+#   A          hold to bow
+#   B          pluck it (pizzicato)
+#   up/down    bow force, half again a press (starts at 1)
+#   left/right where the bow is, nearer the bridge or further out
+#   X / Y      bow slower / faster
+#
+#   tools/pad --notes & ./aither patches/bowed_string.aither | tools/play hw:rockchipes8388c 20 |
+#     AITHER_SOCK=/tmp/aither-picture.sock ./aither patches/bowed_string_eye.aither | tools/scope --decay 0.85 > /dev/null
+
+let note = 196.0                                     # G3, a violin's open G
+
+$force = 0
+$force = clamp($force + midi_trig(40) - midi_trig(41), -4, 6)
+let N = pow(1.5, $force)
+let places = [0.04, 0.06, 0.08, 0.10, 0.12, 0.15, 0.2, 0.25]
+$at = 4
+$at = clamp($at + midi_trig(43) - midi_trig(42), 0, 7)
+let bowAt = places[$at]
+$speed = 0
+$speed = clamp($speed + midi_trig(39) - midi_trig(38), -3, 3)
+
+# The bow lands and gets going over a few hundredths of a second, and
+# lifts off as quickly.
+$on = 0.0
+$on = $on + ((if midi_note(36) > 0 then 1 else 0) - $on) * dt * 40
+let vb = 0.1 * pow(1.5, $speed) * $on
+
+# A grip of 0.65 stuck, falling to 0.25 as it slides; a tanh 1 mm/s wide
+# for the stick.
+def friction(u, N): N * tanh(u / 0.001) * (0.25 + 0.4 * exp(-abs(u) / 0.1))
+
+# A pluck: a finger pulls the string aside at 0.3 and lets go.
+let pluck = if since(midi_trig(37)) < 0.003 then 3 else 0
+
+$x = field(period = 1 / note, ends = fixed)
+$v = field(period = 1 / note, ends = fixed)
+$v' = Δ$x - $v * 0.02 + Δ$v * 3e-6 + friction(vb - $v(bowAt), N * $on) * δ(bowAt) + pluck * δ(0.3, 0.03)
+$x' = $v
+
+# Two pickups, left and right, where between them every harmonic up to
+# the 20th is heard (bowed_string_eye takes the shape from these).
+($x(0.174), $x(0.434)) * 10 |> tanh

@@ -52,3 +52,15 @@ tools/pad --notes & ./aither patches/struck_plate.aither | tools/play hw:rockchi
 | Demo | Size | What it shows |
 |---|---|---|
 | `struck_plate` (with `struck_plate_eye`) | 48x27 | A square steel plate, pinned all round, its law a plate's (`ΔΔ`, bending), held exactly as modes by the field core: it rings at 1, 2.5, 4, 5, 6.5… times D4, none of them harmonics, which is why it sounds like metal. Strike it with a hard or soft mallet (A, B), move where with the d-pad, hold X to drive it with a vibrator at one resonance (tap X for the next) and it rings up into that mode alone; Y lays a hand on it. `struck_plate_eye` hears the two pickups (left, right) through `input()`, finds each mode by a lock-in at its pitch, and tells apart the pairs that ring together on a square, (m, n) and (n, m), from the two channels: the figure drawn is the one the sound holds. Hue is phase, so each side of a nodal line shows the opposite colour; the black lines are where the sand would gather. Drive a resonance from a point on its nodal line and it can't take hold. |
+
+`bowed_string` also lives in `patches/`: a string on the field core you
+bow from the gamepad, the bow's friction solved within each step as a
+contact, with a second engine that draws its motion on the scope:
+
+```
+tools/pad --notes & ./aither patches/bowed_string.aither | tools/play hw:rockchipes8388c 20 | AITHER_SOCK=/tmp/aither-picture.sock ./aither patches/bowed_string_eye.aither | tools/scope --decay 0.85 > /dev/null
+```
+
+| Demo | Size | What it shows |
+|---|---|---|
+| `bowed_string` (with `bowed_string_eye`) | scope | A 196 Hz string (a violin's open G) on the field core, bowed by stick-slip friction (a grip of 0.65 falling to 0.25 as it slides), which reads the string where it acts and so is solved within each sample as a contact. It falls into Helmholtz motion (1863): stuck to the bow most of each period, slipping back once. `bowed_string_eye` hears the two pickups through `input()`, finds the first 20 harmonics by lock-ins and puts the string back together, strobed so one period takes two seconds: two straight lines and a corner racing round a lens, the scope's afterglow drawing the lens. Hold A to bow, B plucks; up/down bow force, left/right where the bow is, X/Y bow slower/faster (Schelleng's window: too light or heavy and the corner breaks up). |
