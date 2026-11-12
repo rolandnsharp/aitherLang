@@ -811,15 +811,22 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   that state as they are at the sample's start, wherever they stand. Anything
   else, for now, goes the old way; `AITHER_CORE=0` sends everything the old way.
 - **`width = p => ...` gives a pair a shape**: how wide the line is at p, 0
-  to 1 along it, stated where the line is, so a where stays out of the law.
-  The field that says it is the pressure, and its partner takes it as flow:
-  flow changes pressure over the area, and pressure changes flow times it,
-  the area being width squared. The laws don't change. Tapered, the line is
-  a horn, Webster's equation, as a tapered telegraph line is the same thing
-  with L and C changing along it. Closed at one end, a cylinder's modes are
-  1, 3, 5 and a cone from 0.1 past its apex measures 1.80, 3.65, 5.55, 7.45
-  against theory's 1.82, 3.67, 5.54, 7.45. Only a pair has one, and a
-  `matched` end is for a line of one width.
+  to 1 along it, stated where the line is (on the first field, the pressure),
+  so a where stays out of the law. Its partner takes it as flow: flow changes
+  pressure over the area, and pressure changes flow times it, the area S being
+  width squared. Together that is Webster's horn, and `Δ` on the pressure is the
+  horn's own Laplacian, `(1/S) (S p')'`, the cross-section's mean of the 3D one
+  (the plain `Δ` when the width is even). The field core holds a horn as its
+  modes, Webster's eigenproblem solved once: finite volumes, the eigenvalues by
+  bisection at two grids and extrapolated, the shapes by inverse iteration,
+  within 0.22 cents of a cylinder's and a cone's exact modes at the 256th. It
+  takes about half a second, so live it runs on a thread of its own, the horn
+  silent until it is in and nothing else waiting; offline it is worked out at
+  the first sample, so a render is the same every time. The width is laid in
+  once, by the medium's array rule, so it is fixed while the patch plays.
+  `field_didge` sounds 73.80, 73.81, 73.81 Hz at 48, 96 and 192 kHz (it drifted
+  9 cents on places). A horn whose period moves, a spread force on one, or a `Δ`
+  on the flow, go the old way.
 - **A line's period can move**: `field(period = 1 / note, ends = fixed)`, with
   any signal for `note`. Such a line is a pair of equal loss, `$v' = -∇$i
   - $v * loss`, `$i' = -∇$v - $i * loss`, and anything else is an error,

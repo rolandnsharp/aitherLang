@@ -74,9 +74,25 @@ def case_springs_as_laws():
     return springs('springs_laws.aither')
 case_springs_as_laws.__doc__ = 'As four lines of laws. ' + springs.__doc__
 
-def case_springs_as_dho():
-    return springs('springs_dho.aither')
-case_springs_as_dho.__doc__ = 'As two dho, coupled through $state. ' + springs.__doc__
+def case_boundary_lag():
+    """The boundary SPEC states: memory outside the laws (two exact dho,
+    coupled through $state the patch writes) meets them across a sample, and
+    that lag is first order. A lossless pair so coupled gains energy at a rate
+    that halves with each halving of the step, at 96, 192 and 384 kHz, each
+    ratio within 25% of 2, over its first 0.4 s (it runs away soon after). Written as
+    laws, the same pair holds (springs_as_laws)."""
+    rates = (96000, 192000, 384000)
+    grow = []
+    for rate in rates:
+        L, R, said = render('springs_dho.aither', rate, 0.45)
+        if said: return False, '%d Hz: %s' % (rate, said[0])
+        def env(t):
+            i, w = int(t * rate), int(0.02 * rate)
+            return np.max(np.abs(L[i:i + w]) + np.abs(R[i:i + w]))
+        grow.append(20 * np.log10(env(0.4) / env(0.05)) / 0.35)
+    ratios = [grow[i] / grow[i + 1] for i in range(2)]
+    ok = all(abs(r - 2) < 0.5 for r in ratios)
+    return ok, 'gains %.1f, %.1f, %.1f dB a second: halving the step, %.2f and %.2f times less' % (*grow, *ratios)
 
 def case_string_partials():
     """A string, fixed ends, 110 Hz, struck at 0.3 for 0.5 ms, heard at 0.13:

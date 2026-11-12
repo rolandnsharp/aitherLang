@@ -47,6 +47,7 @@ double n_medium_velocity_at(double* m, double at);
 double n_medium_pair_turn(double* m, double cap, double T, double Cv, double Gv, double Dv,
                           double Ci, double Gi, double Di, double el, double er, double h);
 double n_medium_partner_at(double* m, double at);
+extern int dsp_medium_async;               /* live: a horn's modes on a worker thread */
 double n_medium_horn_turn(double* m, double cap, double T, double Cp, double Gp, double Dp, double Cu, double Gu,
                           double el, double er, double h);
 double n_medium_horn_at(double* m, double at, double which);

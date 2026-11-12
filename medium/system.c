@@ -49,6 +49,7 @@ typedef struct {
   int pair;                        /* a pair, ∇ each the other's: x the first field, v its partner */
   int axes;                        /* 1, or 2: a sheet, each axis's period T, a square, its edge all one end */
   int delay;                       /* a pair whose period moves, of equal loss: two travelling waves */
+  Node* width;                     /* a horn: the pressure's width, p => ..., Webster's modes */
   Node* loss;                      /* its loss a round, g */
   Node* law[2][3];                 /* a pair's: each field's coefficients of ∇partner, itself, Δ itself */
   Source src[64];
@@ -315,6 +316,15 @@ static int same_tree(const Node* a, const Node* b) {
   return 1;
 }
 
+/* A copy of `n` with `name` (a lambda's parameter) read as `value`. */
+static Node* substitute(Sys* s, const Node* n, const char* name, Node* value) {
+  if (!n) return NULL;
+  if (n->kind == nkIdent && !strcmp(n->str, name)) return copy(s, value);
+  Node* c = copy(s, n);
+  for (int i = 0; i < c->nkids; i++) c->kids[i] = substitute(s, n->kids[i], name, value);
+  return c;
+}
+
 /* ------------------------------------------- what the block computes */
 
 /* A copy for the block: lets that read the system written in where they're
@@ -329,8 +339,8 @@ static Node* inside(Sys* s, const Node* n, int depth) {
     if (reads_system(s, n->kids[1], 0)) s->no = 1;   /* a reading where the system says: later */
     const char* name = fresh(s, "read");
     int vel = !strcmp(n->kids[0]->str, m->v);
-    push(&s->reads, let(s, name, m->delay
-      ? call(s, "medium_line_at", n, 3, (Node*[]){ident(s, m->store, n), at, num(s, vel ? 2 : 1, n)})
+    push(&s->reads, let(s, name, m->delay || m->width
+      ? call(s, m->width ? "medium_horn_at" : "medium_line_at", n, 3, (Node*[]){ident(s, m->store, n), at, num(s, vel ? 2 : 1, n)})
       : call(s, vel ? (m->pair ? "medium_partner_at" : m->axes == 2 ? "medium_velocity_at2" : "medium_velocity_at")
                     : m->axes == 2 ? "medium_at2" : "medium_at", n, 2, (Node*[]){ident(s, m->store, n), at})));
     return ident(s, name, n);
@@ -365,8 +375,9 @@ static Node* outside(Sys* s, Node* n) {
   if (n->kind == nkIdx && n->num == 2 && n->kids[0]->kind == nkIdent && medium_of(s, n->kids[0]->str)) {
     Medium* m = medium_of(s, n->kids[0]->str);
     int vel = !strcmp(n->kids[0]->str, m->v);
-    if (m->delay)
-      return call(s, "medium_line_at", n, 3, (Node*[]){ident(s, m->store, n), outside(s, n->kids[1]), num(s, vel ? 2 : 1, n)});
+    if (m->delay || m->width)
+      return call(s, m->width ? "medium_horn_at" : "medium_line_at", n, 3,
+                  (Node*[]){ident(s, m->store, n), outside(s, n->kids[1]), num(s, vel ? 2 : 1, n)});
     return call(s, vel ? (m->pair ? "medium_partner_at" : m->axes == 2 ? "medium_velocity_at2" : "medium_velocity_at")
                        : m->axes == 2 ? "medium_at2" : "medium_at", n, 2,
                 (Node*[]){ident(s, m->store, n), outside(s, n->kids[1])});
@@ -505,7 +516,9 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
     int moves = !(plain_number(s, pe, &T) && plain_number(s, pv, &T2));
     if (moves ? !same_tree(pe, pv) || reads_system(s, pe, 0) : (T != T2 || T <= 0)) return said_no(__LINE__);
     m->delay = moves;
-    if (arg(d->kids[0], "width", 99) || arg(pd->kids[0], "width", 99)) return said_no(__LINE__);    /* a horn: later */
+    if (arg(pd->kids[0], "width", 99)) return said_no(__LINE__);    /* the width is the pressure's, the first field's */
+    m->width = arg(d->kids[0], "width", 99);
+    if (m->width && (m->width->kind != nkLambda || m->width->nparams != 1)) return said_no(__LINE__);
     if (arg(d->kids[0], "start", 99) || arg(pd->kids[0], "start", 99)) return said_no(__LINE__);
     int round = !strcmp(d->kids[0]->str, "ring");
     Node *ex = arg(d->kids[0], "ends", 99), *ev = arg(pd->kids[0], "ends", 99);
@@ -521,6 +534,10 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
       linear_pair(s, f ? m->v : m->x, f ? m->x : m->v, inline_words(s, lw->kids[0], 0), num(s, 1, lw), coef);
       if (s->no) return said_no(__LINE__);
       for (int c = 0; c < 3; c++) m->law[f][c] = coef[c] ? coef[c] : num(s, 0, lw);
+    }
+    if (m->width) {                                    /* a horn: a fixed period, no Δ on the flow */
+      double du;
+      if (m->delay || round || !plain_number(s, m->law[1][2], &du) || du != 0) return said_no(__LINE__);
     }
     if (m->delay) {                                    /* two waves: -∇ each, one loss for both, no Δ */
       double c0, c1, d0, d1;
@@ -586,7 +603,7 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
     if (place->kind == nkCall && !strcmp(place->str, "gauss") && place->nkids == 2) { width = place->kids[1]; place = place->kids[0]; }
     Node* said = t->kids[2];
     int into = m->pair ? (!strcmp(base, m->x) ? 1 : 2) : !strcmp(base, m->x);
-    if (m->delay && width) return said_no(__LINE__);                   /* spread on travelling waves: later */
+    if ((m->delay || m->width) && width) return said_no(__LINE__);     /* spread on travelling waves or a horn: later */
     m->src[m->nsrc++] = (Source){place, width, said->kids[1], !strcmp(said->str, "-"), into};
   }
 
@@ -596,7 +613,13 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
   for (int i = 0; i < s->nm; i++) {
     Medium* m = &s->m[i];
     if (m->delay) continue;                            /* travelling waves take their whole sample after the kicks */
-    Node* turn = m->pair
+    Node* turn = m->width
+      ? call(s, "medium_horn_turn", at, 11, (Node*[]){
+          ident(s, m->store, at), num(s, MODE_CAP, at), inside(s, m->period, 0),
+          inside(s, m->law[0][0], 0), inside(s, m->law[0][1], 0), inside(s, m->law[0][2], 0),
+          inside(s, m->law[1][0], 0), inside(s, m->law[1][1], 0),
+          num(s, m->ends[0], at), num(s, m->ends[1], at), bin(s, "/", ident(s, "dt", at), num(s, 2, at), at)})
+      : m->pair
       ? call(s, "medium_pair_turn", at, 12, (Node*[]){
           ident(s, m->store, at), num(s, MODE_CAP, at), inside(s, m->period, 0),
           inside(s, m->law[0][0], 0), inside(s, m->law[0][1], 0), inside(s, m->law[0][2], 0),
@@ -685,8 +708,9 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
       Node* f = s->np ? bin(s, "*", num(s, 0.5, at), bin(s, "+", staged(s, f0, y1), staged(s, f0, y2), at), at) : f0;
       Node* impulse = bin(s, "*", f, copy(s, dt), at);
       if (m->src[k].minus) impulse = bin(s, "*", impulse, num(s, -1, at), at);
-      Node* kick = m->delay
-        ? call(s, "medium_line_kick", at, 4, (Node*[]){ident(s, m->store, at), impulse, place[i][k], num(s, m->src[k].into, at)})
+      Node* kick = m->delay || m->width
+        ? call(s, m->width ? "medium_horn_kick" : "medium_line_kick", at, 4,
+               (Node*[]){ident(s, m->store, at), impulse, place[i][k], num(s, m->src[k].into, at)})
         : call(s, m->axes == 2 ? "medium_kick2" : "medium_kick", at, 5, (Node*[]){ident(s, m->store, at), impulse,
                                                                               place[i][k], spread[i][k], num(s, m->src[k].into, at)});
       push(&block, store(s, nkAssign, m->tick, kick));
@@ -696,7 +720,13 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
   for (int i = 0; i < s->nm; i++) {
     Medium* m = &s->m[i];
     if (m->delay) continue;                            /* it took its sample before the kicks */
-    Node* turn = m->pair
+    Node* turn = m->width
+      ? call(s, "medium_horn_turn", at, 11, (Node*[]){
+          ident(s, m->store, at), num(s, MODE_CAP, at), inside(s, m->period, 0),
+          inside(s, m->law[0][0], 0), inside(s, m->law[0][1], 0), inside(s, m->law[0][2], 0),
+          inside(s, m->law[1][0], 0), inside(s, m->law[1][1], 0),
+          num(s, m->ends[0], at), num(s, m->ends[1], at), bin(s, "/", ident(s, "dt", at), num(s, 2, at), at)})
+      : m->pair
       ? call(s, "medium_pair_turn", at, 12, (Node*[]){
           ident(s, m->store, at), num(s, MODE_CAP, at), inside(s, m->period, 0),
           inside(s, m->law[0][0], 0), inside(s, m->law[0][1], 0), inside(s, m->law[0][2], 0),
@@ -720,6 +750,21 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
     Node* t = s->v[i];
     Medium* m = (t->kind == nkVar) ? medium_of(s, t->str) : NULL;
     if (m && t == m->xdecl) {
+      if (m->width) {                                  /* a horn's state, its width at 513 places laid in by the array's rule */
+        int off = 24 + 7 * MODE_CAP, size = off + 513 + 2 * MODE_CAP * 1025;
+        const char* i_ = fresh(s, "place");
+        Node* where = bin(s, "/", bin(s, "-", ident(s, i_, t), num(s, off, t), t), num(s, 512, t), t);
+        Node* w = substitute(s, m->width->kids[0], m->width->params[0], where);
+        Node* in = bin(s, "and", bin(s, ">=", ident(s, i_, t), num(s, off, t), t), bin(s, "<=", ident(s, i_, t), num(s, off + 512, t), t), t);
+        Node* cond = mk(s, nkIf, "", t);
+        kids(s, cond, 3, (Node*[]){in, w, num(s, 0, t)});
+        Node* rule = mk(s, nkLambda, "", t);
+        kids(s, rule, 1, (Node*[]){cond});
+        rule->nparams = 1;
+        rule->params = arena_alloc(s->a, sizeof(char*));
+        rule->params[0] = i_;
+        push(&kept, store(s, nkVar, m->store, call(s, "array", t, 2, (Node*[]){num(s, size, t), rule})));
+      } else
       push(&kept, store(s, nkVar, m->store, call(s, "array", t, 1, (Node*[]){num(s, m->delay ? 24 + 2 * 131072 : 24 + 10 * MODE_CAP, t)})));
       push(&kept, store(s, nkVar, m->tick, num(s, 0, t)));
       continue;

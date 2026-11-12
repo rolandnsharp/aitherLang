@@ -932,6 +932,10 @@ enum { HN_N, HN_T, HN_GP, HN_DP, HN_GU, HN_EL, HN_ER, HN_H, HN_CAP, HN_STATE, HN
 #define HN_PSI(N) (HN_PHI(N) + (N) * (HN_G + 1))
 typedef struct { int used, done, orphan; double width[HN_W + 1]; int el, er, want, got; double* mu; double* phi; } HornJob;
 static HornJob hn_jobs[32];
+/* Live (the engine without a duration sets it), a horn's modes come on a
+ * worker thread, so nothing else playing waits for them; offline they are
+ * worked out at the first sample, so a render is the same every time. */
+int dsp_medium_async;
 static pthread_mutex_t hn_lock = PTHREAD_MUTEX_INITIALIZER;
 static void* hn_work(void* arg) {
   HornJob* j = arg;
@@ -962,7 +966,32 @@ double n_medium_horn_turn(double* m, double cap, double T, double Cp, double Gp,
   double *a = m + HN_HEAD, *b = a + N, *p00 = b + N, *p01 = p00 + N, *p10 = p01 + N, *p11 = p10 + N, *mu = p11 + N;
   double *width = m + HN_WIDTH(N), *phi = m + HN_PHI(N), *psi = m + HN_PSI(N);
   double hash = hn_hash(width, el, er);
-  if (m[HN_CAP] != cap || m[HN_HASH] != hash || m[HN_STATE] == 0) {   /* a new horn: its modes, on a thread */
+  if ((m[HN_CAP] != cap || m[HN_HASH] != hash || m[HN_STATE] == 0) && !dsp_medium_async) {   /* offline: now */
+    if (m[HN_STATE] == 1) {
+      pthread_mutex_lock(&hn_lock);
+      HornJob* old = &hn_jobs[(int)m[HN_JOB]];
+      if (old->done) { free(old->mu); free(old->phi); old->used = 0; } else old->orphan = 1;
+      pthread_mutex_unlock(&hn_lock);
+    }
+    pthread_mutex_lock(&hn_lock);
+    int k = -1;
+    for (int i = 0; i < 32 && k < 0; i++) if (!hn_jobs[i].used) k = i;
+    if (k >= 0) { memset(&hn_jobs[k], 0, sizeof hn_jobs[k]); hn_jobs[k].used = 1; }
+    pthread_mutex_unlock(&hn_lock);
+    if (k >= 0) {
+      HornJob* j = &hn_jobs[k];
+      j->el = (int)el; j->er = (int)er; j->want = (int)N;
+      memcpy(j->width, width, sizeof j->width);
+      j->mu = malloc(sizeof(double) * N);
+      j->phi = malloc(sizeof(double) * N * (HN_G + 1));
+      if (j->mu && j->phi) { j->got = horn_modes(j->width, HN_W, j->el, j->er, j->want, j->mu, j->phi, HN_G); j->done = 1;
+                             m[HN_STATE] = 1; m[HN_JOB] = k; }
+      else { free(j->mu); free(j->phi); j->used = 0; m[HN_STATE] = 0; }
+    }
+    m[HN_CAP] = cap; m[HN_HASH] = hash; m[HN_N] = 0; m[HN_GOT] = 0;
+    for (long i = 0; i < N; i++) a[i] = b[i] = 0.0;
+  }
+  if (m[HN_CAP] != cap || m[HN_HASH] != hash || m[HN_STATE] == 0) {   /* live: a new horn's modes, on a thread */
     pthread_mutex_lock(&hn_lock);
     if (m[HN_STATE] == 1) {                                       /* the one on its way is for another width */
       HornJob* old = &hn_jobs[(int)m[HN_JOB]];

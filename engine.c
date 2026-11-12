@@ -20,6 +20,7 @@
 #include <sys/stat.h>
 #include <sys/un.h>
 #include "engine.h"
+#include "dsp.h"
 #include "pool.h"
 #include "analysis.h"
 #include "cli_output.h"
@@ -1938,6 +1939,7 @@ void engine_run(char** files, int nfiles, double seconds) {
   }
   /* The workers first: the voices are cut into tasks for them. */
   pool_start();
+  dsp_medium_async = seconds <= 0.0;      /* live, a horn's modes come on a thread of their own */
   if (seconds <= 0.0) start_optimizer();
   for (int i = 0; i < nfiles; i++) {
     char* path = absolute(files[i]);
