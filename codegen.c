@@ -108,6 +108,8 @@ struct Ctx {
   Map file_vars;            /* every file-level `$x`, known from the start */
   int each_depth;
   Buf deferred;
+  int each_loop;       /* inside an each written as a loop: its count; held-back stores go through scratch arrays */
+  Buf each_scratch;    /* their declarations, before the loop */
   Map recursive, tail_checked, stereo_seen, pure_seen;
   /* Tasks: the units, each one's task, and the buffers between tasks. */
   Unit* units; Use* use; int nunits;
@@ -1419,6 +1421,48 @@ static int c_number(const char* t) {
 
 static V emit_block(Ctx* c, Scope* sc, Node* b, Buf* pre);
 
+/* The regions the body of a loop claimed (r0 on) as each pass's own:
+ * pass 0's as emitted, each later pass's claimed as the unrolled copies
+ * would have claimed them, so the layout, a reload's matching and the
+ * noise seeds are the unrolled ones; pass k's offset is pass 0's plus k
+ * times its type's span. Patches the body's code, tl and tr (either may be
+ * NULL) and the per-block code from h0 on. */
+static const char* loop_regions(Ctx* c, int r0, long N, int h0, const char* code, const char** tl, const char** tr) {
+  int r1 = c->nregions, nr = r1 - r0;
+  const char** types = al(c, (nr + 1) * sizeof(char*));
+  long* span = al(c, (nr + 1) * sizeof(long));
+  int nt = 0;
+  for (int r = r0; r < r1; r++) {
+    int k = 0;
+    while (k < nt && !eq(types[k], c->regions[r].type_name)) k++;
+    if (k == nt) { types[nt] = c->regions[r].type_name; span[nt++] = 0; }
+    span[k] += c->regions[r].size;
+  }
+  int* copies = al(c, ((long)N * nr + 1) * sizeof(int));     /* copies[v * nr + i]: pass v's region i */
+  for (int i = 0; i < nr; i++) copies[i] = r0 + i;
+  for (long v = 1; v < N; v++)
+    for (int i = 0; i < nr; i++) copies[v * nr + i] = copy_region(c, r0 + i);
+  for (int i = 0; i < nr; i++) {
+    int r = r0 + i, k = 0;
+    while (!eq(types[k], c->regions[r].type_name)) k++;
+    const char* ph = offset_placeholder(c, r);
+    const char* at = F(c, "(%s + aither_vk * %ldL)", ph, span[k]);
+    code = replace_all(c, code, ph, at);
+    if (tl) *tl = replace_all(c, *tl, ph, at);
+    if (tr) *tr = replace_all(c, *tr, ph, at);
+    for (int h = h0; h < c->hoist_inits.n; h++)
+      if (strstr(c->hoist_inits.v[h], ph)) c->hoist_inits.v[h] = replace_all(c, c->hoist_inits.v[h], ph, at);
+    if (eq(c->regions[r].type_name, "noise")) {
+      Buf seeds = {0};
+      for (long v = 0; v < N; v++) badd(c, &seeds, "%s%uu", v ? ", " : "", noise_seed(c, copies[v * nr + i]));
+      const char* arr = F(c, "nzs_%d", r);
+      spush(c, &c->hoist_decls, F(c, "static const unsigned int %s[%ld] = {%s};\n", arr, N, bstr(&seeds)));
+      code = replace_all(c, code, F(c, "__SEED_%06d__", r), F(c, "%s[aither_vk]", arr));
+    }
+  }
+  return code;
+}
+
 static V emit_voice_loop(Ctx* c, Scope* sc, Node* call, Node* body, const char* param, long N, Buf* pre) {
   int r0 = c->nregions;
   const char* idx = "((double)(aither_vk + 1))";
@@ -1436,43 +1480,10 @@ static V emit_voice_loop(Ctx* c, Scope* sc, Node* call, Node* body, const char* 
   Buf own = {0};
   V t = body->kind == nkBlock ? emit_block(c, iter, body, &own) : emit(c, iter, body, &own);
   c->loop_nv = 0;
-  int r1 = c->nregions, nr = r1 - r0;
-  /* Each type's span in one voice: voice k's region is voice 1's plus k spans. */
-  const char** types = al(c, (nr + 1) * sizeof(char*));
-  long* span = al(c, (nr + 1) * sizeof(long));
-  int nt = 0;
-  for (int r = r0; r < r1; r++) {
-    int k = 0;
-    while (k < nt && !eq(types[k], c->regions[r].type_name)) k++;
-    if (k == nt) { types[nt] = c->regions[r].type_name; span[nt++] = 0; }
-    span[k] += c->regions[r].size;
-  }
-  int* copies = al(c, ((long)N * nr + 1) * sizeof(int));     /* copies[v * nr + i]: voice v's region i */
-  for (int i = 0; i < nr; i++) copies[i] = r0 + i;
-  for (long v = 1; v < N; v++)
-    for (int i = 0; i < nr; i++) copies[v * nr + i] = copy_region(c, r0 + i);
   no_quad(c, t, "a poly voice (the voice loop)", call);
-  const char* code = bstr(&own);
   const char* tl = t.l;
   const char* tr = t.r;
-  for (int i = 0; i < nr; i++) {
-    int r = r0 + i, k = 0;
-    while (!eq(types[k], c->regions[r].type_name)) k++;
-    const char* ph = offset_placeholder(c, r);
-    const char* at = F(c, "(%s + aither_vk * %ldL)", ph, span[k]);
-    code = replace_all(c, code, ph, at);
-    tl = replace_all(c, tl, ph, at);
-    tr = replace_all(c, tr, ph, at);
-    for (int h = h0; h < c->hoist_inits.n; h++)
-      if (strstr(c->hoist_inits.v[h], ph)) c->hoist_inits.v[h] = replace_all(c, c->hoist_inits.v[h], ph, at);
-    if (eq(c->regions[r].type_name, "noise")) {
-      Buf seeds = {0};
-      for (long v = 0; v < N; v++) badd(c, &seeds, "%s%uu", v ? ", " : "", noise_seed(c, copies[v * nr + i]));
-      const char* arr = F(c, "nzs_%d", r);
-      spush(c, &c->hoist_decls, F(c, "static const unsigned int %s[%ld] = {%s};\n", arr, N, bstr(&seeds)));
-      code = replace_all(c, code, F(c, "__SEED_%06d__", r), F(c, "%s[aither_vk]", arr));
-    }
-  }
+  const char* code = loop_regions(c, r0, N, h0, bstr(&own), &tl, &tr);
   const char* al_ = fresh(c, "voices_l");
   const char* ar_ = fresh(c, "voices_r");
   badd(c, pre, "  double %s = 0.0, %s = 0.0;\n  for (long aither_vk = 0; aither_vk < %ld; aither_vk++) {\n%s",
@@ -1483,6 +1494,160 @@ static V emit_voice_loop(Ctx* c, Scope* sc, Node* call, Node* body, const char* 
   else
     badd(c, pre, "  if (aither_vk == 0) %s = (%s); else %s += (%s);\n  }\n", al_, tl, al_, tl);
   return is_pair(t) ? vpair(al_, ar_) : mono(al_);
+}
+
+/* ------------------------------------------------- each over places as a loop
+ * `each(N, k => ...)` is one simultaneous step at every place; its body
+ * was written out N times, so a field of a hundred places was a hundred
+ * copies of its law in the C (field_ear: a minute of gcc). Where k is only
+ * ever a run-time number, the body is written once, as a loop over k, and
+ * the bits are the unrolled ones: each pass's state where the unrolled
+ * copy's was (loop_regions), what is steady over a block and depends on k
+ * an array filled once a block, as a voice loop's is, and the stores to
+ * state arrays held back through scratch arrays, one a store, to land
+ * after the loop, pass by pass, in the order the copies made them.
+ *
+ * k is a run-time number where it, or anything made from it, goes only
+ * into arithmetic, a comparison or an `if`, pure maths, a pure def, a
+ * value (a, b), a let, a store, or the index of a state or local array.
+ * Anywhere else (a count, an array's size, an exponent, which is products
+ * when it is a whole number known when compiling, a call that holds
+ * state, a lambda) the body unrolls as before. AITHER_LOOP=0 unrolls every
+ * each. */
+
+static const char* const EACH_LOOP_CALLS[] = {"amplitude", "phase", "conj", "axis", NULL};
+
+static int tainted_by(Node* n, Strs* t) {
+  for (int i = 0; i < t->n; i++) if (mentions(n, t->v[i])) return 1;
+  return 0;
+}
+
+static int each_ok(Ctx* c, Scope* sc, Node* n, Strs* t, int rt);
+
+static int each_ok_kids(Ctx* c, Scope* sc, Node* n, Strs* t, int rt) {
+  for (int i = 0; i < n->nkids; i++) if (!each_ok(c, sc, n->kids[i], t, rt)) return 0;
+  return 1;
+}
+
+/* Can this part of an each's body take k as a run-time number? rt: does
+ * this place take one. */
+static int each_ok(Ctx* c, Scope* sc, Node* n, Strs* t, int rt) {
+  if (!n) return 1;
+  switch (n->kind) {
+  case nkNum: case nkStr: return 1;
+  case nkIdent:
+    for (int i = 0; i < t->n; i++) if (eq(n->str, t->v[i])) return rt;
+    return 1;
+  case nkBinOp:
+    if (eq(n->str, "^")) {     /* an exponent from k only on a number known now: aither_whole_pow */
+      double v;
+      int known = const_value(c, sc, n->kids[0], &v);
+      return each_ok(c, sc, n->kids[0], t, rt) && each_ok(c, sc, n->kids[1], t, known && rt);
+    }
+    return each_ok_kids(c, sc, n, t, rt);
+  case nkIf: return each_ok_kids(c, sc, n, t, rt);
+  case nkUnary:
+    return each_ok_kids(c, sc, n, t, (eq(n->str, "-") || eq(n->str, "not")) && rt);
+  case nkArr: return each_ok_kids(c, sc, n, t, n->nkids == 2 && rt);
+  case nkIdx: case nkIdxAssign: {
+    Node* base = n->kids[0];
+    int place = base && base->kind == nkIdent && (lookup_sarray(c, sc, base->str) || lookup_larray(c, sc, base->str));
+    if (n->kind == nkIdxAssign && !place) return 0;
+    if (!each_ok(c, sc, base, t, rt) || !each_ok(c, sc, n->kids[1], t, place)) return 0;
+    return n->kind == nkIdx || each_ok(c, sc, n->kids[2], t, 1);
+  }
+  case nkLet: case nkVar: case nkAssign:
+    if (n->kind == nkVar && is_array_make(n->kids[0])) return 0;      /* an array a pass: unrolls */
+    if (!each_ok(c, sc, n->kids[0], t, 1)) return 0;
+    if (n->kind == nkLet && n->str && tainted_by(n->kids[0], t)) spush(c, t, n->str);
+    return 1;
+  case nkBlock: return each_ok_kids(c, sc, n, t, 1);
+  case nkCall: {
+    if (!n->str || eq(n->str, "each") || eq(n->str, "sum") || eq(n->str, "array") || eq(n->str, "δ") ||
+        eq(n->str, "slope") || !strncmp(n->str, "medium_", 7) || !strncmp(n->str, "field", 5))
+      return 0;
+    for (int i = 0; i < n->nkids; i++)
+      if (n->kids[i] && (n->kids[i]->kind == nkLambda || n->kids[i]->kind == nkNamedArg)) return 0;
+    if (in(n->str, PURE_MATH) || in(n->str, EACH_LOOP_CALLS)) return each_ok_kids(c, sc, n, t, rt);
+    Node* d = pure_def(c, sc, n);
+    if (d) {
+      Strs inner = {0};
+      for (int i = 0; i < n->nkids; i++) {
+        if (!each_ok(c, sc, n->kids[i], t, rt)) return 0;
+        if (tainted_by(n->kids[i], t)) spush(c, &inner, d->params[i]);
+      }
+      pure_path[pure_depth++] = d;
+      int ok = each_ok(c, sc, d->kids[0], &inner, rt);
+      pure_depth--;
+      return ok;
+    }
+    /* A def of the patch's or the stdlib's: its body is more of the body,
+     * checked the same way, its parameters carrying k where its arguments do. */
+    Node* u = user_def(c, n->str);
+    if (u && !u->is_rec && u->kids && u->kids[0] && n->nkids <= u->nparams && !lookup_fn(sc, n->str)[0] &&
+        !lookup_lambda(sc, n->str) && pure_depth < 64) {
+      for (int i = 0; i < pure_depth; i++) if (pure_path[i] == u) return 0;
+      Strs inner = {0};
+      for (int i = 0; i < n->nkids; i++) {
+        if (!each_ok(c, sc, n->kids[i], t, rt)) return 0;
+        if (tainted_by(n->kids[i], t)) spush(c, &inner, u->params[i]);
+      }
+      pure_path[pure_depth++] = u;
+      int ok = each_ok(c, sc, u->kids[0], &inner, rt);
+      pure_depth--;
+      return ok;
+    }
+    return each_ok_kids(c, sc, n, t, 0);       /* a built-in that holds state: k may not reach it */
+  }
+  default: return 0;                          /* a lambda, a def, a play: unrolls */
+  }
+}
+
+static int can_each_loop(Ctx* c, Scope* sc, Node* lam, long N) {
+  if (N < 2 || c->loop_nv || c->each_depth || loops_off() || !mentions(lam->kids[0], lam->params[0])) return 0;
+  Strs t = {0};
+  spush(c, &t, lam->params[0]);
+  return each_ok(c, sc, lam->kids[0], &t, 1);
+}
+
+static void emit_each_loop(Ctx* c, Scope* sc, Node* call, Node* lam, long N, Buf* pre) {
+  int r0 = c->nregions;
+  const char* idx = "((double)aither_vk)";
+  if (!c->hoisted) c->hoisted = push(c, NULL);
+  lput(c, &c->hoisted->names, "@ek")->a = idx;
+  Scope* iter = push(c, sc);
+  lput(c, &iter->names, lam->params[0])->a = idx;     /* the place, at run time */
+  Node* ek = mknode(c, nkIdent, call->line, call->source);
+  ek->str = "@ek";
+  Ent* inv = lput(c, &iter->invs, lam->params[0]);   /* and steady over a block */
+  inv->node = ek;
+  inv->sc = iter;
+  Buf saved = c->deferred, saved_scratch = c->each_scratch;
+  c->deferred = (Buf){0};
+  c->each_scratch = (Buf){0};
+  c->loop_nv = (int)N;
+  c->each_loop = (int)N;
+  c->each_depth++;
+  int h0 = c->hoist_inits.n;
+  Buf own = {0};
+  Node* b = lam->kids[0];
+  if (b->kind == nkBlock) {
+    for (int i = 0; i < b->nkids - 1; i++) emit_local_stmt(c, iter, b->kids[i], &own);
+    Node* last = b->kids[b->nkids - 1];
+    if (!(last->kind == nkNum && last->num == 0.0)) emit(c, iter, last, &own);
+  } else {
+    emit(c, iter, b, &own);
+  }
+  c->each_depth--;
+  c->each_loop = 0;
+  c->loop_nv = 0;
+  const char* code = loop_regions(c, r0, N, h0, bstr(&own), NULL, NULL);
+  bcat(c, pre, bstr(&c->each_scratch));
+  badd(c, pre, "  for (long aither_vk = 0; aither_vk < %ldL; aither_vk++) {\n%s  }\n", N, code);
+  if (c->deferred.n)                            /* the step lands together, pass by pass */
+    badd(c, pre, "  for (long aither_ek = 0; aither_ek < %ldL; aither_ek++) {\n%s  }\n", N, bstr(&c->deferred));
+  c->deferred = saved;
+  c->each_scratch = saved_scratch;
 }
 
 /* A stateful native at its call site's region: its offset passed as the
@@ -1821,6 +1986,33 @@ static V* emit_rule(Ctx* c, Scope* sc, Node* rule, int n, Buf* pre, int* w, int*
   return vs;
 }
 
+static int each_ok(Ctx* c, Scope* sc, Node* n, Strs* t, int rt);
+static int loops_off(void);
+
+/* A rule that holds nothing: no stores, no state, nothing called but
+ * maths and pure defs. Only such a rule is written as a loop. */
+static int rule_holds_nothing(Ctx* c, Scope* sc, Node* n) {
+  if (!n) return 1;
+  if (n->kind == nkVar || n->kind == nkAssign || n->kind == nkIdxAssign || n->kind == nkLambda ||
+      n->kind == nkDef || n->kind == nkPlay || n->kind == nkNamedArg)
+    return 0;
+  if (n->kind == nkCall && !in(n->str, PURE_MATH) && !in(n->str, EACH_LOOP_CALLS) && !pure_def(c, sc, n)) return 0;
+  for (int i = 0; i < n->nkids; i++) if (!rule_holds_nothing(c, sc, n->kids[i])) return 0;
+  return 1;
+}
+
+/* `array(n, k => rule)` written as a loop over k, where the rule holds
+ * nothing and k is a run-time number in it (each_ok): its element once,
+ * computed when the array is born, not every element's code, and not
+ * hoisted to every block. NULL where it unrolls. */
+static int rule_loops(Ctx* c, Scope* sc, Node* rule, int n) {
+  if (n < 2 || loops_off() || c->loop_nv || rule->nparams != 1 || !rule_holds_nothing(c, sc, rule->kids[0])) return 0;
+  if (!mentions(rule->kids[0], rule->params[0])) return 0;
+  Strs t = {0};
+  spush(c, &t, rule->params[0]);
+  return each_ok(c, sc, rule->kids[0], &t, 1);
+}
+
 static void declare_state_array(Ctx* c, Scope* sc, Node* st, Buf* pre, int top_level) {
   Node* call = st->kids[0];
   ArrayArgs args = array_args(call);
@@ -1845,7 +2037,26 @@ static void declare_state_array(Ctx* c, Scope* sc, Node* st, Buf* pre, int top_l
   int w = 1;
   V iv = mono("0.0");
   int lad = 0;
-  if (rule) rv = emit_rule(c, sc, rule, n, &init_pre, &w, &lad);
+  int looped = rule && rule_loops(c, sc, rule, n);
+  V one = mono("0.0");
+  if (looped) {
+    /* The element at a run-time index, computed at birth, in the loop. */
+    int hoisting = c->hoist_on;
+    c->hoist_on = 0;
+    Scope* iter = push(c, sc);
+    lput(c, &iter->names, rule->params[0])->a = "((double)aither_vk)";
+    Node* b = rule->kids[0];
+    if (b->kind == nkBlock) {
+      for (int i = 0; i < b->nkids - 1; i++) emit_local_stmt(c, iter, b->kids[i], &init_pre);
+      one = emit(c, iter, b->kids[b->nkids - 1], &init_pre);
+    } else {
+      one = emit(c, iter, b, &init_pre);
+    }
+    c->hoist_on = hoisting;
+    w = is_quad(one) ? 4 : is_pair(one) ? 2 : 1;
+    lad = one.lad;
+    if (lad) one = embed(one, w);
+  } else if (rule) rv = emit_rule(c, sc, rule, n, &init_pre, &w, &lad);
   else {
     if (args.npos == 2) iv = emit(c, sc, args.pos[1], &init_pre);
     w = iv.w;
@@ -1865,7 +2076,14 @@ static void declare_state_array(Ctx* c, Scope* sc, Node* st, Buf* pre, int top_l
     e->a = b; e->n = n; e->wo = wo; e->wd = w; e->lad = lad;
     base = b;
   }
-  if (rule) {
+  if (looped) {
+    Buf fill = {0};
+    for (int g = 0; g < gens; g++)
+      for (int j = 0; j < w; j++)
+        badd(c, &fill, "      s->pool[%s + 1 + (%ld + aither_vk) * %d + %d] = (%s);\n", base, (long)g * n, w, j, at(one, j));
+    badd(c, pre, "  if (s->pool[%s] == 0.0) {\n    for (long aither_vk = 0; aither_vk < %dL; aither_vk++) {\n%s%s    }\n"
+         "    s->pool[%s] = 1.0;\n  }\n", base, n, bstr(&init_pre), bstr(&fill), base);
+  } else if (rule) {
     Buf fill = {0};
     for (int g = 0; g < gens; g++)
       for (int k = 0; k < n; k++) {
@@ -1946,24 +2164,43 @@ static const char* emit_idx_assign(Ctx* c, Scope* sc, Node* st) {
       Buf pre = {0};
       const char* ix = emit1(c, sc, st->kids[1], &pre, "an index");
       const char* it = fresh(c, "ai");
-      const char* store;
       int w = ew(sa);
+      const char* vts[4];
       if (w > 1) {                         /* every number of the element; a number fills them */
         V v = elem_fit(c, emit(c, sc, st->kids[2], &pre), sa, base->str, st);
         badd(c, &pre, "  long %s = (long)(%s);\n", it, ix);
-        Buf put = {0};
         for (int j = 0; j < w; j++) {
-          const char* vt = fresh(c, "av");
-          badd(c, &pre, "  double %s = (%s);\n", vt, at(v, j));
-          badd(c, &put, " s->pool[%s + %d + %ld + %d * %s] = %s;", sa->a, 1 + j, sa->wo, w, it, vt);
+          vts[j] = fresh(c, "av");
+          badd(c, &pre, "  double %s = (%s);\n", vts[j], at(v, j));
         }
-        store = F(c, "  if (%s >= 0 && %s < %ld) {%s }\n", it, it, sa->n, bstr(&put));
       } else {
         const char* v = emit1(c, sc, st->kids[2], &pre, F(c, "$%s[i]", base->str));
-        const char* vt = fresh(c, "av");
-        badd(c, &pre, "  long %s = (long)(%s); double %s = (%s);\n", it, ix, vt, v);
+        vts[0] = fresh(c, "av");
+        badd(c, &pre, "  long %s = (long)(%s); double %s = (%s);\n", it, ix, vts[0], v);
+      }
+      /* In a looped each, this pass's index and numbers go into scratch
+       * arrays, and the store reads them back after the loop, pass by pass
+       * (emit_each_loop). */
+      int looped = c->each_depth > 0 && c->each_loop;
+      if (looped) {
+        badd(c, &c->each_scratch, "  long %s_s[%d];\n", it, c->each_loop);
+        badd(c, &pre, "  %s_s[aither_vk] = %s;\n", it, it);
+        for (int j = 0; j < w; j++) {
+          badd(c, &c->each_scratch, "  double %s_s[%d];\n", vts[j], c->each_loop);
+          badd(c, &pre, "  %s_s[aither_vk] = %s;\n", vts[j], vts[j]);
+        }
+      }
+      const char* ii = looped ? F(c, "%s_s[aither_ek]", it) : it;
+      const char* store;
+      if (w > 1) {
+        Buf put = {0};
+        for (int j = 0; j < w; j++)
+          badd(c, &put, " s->pool[%s + %d + %ld + %d * %s] = %s;", sa->a, 1 + j, sa->wo, w, ii,
+               looped ? F(c, "%s_s[aither_ek]", vts[j]) : vts[j]);
+        store = F(c, "  if (%s >= 0 && %s < %ld) {%s }\n", ii, ii, sa->n, bstr(&put));
+      } else {
         store = F(c, "  if (%s >= 0 && %s < %ld) s->pool[%s + 1 + %ld + %s] = %s;\n",
-                  it, it, sa->n, sa->a, sa->wo, it, vt);
+                  ii, ii, sa->n, sa->a, sa->wo, ii, looped ? F(c, "%s_s[aither_ek]", vts[0]) : vts[0]);
       }
       if (c->each_depth > 0) bcat(c, &c->deferred, store);
       else bcat(c, &pre, store);
@@ -3067,7 +3304,7 @@ static V binop_at(Ctx* c, Scope* sc, Node* n, V a, V b, Buf* pre) {
       if (!is_pair(a)) return mono(power_of(c, a.l, k));
       return vpair(power_of(c, a.l, k), power_of(c, a.r, k));
     }
-    fmt = "pow((%1$s), (%2$s))";
+    fmt = strstr(b.l, "aither_vk") ? "aither_whole_pow((%1$s), (%2$s))" : "pow((%1$s), (%2$s))";
   }
   else if (eq(op, "+")) fmt = "((%1$s) + (%2$s))";
   else if (eq(op, "-")) fmt = "((%1$s) - (%2$s))";
@@ -3434,6 +3671,7 @@ static V emit_call(Ctx* c, Scope* sc, Node* n, Buf* pre) {
     if ((double)N != v || N < 0)
       fail(c, "each: the count must be a non-negative integer, got %s %s", nim_float(c, v), err_loc(c, narg));
     Node* l = n->kids[1];
+    if (can_each_loop(c, sc, l, N)) { emit_each_loop(c, sc, n, l, N, pre); return mono("0.0"); }
     Buf saved = c->deferred;
     c->deferred = (Buf){0};
     c->each_depth++;
@@ -4947,6 +5185,13 @@ static const char* emit_program(Ctx* c, Node* program) {
   /* The prelude, now that the state's shape is known. */
   Buf pre = {0};
   bcat(c, &pre, "#include <math.h>\n");
+  /* A power whose exponent is a loop's index at run time, as the compiler
+   * folds one it knows: a whole power from 0 to 4 the products, left to
+   * right, anything else pow(), so a loop's bits are its unrolled copies'. */
+  bcat(c, &pre, "static inline double aither_whole_pow(double a, double b) {\n"
+                "  long k = (long)b;\n"
+                "  if ((double)k == b && k >= 0 && k <= 4) { double r = 1.0; if (k) { r = a; for (long j = 1; j < k; j++) r = r * a; } return r; }\n"
+                "  return pow(a, b);\n}\n");
   /* One file: the block's hoisted values and the tasks are its own. A
    * parallel -O2 build (voice.c) defines these to share them between
    * files: the values once, the tasks callable from the tail. */
