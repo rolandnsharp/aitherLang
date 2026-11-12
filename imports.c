@@ -1085,10 +1085,16 @@ static void check_laws(Fields* fs, Node* n, int stands, char* said) {
 
 /* A law on plain state: one place, no neighbours, and nothing to take a
  * round from, so its rates are a second. It is lowered here, before anything
- * else sees it, to `$x = $x + rate * dt`. As with a field, the laws of a
- * block are one system and the order written means nothing: they step where
- * the last stands, in the order the state was declared, and one that says
- * only what it moves at, `$x' = $v`, last: force before motion. */
+ * else sees it. As with a field, the laws of a block are one system and the
+ * order written means nothing. They step together where the last stands, by
+ * the 4th-order Gauss-Legendre method: symplectic, so a lossless spring keeps
+ * its energy, and a fraction of a cent out at 3 kHz at 48 kHz (velocity, then
+ * place, the old way, held the energy and ran 11 cents sharp; RK4 would drain
+ * it). Its two stages are implicit, solved by fixed-point iteration from an
+ * explicit guess: at audio rates each turn takes the error down by h times the
+ * law's rate, and five turns leave it far under the method's own. A let of the
+ * block that reads a law's state is written into the law, so each stage sees
+ * it as it would be there. */
 typedef struct { Node** at; int n; } Scope1;
 static int plain_decl(const Node* s, const char* name, size_t len) {
   if (s->kind != nkVar || primed(s->str) || strlen(s->str) != len || strncmp(s->str, name, len)) return 0;
@@ -1103,25 +1109,65 @@ static void has_time(const Node* n, const char** which, const Node** where) {
   if (n->kind == nkIdent && (!strcmp(n->str, "dt") || !strcmp(n->str, "t"))) { *which = n->str; *where = n; return; }
   for (int i = 0; i < n->nkids; i++) has_time(n->kids[i], which, where);
 }
-static int plain_block(Arena* a, Node** list, int n, Scope1 file, char* err, int errlen);
+/* A copy with each state named in `from` read as `to`'s, and each let of the
+ * block that reads a state written in. */
+static Node* pl_copy(Fields* fs, const Node* n, const char** from, const char** to, int m, Node** list, int nl, int depth);
+static int pl_reads(const Node* n, const char** from, int m, Node** list, int nl, int depth) {
+  if (!n || depth > 64) return 0;
+  if (n->kind == nkIdent) {
+    for (int k = 0; k < m; k++) if (!strcmp(n->str, from[k])) return 1;
+    for (int i = 0; i < nl; i++)
+      if (list[i]->kind == nkLet && list[i]->nkids == 1 && !strcmp(list[i]->str, n->str))
+        return pl_reads(list[i]->kids[0], from, m, list, nl, depth + 1);
+    return 0;
+  }
+  for (int i = 0; i < n->nkids; i++) if (pl_reads(n->kids[i], from, m, list, nl, depth)) return 1;
+  return 0;
+}
+static Node* pl_copy(Fields* fs, const Node* n, const char** from, const char** to, int m, Node** list, int nl, int depth) {
+  if (!n) return NULL;
+  if (n->kind == nkIdent) {
+    for (int k = 0; k < m; k++) if (!strcmp(n->str, from[k])) return fident(fs, to[k], n);
+    if (depth < 64)
+      for (int i = 0; i < nl; i++)
+        if (list[i]->kind == nkLet && list[i]->nkids == 1 && !strcmp(list[i]->str, n->str) &&
+            pl_reads(list[i]->kids[0], from, m, list, nl, depth + 1))
+          return pl_copy(fs, list[i]->kids[0], from, to, m, list, nl, depth + 1);
+  }
+  Node* c = arena_alloc(fs->a, sizeof(Node));
+  *c = *n;
+  if (n->nkids) {
+    c->kids = arena_alloc(fs->a, n->nkids * sizeof(Node*));
+    for (int i = 0; i < n->nkids; i++) c->kids[i] = pl_copy(fs, n->kids[i], from, to, m, list, nl, depth);
+  }
+  return c;
+}
+static int pl_made;
+static const char* pl_name(Arena* a, const char* what, const char* state) {
+  char b[256];
+  snprintf(b, sizeof b, "__%s_%s_%d", what, state, pl_made++);
+  size_t l = strlen(b);
+  char* d = arena_alloc(a, l + 1);
+  memcpy(d, b, l + 1);
+  return d;
+}
+static int plain_block(Arena* a, Node*** listp, int* np, Scope1 file, char* err, int errlen);
 static int plain_walk(Arena* a, Node* n, Scope1 file, char* err, int errlen) {
   if (!n) return 0;
-  if ((n->kind == nkBlock || n->kind == nkDef) && plain_block(a, n->kids, n->nkids, file, err, errlen)) return -1;
+  if ((n->kind == nkBlock || n->kind == nkDef) && plain_block(a, &n->kids, &n->nkids, file, err, errlen)) return -1;
   for (int i = 0; i < n->nkids; i++) if (plain_walk(a, n->kids[i], file, err, errlen)) return -1;
   return 0;
 }
-static int plain_block(Arena* a, Node** list, int n, Scope1 file, char* err, int errlen) {
+static int plain_block(Arena* a, Node*** listp, int* np, Scope1 file, char* err, int errlen) {
+  Node** list = *listp;
+  int n = *np;
   Node* laws[n + 1];
-  int keys[n + 1], count = 0, last = -1;
+  int count = 0, last = -1;
   for (int i = 0; i < n; i++) {
     if (!(list[i]->kind == nkVar || list[i]->kind == nkAssign) || !primed(list[i]->str)) continue;
     size_t len = strlen(list[i]->str) - 1;
-    int order = declared_at(list, n, list[i]->str, len);
-    if (order < 0) {
-      order = declared_at(file.at, file.n, list[i]->str, len);
-      if (order < 0) continue;                               /* a field's, or nobody's: fields_pass says */
-      order += n;
-    }
+    if (declared_at(list, n, list[i]->str, len) < 0 && declared_at(file.at, file.n, list[i]->str, len) < 0)
+      continue;                                              /* a field's, or nobody's: fields_pass says */
     const char* time = NULL;
     const Node* where = NULL;
     has_time(list[i]->kids[0], &time, &where);
@@ -1136,46 +1182,90 @@ static int plain_block(Arena* a, Node** list, int n, Scope1 file, char* err, int
                  list[i]->source, list[i]->line);
         return -1;
       }
-    keys[count] = order + (list[i]->kids[0]->kind == nkIdent ? 100000 : 0);
     laws[count++] = list[i];
     last = i;
   }
   if (!count) return 0;
-  for (int i = 1; i < count; i++)                            /* by declaration, what only moves last */
-    for (int k = i; k > 0 && keys[k - 1] > keys[k]; k--) {
-      int key = keys[k]; keys[k] = keys[k - 1]; keys[k - 1] = key;
-      Node* law = laws[k]; laws[k] = laws[k - 1]; laws[k - 1] = law;
-    }
   Fields fs = {0};
   fs.a = a;
+  const char *state[count], *y1[count], *y2[count], *f1[count], *f2[count];
   for (int k = 0; k < count; k++) {
-    Node* s = laws[k];
-    char* name = arena_alloc(a, strlen(s->str));
-    memcpy(name, s->str, strlen(s->str) - 1);
-    name[strlen(s->str) - 1] = 0;
-    Node* step = fbin(&fs, "*", s->kids[0], fident(&fs, "dt", s), s);
-    s->kids[0] = fbin(&fs, "+", fident(&fs, name, s), step, s);
-    s->kind = nkAssign;
-    s->str = name;
+    char* name = arena_alloc(a, strlen(laws[k]->str));
+    memcpy(name, laws[k]->str, strlen(laws[k]->str) - 1);
+    name[strlen(laws[k]->str) - 1] = 0;
+    state[k] = name;
   }
-  int w = 0, seen = 0;                                       /* the others keep their order; the laws go where the last stood */
-  Node* rest[n + 1];
+  /* Gauss-Legendre, two stages: c = 1/2 -+ sqrt 3 / 6, a11 = a22 = 1/4,
+   * a12 = 1/4 - sqrt 3 / 6, a21 = 1/4 + sqrt 3 / 6, b = 1/2, 1/2. */
+  const double r3 = sqrt(3.0) / 6.0, c1 = 0.5 - r3, c2 = 0.5 + r3, a11 = 0.25, a12 = 0.25 - r3, a21 = 0.25 + r3, a22 = 0.25;
+  const int turns = 8;
+  Node* made[count * (6 * turns + 12) + 8];
+  int nm = 0;
+  const Node* at = laws[count - 1];
+  Node* dt = fident(&fs, "dt", at);
+  #define PL_LET(name, value) do { Node* l_ = fnode(&fs, nkLet, (name), at); fkids(&fs, l_, 1, (Node*[]){(value)}); made[nm++] = l_; } while (0)
+  #define PL_STEP(base, coef, rate) fbin(&fs, "+", fident(&fs, (base), at), fbin(&fs, "*", fbin(&fs, "*", fnum(&fs, (coef), at), dt, at), (rate), at), at)
+  const char* f0[count];                                     /* the explicit guess: each stage from the rate now */
+  for (int k = 0; k < count; k++) {
+    f0[k] = pl_name(a, "rate", state[k]);
+    PL_LET(f0[k], pl_copy(&fs, laws[k]->kids[0], state, state, count, list, n, 0));
+  }
+  for (int k = 0; k < count; k++) {
+    y1[k] = pl_name(a, "stage", state[k]); PL_LET(y1[k], PL_STEP(state[k], c1, fident(&fs, f0[k], at)));
+    y2[k] = pl_name(a, "stage", state[k]); PL_LET(y2[k], PL_STEP(state[k], c2, fident(&fs, f0[k], at)));
+  }
+  for (int it = 0; it <= turns; it++) {
+    for (int k = 0; k < count; k++) {
+      f1[k] = pl_name(a, "rate", state[k]); PL_LET(f1[k], pl_copy(&fs, laws[k]->kids[0], state, y1, count, list, n, 0));
+      f2[k] = pl_name(a, "rate", state[k]); PL_LET(f2[k], pl_copy(&fs, laws[k]->kids[0], state, y2, count, list, n, 0));
+    }
+    if (it == turns) break;
+    const char *n1[count], *n2[count];
+    for (int k = 0; k < count; k++) {
+      n1[k] = pl_name(a, "stage", state[k]);
+      PL_LET(n1[k], fbin(&fs, "+", PL_STEP(state[k], a11, fident(&fs, f1[k], at)),
+                         fbin(&fs, "*", fbin(&fs, "*", fnum(&fs, a12, at), dt, at), fident(&fs, f2[k], at), at), at));
+      n2[k] = pl_name(a, "stage", state[k]);
+      PL_LET(n2[k], fbin(&fs, "+", PL_STEP(state[k], a21, fident(&fs, f1[k], at)),
+                         fbin(&fs, "*", fbin(&fs, "*", fnum(&fs, a22, at), dt, at), fident(&fs, f2[k], at), at), at));
+    }
+    for (int k = 0; k < count; k++) { y1[k] = n1[k]; y2[k] = n2[k]; }
+  }
+  const char* next[count];
+  for (int k = 0; k < count; k++) {
+    next[k] = pl_name(a, "next", state[k]);
+    PL_LET(next[k], PL_STEP(state[k], 0.5, fbin(&fs, "+", fident(&fs, f1[k], at), fident(&fs, f2[k], at), at)));
+  }
+  for (int k = 0; k < count; k++) {                          /* every state at once, where the last law stood */
+    Node* s = laws[k];
+    s->kind = nkAssign;
+    s->str = state[k];
+    s->kids[0] = fident(&fs, next[k], at);
+    made[nm++] = s;
+  }
+  #undef PL_LET
+  #undef PL_STEP
+  int total = n - count + nm, w = 0;
+  Node** out = arena_alloc(a, (total + 1) * sizeof(Node*));
   for (int i = 0; i < n; i++) {
     int law = 0;
     for (int k = 0; k < count; k++) if (list[i] == laws[k]) law = 1;
-    if (!law) rest[w++] = list[i];
-    else if (i < last) seen++;
+    if (!law) out[w++] = list[i];
+    if (i == last) for (int k = 0; k < nm; k++) out[w++] = made[k];
   }
-  int before = last - seen;
-  for (int i = 0, o = 0; i < n; i++) {
-    if (i >= before && i < before + count) list[i] = laws[i - before];
-    else list[i] = rest[o++];
-  }
+  *listp = out;
+  *np = w;
   return 0;
 }
 static int plain_laws(Arena* a, Kids* kids, int from, char* err, int errlen) {
+  Node** top = kids->v + from;
+  int nt = kids->n - from;
+  if (plain_block(a, &top, &nt, (Scope1){NULL, 0}, err, errlen)) return -1;
+  if (top != kids->v + from) {                               /* the file's own lines, with the laws' steps in */
+    kids->n = from;
+    for (int i = 0; i < nt; i++) kid(kids, top[i]);
+  }
   Scope1 file = {kids->v + from, kids->n - from};
-  if (plain_block(a, kids->v + from, kids->n - from, (Scope1){NULL, 0}, err, errlen)) return -1;
   for (int i = from; i < kids->n; i++) if (plain_walk(a, kids->v[i], file, err, errlen)) return -1;
   return 0;
 }

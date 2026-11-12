@@ -1,0 +1,7 @@
+# spring_high: a lossless spring at 3 kHz as laws, kicked (run.py)
+let w = TAU * 3000
+$x = 0
+$v = w
+$v' = -$x * w ^ 2
+$x' = $v
+[$x, 0]

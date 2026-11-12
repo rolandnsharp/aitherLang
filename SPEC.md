@@ -793,7 +793,7 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   moves, of equal loss, is held as two travelling waves (d'Alembert's), delay
   lines with cubic taps, an end turning what arrives: exact for it, where
   turning every mode anew each sample cost 30 times as much; its laws on plain
-  state step with it by RK4, so a wake locks the same at any rate (329.8 Hz
+  state step with it by Gauss-Legendre, so a wake locks the same at any rate (329.8 Hz
   within 0.1 cents from 48 to 384 kHz, where it wandered by 6). A def holding
   a field is written out first, so each call's field is a medium of the core's.
   When a field keeps fewer modes than it has under Nyquist (the cap, 256), it
@@ -801,7 +801,7 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   is then felt ahead of its front at a few parts in 10^4. A coefficient that moves is
   followed to 1 part in 10^4 (at most 0.17 cents behind in pitch), so a drifting
   loss costs a recompute every few dozen samples. Up to 256 modes, those under Nyquist. Laws
-  on plain state beside it step with it, by RK4, and everything couples within
+  on plain state beside it step with it, by Gauss-Legendre, and everything couples within
   one step: each medium turns half a sample, the laws and forces act at the
   midpoint, it turns the other half. The patch's own lines read the media and
   that state as they are at the sample's start, wherever they stand. Anything
@@ -837,7 +837,7 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   fixed all round sounds first at sqrt 2 / T: measured (in the old spelling,
   whose period was that first mode's) 0.500 Hz where theory has 0.5, 99.8 Hz of
   100, the next at 0.790 and 157.4 of 0.79 and 158; on the field core now 100.0
-  and 158.0, and a plate, its stiffness 1 / (8 pi^2), 100.0 and 250.0 of 100
+  and 158.0, and a plate, its stiffness 1 / (8 pi^2) for sqrt 2 / T, 100.0 and 250.0 of 100
   and 250. Two axes have one period as yet, a square. It is as fine as a place a sample allows, about 31 a side at
   2 s, for a place of cost. Too short for 12 a side, it takes several a sample
   at 12 a side, about a third of a uConsole core at 100 Hz, and a plate 8. The
@@ -863,8 +863,9 @@ the grain** (notes/field-by-its-period-2026-11-06.md).
   bar, its highest mode setting the step. There a stiffness much past what
   puts the first mode at 1 / T goes unstable. A free bar drifts as it's struck,
   so read `$v`, or hold it. A plate is the same on a square, pinned all round:
-  `stiff = 1 / (8 pi^2)` puts its first mode at 1 / T, the next at 2.5 times,
-  exactly. The period has to be plain numbers and file-level lets.
+  its first mode, (1, 1), is at `4 pi sqrt(stiff) / T`, so `stiff = 1 / (16 pi^2)`
+  puts it at 1 / T (and `1 / (8 pi^2)` at sqrt 2 / T, a membrane's first), the
+  next at 2.5 times, exactly. The period has to be plain numbers and file-level lets.
 - A bare `$x` is the field at this place, and `$x = ...` stores there. A
   later line at the place sees what was stored; a neighbour sees the last
   step. A number or a value is everywhere.
@@ -1002,12 +1003,17 @@ $x' = $v
 With no round to count in, its rates are a second. The laws of a block are
 one system, in the file, a `play`, a `def` or a lambda, and each call of a def
 and each run of a `sum` has its own: they step together where the last stands,
-whatever order they're written in, by the order the state was declared, and
-one that only says what it moves at, `$x' = $v`, last: force before motion.
-There is no `dt` or `t` in a law, one law a state, and a rate is said, never
-read. What varies with time comes in by a `let` above it. Such a spring runs
-sharp at high pitch, 11 cents at 3 kHz at 48 kHz, where `dho` and `resonator`
-turn it exactly: laws are for what those can't say.
+whatever order they're written in, by the 4th-order Gauss-Legendre method.
+It is symplectic, so a lossless spring keeps its energy, and close: a spring
+at 3 kHz at 48 kHz is 0.06 cents out and holds its level to 0.03 dB over 2 s
+(velocity then place, the way before, ran it 11 cents sharp; RK4 would drain
+it). Its two stages are implicit, solved by eight fixed-point turns from an
+explicit guess, so a law is worked out 19 times a sample; a `let` of the block
+that reads a law's state is written into the law, so each stage sees it as it
+would be there. Beside a field, the laws on plain state step in the field
+core's one step, by the same method. There is no `dt` or `t` in a law, one law a state,
+and a rate is said, never read. What varies with time comes in by a `let`
+above it.
 
 An array assigned bare (`$x = array(128)`, `$x = $x + ...`) is a field too,
 with the size in the patch: a push then takes `N² / (sqrt(stiff) * sr)`

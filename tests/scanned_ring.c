@@ -479,7 +479,7 @@ static double sheet_mode(const char* law, const char* period, double near, doubl
 }
 TEST(sheets_ring_as_they_should) {
   const char* wave = "Δ$x";
-  const char* plate = "-ΔΔ$x * 0.012665147955292222";       /* 1 / (8 pi^2): its first mode 1 / T */
+  const char* plate = "-ΔΔ$x * 0.012665147955292222";       /* 1 / (8 pi^2): its first mode sqrt 2 / T, as the sheet's */
   double slow = sheet_mode(wave, "2", 0.5, 12), slow2 = sheet_mode(wave, "2", 0.79, 12);
   double drum = sheet_mode(wave, "1 / 100", 100, 40), drum2 = sheet_mode(wave, "1 / 100", 158, 40);
   double pl = sheet_mode(plate, "1 / 100", 100, 40), pl2 = sheet_mode(plate, "1 / 100", 250, 40);

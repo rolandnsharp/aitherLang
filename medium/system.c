@@ -8,7 +8,7 @@
  *
  *   each medium turns half a sample on its own, exactly (dsp.c's modes);
  *   what the laws read of the media is read there, at the midpoint;
- *   the laws on plain state step by RK4 on it, and each source's force,
+ *   the laws on plain state step by Gauss-Legendre on it, and each source's force,
  *     averaged over the step, kicks its medium;
  *   each medium turns the other half.
  *
@@ -627,31 +627,44 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
   if (s->no) { free(block.v); free(s->reads.v); return said_no(__LINE__); }
   for (int k = 0; k < s->reads.n; k++) push(&block, s->reads.v[k]);
 
-  /* The laws on plain state, RK4 over the sample. */
-  const char *now[64], *stage[64], *k1[64], *k2[64], *k3[64], *k4[64], *next[64];
+  /* The laws on plain state, by 4th-order Gauss-Legendre over the sample,
+   * as everywhere (imports.c, plain_block): two implicit stages, eight
+   * fixed-point turns from an explicit guess, the media held at the midpoint. */
+  const char *now[64], *y1[64], *y2[64], *f1[64], *f2[64], *next[64];
   for (int j = 0; j < s->np; j++) now[j] = s->p[j].name;
   Node* dt = ident(s, "dt", at);
   if (s->np) {
-    const char** ks[4] = {k1, k2, k3, k4};
-    double step[4] = {0, 0.5, 0.5, 1};
-    for (int g = 0; g < 4; g++) {
-      if (g) for (int j = 0; j < s->np; j++) {
-        stage[j] = fresh(s, "stage");
-        push(&block, let(s, stage[j], bin(s, "+", ident(s, now[j], at),
-                                          bin(s, "*", bin(s, "*", copy(s, dt), num(s, step[g], at), at), ident(s, ks[g - 1][j], at), at), at)));
-      }
+    const double r3 = sqrt(3.0) / 6.0, c1 = 0.5 - r3, c2 = 0.5 + r3, a11 = 0.25, a12 = 0.25 - r3, a21 = 0.25 + r3, a22 = 0.25;
+    const int turns = 8;
+    #define GL_STEP(base, coef, rate) bin(s, "+", ident(s, (base), at), bin(s, "*", bin(s, "*", num(s, (coef), at), copy(s, dt), at), (rate), at), at)
+    const char* f0[64];
+    for (int j = 0; j < s->np; j++) { f0[j] = fresh(s, "rate"); push(&block, let(s, f0[j], staged(s, rate[j], now))); }
+    for (int j = 0; j < s->np; j++) {
+      y1[j] = fresh(s, "stage"); push(&block, let(s, y1[j], GL_STEP(now[j], c1, ident(s, f0[j], at))));
+      y2[j] = fresh(s, "stage"); push(&block, let(s, y2[j], GL_STEP(now[j], c2, ident(s, f0[j], at))));
+    }
+    for (int it = 0; it <= turns; it++) {
       for (int j = 0; j < s->np; j++) {
-        ks[g][j] = fresh(s, "rate");
-        push(&block, let(s, ks[g][j], staged(s, rate[j], g ? stage : now)));
+        f1[j] = fresh(s, "rate"); push(&block, let(s, f1[j], staged(s, rate[j], y1)));
+        f2[j] = fresh(s, "rate"); push(&block, let(s, f2[j], staged(s, rate[j], y2)));
       }
+      if (it == turns) break;
+      const char *n1[64], *n2[64];
+      for (int j = 0; j < s->np; j++) {
+        n1[j] = fresh(s, "stage");
+        push(&block, let(s, n1[j], bin(s, "+", GL_STEP(now[j], a11, ident(s, f1[j], at)),
+                                       bin(s, "*", bin(s, "*", num(s, a12, at), copy(s, dt), at), ident(s, f2[j], at), at), at)));
+        n2[j] = fresh(s, "stage");
+        push(&block, let(s, n2[j], bin(s, "+", GL_STEP(now[j], a21, ident(s, f1[j], at)),
+                                       bin(s, "*", bin(s, "*", num(s, a22, at), copy(s, dt), at), ident(s, f2[j], at), at), at)));
+      }
+      for (int j = 0; j < s->np; j++) { y1[j] = n1[j]; y2[j] = n2[j]; }
     }
     for (int j = 0; j < s->np; j++) {
       next[j] = fresh(s, "next");
-      Node* sum = bin(s, "+", bin(s, "+", ident(s, k1[j], at), bin(s, "*", num(s, 2, at), ident(s, k2[j], at), at), at),
-                      bin(s, "+", bin(s, "*", num(s, 2, at), ident(s, k3[j], at), at), ident(s, k4[j], at), at), at);
-      push(&block, let(s, next[j], bin(s, "+", ident(s, now[j], at),
-                                       bin(s, "*", bin(s, "/", copy(s, dt), num(s, 6, at), at), sum, at), at)));
+      push(&block, let(s, next[j], GL_STEP(now[j], 0.5, bin(s, "+", ident(s, f1[j], at), ident(s, f2[j], at), at))));
     }
+    #undef GL_STEP
   }
   /* Travelling waves take their whole sample now, so their forces land on
    * the sample just made, and the first sample's too (a kick needs the
@@ -663,13 +676,13 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
       ident(s, m->store, at), inside(s, m->period, 0), inside(s, m->loss, 0),
       num(s, m->ends[0], at), num(s, m->ends[1], at), ident(s, "dt", at)})));
   }
-  /* Each force, averaged over the step (as the plain state was and is),
-   * kicks its medium. */
+  /* Each force, averaged over the step as the method's own quadrature does
+   * (the mean of it at the two stages), kicks its medium. */
   for (int i = 0; i < s->nm; i++) {
     Medium* m = &s->m[i];
     for (int k = 0; k < m->nsrc; k++) {
       Node* f0 = force[i][k];
-      Node* f = s->np ? bin(s, "*", num(s, 0.5, at), bin(s, "+", f0, staged(s, f0, next), at), at) : f0;
+      Node* f = s->np ? bin(s, "*", num(s, 0.5, at), bin(s, "+", staged(s, f0, y1), staged(s, f0, y2), at), at) : f0;
       Node* impulse = bin(s, "*", f, copy(s, dt), at);
       if (m->src[k].minus) impulse = bin(s, "*", impulse, num(s, -1, at), at);
       Node* kick = m->delay
@@ -725,13 +738,38 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
   /* What the mode cap leaves out is said, not hidden: a field slow against
    * the rate has more modes under Nyquist than it keeps, and is band-limited
    * to the highest it keeps. */
+  /* Counted from the law itself (a plate's modes are spaced as m^2 + n^2,
+   * a membrane's as their root), when its coefficients are plain numbers. */
   for (int i = 0; i < s->nm; i++) {
     Medium* m = &s->m[i];
-    if (m->delay || m->T <= 0) continue;
-    double under = m->T * fields_sr() / 2.0 * (m->axes == 2 ? m->T * fields_sr() / 2.0 * 0.785 : 1.0);
-    if (under > MODE_CAP * 1.01)
-      fprintf(stderr, "[aither] $%s keeps %d of its %.0f modes under Nyquist: band-limited to about %.0f Hz\n",
-              m->x, MODE_CAP, under, m->axes == 2 ? sqrt(MODE_CAP / 0.785) / m->T : MODE_CAP / m->T);
+    double A, B, E, T = m->T;
+    if (m->delay || m->pair || T <= 0 || !plain_number(s, m->A, &A) || !plain_number(s, m->B, &B) ||
+        !plain_number(s, m->E, &E)) continue;
+    double ny = M_PI * fields_sr(), o = m->ends[0] == m->ends[1] ? (m->ends[0] == 1 ? 1.0 : 0.0) : 0.5;
+    if (m->ends[0] == 0) o = 0.0;
+    long under = 0, kept_at = -1;
+    double band = 0, w[1 << 14];
+    int nw = 0;
+    for (long j1 = 0; j1 < 4096; j1++) {
+      double k1 = (m->ends[0] == 0 ? (double)((j1 + 1) / 2) : j1 + o) * M_PI;
+      long seen = 0;
+      for (long j2 = 0; j2 < (m->axes == 2 ? 4096 : 1); j2++) {
+        double k2 = m->axes == 2 ? (j2 + o) * M_PI : 0.0, l = k1 * k1 + k2 * k2;
+        double w2 = (4.0 * A * l - B - 16.0 * E * l * l) / (T * T);
+        if (w2 > ny * ny) break;
+        under++; seen++;
+        if (nw < (1 << 14)) w[nw++] = sqrt(w2 > 0 ? w2 : 0);
+      }
+      if (!seen && j1 > 0) break;
+    }
+    if (under > MODE_CAP) {                            /* the cap-th lowest: the band it keeps */
+      for (int a2 = 0; a2 < nw && a2 <= MODE_CAP; a2++)
+        for (int b2 = a2 + 1; b2 < nw; b2++) if (w[b2] < w[a2]) { double t2 = w[a2]; w[a2] = w[b2]; w[b2] = t2; }
+      kept_at = MODE_CAP - 1;
+      band = w[kept_at] / (2.0 * M_PI);
+      fprintf(stderr, "[aither] $%s keeps %d of its %ld modes under Nyquist: band-limited to about %.0f Hz\n",
+              m->x, MODE_CAP, under, band);
+    }
   }
   free(s->reads.v);
   free(*vp);

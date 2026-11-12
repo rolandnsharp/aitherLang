@@ -210,6 +210,22 @@ def case_wake_on_moving_string():
     note at 48, 96 and 192 kHz each within 1 cent of what it is at 384."""
     return wake('moving_wake.aither')
 
+def case_spring_high():
+    """A lossless spring at 3 kHz as two laws, kicked: its pitch within 0.5
+    cents and its level held to 0.05 dB over 2 s, at 48, 96 and 192 kHz. A
+    method that isn't symplectic drains it (RK4: about 11 dB a second at
+    48 kHz); velocity-then-place holds it but runs about 11 cents sharp. The
+    pitch is the spectrum's peak (a phase drift would wrap)."""
+    worst_c = worst_db = 0
+    for rate in (48000, 96000, 192000):
+        L, _, said = render('spring_high.aither', rate, 2)
+        if said: return False, said[0]
+        f, _ = peak(L, rate, 3000.0, span=60.0, pad=16)
+        a0 = np.abs(L[:int(0.1 * rate)]).max(); a1 = np.abs(L[-int(0.1 * rate):]).max()
+        worst_c = max(worst_c, abs(cents(f, 3000.0)))
+        worst_db = max(worst_db, abs(20 * np.log10(a1 / a0)))
+    return worst_c < 0.5 and worst_db < 0.05, 'worst %.3f cents, %.3f dB' % (worst_c, worst_db)
+
 def case_didge_converges():
     """patches/field_didge.aither, its note at 48, 96 and 192 kHz: the same
     within 1 cent, as a model has one answer and the rate is how finely it
