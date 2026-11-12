@@ -1,0 +1,22 @@
+# bowed_string: a 196 Hz string bowed at 0.12 of its length by stick-slip
+# friction, the bow at a steady speed (run.py). Helmholtz motion: stuck to
+# the bow 88% of each period (1 - 0.12), slipping back once at
+# -vb (1 - 0.12) / 0.12, at the string's own pitch.
+#
+# The friction reads the string where it acts, so it is a contact, solved
+# within each sample (SPEC, contacts). Its curve: a static coefficient 0.65
+# falling to 0.25 as the string slides (the Stribeck fall), a tanh 1 mm/s
+# wide for the stick.
+#
+# The string loses more the higher it goes (the Δ$v term), as a real one
+# does: without it the corner Helmholtz motion turns on stays sharp to the
+# last mode, its ripple trips the bow off early, and at a rate the period
+# isn't a whole number of samples of the bow slips several times a period.
+let vb = 0.1
+let N = 1
+def friction(u, N): N * tanh(u / 0.001) * (0.25 + 0.4 * exp(-abs(u) / 0.1))
+$x = field(period = 1 / 196, ends = fixed)
+$v = field(period = 1 / 196, ends = fixed)
+$v' = Δ$x - $v * 0.02 + Δ$v * 3e-6 + friction(vb - $v(0.12), N) * δ(0.12)
+$x' = $v
+[$x(0.12), $v(0.12)]

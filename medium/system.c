@@ -36,7 +36,10 @@ static void push(Vec* k, Node* n) {
   k->v[k->n++] = n;
 }
 
-typedef struct { Node* at; Node* width; Node* force; int minus, into; } Source;   /* into: 0 velocity, 1 place or a pair's first, 2 its partner */
+typedef struct { Node* at; Node* width; Node* force; int minus, into; const char* contact; } Source;
+/* into: 0 velocity, 1 place or a pair's first, 2 its partner. contact: a
+ * force that reads its own field where it acts (a bow, a hammer's felt), the
+ * name of the state its last root is kept in, or NULL. */
 
 typedef struct {
   const char *x, *v;               /* the place and the velocity fields */
@@ -316,6 +319,41 @@ static int same_tree(const Node* a, const Node* b) {
   return 1;
 }
 
+/* The field a source's force acts on: a wave's velocity, a pair's (a
+ * horn's, travelling waves') first field or its partner. */
+static const char* driven_field(Medium* m, int into) {
+  if (!m->pair) return into == 0 ? m->v : m->x;
+  return into == 2 ? m->v : m->x;
+}
+static int is_reading(const Node* n, const char* field, const Node* place) {
+  return n->kind == nkIdx && n->num == 2 && n->kids[0]->kind == nkIdent && !strcmp(n->kids[0]->str, field) &&
+         same_tree(n->kids[1], place);
+}
+/* Whether a force reads the field it drives, at the place it acts: a contact. */
+static int reads_own(Medium* m, const char* field, const Node* place, const Node* n) {
+  (void)m;
+  if (!n) return 0;
+  if (is_reading(n, field, place)) return 1;
+  for (int i = 0; i < n->nkids; i++) if (reads_own(m, field, place, n->kids[i])) return 1;
+  return 0;
+}
+static Node* reading_as(Sys* s, const Node* n, const char* field, const Node* place, const char* name) {
+  if (!n) return NULL;
+  if (is_reading(n, field, place)) return ident(s, name, n);
+  Node* c = copy(s, n);
+  for (int i = 0; i < c->nkids; i++) c->kids[i] = reading_as(s, n->kids[i], field, place, name);
+  return c;
+}
+
+/* A copy with each name in `from` read as the one in `to`. */
+static Node* subst_names(Sys* s, const Node* n, const char** from, const char** to, int count) {
+  if (!n) return NULL;
+  if (n->kind == nkIdent) for (int k = 0; k < count; k++) if (!strcmp(n->str, from[k])) return ident(s, to[k], n);
+  Node* c = copy(s, n);
+  for (int i = 0; i < c->nkids; i++) c->kids[i] = subst_names(s, n->kids[i], from, to, count);
+  return c;
+}
+
 /* A copy of `n` with `name` (a lambda's parameter) read as `value`. */
 static Node* substitute(Sys* s, const Node* n, const char* name, Node* value) {
   if (!n) return NULL;
@@ -411,6 +449,26 @@ static int said_no(int line) {
   const char* say = getenv("AITHER_CORE_SAY");
   if (say && !strcmp(say, "1")) fprintf(stderr, "[aither] the field core leaves this patch to the old way (medium/system.c:%d)\n", line);
   return 0;
+}
+
+/* The names an expression reads (idents, not the functions it calls),
+ * each once, leaving out `but` and any lambda's own parameters. */
+static void free_names(const Node* n, const char* but, const char** out, int* nn, int cap) {
+  if (!n) return;
+  if (n->kind == nkIdent && strcmp(n->str, but)) {
+    for (int i = 0; i < *nn; i++) if (!strcmp(out[i], n->str)) return;
+    if (*nn < cap) out[(*nn)++] = n->str;
+    return;
+  }
+  if (n->kind == nkLambda) {
+    int before = *nn;
+    for (int i = 0; i < n->nkids; i++) free_names(n->kids[i], but, out, nn, cap);
+    for (int i = before; i < *nn; i++)
+      for (int q = 0; q < n->nparams; q++)
+        if (!strcmp(out[i], n->params[q])) { out[i] = out[--*nn]; i--; break; }
+    return;
+  }
+  for (int i = 0; i < n->nkids; i++) free_names(n->kids[i], but, out, nn, cap);
 }
 
 int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, int errlen) {
@@ -604,11 +662,13 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
     Node* said = t->kids[2];
     int into = m->pair ? (!strcmp(base, m->x) ? 1 : 2) : !strcmp(base, m->x);
     if ((m->delay || m->width) && width) return said_no(__LINE__);     /* spread on travelling waves or a horn: later */
-    m->src[m->nsrc++] = (Source){place, width, said->kids[1], !strcmp(said->str, "-"), into};
+    m->src[m->nsrc++] = (Source){place, width, said->kids[1], !strcmp(said->str, "-"), into, NULL};
+    if (reads_own(m, driven_field(m, into), place, said->kids[1]))
+      m->src[m->nsrc - 1].contact = fresh(s, "contact");
   }
 
   /* The block, after everything. */
-  Vec block = {0}, kept = {0};
+  Vec block = {0}, kept = {0}, solvers = {0};
   const Node* at = s->v[s->n - 1];
   for (int i = 0; i < s->nm; i++) {
     Medium* m = &s->m[i];
@@ -642,7 +702,9 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
   for (int i = 0; i < s->nm; i++)
     for (int k = 0; k < s->m[i].nsrc; k++) {
       Source* src = &s->m[i].src[k];
-      force[i][k] = inside(s, src->force, 0);
+      /* a contact's own reading is the unknown it is solved for, not a reading at the midpoint */
+      force[i][k] = inside(s, src->contact ? reading_as(s, src->force, driven_field(&s->m[i], src->into), src->at, src->contact)
+                                           : src->force, 0);
       place[i][k] = inside(s, src->at, 0);
       spread[i][k] = src->width ? inside(s, src->width, 0) : num(s, 0, src->at);
       if (reads_system(s, src->at, 0) || (src->width && reads_system(s, src->width, 0))) s->no = 1;
@@ -704,6 +766,7 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
   for (int i = 0; i < s->nm; i++) {
     Medium* m = &s->m[i];
     for (int k = 0; k < m->nsrc; k++) {
+      if (m->src[k].contact) continue;                 /* contacts are solved after every other force has landed */
       Node* f0 = force[i][k];
       Node* f = s->np ? bin(s, "*", num(s, 0.5, at), bin(s, "+", staged(s, f0, y1), staged(s, f0, y2), at), at) : f0;
       Node* impulse = bin(s, "*", f, copy(s, dt), at);
@@ -714,6 +777,150 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
         : call(s, m->axes == 2 ? "medium_kick2" : "medium_kick", at, 5, (Node*[]){ident(s, m->store, at), impulse,
                                                                               place[i][k], spread[i][k], num(s, m->src[k].into, at)});
       push(&block, store(s, nkAssign, m->tick, kick));
+    }
+  }
+  /* A contact, a force that reads its own field where it acts (a bow's
+   * friction, a hammer's felt), is solved within the step: u, the field there
+   * once the force has acted, is u0 (there with every other force in) plus the
+   * medium's admittance there times the force's impulse, u = u0 + Y dt f(u).
+   * Y is measured: a unit impulse kicked in, read, and kicked back out, exact
+   * for a medium that is linear. Newton's method, its slope by a difference,
+   * from the last sample's root, so a bow stuck stays stuck until the force
+   * can't hold it, and slips until it can: stick and slip, and their hysteresis. */
+  for (int i = 0; i < s->nm; i++) {
+    Medium* m = &s->m[i];
+    for (int k = 0; k < m->nsrc; k++) {
+      Source* src = &m->src[k];
+      if (!src->contact) continue;
+      const char* field = driven_field(m, src->into);
+      Node* read_node = mk(s, nkIdx, "", at);
+      kids(s, read_node, 2, (Node*[]){ident(s, field, at), copy(s, place[i][k])});
+      read_node->num = 2;
+      #define CONTACT_KICK(imp) (m->delay || m->width \
+        ? call(s, m->width ? "medium_horn_kick" : "medium_line_kick", at, 4, (Node*[]){ident(s, m->store, at), (imp), copy(s, place[i][k]), num(s, src->into, at)}) \
+        : call(s, m->axes == 2 ? "medium_kick2" : "medium_kick", at, 5, (Node*[]){ident(s, m->store, at), (imp), copy(s, place[i][k]), copy(s, spread[i][k]), num(s, src->into, at)}))
+      const char* u0 = fresh(s, "contact_from");
+      push(&block, let(s, u0, outside(s, copy(s, read_node))));
+      push(&block, store(s, nkAssign, m->tick, CONTACT_KICK(num(s, 1, at))));
+      const char* up = fresh(s, "contact_kicked");
+      push(&block, let(s, up, outside(s, copy(s, read_node))));
+      push(&block, store(s, nkAssign, m->tick, CONTACT_KICK(num(s, -1, at))));
+      const char* Y = fresh(s, "admittance");
+      push(&block, let(s, Y, bin(s, "*", bin(s, "-", ident(s, up, at), ident(s, u0, at), at), copy(s, dt), at)));   /* Y dt */
+      double sign = src->minus ? -1.0 : 1.0;
+      Node* f0 = force[i][k];
+      /* the force at u: f0 with the contact's state read as u (and averaged over the stages, as the others are) */
+      #define FORCE_AT(uname) ({ const char* from_[1] = {src->contact}; const char* to_[1] = {(uname)}; \
+        Node* g_ = subst_names(s, f0, from_, to_, 1); \
+        s->np ? bin(s, "*", num(s, 0.5, at), bin(s, "+", staged(s, g_, y1), staged(s, g_, y2), at), at) : g_; })
+      const char* u = src->contact;                    /* the last root, a state */
+      /* the velocity the force meets is the step's mean, halfway through its
+       * kick: before it, u0; after, u0 + Y dt f. Matched to the after, a stuck
+       * bow holds a still string (the reads swing half a kick either side). */
+      Node* cs = bin(s, "*", ident(s, Y, at), num(s, 0.5 * sign, at), at);
+      /* G(x) = x - u0 - Y dt sign f(x), zero at the root; named, so each is one let */
+      #define G_OF(xname) bin(s, "-", bin(s, "-", ident(s, (xname), at), ident(s, u0, at), at), \
+                                  bin(s, "*", copy(s, cs), FORCE_AT(xname), at), at)
+      #define G_AT(xname) ({ const char* gx_ = fresh(s, "contact_g"); push(&block, let(s, gx_, G_OF(xname))); gx_; })
+      #define IF(c, a_, b_) ({ Node* if_ = mk(s, nkIf, "", at); kids(s, if_, 3, (Node*[]){(c), (a_), (b_)}); if_; })
+      #define LET(name, v) ({ const char* n_ = fresh(s, name); push(&block, let(s, n_, (v))); n_; })
+      #define ID(n) ident(s, (n), at)
+      /* From the last root, toward where G says the root is (down if G > 0):
+       * the nearest root that way, so the contact keeps its state, stuck or
+       * slipping, while that state's root lasts, and jumps only when it's gone.
+       * The friction curve's fall makes three roots in the middle (McIntyre,
+       * Schumacher & Woodhouse 1983); Newton's method alone wanders among them.
+       * First a step out, half again the Newton step at first and eight times
+       * as far each time (to 8^8), until G changes sign; then regula falsi in
+       * the bracket, the Illinois way (an end kept twice has its G halved),
+       * every other step a halving, so the bracket at least halves each two,
+       * until G is within 10^-14 (40 steps at most). */
+      const char* r = LET("contact_r", ID(u));
+      const char* g0 = G_AT(r);
+      const char* re = LET("contact_re", bin(s, "+", ID(r), num(s, 1e-7, at), at));
+      const char* ge = G_AT(re);
+      const char* dir = LET("contact_dir", IF(bin(s, ">", ID(g0), num(s, 0, at), at), num(s, -1, at), num(s, 1, at)));
+      Node* slope = bin(s, "/", bin(s, "-", ID(ge), ID(g0), at), num(s, 1e-7, at), at);
+      Node* newton = bin(s, "/", call(s, "abs", at, 1, (Node*[]){ID(g0)}), call(s, "abs", at, 1, (Node*[]){slope}), at);
+      const char* step = LET("contact_step", call(s, "max", at, 2, (Node*[]){
+        IF(bin(s, ">", copy(s, slope), num(s, 1e-12, at), at), bin(s, "*", num(s, 1.5, at), newton, at),
+           call(s, "abs", at, 1, (Node*[]){ID(g0)})), num(s, 1e-12, at)}));
+      /* The search is a loop, a `def rec` of the patch's own, each repeat one
+       * trial point and one evaluation of the force, stopping when it's done:
+       * a step out from the last root while G keeps its sign, then the
+       * bracket closed. The force's names come in as parameters. */
+      const char* names[64]; int nn = 0;
+      free_names(f0, src->contact, names, &nn, 64);
+      const char* fixed_[] = {u0, Y, r, g0, dir, step};
+      enum { NF = 6 };
+      const char* loop = fresh(s, "contact_solve");
+      const char* P[] = {"__cs_ph", "__cs_a", "__cs_ga", "__cs_b", "__cs_gb", "__cs_reach", "__cs_k"};
+      enum { NP = 7 };
+      int total = NP + NF + nn;
+      Node* def = mk(s, nkDef, loop, at);
+      def->is_rec = 1;
+      def->nparams = total;
+      def->params = arena_alloc(s->a, total * sizeof(char*));
+      def->defaults = arena_alloc(s->a, total * sizeof(Node*));
+      for (int q = 0; q < NP; q++) def->params[q] = P[q];
+      for (int q = 0; q < NF; q++) def->params[NP + q] = fixed_[q];
+      for (int q = 0; q < nn; q++) def->params[NP + NF + q] = names[q];
+      #define PI(q) ident(s, P[q], at)
+      #define REPEAT(...) ({ Node* args_[] = {__VA_ARGS__}; Node* all_[total]; \
+        for (int q = 0; q < NP; q++) all_[q] = args_[q]; \
+        for (int q = 0; q < NF; q++) all_[NP + q] = ident(s, fixed_[q], at); \
+        for (int q = 0; q < nn; q++) all_[NP + NF + q] = ident(s, names[q], at); \
+        call(s, loop, at, total, all_); })
+      Vec body = {0};
+      Node* odd = bin(s, "==", bin(s, "-", PI(6), bin(s, "*", num(s, 2, at), call(s, "floor", at, 1, (Node*[]){bin(s, "/", PI(6), num(s, 2, at), at)}), at), at), num(s, 1, at), at);
+      Node* span = bin(s, "-", PI(4), PI(2), at);
+      Node* falsi = IF(bin(s, "==", copy(s, span), num(s, 0, at), at), PI(3),
+                       bin(s, "-", PI(3), bin(s, "/", bin(s, "*", PI(4), bin(s, "-", PI(3), PI(1), at), at), span, at), at));
+      Node* trial = IF(bin(s, "==", PI(0), num(s, 0, at), at),
+                       bin(s, "+", ID(r), bin(s, "*", bin(s, "*", ID(dir), ID(step), at), PI(5), at), at),
+                       IF(copy(s, odd), bin(s, "*", num(s, 0.5, at), bin(s, "+", PI(1), PI(3), at), at), falsi));
+      Node* tiny_g = bin(s, "<=", call(s, "abs", at, 1, (Node*[]){PI(4)}),
+                         bin(s, "*", num(s, 1e-14, at), bin(s, "+", num(s, 1, at), call(s, "abs", at, 1, (Node*[]){PI(3)}), at), at), at);
+      Node* tiny_b = bin(s, "<=", call(s, "abs", at, 1, (Node*[]){bin(s, "-", PI(3), PI(1), at)}),
+                         bin(s, "*", num(s, 1e-13, at), bin(s, "+", num(s, 1, at), call(s, "abs", at, 1, (Node*[]){PI(3)}), at), at), at);
+      Node* done_e = bin(s, "and", bin(s, "==", PI(0), num(s, 1, at), at),
+                         bin(s, "or", bin(s, "or", tiny_g, tiny_b, at), bin(s, ">=", PI(6), num(s, 40, at), at), at), at);
+      push(&body, let(s, "__cs_done", done_e));
+      push(&body, let(s, "__cs_t", trial));
+      Node* g_t = bin(s, "-", bin(s, "-", ident(s, "__cs_t", at), ID(u0), at),
+                      bin(s, "*", bin(s, "*", ID(Y), num(s, 0.5 * sign, at), at), FORCE_AT("__cs_t"), at), at);
+      push(&body, let(s, "__cs_gt", IF(ID("__cs_done"), num(s, 0, at), g_t)));
+      Node* crossed = bin(s, "<=", bin(s, "*", ID("__cs_gt"), ID(g0), at), num(s, 0, at), at);
+      Node* out = IF(crossed,
+        REPEAT(num(s, 1, at), PI(1), PI(2), ID("__cs_t"), ID("__cs_gt"), PI(5), num(s, 0, at)),
+        IF(bin(s, ">=", PI(6), num(s, 8, at), at), ID("__cs_t"),
+           REPEAT(num(s, 0, at), ID("__cs_t"), ID("__cs_gt"), PI(3), PI(4), bin(s, "*", PI(5), num(s, 8, at), at),
+                  bin(s, "+", PI(6), num(s, 1, at), at))));
+      Node* kept = bin(s, ">", bin(s, "*", ID("__cs_gt"), PI(4), at), num(s, 0, at), at);
+      Node* in = REPEAT(num(s, 1, at), IF(copy(s, kept), PI(1), PI(3)),
+                        IF(kept, IF(copy(s, odd), PI(2), bin(s, "*", num(s, 0.5, at), PI(2), at)), PI(4)),
+                        ID("__cs_t"), ID("__cs_gt"), PI(5), bin(s, "+", PI(6), num(s, 1, at), at));
+      push(&body, IF(ID("__cs_done"), PI(3), IF(bin(s, "==", PI(0), num(s, 0, at), at), out, in)));
+      Node* blk = mk(s, nkBlock, "", at);
+      kids(s, blk, body.n, body.v);
+      free(body.v);
+      kids(s, def, 1, (Node*[]){blk});
+      push(&solvers, def);
+      const char* cur = LET("contact_u", IF(bin(s, "==", ID(g0), num(s, 0, at), at), ID(r),
+        REPEAT(num(s, 0, at), ID(r), ID(g0), ID(r), ID(g0), num(s, 1, at), num(s, 0, at))));
+      #undef PI
+      #undef REPEAT
+      #undef G_AT
+      #undef G_OF
+      #undef IF
+      #undef LET
+      #undef ID
+      const char* ff = fresh(s, "contact_force");
+      push(&block, let(s, ff, FORCE_AT(cur)));
+      push(&block, store(s, nkAssign, m->tick, CONTACT_KICK(bin(s, "*", bin(s, "*", ident(s, ff, at), num(s, sign, at), at), copy(s, dt), at))));
+      push(&block, store(s, nkAssign, u, ident(s, cur, at)));
+      #undef CONTACT_KICK
+      #undef FORCE_AT
     }
   }
   for (int j = 0; j < s->np; j++) push(&block, store(s, nkAssign, now[j], ident(s, next[j], at)));
@@ -750,6 +957,8 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
     Node* t = s->v[i];
     Medium* m = (t->kind == nkVar) ? medium_of(s, t->str) : NULL;
     if (m && t == m->xdecl) {
+      for (int k = 0; k < m->nsrc; k++)                /* each contact's last root */
+        if (m->src[k].contact) push(&kept, store(s, nkVar, m->src[k].contact, num(s, 0, t)));
       if (m->width) {                                  /* a horn's state, its width at 513 places laid in by the array's rule */
         int off = 24 + 7 * MODE_CAP, size = off + 513 + 2 * MODE_CAP * 1025;
         const char* i_ = fresh(s, "place");
@@ -778,6 +987,8 @@ int system_pass(Arena* a, Node*** vp, int* np, int* capp, int from, char* err, i
     push(&kept, outside(s, copy(s, t)));          /* a copy: the patch is untouched until it's taken */
   }
   if (s->no) { free(block.v); free(kept.v); free(s->reads.v); return said_no(__LINE__); }
+  for (int k = 0; k < solvers.n; k++) push(&kept, solvers.v[k]);   /* the contacts' searches, defs of the patch's own */
+  free(solvers.v);
   for (int k = 0; k < block.n; k++) push(&kept, block.v[k]);
   free(block.v);
   /* What the mode cap leaves out is said, not hidden: a field slow against
